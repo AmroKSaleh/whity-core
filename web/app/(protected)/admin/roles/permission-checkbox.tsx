@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@/components/ui/input';
 import { IconChevronDown, IconSearch } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { Permission } from './types';
 
 interface PermissionCheckboxProps {
@@ -12,7 +13,15 @@ interface PermissionCheckboxProps {
   onChange: (selectedIds: number[]) => void;
 }
 
-/** Group key = the resource segment before the first colon (e.g. users:write → users). */
+/**
+ * Group key = the resource segment before the first colon (e.g. users:write → users).
+ *
+ * The group name, the permission slug and its description are all rows from the
+ * permissions table — tenant DATA, not source strings — so they render verbatim
+ * and never enter the catalogue. Only the chrome around them (the picker's
+ * labels, counts and empty state) is translated below. Nothing here reaches
+ * `t()` with a computed key, so there is no dynamic call site to declare.
+ */
 function groupOf(name: string): string {
   const i = name.indexOf(':');
   return i > 0 ? name.slice(0, i) : 'general';
@@ -29,6 +38,7 @@ const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * control) is preserved so it drops into the create/edit modals unchanged.
  */
 export function PermissionCheckbox({ permissions, selectedIds, onChange }: PermissionCheckboxProps) {
+  const t = useTranslation('admin');
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -83,10 +93,18 @@ export function PermissionCheckbox({ permissions, selectedIds, onChange }: Permi
         onClick={() => setIsOpen(!isOpen)}
         className="w-full justify-between text-start font-normal"
       >
+        {/*
+          Singular and plural are separate keys, not a suffixed 's': a language
+          with different plural rules cannot be served by appending a letter.
+        */}
         <span className="truncate">
           {selectedCount === 0
-            ? 'Select permissions...'
-            : `${selectedCount} permission${selectedCount !== 1 ? 's' : ''} selected`}
+            ? t('roles.permissions.placeholder', 'Select permissions...')
+            : selectedCount === 1
+              ? t('roles.permissions.selected.one', '1 permission selected')
+              : t('roles.permissions.selected.other', '{count} permissions selected', {
+                  count: selectedCount,
+                })}
         </span>
         <IconChevronDown size={16} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </Button>
@@ -100,27 +118,34 @@ export function PermissionCheckbox({ permissions, selectedIds, onChange }: Permi
                 data-testid="perm-search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Filter permissions…"
+                placeholder={t('roles.permissions.filterPlaceholder', 'Filter permissions…')}
                 className="h-8 ps-7 text-sm"
               />
             </div>
             <div className="flex items-center justify-between px-1">
               <span className="text-xs text-muted-foreground" data-testid="perm-summary">
-                {selectedCount} of {totalCount} selected
+                {t('roles.permissions.summary', '{selected} of {total} selected', {
+                  selected: selectedCount,
+                  total: totalCount,
+                })}
               </span>
               <button
                 type="button"
                 onClick={toggleGlobal}
                 className="rounded px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
               >
-                {selectedCount === totalCount && totalCount > 0 ? 'Deselect All' : 'Select All'}
+                {selectedCount === totalCount && totalCount > 0
+                  ? t('roles.permissions.deselectAll', 'Deselect All')
+                  : t('roles.permissions.selectAll', 'Select All')}
               </button>
             </div>
           </div>
 
           <div className="max-h-80 overflow-y-auto p-2">
             {groups.length === 0 ? (
-              <div className="px-2 py-4 text-center text-sm text-muted-foreground">No permissions match.</div>
+              <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                {t('roles.permissions.noMatch', 'No permissions match.')}
+              </div>
             ) : (
               groups.map(([group, perms]) => {
                 const inGroup = perms.filter((p) => selected.has(p.id)).length;
@@ -131,7 +156,11 @@ export function PermissionCheckbox({ permissions, selectedIds, onChange }: Permi
                     <div className="flex items-center gap-2 rounded bg-muted/40 px-2 py-1">
                       <input
                         type="checkbox"
-                        aria-label={`Select all ${group} permissions`}
+                        aria-label={t(
+                          'roles.permissions.selectAllGroup',
+                          'Select all {group} permissions',
+                          { group }
+                        )}
                         data-testid={`perm-group-toggle-${group}`}
                         checked={allOn}
                         ref={(el) => {

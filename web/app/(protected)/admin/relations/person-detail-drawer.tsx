@@ -14,6 +14,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { IconEdit, IconPlus, IconTrash, IconUser, IconUserOff, IconX } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { Person, RelationView } from './types';
 import type { PersonAction } from './relations-view';
 
@@ -53,6 +54,7 @@ export function PersonDetailDrawer({
 }: PersonDetailDrawerProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
 
   const [relations, setRelations] = useState<RelationView[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -71,11 +73,11 @@ export function PersonDetailDrawer({
         setRelations(((await res.json()).data ?? []) as RelationView[]);
       }
     } catch {
-      addToast('Failed to load relations', 'error');
+      addToast(t('relations.detail.loadError', 'Failed to load relations'), 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [apiClient, personId, addToast]);
+  }, [apiClient, personId, addToast, t]);
 
   useEffect(() => {
     if (personId !== null) {
@@ -91,13 +93,20 @@ export function PersonDetailDrawer({
       const res = await apiClient(`/api/v1/relations/${relationId}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Failed to remove relation');
+        throw new Error(
+          body.error || t('relations.detail.removeError', 'Failed to remove relation')
+        );
       }
-      addToast('Relation removed', 'success');
+      addToast(t('relations.detail.removeSuccess', 'Relation removed'), 'success');
       await loadRelations();
       onChanged();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to remove relation', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('relations.detail.removeError', 'Failed to remove relation'),
+        'error'
+      );
     } finally {
       setIsMutating(false);
     }
@@ -117,12 +126,18 @@ export function PersonDetailDrawer({
               </SheetTitle>
               <SheetDescription>
                 {person.hasAccount
-                  ? 'Linked to a platform account.'
-                  : 'A relative without a platform account.'}
+                  ? t('relations.detail.hasAccount', 'Linked to a platform account.')
+                  : t('relations.detail.noAccount', 'A relative without a platform account.')}
               </SheetDescription>
               <div className="mt-1 flex flex-wrap gap-2 text-[0.625rem] text-muted-foreground">
-                {person.birthDate && <span>Born {person.birthDate}</span>}
-                {person.deceased && <Badge variant="outline">Deceased</Badge>}
+                {person.birthDate && (
+                  <span>
+                    {t('relations.detail.born', 'Born {date}', { date: person.birthDate })}
+                  </span>
+                )}
+                {person.deceased && (
+                  <Badge variant="outline">{t('relations.detail.deceased', 'Deceased')}</Badge>
+                )}
               </div>
               {person.notes && (
                 <p className="mt-2 text-xs text-muted-foreground">{person.notes}</p>
@@ -135,18 +150,18 @@ export function PersonDetailDrawer({
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => onAction('add-relation', person)}>
                   <IconPlus />
-                  Add relation
+                  {t('relations.detail.action.addRelation', 'Add relation')}
                 </Button>
                 {!person.hasAccount && (
                   <Button size="sm" variant="outline" onClick={() => onAction('edit', person)}>
                     <IconEdit />
-                    Edit
+                    {t('relations.detail.action.edit', 'Edit')}
                   </Button>
                 )}
                 {!person.hasAccount && (
                   <Button size="sm" variant="destructive" onClick={() => onAction('delete', person)}>
                     <IconTrash />
-                    Delete
+                    {t('relations.detail.action.delete', 'Delete')}
                   </Button>
                 )}
               </div>
@@ -157,13 +172,15 @@ export function PersonDetailDrawer({
                 id="person-relations-heading"
                 className="font-heading text-xs font-semibold uppercase tracking-wide text-muted-foreground"
               >
-                Relations
+                {t('relations.detail.relations.heading', 'Relations')}
               </h3>
 
               {isLoading ? (
                 <Skeleton className="h-8 w-full" />
               ) : relations.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No relations yet.</p>
+                <p className="text-xs text-muted-foreground">
+                  {t('relations.detail.relations.empty', 'No relations yet.')}
+                </p>
               ) : (
                 <ul className="space-y-1">
                   {relations.map((relation) => (
@@ -178,7 +195,7 @@ export function PersonDetailDrawer({
                         </span>
                         {!relation.otherPersonHasAccount && (
                           <span className="ms-1 text-[0.625rem] text-muted-foreground">
-                            (relative)
+                            {t('relations.detail.relations.relativeTag', '(relative)')}
                           </span>
                         )}
                       </div>
@@ -189,7 +206,11 @@ export function PersonDetailDrawer({
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Remove relation to ${relation.otherPersonName}`}
+                          aria-label={t(
+                            'relations.detail.relations.remove',
+                            'Remove relation to {name}',
+                            { name: relation.otherPersonName }
+                          )}
                           disabled={isMutating}
                           onClick={() => handleRemoveRelation(relation.relationId)}
                         >
@@ -201,8 +222,11 @@ export function PersonDetailDrawer({
                 </ul>
               )}
               <p className="text-[0.625rem] text-muted-foreground">
-                Relations are shown from {person.displayName}&rsquo;s perspective; the reciprocal is
-                derived automatically.
+                {t(
+                  'relations.detail.relations.perspective',
+                  'Relations are shown from {name}’s perspective; the reciprocal is derived automatically.',
+                  { name: person.displayName }
+                )}
               </p>
             </section>
           </>

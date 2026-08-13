@@ -13,6 +13,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@amroksaleh/ui/textarea';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { Person } from './types';
 
 interface EditPersonModalProps {
@@ -29,6 +30,7 @@ interface EditPersonModalProps {
 export function EditPersonModal({ isOpen, onClose, onSuccess, person }: EditPersonModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isLoading, setIsLoading] = useState(false);
   const [displayName, setDisplayName] = useState(person.displayName);
   const [birthDate, setBirthDate] = useState(person.birthDate ?? '');
@@ -40,7 +42,7 @@ export function EditPersonModal({ isOpen, onClose, onSuccess, person }: EditPers
 
   const handleUpdate = async () => {
     if (!displayName.trim()) {
-      addToast('Name is required', 'error');
+      addToast(t('relations.editPerson.validation.nameRequired', 'Name is required'), 'error');
       return;
     }
 
@@ -60,13 +62,20 @@ export function EditPersonModal({ isOpen, onClose, onSuccess, person }: EditPers
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
-        throw new Error(error.error || 'Failed to update person');
+        throw new Error(
+          error.error || t('relations.editPerson.error', 'Failed to update person')
+        );
       }
 
-      addToast('Person updated', 'success');
+      addToast(t('relations.editPerson.success', 'Person updated'), 'success');
       onSuccess();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to update person', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('relations.editPerson.error', 'Failed to update person'),
+        'error'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -76,14 +85,18 @@ export function EditPersonModal({ isOpen, onClose, onSuccess, person }: EditPers
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit relative</DialogTitle>
-          <DialogDescription>Update the details of {person.displayName}.</DialogDescription>
+          <DialogTitle>{t('relations.editPerson.title', 'Edit relative')}</DialogTitle>
+          <DialogDescription>
+            {t('relations.editPerson.subtitle', 'Update the details of {name}.', {
+              name: person.displayName,
+            })}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
             <label className="text-sm font-medium" htmlFor="edit-person-name">
-              Name *
+              {t('relations.editPerson.name.label', 'Name *')}
             </label>
             <Input
               id="edit-person-name"
@@ -95,7 +108,7 @@ export function EditPersonModal({ isOpen, onClose, onSuccess, person }: EditPers
 
           <div>
             <label className="text-sm font-medium" htmlFor="edit-person-birth">
-              Birth date
+              {t('relations.editPerson.birthDate.label', 'Birth date')}
             </label>
             <Input
               id="edit-person-birth"
@@ -114,12 +127,12 @@ export function EditPersonModal({ isOpen, onClose, onSuccess, person }: EditPers
               onChange={(e) => setDeceased(e.target.checked)}
               disabled={isLoading}
             />
-            Deceased
+            {t('relations.editPerson.deceased.label', 'Deceased')}
           </label>
 
           <div>
             <label className="text-sm font-medium" htmlFor="edit-person-notes">
-              Notes
+              {t('relations.editPerson.notes.label', 'Notes')}
             </label>
             <Textarea
               id="edit-person-notes"
@@ -132,10 +145,12 @@ export function EditPersonModal({ isOpen, onClose, onSuccess, person }: EditPers
 
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={onClose} disabled={isLoading}>
-              Cancel
+              {t('relations.editPerson.cancel', 'Cancel')}
             </Button>
             <Button onClick={handleUpdate} disabled={isLoading}>
-              {isLoading ? 'Updating…' : 'Update'}
+              {isLoading
+                ? t('relations.editPerson.submitting', 'Updating…')
+                : t('relations.editPerson.submit', 'Update')}
             </Button>
           </div>
         </div>

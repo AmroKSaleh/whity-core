@@ -14,6 +14,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconAlertCircle } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { Role } from './types';
 
 interface DeleteRoleModalProps {
@@ -31,6 +32,7 @@ export function DeleteRoleModal({
 }: DeleteRoleModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
@@ -49,7 +51,10 @@ export function DeleteRoleModal({
         // friendly toast instead of a generic error / console noise.
         if (response.status === 404) {
           addToast(
-            "This role can't be modified by your tenant — global base roles are managed by the system tenant.",
+            t(
+              'roles.delete.notManageable',
+              "This role can't be modified by your tenant — global base roles are managed by the system tenant."
+            ),
             'error'
           );
           return;
@@ -57,15 +62,15 @@ export function DeleteRoleModal({
 
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
-          errorData.message || 'Failed to delete role'
+          errorData.message || t('roles.delete.error', 'Failed to delete role')
         );
       }
 
-      addToast('Role deleted successfully', 'success');
+      addToast(t('roles.delete.success', 'Role deleted successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to delete role';
+        error instanceof Error ? error.message : t('roles.delete.error', 'Failed to delete role');
       addToast(message, 'error');
     } finally {
       setIsDeleting(false);
@@ -76,9 +81,12 @@ export function DeleteRoleModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Role</DialogTitle>
+          <DialogTitle>{t('roles.delete.title', 'Delete Role')}</DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete this role? This action cannot be undone.
+            {t(
+              'roles.delete.description',
+              'Are you sure you want to delete this role? This action cannot be undone.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -92,7 +100,9 @@ export function DeleteRoleModal({
             </div>
             {role.permissionCount && (
               <div className="text-xs text-muted-foreground mt-2">
-                Permissions: {role.permissionCount}
+                {t('roles.delete.permissionCount', 'Permissions: {count}', {
+                  count: role.permissionCount,
+                })}
               </div>
             )}
           </div>
@@ -100,7 +110,10 @@ export function DeleteRoleModal({
           <Alert>
             <IconAlertCircle className="h-4 w-4" />
             <AlertDescription>
-              If this role is assigned to users, they will lose the permissions associated with this role.
+              {t(
+                'roles.delete.warning',
+                'If this role is assigned to users, they will lose the permissions associated with this role.'
+              )}
             </AlertDescription>
           </Alert>
         </div>
@@ -112,7 +125,7 @@ export function DeleteRoleModal({
             onClick={() => onOpenChange(false)}
             disabled={isDeleting}
           >
-            Cancel
+            {t('roles.delete.cancel', 'Cancel')}
           </Button>
           <Button
             type="button"
@@ -120,7 +133,9 @@ export function DeleteRoleModal({
             onClick={handleDelete}
             disabled={isDeleting}
           >
-            {isDeleting ? 'Deleting...' : 'Delete Role'}
+            {isDeleting
+              ? t('roles.delete.submitting', 'Deleting...')
+              : t('roles.delete.submit', 'Delete Role')}
           </Button>
         </DialogFooter>
       </DialogContent>

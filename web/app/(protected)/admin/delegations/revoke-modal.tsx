@@ -14,6 +14,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconAlertCircle } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { Delegation } from './types';
 
 interface RevokeDelegationModalProps {
@@ -35,6 +36,7 @@ export function RevokeDelegationModal({
   onSuccess,
 }: RevokeDelegationModalProps) {
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isRevoking, setIsRevoking] = useState(false);
 
   const handleRevoke = async () => {
@@ -45,14 +47,18 @@ export function RevokeDelegationModal({
       });
 
       if (error !== undefined || !response.ok) {
-        throw new Error(error?.error ?? 'Failed to revoke delegation');
+        throw new Error(
+          error?.error ?? t('delegations.revoke.error', 'Failed to revoke delegation')
+        );
       }
 
-      addToast('Delegation revoked successfully', 'success');
+      addToast(t('delegations.revoke.success', 'Delegation revoked successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to revoke delegation';
+        error instanceof Error
+          ? error.message
+          : t('delegations.revoke.error', 'Failed to revoke delegation');
       addToast(message, 'error');
     } finally {
       setIsRevoking(false);
@@ -63,29 +69,49 @@ export function RevokeDelegationModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Revoke Delegation</DialogTitle>
+          <DialogTitle>{t('delegations.revoke.title', 'Revoke Delegation')}</DialogTitle>
           <DialogDescription>
-            Are you sure you want to revoke this delegation? The grantee will lose
-            the delegated access immediately.
+            {t(
+              'delegations.revoke.description',
+              'Are you sure you want to revoke this delegation? The grantee will lose ' +
+                'the delegated access immediately.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 py-4">
           <div className="rounded-lg bg-muted p-3">
             <div className="text-sm font-medium">{delegation.permission}</div>
+            {/*
+              One sentence, one key. The grantee kind and the scope are holes in
+              it rather than fragments concatenated around it, so a translator
+              can move the id, the kind and the scope wherever their grammar
+              wants them — which is the whole reason this is not
+              `'Delegated to ' + type + ' #' + id`.
+            */}
             <div className="mt-1 text-xs text-muted-foreground">
-              Delegated to {delegation.granteeType} #{delegation.granteeId}
-              {delegation.ouId !== null
-                ? ` (OU #${delegation.ouId})`
-                : ' (tenant-wide)'}
+              {t('delegations.revoke.grantee', 'Delegated to {type} #{id} ({scope})', {
+                type:
+                  delegation.granteeType === 'role'
+                    ? t('delegations.revoke.granteeType.role', 'role')
+                    : t('delegations.revoke.granteeType.user', 'user'),
+                id: delegation.granteeId,
+                scope:
+                  delegation.ouId !== null
+                    ? t('delegations.revoke.scope.ou', 'OU #{id}', { id: delegation.ouId })
+                    : t('delegations.revoke.scope.tenantWide', 'tenant-wide'),
+              })}
             </div>
           </div>
 
           <Alert>
             <IconAlertCircle className="h-4 w-4" />
             <AlertDescription>
-              This action cannot be undone. To restore access you would create a
-              new delegation.
+              {t(
+                'delegations.revoke.warning',
+                'This action cannot be undone. To restore access you would create a ' +
+                  'new delegation.'
+              )}
             </AlertDescription>
           </Alert>
         </div>
@@ -97,7 +123,7 @@ export function RevokeDelegationModal({
             onClick={() => onOpenChange(false)}
             disabled={isRevoking}
           >
-            Cancel
+            {t('delegations.revoke.cancel', 'Cancel')}
           </Button>
           <Button
             type="button"
@@ -105,7 +131,9 @@ export function RevokeDelegationModal({
             onClick={handleRevoke}
             disabled={isRevoking}
           >
-            {isRevoking ? 'Revoking...' : 'Revoke Delegation'}
+            {isRevoking
+              ? t('delegations.revoke.submitting', 'Revoking...')
+              : t('delegations.revoke.submit', 'Revoke Delegation')}
           </Button>
         </DialogFooter>
       </DialogContent>

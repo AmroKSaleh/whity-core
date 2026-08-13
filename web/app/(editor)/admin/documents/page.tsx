@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ScreenTooSmall, useViewportAtLeast } from '@/components/ui/screen-too-small';
 import { Button } from '@amroksaleh/ui/button';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { DocumentDesigner } from '@/components/documents/document-designer';
 
 /**
@@ -33,6 +34,11 @@ const MIN_EDITOR_WIDTH = 1024;
 
 export default function DocumentsPage() {
   const router = useRouter();
+  // The `documents` domain, not `admin`: every other string on this screen —
+  // the designer's menus, rails and inspector — already lives there, and this
+  // page mounts nothing else, so a second bundle would be fetched to say one
+  // sentence.
+  const t = useTranslation('documents');
   const wideEnough = useViewportAtLeast(MIN_EDITOR_WIDTH);
 
   // `undefined` until measured on the client: render neither branch for that
@@ -45,12 +51,17 @@ export default function DocumentsPage() {
   if (!wideEnough) {
     return (
       <ScreenTooSmall
-        title="The document editor needs a larger screen"
-        description="Designing print-accurate labels and documents needs room for the page plus its layers and properties panels. Open this on a tablet in landscape, laptop or desktop."
+        title={t('editor.tooSmall.title', 'The document editor needs a larger screen')}
+        description={t(
+          'editor.tooSmall.description',
+          'Designing print-accurate labels and documents needs room for the page plus ' +
+            'its layers and properties panels. Open this on a tablet in landscape, ' +
+            'laptop or desktop.'
+        )}
         minWidth={MIN_EDITOR_WIDTH}
         action={
           <Button asChild variant="outline" size="sm" className="mt-2">
-            <Link href="/admin">Back to dashboard</Link>
+            <Link href="/admin">{t('editor.tooSmall.back', 'Back to dashboard')}</Link>
           </Button>
         }
       />

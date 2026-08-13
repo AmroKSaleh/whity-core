@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconDotsVertical, IconUser, IconUserOff } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { PersonAction, RelationsGraphProps } from './relations-view';
 import type { Person } from './types';
 
@@ -77,6 +78,7 @@ function layout(persons: Person[]): Array<{ person: Person; x: number; y: number
 /** Custom react-flow node: a selectable card marked account vs non-user. */
 function PersonFlowNode({ data }: NodeProps<Node<PersonNodeData>>) {
   const { person, selected, onSelect, onAction, canManage } = data;
+  const t = useTranslation('admin');
   const Icon = person.hasAccount ? IconUser : IconUserOff;
 
   return (
@@ -112,7 +114,9 @@ function PersonFlowNode({ data }: NodeProps<Node<PersonNodeData>>) {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`Actions for ${person.displayName}`}
+              aria-label={t('relations.node.actions', 'Actions for {name}', {
+                name: person.displayName,
+              })}
               className="nodrag"
             >
               <IconDotsVertical />
@@ -120,16 +124,18 @@ function PersonFlowNode({ data }: NodeProps<Node<PersonNodeData>>) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => onAction('add-relation', person)}>
-              Add relation
+              {t('relations.node.addRelation', 'Add relation')}
             </DropdownMenuItem>
             {!person.hasAccount && (
-              <DropdownMenuItem onClick={() => onAction('edit', person)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onAction('edit', person)}>
+                {t('relations.node.edit', 'Edit')}
+              </DropdownMenuItem>
             )}
             {!person.hasAccount && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={() => onAction('delete', person)}>
-                  Delete
+                  {t('relations.node.delete', 'Delete')}
                 </DropdownMenuItem>
               </>
             )}

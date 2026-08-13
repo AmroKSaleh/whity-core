@@ -13,6 +13,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@amroksaleh/ui/textarea';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 interface CreatePersonModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ interface CreatePersonModalProps {
 export function CreatePersonModal({ isOpen, onClose, onSuccess }: CreatePersonModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isLoading, setIsLoading] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [birthDate, setBirthDate] = useState('');
@@ -43,7 +45,7 @@ export function CreatePersonModal({ isOpen, onClose, onSuccess }: CreatePersonMo
 
   const handleCreate = async () => {
     if (!displayName.trim()) {
-      addToast('Name is required', 'error');
+      addToast(t('relations.createPerson.validation.nameRequired', 'Name is required'), 'error');
       return;
     }
 
@@ -67,14 +69,21 @@ export function CreatePersonModal({ isOpen, onClose, onSuccess }: CreatePersonMo
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
-        throw new Error(error.error || 'Failed to create person');
+        throw new Error(
+          error.error || t('relations.createPerson.error', 'Failed to create person')
+        );
       }
 
-      addToast('Person created', 'success');
+      addToast(t('relations.createPerson.success', 'Person created'), 'success');
       reset();
       onSuccess();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to create person', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('relations.createPerson.error', 'Failed to create person'),
+        'error'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -91,30 +100,32 @@ export function CreatePersonModal({ isOpen, onClose, onSuccess }: CreatePersonMo
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add a relative</DialogTitle>
+          <DialogTitle>{t('relations.createPerson.title', 'Add a relative')}</DialogTitle>
           <DialogDescription>
-            Add a person who does not have a platform account (e.g. a child or a
-            deceased relative).
+            {t(
+              'relations.createPerson.subtitle',
+              'Add a person who does not have a platform account (e.g. a child or a deceased relative).'
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
             <label className="text-sm font-medium" htmlFor="person-name">
-              Name *
+              {t('relations.createPerson.name.label', 'Name *')}
             </label>
             <Input
               id="person-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g., Jane Doe"
+              placeholder={t('relations.createPerson.name.placeholder', 'e.g., Jane Doe')}
               disabled={isLoading}
             />
           </div>
 
           <div>
             <label className="text-sm font-medium" htmlFor="person-birth">
-              Birth date
+              {t('relations.createPerson.birthDate.label', 'Birth date')}
             </label>
             <Input
               id="person-birth"
@@ -133,18 +144,18 @@ export function CreatePersonModal({ isOpen, onClose, onSuccess }: CreatePersonMo
               onChange={(e) => setDeceased(e.target.checked)}
               disabled={isLoading}
             />
-            Deceased
+            {t('relations.createPerson.deceased.label', 'Deceased')}
           </label>
 
           <div>
             <label className="text-sm font-medium" htmlFor="person-notes">
-              Notes
+              {t('relations.createPerson.notes.label', 'Notes')}
             </label>
             <Textarea
               id="person-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes"
+              placeholder={t('relations.createPerson.notes.placeholder', 'Optional notes')}
               disabled={isLoading}
               rows={3}
             />
@@ -152,10 +163,12 @@ export function CreatePersonModal({ isOpen, onClose, onSuccess }: CreatePersonMo
 
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isLoading}>
-              Cancel
+              {t('relations.createPerson.cancel', 'Cancel')}
             </Button>
             <Button onClick={handleCreate} disabled={isLoading}>
-              {isLoading ? 'Creating…' : 'Create'}
+              {isLoading
+                ? t('relations.createPerson.submitting', 'Creating…')
+                : t('relations.createPerson.submit', 'Create')}
             </Button>
           </div>
         </div>
