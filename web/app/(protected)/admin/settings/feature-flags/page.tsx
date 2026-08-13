@@ -12,6 +12,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconDeviceFloppy } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -50,6 +51,7 @@ export default function FeatureFlagsSettingsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canManage = hasPermission(SETTINGS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -63,21 +65,27 @@ export default function FeatureFlagsSettingsPage() {
   }
 
   if (!isSystemTenant || !canManage) {
+    // ONE translatable sentence with a {link} hole, split at render time so the
+    // General link stays a link without fragmenting the sentence for translators.
+    const [beforeLink, afterLink] = t(
+      'settings.featureFlags.accessDenied',
+      'Feature flags can only be managed from the system tenant. Your tenant’s settings are on the {link} page.'
+    ).split('{link}');
+
     return (
       <AccessDenied
         description={
           <>
-            Feature flags can only be managed from the system tenant. Your tenant&rsquo;s
-            settings are on the{' '}
+            {beforeLink}
             <Link href="/admin/settings" className="font-medium underline">
-              General
-            </Link>{' '}
-            page.
+              {t('settings.featureFlags.accessDenied.link', 'General')}
+            </Link>
+            {afterLink}
           </>
         }
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.featureFlags.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -87,8 +95,11 @@ export default function FeatureFlagsSettingsPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Feature flags"
-        description="Turn platform-wide capabilities on or off for this instance."
+        title={t('settings.featureFlags.title', 'Feature flags')}
+        description={t(
+          'settings.featureFlags.description',
+          'Turn platform-wide capabilities on or off for this instance.'
+        )}
       />
       <SettingsTabs active="feature-flags" />
       <FeatureFlagsForm addToast={addToast} />
@@ -97,10 +108,14 @@ export default function FeatureFlagsSettingsPage() {
 }
 
 function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
+  const t = useTranslation('admin');
+
   const { data, loading, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load feature flags'));
+      throw new Error(
+        errorMessage(getError, t('settings.featureFlags.error.load', 'Failed to load feature flags'))
+      );
     }
     return body.data;
   }, []);
@@ -149,13 +164,20 @@ function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
       });
       if (patchError) {
         setFieldErrors(fieldErrorsFrom(patchError));
-        throw new Error(errorMessage(patchError, 'Failed to save feature flags'));
+        throw new Error(
+          errorMessage(patchError, t('settings.featureFlags.error.save', 'Failed to save feature flags'))
+        );
       }
-      addToast('Feature flags saved.', 'success');
+      addToast(t('settings.featureFlags.saved', 'Feature flags saved.'), 'success');
       setDraft({});
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save feature flags', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('settings.featureFlags.error.save', 'Failed to save feature flags'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -166,7 +188,7 @@ function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Feature flags</h2>
+            <h2>{t('settings.featureFlags.card.title', 'Feature flags')}</h2>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -186,17 +208,19 @@ function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
       >
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Feature flags</h2>
+            <h2>{t('settings.featureFlags.card.title', 'Feature flags')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
-            Capability toggles for this instance. Per-tenant overrides and plugin-declared
-            flags are not supported here (tracked separately).
+            {t(
+              'settings.featureFlags.card.description',
+              'Capability toggles for this instance. Per-tenant overrides and plugin-declared flags are not supported here (tracked separately).'
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           {flags.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No feature flags are published by this instance.
+              {t('settings.featureFlags.empty', 'No feature flags are published by this instance.')}
             </p>
           ) : (
             flags.map((entry) => (
@@ -221,7 +245,9 @@ function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
           data-testid="feature-flags-settings-save"
         >
           <IconDeviceFloppy className="w-4 h-4" />
-          {saving ? 'Saving…' : 'Save feature flags'}
+          {saving
+            ? t('settings.featureFlags.saving', 'Saving…')
+            : t('settings.featureFlags.save', 'Save feature flags')}
         </Button>
       </div>
     </div>

@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { tabsListVariants } from '@amroksaleh/ui/tabs';
 import { api } from '@/lib/api/client';
 import { useFetch } from '@/hooks/useFetch';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { components } from '@/lib/api/schema';
 
 /**
@@ -51,6 +52,7 @@ interface SettingsTabsProps {
 type SettingsTab = components['schemas']['SettingsTab'];
 
 export function SettingsTabs({ active }: SettingsTabsProps) {
+  const t = useTranslation('admin');
   const { data: tabs } = useFetch<SettingsTab[]>(async () => {
     const { data: body } = await api.GET('/api/v1/settings/tabs');
     return body?.data ?? [];
@@ -67,7 +69,7 @@ export function SettingsTabs({ active }: SettingsTabsProps) {
 
   return (
     <nav
-      aria-label="Settings sections"
+      aria-label={t('settings.tabs.ariaLabel', 'Settings sections')}
       data-testid="settings-tabs"
       className={cn(tabsListVariants({ variant: 'default' }), 'w-full flex-wrap md:w-fit')}
     >
