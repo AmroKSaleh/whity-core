@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@amroksaleh/ui/select';
 import { Textarea } from '@amroksaleh/ui/textarea';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { OU } from './types';
 import { buildOuTree, getDescendantIds } from './ou-tree-util';
 
@@ -34,6 +35,7 @@ interface EditOuModalProps {
 export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isLoading, setIsLoading] = useState(false);
   // Form state seeds from the `ou` prop. The parent remounts this component via
   // `key={ou.id}` whenever a different OU is edited, so these initializers re-run
@@ -45,7 +47,7 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
 
   const handleUpdate = async () => {
     if (!name.trim()) {
-      addToast('Name is required', 'error');
+      addToast(t('ous.edit.validation.nameRequired', 'Name is required'), 'error');
       return;
     }
 
@@ -72,14 +74,18 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to update organizational unit');
+        throw new Error(
+          error.error || t('ous.edit.error', 'Failed to update organizational unit')
+        );
       }
 
-      addToast('Organizational unit updated successfully', 'success');
+      addToast(t('ous.edit.success', 'Organizational unit updated successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to update organizational unit';
+        error instanceof Error
+          ? error.message
+          : t('ous.edit.error', 'Failed to update organizational unit');
       addToast(message, 'error');
     } finally {
       setIsLoading(false);
@@ -102,42 +108,48 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit Organizational Unit</DialogTitle>
+          <DialogTitle>{t('ous.edit.title', 'Edit Organizational Unit')}</DialogTitle>
           <DialogDescription>
-            Update the details of {ou.name}
+            {t('ous.edit.subtitle', 'Update the details of {name}', { name: ou.name })}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Name *</label>
+            <label className="text-sm font-medium">{t('ous.edit.name.label', 'Name *')}</label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., Engineering"
+              placeholder={t('ous.edit.name.placeholder', 'e.g., Engineering')}
               disabled={isLoading}
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium">Description</label>
+            <label className="text-sm font-medium">
+              {t('ous.edit.description.label', 'Description')}
+            </label>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description for this OU"
+              placeholder={t('ous.edit.description.placeholder', 'Optional description for this OU')}
               disabled={isLoading}
               rows={3}
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium">Move to parent</label>
+            <label className="text-sm font-medium">
+              {t('ous.edit.parent.label', 'Move to parent')}
+            </label>
             <Select value={parentId} onValueChange={setParentId} disabled={isLoading}>
-              <SelectTrigger aria-label="Move to parent">
-                <SelectValue placeholder="Select a parent OU (optional)" />
+              <SelectTrigger aria-label={t('ous.edit.parent.label', 'Move to parent')}>
+                <SelectValue
+                  placeholder={t('ous.edit.parent.placeholder', 'Select a parent OU (optional)')}
+                />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="null">None (Root OU)</SelectItem>
+                <SelectItem value="null">{t('ous.edit.parent.none', 'None (Root OU)')}</SelectItem>
                 {availableParents.map((parent) => (
                   <SelectItem key={parent.id} value={parent.id.toString()}>
                     {parent.name}
@@ -146,7 +158,10 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
               </SelectContent>
             </Select>
             <p className="mt-1 text-xs text-muted-foreground">
-              The OU itself and its descendants are excluded to prevent cycles.
+              {t(
+                'ous.edit.parent.hint',
+                'The OU itself and its descendants are excluded to prevent cycles.'
+              )}
             </p>
           </div>
 
@@ -156,13 +171,15 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
               onClick={onClose}
               disabled={isLoading}
             >
-              Cancel
+              {t('ous.edit.cancel', 'Cancel')}
             </Button>
             <Button
               onClick={handleUpdate}
               disabled={isLoading}
             >
-              {isLoading ? 'Updating...' : 'Update'}
+              {isLoading
+                ? t('ous.edit.submitting', 'Updating...')
+                : t('ous.edit.submit', 'Update')}
             </Button>
           </div>
         </div>

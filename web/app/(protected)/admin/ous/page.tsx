@@ -11,6 +11,7 @@ import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { IconBinaryTree2, IconList, IconPlus } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateOuModal } from './create-modal';
 import { EditOuModal } from './edit-modal';
 import { DeleteOuModal } from './delete-modal';
@@ -34,6 +35,7 @@ const VIEW_STORAGE_KEY = 'wc:ous:view';
 export default function OUsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const { hasPermission } = useCapabilities();
   const canCreate = hasPermission(OUS_WRITE);
   const canEdit = hasPermission(OUS_WRITE);
@@ -65,11 +67,11 @@ export default function OUsPage() {
   const { data, loading: isLoading, error, refetch: fetchOUs } = useFetch(async () => {
     const response = await apiClient('/api/v1/ous');
     if (!response.ok) {
-      throw new Error('Failed to fetch organizational units');
+      throw new Error(t('ous.error.load', 'Failed to fetch organizational units'));
     }
     const data = await response.json();
     return (data.data ?? []) as OU[];
-  }, [apiClient]);
+  }, [apiClient, t]);
 
   const ous = useMemo(() => data ?? [], [data]);
 
@@ -113,7 +115,11 @@ export default function OUsPage() {
   };
 
   const ViewToggle = (
-    <div role="group" aria-label="View mode" className="inline-flex rounded-md border border-border p-0.5">
+    <div
+      role="group"
+      aria-label={t('ous.view.label', 'View mode')}
+      className="inline-flex rounded-md border border-border p-0.5"
+    >
       <Button
         variant={view === 'tree' ? 'secondary' : 'ghost'}
         size="sm"
@@ -122,7 +128,7 @@ export default function OUsPage() {
         className="gap-1.5"
       >
         <IconList />
-        Tree
+        {t('ous.view.tree', 'Tree')}
       </Button>
       <Button
         variant={view === 'graph' ? 'secondary' : 'ghost'}
@@ -132,7 +138,7 @@ export default function OUsPage() {
         className="gap-1.5"
       >
         <IconBinaryTree2 />
-        Graph
+        {t('ous.view.graph', 'Graph')}
       </Button>
     </div>
   );
@@ -142,13 +148,16 @@ export default function OUsPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Organizational Units"
-        description="Visualize and manage your organizational hierarchy, role assignments, and members."
+        title={t('ous.title', 'Organizational Units')}
+        description={t(
+          'ous.description',
+          'Visualize and manage your organizational hierarchy, role assignments, and members.'
+        )}
         action={
           canCreate ? (
             <Button onClick={openCreateRoot} className="gap-2">
               <IconPlus />
-              Create OU
+              {t('ous.header.create', 'Create OU')}
             </Button>
           ) : undefined
         }
@@ -162,14 +171,16 @@ export default function OUsPage() {
         <Skeleton className="h-64 w-full rounded-lg" />
       ) : isEmpty ? (
         <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
-          <h2 className="font-heading text-sm font-medium">No organizational units yet</h2>
+          <h2 className="font-heading text-sm font-medium">
+            {t('ous.empty.title', 'No organizational units yet')}
+          </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Create an organizational unit to structure your organization.
+            {t('ous.empty.description', 'Create an organizational unit to structure your organization.')}
           </p>
           {canCreate && (
             <Button onClick={openCreateRoot} variant="outline" className="mt-4 gap-2">
               <IconPlus />
-              Create the first OU
+              {t('ous.empty.create', 'Create the first OU')}
             </Button>
           )}
         </div>

@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@amroksaleh/ui/select';
+import { useRichTranslation, useTranslation } from '@amroksaleh/features/i18n';
 import type { Person, RelationshipType } from './types';
 
 /**
@@ -61,6 +62,8 @@ export function AddRelationModal({
 }: AddRelationModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
+  const rt = useRichTranslation('admin');
   const [isLoading, setIsLoading] = useState(false);
   const [targetKind, setTargetKind] = useState<TargetKind>('person');
   const [targetId, setTargetId] = useState<string>('');
@@ -108,7 +111,10 @@ export function AddRelationModal({
 
   const handleSubmit = async () => {
     if (!targetId || !typeId) {
-      addToast('Pick a target and a relationship type', 'error');
+      addToast(
+        t('relations.addRelation.validation.required', 'Pick a target and a relationship type'),
+        'error'
+      );
       return;
     }
 
@@ -125,13 +131,20 @@ export function AddRelationModal({
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
-        throw new Error(error.error || 'Failed to add relation');
+        throw new Error(
+          error.error || t('relations.addRelation.error', 'Failed to add relation')
+        );
       }
 
-      addToast('Relation added', 'success');
+      addToast(t('relations.addRelation.success', 'Relation added'), 'success');
       onSuccess();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to add relation', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('relations.addRelation.error', 'Failed to add relation'),
+        'error'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -146,19 +159,32 @@ export function AddRelationModal({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add a relation</DialogTitle>
+          <DialogTitle>{t('relations.addRelation.title', 'Add a relation')}</DialogTitle>
           <DialogDescription>
-            Define how <span className="font-medium">{fromPerson.displayName}</span> is related to
-            another person or account.
+            {rt(
+              'relations.addRelation.subtitle',
+              'Define how <0>{name}</0> is related to another person or account.',
+              { name: fromPerson.displayName },
+              [<span key="name" className="font-medium" />]
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">{fromPerson.displayName} is the…</label>
+            <label className="text-sm font-medium">
+              {t('relations.addRelation.type.label', '{name} is the…', {
+                name: fromPerson.displayName,
+              })}
+            </label>
             <Select value={typeId} onValueChange={setTypeId} disabled={isLoading}>
-              <SelectTrigger aria-label="Relationship type">
-                <SelectValue placeholder="Select a relationship type" />
+              <SelectTrigger aria-label={t('relations.addRelation.type.select', 'Relationship type')}>
+                <SelectValue
+                  placeholder={t(
+                    'relations.addRelation.type.placeholder',
+                    'Select a relationship type'
+                  )}
+                />
               </SelectTrigger>
               <SelectContent>
                 {types.map((type) => (
@@ -170,28 +196,47 @@ export function AddRelationModal({
             </Select>
             <Alert variant="info" className="mt-1">
               <AlertDescription>
-                The reciprocal is shown automatically from the other person&rsquo;s side.
+                {t(
+                  'relations.addRelation.type.hint',
+                  'The reciprocal is shown automatically from the other person’s side.'
+                )}
               </AlertDescription>
             </Alert>
           </div>
 
           <div>
-            <label className="text-sm font-medium">Related to</label>
+            <label className="text-sm font-medium">
+              {t('relations.addRelation.target.label', 'Related to')}
+            </label>
             <div className="flex gap-2">
               <Select value={targetKind} onValueChange={onTargetKindChange} disabled={isLoading}>
-                <SelectTrigger aria-label="Target kind" className="w-32">
+                <SelectTrigger
+                  aria-label={t('relations.addRelation.targetKind.select', 'Target kind')}
+                  className="w-32"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="person">Relative</SelectItem>
-                  <SelectItem value="profile">Account</SelectItem>
+                  <SelectItem value="person">
+                    {t('relations.addRelation.targetKind.person', 'Relative')}
+                  </SelectItem>
+                  <SelectItem value="profile">
+                    {t('relations.addRelation.targetKind.profile', 'Account')}
+                  </SelectItem>
                 </SelectContent>
               </Select>
 
               <Select value={targetId} onValueChange={setTargetId} disabled={isLoading}>
-                <SelectTrigger aria-label="Target" className="flex-1">
+                <SelectTrigger
+                  aria-label={t('relations.addRelation.target.select', 'Target')}
+                  className="flex-1"
+                >
                   <SelectValue
-                    placeholder={targetKind === 'profile' ? 'Select an account' : 'Select a relative'}
+                    placeholder={
+                      targetKind === 'profile'
+                        ? t('relations.addRelation.target.placeholderProfile', 'Select an account')
+                        : t('relations.addRelation.target.placeholderPerson', 'Select a relative')
+                    }
                   />
                 </SelectTrigger>
                 <SelectContent>
@@ -213,10 +258,12 @@ export function AddRelationModal({
 
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={onClose} disabled={isLoading}>
-              Cancel
+              {t('relations.addRelation.cancel', 'Cancel')}
             </Button>
             <Button onClick={handleSubmit} disabled={isLoading || !targetId || !typeId}>
-              {isLoading ? 'Adding…' : 'Add relation'}
+              {isLoading
+                ? t('relations.addRelation.submitting', 'Adding…')
+                : t('relations.addRelation.submit', 'Add relation')}
             </Button>
           </div>
         </div>
