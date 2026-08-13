@@ -9,6 +9,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconCheck, IconInbox, IconX } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Pending "lost my 2FA device" recovery requests
@@ -35,6 +36,7 @@ interface PendingTwoFactorRecovery {
 export default function TwoFactorRecoveryApprovalsPage() {
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canApprove = hasPermission(TWO_FACTOR_RECOVERY_APPROVE);
 
@@ -81,19 +83,48 @@ export default function TwoFactorRecoveryApprovalsPage() {
         credentials: 'include',
       });
       if (!res.ok) {
-        addToast(`Failed to ${action} the request for ${item.email} (${res.status}).`, 'error');
+        addToast(
+          action === 'approve'
+            ? t(
+                'twoFactorRecovery.approve.failedStatus',
+                'Failed to approve the request for {email} ({status}).',
+                { email: item.email, status: res.status }
+              )
+            : t(
+                'twoFactorRecovery.reject.failedStatus',
+                'Failed to reject the request for {email} ({status}).',
+                { email: item.email, status: res.status }
+              ),
+          'error'
+        );
         void load();
         return;
       }
       addToast(
         action === 'approve'
-          ? `Approved — ${item.email}'s two-factor authentication has been cleared and a password-reset link was sent.`
-          : `Rejected the recovery request for ${item.email}.`,
+          ? t(
+              'twoFactorRecovery.approve.success',
+              "Approved — {email}'s two-factor authentication has been cleared and a " +
+                "password-reset link was sent.",
+              { email: item.email }
+            )
+          : t('twoFactorRecovery.reject.success', 'Rejected the recovery request for {email}.', {
+              email: item.email,
+            }),
         'success'
       );
       setItems((prev) => prev.filter((i) => i.id !== item.id));
     } catch {
-      addToast(`Failed to ${action} the request for ${item.email}.`, 'error');
+      addToast(
+        action === 'approve'
+          ? t('twoFactorRecovery.approve.failed', 'Failed to approve the request for {email}.', {
+              email: item.email,
+            })
+          : t('twoFactorRecovery.reject.failed', 'Failed to reject the request for {email}.', {
+              email: item.email,
+            }),
+        'error'
+      );
     } finally {
       setBusyId(null);
     }
@@ -113,10 +144,13 @@ export default function TwoFactorRecoveryApprovalsPage() {
         <ApprovalGatingTabs active="two-factor-recovery" />
         <AccessDenied
           data-testid="two-factor-recovery-access-denied"
-          description="You don't have permission to review pending 2FA-recovery requests."
+          description={t(
+            'twoFactorRecovery.accessDenied',
+            "You don't have permission to review pending 2FA-recovery requests."
+          )}
           action={
             <Button onClick={() => window.history.back()} variant="outline">
-              Go Back
+              {t('twoFactorRecovery.goBack', 'Go Back')}
             </Button>
           }
         />
@@ -128,18 +162,25 @@ export default function TwoFactorRecoveryApprovalsPage() {
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <ApprovalGatingTabs active="two-factor-recovery" />
       <AdminHeader
-        title="2FA Auth Reset Approvals"
-        description="Review requests from users locked out because they lost both their password and their 2FA device."
+        title={t('twoFactorRecovery.title', '2FA Auth Reset Approvals')}
+        description={t(
+          'twoFactorRecovery.description',
+          'Review requests from users locked out because they lost both their password and ' +
+            'their 2FA device.'
+        )}
       />
 
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Awaiting approval</h2>
+            <h2>{t('twoFactorRecovery.list.title', 'Awaiting approval')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
-            Approving clears the user&rsquo;s two-factor authentication entirely and emails them a
-            fresh password-reset link. Rejecting leaves their account completely untouched.
+            {t(
+              'twoFactorRecovery.list.description',
+              'Approving clears the user’s two-factor authentication entirely and emails them a ' +
+                'fresh password-reset link. Rejecting leaves their account completely untouched.'
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -149,9 +190,9 @@ export default function TwoFactorRecoveryApprovalsPage() {
             </div>
           ) : loadError ? (
             <div className="text-sm text-destructive" data-testid="two-factor-recovery-load-error">
-              Failed to load pending 2FA-recovery requests.{' '}
+              {t('twoFactorRecovery.loadError', 'Failed to load pending 2FA-recovery requests.')}{' '}
               <button type="button" onClick={() => void load()} className="underline font-medium">
-                Retry
+                {t('twoFactorRecovery.retry', 'Retry')}
               </button>
             </div>
           ) : items.length === 0 ? (
@@ -160,7 +201,9 @@ export default function TwoFactorRecoveryApprovalsPage() {
               data-testid="two-factor-recovery-empty"
             >
               <IconInbox size={40} className="mb-3 opacity-60" />
-              <p className="text-sm">No pending 2FA-recovery requests.</p>
+              <p className="text-sm">
+                {t('twoFactorRecovery.empty', 'No pending 2FA-recovery requests.')}
+              </p>
             </div>
           ) : (
             <ul className="divide-y divide-border" data-testid="two-factor-recovery-list">
@@ -184,7 +227,7 @@ export default function TwoFactorRecoveryApprovalsPage() {
                       data-testid={`two-factor-recovery-approve-${item.id}`}
                     >
                       <IconCheck className="w-4 h-4" />
-                      Approve
+                      {t('twoFactorRecovery.action.approve', 'Approve')}
                     </Button>
                     <Button
                       type="button"
@@ -196,7 +239,7 @@ export default function TwoFactorRecoveryApprovalsPage() {
                       data-testid={`two-factor-recovery-reject-${item.id}`}
                     >
                       <IconX className="w-4 h-4" />
-                      Reject
+                      {t('twoFactorRecovery.action.reject', 'Reject')}
                     </Button>
                   </div>
                 </li>

@@ -5,6 +5,7 @@ import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 import { useToast } from '@/lib/toast-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
+import { useRichTranslation, useTranslation } from '@amroksaleh/features/i18n';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
@@ -29,6 +30,8 @@ type CataloguePlugin = components['schemas']['StoreCataloguePlugin'];
 export default function PluginStorePage() {
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
+  const rt = useRichTranslation('admin');
   const hasAccess = hasPermission(PLUGINS_READ);
 
   const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
@@ -51,7 +54,11 @@ export default function PluginStorePage() {
       const { data, error } = await api.GET('/api/v1/plugins/store/allowed');
       if (!active) return;
       if (error || !data) {
-        addToast(error?.error || 'Could not load the configured stores.', 'error');
+        addToast(
+          error?.error ||
+            t('pluginStore.error.loadStores', 'Could not load the configured stores.'),
+          'error'
+        );
         return;
       }
       setAllowedHosts(data.data.hosts);
@@ -64,11 +71,11 @@ export default function PluginStorePage() {
     return () => {
       active = false;
     };
-  }, [hasAccess, addToast]);
+  }, [hasAccess, addToast, t]);
 
   const browse = useCallback(async () => {
     if (!storeUrl) {
-      addToast('Choose a store first.', 'error');
+      addToast(t('pluginStore.error.noStore', 'Choose a store first.'), 'error');
       return;
     }
     setBrowsing(true);
@@ -77,7 +84,11 @@ export default function PluginStorePage() {
         params: { query: { store_url: storeUrl, q: search || undefined } },
       });
       if (error || !data) {
-        addToast(error?.error || 'The store catalogue could not be loaded.', 'error');
+        addToast(
+          error?.error ||
+            t('pluginStore.error.catalogue', 'The store catalogue could not be loaded.'),
+          'error'
+        );
         return;
       }
       setPlugins(data.data);
@@ -85,13 +96,18 @@ export default function PluginStorePage() {
     } finally {
       setBrowsing(false);
     }
-  }, [storeUrl, search, addToast]);
+  }, [storeUrl, search, addToast, t]);
 
   const install = useCallback(
     async (plugin: CataloguePlugin) => {
       const version = plugin.latest_version;
       if (!version) {
-        addToast(`"${plugin.name}" has no published version to install.`, 'error');
+        addToast(
+          t('pluginStore.error.noVersion', '"{name}" has no published version to install.', {
+            name: plugin.name,
+          }),
+          'error'
+        );
         return;
       }
       setInstallingSlug(plugin.slug);
@@ -104,18 +120,26 @@ export default function PluginStorePage() {
           // token is required", "already installed", allowlist rejection) —
           // a generic message left every failure equally unexplained,
           // including the common case of installing without a token.
-          addToast(error.error || `Failed to install "${plugin.name}".`, 'error');
+          addToast(
+            error.error ||
+              t('pluginStore.error.install', 'Failed to install "{name}".', { name: plugin.name }),
+            'error',
+          );
           return;
         }
         addToast(
-          `"${plugin.name}" v${data?.data.version ?? version} installed (disabled). Enable it from Plugins.`,
+          t(
+            'pluginStore.toast.installed',
+            '"{name}" v{version} installed (disabled). Enable it from Plugins.',
+            { name: plugin.name, version: data?.data.version ?? version },
+          ),
           'success',
         );
       } finally {
         setInstallingSlug(null);
       }
     },
-    [storeUrl, token, addToast],
+    [storeUrl, token, addToast, t],
   );
 
   /**
@@ -130,7 +154,7 @@ export default function PluginStorePage() {
    */
   const mintToken = useCallback(async () => {
     if (!storeUrl) {
-      addToast('Choose a store first.', 'error');
+      addToast(t('pluginStore.error.noStore', 'Choose a store first.'), 'error');
       return;
     }
     setMintingToken(true);
@@ -143,17 +167,24 @@ export default function PluginStorePage() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data?.token) {
-        addToast(body?.error || 'Could not mint a store token for this store.', 'error');
+        addToast(
+          body?.error ||
+            t('pluginStore.error.mint', 'Could not mint a store token for this store.'),
+          'error'
+        );
         return;
       }
       setToken(body.data.token);
-      addToast('Store token minted and filled in below.', 'success');
+      addToast(t('pluginStore.toast.minted', 'Store token minted and filled in below.'), 'success');
     } catch {
-      addToast('Could not reach the store to mint a token.', 'error');
+      addToast(
+        t('pluginStore.error.mintUnreachable', 'Could not reach the store to mint a token.'),
+        'error'
+      );
     } finally {
       setMintingToken(false);
     }
-  }, [storeUrl, addToast]);
+  }, [storeUrl, addToast, t]);
 
   if (isCapabilitiesLoading) {
     return (
@@ -166,15 +197,13 @@ export default function PluginStorePage() {
   if (!hasAccess) {
     return (
       <AccessDenied
-        description={
-          <>
-            You do not have the required permission (`plugins:read`) to browse the Plugin
-            Store.
-          </>
-        }
+        description={t(
+          'pluginStore.accessDenied',
+          'You do not have the required permission (`plugins:read`) to browse the Plugin Store.'
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('pluginStore.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -184,20 +213,30 @@ export default function PluginStorePage() {
   return (
     <div className="space-y-8 max-w-7xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Plugin Store"
-        description="Browse a trusted store and install plugins into this instance."
+        title={t('pluginStore.title', 'Plugin Store')}
+        description={t(
+          'pluginStore.description',
+          'Browse a trusted store and install plugins into this instance.'
+        )}
       />
 
       {featureEnabled === false ? (
         <Card className="border border-border/80 bg-card/50">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
-              <IconBuildingStore className="w-5 h-5" /> Plugin store disabled
+              <IconBuildingStore className="w-5 h-5" />{' '}
+              {t('pluginStore.disabled.title', 'Plugin store disabled')}
             </CardTitle>
             <CardDescription>
-              Installing from a store is disabled on this instance. An operator can turn it on from{' '}
-              <code>plugins.store_enabled</code> (Admin → Settings → Feature flags), and must configure at
-              least one trusted host in <code>plugins.store_allowed_hosts</code> (global settings).
+              {rt(
+                'pluginStore.disabled.description',
+                'Installing from a store is disabled on this instance. An operator can turn it ' +
+                  'on from <0>plugins.store_enabled</0> (Admin → Settings → Feature flags), and ' +
+                  'must configure at least one trusted host in <1>plugins.store_allowed_hosts</1> ' +
+                  '(global settings).',
+                undefined,
+                [<code key="flag" />, <code key="hosts" />]
+              )}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -207,14 +246,16 @@ export default function PluginStorePage() {
           <Card className="border border-border/80 bg-card/50 shadow-sm">
             <CardContent className="flex flex-col gap-4 pt-6 md:flex-row md:items-end">
               <label className="flex flex-1 flex-col gap-1 text-sm">
-                <span className="font-medium text-muted-foreground">Store</span>
+                <span className="font-medium text-muted-foreground">
+                  {t('pluginStore.field.store', 'Store')}
+                </span>
                 <select
                   value={storeUrl}
                   onChange={(e) => setStoreUrl(e.target.value)}
                   className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                 >
                   <option value="" disabled>
-                    Choose a store…
+                    {t('pluginStore.field.storePlaceholder', 'Choose a store…')}
                   </option>
                   {allowedHosts.map((h) => (
                     <option key={h} value={`https://${h}`}>
@@ -224,7 +265,9 @@ export default function PluginStorePage() {
                 </select>
               </label>
               <label className="flex flex-1 flex-col gap-1 text-sm">
-                <span className="font-medium text-muted-foreground">Search</span>
+                <span className="font-medium text-muted-foreground">
+                  {t('pluginStore.field.search', 'Search')}
+                </span>
                 <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 h-10">
                   <IconSearch className="w-4 h-4 text-muted-foreground" />
                   <input
@@ -233,7 +276,7 @@ export default function PluginStorePage() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') browse();
                     }}
-                    placeholder="name, slug, tag…"
+                    placeholder={t('pluginStore.field.searchPlaceholder', 'name, slug, tag…')}
                     type="search"
                     name="plugin-store-search"
                     autoComplete="off"
@@ -242,7 +285,9 @@ export default function PluginStorePage() {
                 </div>
               </label>
               <label className="flex flex-1 flex-col gap-1 text-sm">
-                <span className="font-medium text-muted-foreground">Access token</span>
+                <span className="font-medium text-muted-foreground">
+                  {t('pluginStore.field.token', 'Access token')}
+                </span>
                 <div className="flex items-center gap-1.5">
                   <input
                     value={token}
@@ -250,7 +295,7 @@ export default function PluginStorePage() {
                     type="password"
                     name="plugin-store-access-token"
                     autoComplete="new-password"
-                    placeholder="required to install"
+                    placeholder={t('pluginStore.field.tokenPlaceholder', 'required to install')}
                     className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm"
                   />
                   <Button
@@ -258,7 +303,10 @@ export default function PluginStorePage() {
                     variant="outline"
                     onClick={mintToken}
                     disabled={mintingToken || !storeUrl}
-                    title="Mint a download token from this store (requires an admin session on it)"
+                    title={t(
+                      'pluginStore.field.mintTitle',
+                      'Mint a download token from this store (requires an admin session on it)'
+                    )}
                     className="h-10 w-10 shrink-0 p-0"
                   >
                     <IconKey className={`w-4 h-4 ${mintingToken ? 'animate-pulse' : ''}`} />
@@ -267,7 +315,7 @@ export default function PluginStorePage() {
               </label>
               <Button onClick={browse} disabled={browsing || !storeUrl} className="gap-2 h-10">
                 <IconRefresh className={`w-4 h-4 ${browsing ? 'animate-spin' : ''}`} />
-                Browse
+                {t('pluginStore.action.browse', 'Browse')}
               </Button>
             </CardContent>
           </Card>
@@ -275,7 +323,12 @@ export default function PluginStorePage() {
           {/* Results */}
           {plugins.length === 0 ? (
             <p className="text-sm text-muted-foreground px-1">
-              {hasBrowsed ? 'No plugins matched your search.' : 'Choose a store and press Browse to see its plugins.'}
+              {hasBrowsed
+                ? t('pluginStore.empty.noMatches', 'No plugins matched your search.')
+                : t(
+                    'pluginStore.empty.notBrowsed',
+                    'Choose a store and press Browse to see its plugins.'
+                  )}
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -309,7 +362,9 @@ export default function PluginStorePage() {
                       className="gap-2"
                     >
                       <IconDownload className="w-4 h-4" />
-                      {installingSlug === plugin.slug ? 'Installing…' : 'Install'}
+                      {installingSlug === plugin.slug
+                        ? t('pluginStore.action.installing', 'Installing…')
+                        : t('pluginStore.action.install', 'Install')}
                     </PermissionButton>
                   </CardFooter>
                 </Card>

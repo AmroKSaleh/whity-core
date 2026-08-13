@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +37,7 @@ const PER_PAGE = 25;
 export default function AuditLogsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
 
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,7 +73,7 @@ export default function AuditLogsPage() {
         );
 
         if (!response.ok) {
-          throw new Error('Failed to fetch audit logs');
+          throw new Error(t('auditLogs.error.fetch', 'Failed to fetch audit logs'));
         }
 
         const data: AuditLogResponse = await response.json();
@@ -80,13 +82,15 @@ export default function AuditLogsPage() {
         setTotal(data.pagination?.total ?? 0);
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Failed to fetch audit logs';
+          error instanceof Error
+            ? error.message
+            : t('auditLogs.error.fetch', 'Failed to fetch audit logs');
         addToast(message, 'error');
       } finally {
         setIsLoading(false);
       }
     },
-    [apiClient, addToast, buildQuery]
+    [apiClient, addToast, buildQuery, t]
   );
 
   useEffect(() => {
@@ -138,19 +142,29 @@ export default function AuditLogsPage() {
     return keys.map((key) => `${key}: ${String(metadata[key])}`).join(', ');
   };
 
+  // The `action`, target and metadata CELLS stay untranslated on purpose: they
+  // are audit records written by the backend (`auth.login.success`, a target
+  // type, a metadata blob), i.e. data this screen displays, not source copy.
   const columns: DataTableColumn<AuditLogEntry>[] = [
-    { id: 'time', header: 'Time', cell: (entry) => formatTimestamp(entry.createdAt) },
-    { accessorKey: 'action', header: 'Action' },
+    {
+      id: 'time',
+      header: t('auditLogs.table.time', 'Time'),
+      cell: (entry) => formatTimestamp(entry.createdAt),
+    },
+    { accessorKey: 'action', header: t('auditLogs.table.action', 'Action') },
     {
       id: 'actor',
-      header: 'Actor',
-      cell: (entry) => (entry.actorUserId !== null ? `#${entry.actorUserId}` : 'system'),
+      header: t('auditLogs.table.actor', 'Actor'),
+      cell: (entry) =>
+        entry.actorUserId !== null
+          ? `#${entry.actorUserId}`
+          : t('auditLogs.table.actorSystem', 'system'),
     },
-    { id: 'target', header: 'Target', cell: formatTarget },
-    { accessorKey: 'ipAddress', header: 'IP' },
+    { id: 'target', header: t('auditLogs.table.target', 'Target'), cell: formatTarget },
+    { accessorKey: 'ipAddress', header: t('auditLogs.table.ip', 'IP') },
     {
       id: 'details',
-      header: 'Details',
+      header: t('auditLogs.table.details', 'Details'),
       cell: (entry) => formatMetadata(entry.metadata),
       className: 'max-w-md truncate',
     },
@@ -159,8 +173,11 @@ export default function AuditLogsPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Audit Logs"
-        description="Security audit trail of authentication, role, permission, tenant and user activity"
+        title={t('auditLogs.title', 'Audit Logs')}
+        description={t(
+          'auditLogs.description',
+          'Security audit trail of authentication, role, permission, tenant and user activity'
+        )}
         action={
           <Button
             variant="outline"
@@ -168,7 +185,7 @@ export default function AuditLogsPage() {
             className="gap-2"
           >
             <IconRefresh size={18} />
-            Refresh
+            {t('auditLogs.action.refresh', 'Refresh')}
           </Button>
         }
       />
@@ -177,38 +194,38 @@ export default function AuditLogsPage() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-muted-foreground">
-            Action
+            {t('auditLogs.filter.action', 'Action')}
           </label>
           <Input
             value={draftFilters.action}
             onChange={(e) => updateDraft('action', e.target.value)}
-            placeholder="e.g. auth.login.success"
+            placeholder={t('auditLogs.filter.actionPlaceholder', 'e.g. auth.login.success')}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-muted-foreground">
-            Target Type
+            {t('auditLogs.filter.targetType', 'Target Type')}
           </label>
           <Input
             value={draftFilters.targetType}
             onChange={(e) => updateDraft('targetType', e.target.value)}
-            placeholder="e.g. role"
+            placeholder={t('auditLogs.filter.targetTypePlaceholder', 'e.g. role')}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-muted-foreground">
-            Actor (User ID)
+            {t('auditLogs.filter.actor', 'Actor (User ID)')}
           </label>
           <Input
             type="number"
             value={draftFilters.actor}
             onChange={(e) => updateDraft('actor', e.target.value)}
-            placeholder="e.g. 42"
+            placeholder={t('auditLogs.filter.actorPlaceholder', 'e.g. 42')}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-muted-foreground">
-            From
+            {t('auditLogs.filter.from', 'From')}
           </label>
           <Input
             type="date"
@@ -218,7 +235,7 @@ export default function AuditLogsPage() {
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-muted-foreground">
-            To
+            {t('auditLogs.filter.to', 'To')}
           </label>
           <Input
             type="date"
@@ -228,10 +245,10 @@ export default function AuditLogsPage() {
         </div>
         <div className="flex items-end gap-2">
           <Button onClick={handleApplyFilters} className="flex-1">
-            Apply
+            {t('auditLogs.filter.apply', 'Apply')}
           </Button>
           <Button variant="outline" onClick={handleClearFilters} className="flex-1">
-            Clear
+            {t('auditLogs.filter.clear', 'Clear')}
           </Button>
         </div>
       </div>
@@ -245,7 +262,7 @@ export default function AuditLogsPage() {
         data={entries}
         getRowId={(entry) => String(entry.id)}
         isLoading={isLoading}
-        emptyState={{ title: 'No audit entries found' }}
+        emptyState={{ title: t('auditLogs.empty', 'No audit entries found') }}
         pagination={{
           pageIndex: page - 1,
           pageSize: PER_PAGE,

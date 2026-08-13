@@ -10,6 +10,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { useNavigation } from '@/lib/navigation-context';
 import { usePluginFeatures } from '@/lib/plugin-features-context';
 import { classifyPluginVersion, type PluginVersionTier } from '@/lib/plugin-version-badge';
+import { useRichTranslation, useTranslation } from '@amroksaleh/features/i18n';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
@@ -84,6 +85,8 @@ const VERSION_BADGE_VARIANT: Record<
 export default function PluginsPage() {
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
+  const rt = useRichTranslation('admin');
   const hasAccess = hasPermission(PLUGINS_READ);
 
   // Sidebar nav + plugin feature descriptors: used to optimistically drop a
@@ -96,7 +99,7 @@ export default function PluginsPage() {
   const { data, loading: loadingPlugins, error, refetch: fetchPlugins } = useFetch(async () => {
     const { data: responseData } = await api.GET('/api/v1/plugins');
     if (responseData === undefined) {
-      throw new Error('Failed to fetch plugins');
+      throw new Error(t('plugins.error.fetch', 'Failed to fetch plugins'));
     }
     return responseData.data;
   }, []);
@@ -134,15 +137,14 @@ export default function PluginsPage() {
   if (!hasAccess) {
     return (
       <AccessDenied
-        description={
-          <>
-            You do not have the required permissions (`plugins:read`) to access the Plugin
-            Management Console.
-          </>
-        }
+        description={t(
+          'plugins.accessDenied',
+          'You do not have the required permissions (`plugins:read`) to access the Plugin ' +
+            'Management Console.'
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('plugins.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -182,7 +184,12 @@ export default function PluginsPage() {
     // removal on disable can fire the instant the request succeeds.
     const hrefs = pluginNavHrefs(plugin);
 
-    addToast(`${isCurrentlyActive ? 'Disabling' : 'Enabling'} plugin ${plugin.name}...`, 'info');
+    addToast(
+      isCurrentlyActive
+        ? t('plugins.toast.disabling', 'Disabling plugin {name}...', { name: plugin.name })
+        : t('plugins.toast.enabling', 'Enabling plugin {name}...', { name: plugin.name }),
+      'info'
+    );
 
     try {
       let response;
@@ -197,31 +204,53 @@ export default function PluginsPage() {
       }
 
       if (response.error) {
-        throw new Error(response.error.error || `Failed to ${action} plugin`);
+        throw new Error(
+          response.error.error ||
+            (isCurrentlyActive
+              ? t('plugins.error.disable', 'Failed to disable plugin')
+              : t('plugins.error.enable', 'Failed to enable plugin'))
+        );
       }
 
-      addToast(`Plugin ${plugin.name} successfully ${action}d.`, 'success');
+      addToast(
+        isCurrentlyActive
+          ? t('plugins.toast.disabled', 'Plugin {name} successfully disabled.', {
+              name: plugin.name,
+            })
+          : t('plugins.toast.enabled', 'Plugin {name} successfully enabled.', {
+              name: plugin.name,
+            }),
+        'success'
+      );
       fetchPlugins();
       // Disabling drops the plugin's nav links optimistically; enabling has no
       // hrefs to remove yet, so the refresh alone restores them.
       syncSidebar(isCurrentlyActive ? hrefs : []);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error triggering plugin state';
+      const msg =
+        err instanceof Error
+          ? err.message
+          : t('plugins.error.toggle', 'Error triggering plugin state');
       addToast(msg, 'error');
     }
   };
 
   // Re-enable a failed plugin
   const handleReEnable = async (pluginId: string) => {
-    addToast(`Clearing failed state and re-enabling plugin...`, 'info');
+    addToast(
+      t('plugins.toast.reEnabling', 'Clearing failed state and re-enabling plugin...'),
+      'info'
+    );
     try {
       const { error: reEnableError } = await api.POST('/api/v1/plugins/{id}/re-enable', {
         params: { path: { id: pluginId } },
       });
       if (reEnableError) {
-        throw new Error(reEnableError.error || 'Failed to re-enable plugin');
+        throw new Error(
+          reEnableError.error || t('plugins.error.reEnable', 'Failed to re-enable plugin')
+        );
       }
-      addToast(`Plugin re-enabled successfully.`, 'success');
+      addToast(t('plugins.toast.reEnabled', 'Plugin re-enabled successfully.'), 'success');
       if (detailPlugin) {
         setDetailPlugin(null);
       }
@@ -229,7 +258,10 @@ export default function PluginsPage() {
       // Re-enabling can restore contributed nav links — refresh the sidebar.
       void refreshNavigation();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error re-enabling plugin';
+      const msg =
+        err instanceof Error
+          ? err.message
+          : t('plugins.error.reEnableUnknown', 'Error re-enabling plugin');
       addToast(msg, 'error');
     }
   };
@@ -237,11 +269,11 @@ export default function PluginsPage() {
   // Reload the plugin directory
   const handleReload = async () => {
     setReloadPending(true);
-    addToast('Scanning plugins directory...', 'info');
+    addToast(t('plugins.toast.reloading', 'Scanning plugins directory...'), 'info');
     try {
       const { data: reloadData, error: reloadError } = await api.POST('/api/v1/plugins/reload');
       if (reloadError) {
-        throw new Error(reloadError.error || 'Failed to reload plugins');
+        throw new Error(reloadError.error || t('plugins.error.reload', 'Failed to reload plugins'));
       }
 
       const reloadBody = reloadData as unknown as {
@@ -249,16 +281,26 @@ export default function PluginsPage() {
         data?: { message?: string; worker_restart_required?: boolean };
         worker_restart_required?: boolean;
       };
-      const msg = reloadBody?.data?.message || reloadBody?.message || 'Plugins scanned';
+      const msg =
+        reloadBody?.data?.message ||
+        reloadBody?.message ||
+        t('plugins.toast.reloaded', 'Plugins scanned');
       addToast(msg, 'success');
 
       if (reloadBody?.data?.worker_restart_required || reloadBody?.worker_restart_required) {
-        addToast('Warning: A worker restart is required to load modified plugins.', 'warning');
+        addToast(
+          t(
+            'plugins.toast.restartRequired',
+            'Warning: A worker restart is required to load modified plugins.'
+          ),
+          'warning'
+        );
       }
 
       fetchPlugins();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error reloading plugins';
+      const msg =
+        err instanceof Error ? err.message : t('plugins.error.reloadUnknown', 'Error reloading plugins');
       addToast(msg, 'error');
     } finally {
       setReloadPending(false);
@@ -268,30 +310,41 @@ export default function PluginsPage() {
   // Upload a plugin package (.zip or single .php) for staged install.
   const handleUpload = async () => {
     if (!uploadFile) {
-      addToast('Choose a .zip or .php plugin package to upload.', 'error');
+      addToast(
+        t('plugins.upload.noFile', 'Choose a .zip or .php plugin package to upload.'),
+        'error'
+      );
       return;
     }
     if (uploadFile.size > MAX_UPLOAD_BYTES) {
       addToast(
-        `Package is too large (max ${MAX_UPLOAD_BYTES / (1024 * 1024)} MiB).`,
+        t('plugins.upload.tooLarge', 'Package is too large (max {max} MiB).', {
+          max: MAX_UPLOAD_BYTES / (1024 * 1024),
+        }),
         'error'
       );
       return;
     }
 
     setUploading(true);
-    addToast(`Uploading ${uploadFile.name}...`, 'info');
+    addToast(
+      t('plugins.upload.uploading', 'Uploading {name}...', { name: uploadFile.name }),
+      'info'
+    );
     try {
       const { error: uploadError } = await uploadPluginPackage(uploadFile);
       if (uploadError) {
-        throw new Error(uploadError.error || 'Failed to upload plugin');
+        throw new Error(uploadError.error || t('plugins.error.upload', 'Failed to upload plugin'));
       }
-      addToast('Plugin staged successfully. Review it, then Enable.', 'success');
+      addToast(
+        t('plugins.upload.staged', 'Plugin staged successfully. Review it, then Enable.'),
+        'success'
+      );
       closeUploadDialog();
       // The staged plugin appears with status `disabled` for review.
       fetchPlugins();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Upload failed';
+      const msg = err instanceof Error ? err.message : t('plugins.error.uploadUnknown', 'Upload failed');
       addToast(msg, 'error');
     } finally {
       setUploading(false);
@@ -319,7 +372,12 @@ export default function PluginsPage() {
     const hrefs = pluginNavHrefs(uninstallTarget);
 
     try {
-      addToast(`Uninstalling plugin ${uninstallTarget.name}...`, 'info');
+      addToast(
+        t('plugins.toast.uninstalling', 'Uninstalling plugin {name}...', {
+          name: uninstallTarget.name,
+        }),
+        'info'
+      );
       const postUninstall = api.POST as unknown as (
         url: string,
         options: { params: { path: { id: string } }; body: { force: boolean } }
@@ -331,10 +389,19 @@ export default function PluginsPage() {
       });
 
       if (uninstallError) {
-        throw new Error(uninstallError.error || uninstallError.message || 'Failed to uninstall plugin');
+        throw new Error(
+          uninstallError.error ||
+            uninstallError.message ||
+            t('plugins.error.uninstall', 'Failed to uninstall plugin')
+        );
       }
 
-      addToast(`Plugin ${uninstallTarget.name} uninstalled successfully.`, 'success');
+      addToast(
+        t('plugins.toast.uninstalled', 'Plugin {name} uninstalled successfully.', {
+          name: uninstallTarget.name,
+        }),
+        'success'
+      );
       setUninstallTarget(null);
       if (detailPlugin) setDetailPlugin(null);
       fetchPlugins();
@@ -342,7 +409,8 @@ export default function PluginsPage() {
       // then refresh the authoritative server-filtered nav.
       syncSidebar(hrefs);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Uninstall failed';
+      const msg =
+        err instanceof Error ? err.message : t('plugins.error.uninstallUnknown', 'Uninstall failed');
       addToast(msg, 'error');
     } finally {
       setUninstalling(false);
@@ -358,8 +426,11 @@ export default function PluginsPage() {
   return (
     <div className="space-y-8 max-w-7xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Plugin Management"
-        description="Configure and manage the extension packages installed on your application."
+        title={t('plugins.title', 'Plugin Management')}
+        description={t(
+          'plugins.description',
+          'Configure and manage the extension packages installed on your application.'
+        )}
         action={
           <div className="flex items-center gap-2">
             <PermissionButton
@@ -369,7 +440,7 @@ export default function PluginsPage() {
               className="gap-2 shadow-sm font-medium"
             >
               <IconUpload className="w-4 h-4" />
-              Upload Plugin
+              {t('plugins.header.upload', 'Upload Plugin')}
             </PermissionButton>
             <PermissionButton
               permission={PLUGINS_RELOAD}
@@ -378,7 +449,7 @@ export default function PluginsPage() {
               className="gap-2 shadow-sm font-medium hover:scale-[1.02] active:scale-[0.98] transition-all"
             >
               <IconReload className={`w-4 h-4 ${reloadPending ? 'animate-spin' : ''}`} />
-              Reload Plugins
+              {t('plugins.header.reload', 'Reload Plugins')}
             </PermissionButton>
           </div>
         }
@@ -388,25 +459,25 @@ export default function PluginsPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
-            <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Total Plugins</CardDescription>
+            <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{t('plugins.stat.total', 'Total Plugins')}</CardDescription>
             <CardTitle className="text-3xl font-bold font-heading">{totalInstalled}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
-            <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Active</CardDescription>
+            <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{t('plugins.stat.active', 'Active')}</CardDescription>
             <CardTitle className="text-3xl font-bold font-heading text-success">{activeCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
-            <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Disabled</CardDescription>
+            <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{t('plugins.stat.disabled', 'Disabled')}</CardDescription>
             <CardTitle className="text-3xl font-bold font-heading text-warning">{disabledCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
-            <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Failed</CardDescription>
+            <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{t('plugins.stat.failed', 'Failed')}</CardDescription>
             <CardTitle className="text-3xl font-bold font-heading text-error">{failedCount}</CardTitle>
           </CardHeader>
         </Card>
@@ -429,7 +500,19 @@ export default function PluginsPage() {
       ) : plugins.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
           <IconPlug className="w-10 h-10 mb-3 opacity-60" />
-          <p className="text-sm">No plugins are installed. Drop a plugin into the <code className="font-mono">plugins/</code> directory and use <strong>Reload Plugins</strong>, or use <strong>Upload Plugin</strong>.</p>
+          <p className="text-sm">
+            {rt(
+              'plugins.empty',
+              'No plugins are installed. Drop a plugin into the <0>plugins/</0> directory and use ' +
+                '<1>Reload Plugins</1>, or use <2>Upload Plugin</2>.',
+              undefined,
+              [
+                <code key="dir" className="font-mono" />,
+                <strong key="reload" />,
+                <strong key="upload" />,
+              ]
+            )}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -451,7 +534,9 @@ export default function PluginsPage() {
                       <Badge
                         variant={VERSION_BADGE_VARIANT[versionBadge.tier]}
                         className="font-medium"
-                        title={`Version ${plugin.version}`}
+                        title={t('plugins.card.versionTitle', 'Version {version}', {
+                          version: String(plugin.version),
+                        })}
                         data-testid={`version-badge-${plugin.id}`}
                       >
                         {versionBadge.label}
@@ -467,7 +552,15 @@ export default function PluginsPage() {
                       }
                       className="font-medium capitalize"
                     >
-                      {plugin.status || (plugin.enabled ? 'enabled' : 'disabled')}
+                      {/*
+                        `status` is the backend's own lifecycle value, rendered
+                        as the data it is; only the local fallback pair is
+                        source copy.
+                      */}
+                      {plugin.status ||
+                        (plugin.enabled
+                          ? t('plugins.status.enabled', 'enabled')
+                          : t('plugins.status.disabled', 'disabled'))}
                     </Badge>
                   </div>
                 </div>
@@ -479,20 +572,28 @@ export default function PluginsPage() {
 
               <CardContent className="flex-1 pb-4 text-xs space-y-4">
                 <p className="text-muted-foreground line-clamp-2">
-                  Local plugin installed on disk. {plugin.file && `Loaded from file: ${plugin.file}`}
+                  {t('plugins.card.local', 'Local plugin installed on disk.')}{' '}
+                  {plugin.file &&
+                    t('plugins.card.loadedFrom', 'Loaded from file: {file}', {
+                      file: plugin.file,
+                    })}
                 </p>
                 <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
                   <span className="px-2 py-1 bg-muted rounded-full">
-                    Version: {plugin.version || '1.0.0'}
+                    {t('plugins.card.version', 'Version: {version}', {
+                      version: plugin.version || '1.0.0',
+                    })}
                   </span>
                   {plugin.routes_count !== undefined && (
                     <span className="px-2 py-1 bg-muted rounded-full">
-                      Routes: {plugin.routes_count}
+                      {t('plugins.card.routes', 'Routes: {count}', { count: plugin.routes_count })}
                     </span>
                   )}
                   {plugin.permissions_count !== undefined && (
                     <span className="px-2 py-1 bg-muted rounded-full">
-                      Permissions: {plugin.permissions_count}
+                      {t('plugins.card.permissions', 'Permissions: {count}', {
+                        count: plugin.permissions_count,
+                      })}
                     </span>
                   )}
                 </div>
@@ -505,7 +606,7 @@ export default function PluginsPage() {
                   onClick={() => setDetailPlugin(plugin)}
                   className="font-semibold text-xs gap-1"
                 >
-                  Details <IconChevronRight size={14} />
+                  {t('plugins.card.details', 'Details')} <IconChevronRight size={14} />
                 </Button>
                 <div className="flex gap-2">
                   {/*
@@ -524,11 +625,11 @@ export default function PluginsPage() {
                   >
                     {isActive ? (
                       <>
-                        <IconPlayerPause size={14} /> Disable
+                        <IconPlayerPause size={14} /> {t('plugins.action.disable', 'Disable')}
                       </>
                     ) : (
                       <>
-                        <IconPlayerPlay size={14} /> Enable
+                        <IconPlayerPlay size={14} /> {t('plugins.action.enable', 'Enable')}
                       </>
                     )}
                   </PermissionButton>
@@ -545,23 +646,32 @@ export default function PluginsPage() {
         <DialogContent className="sm:max-w-md text-xs">
           <DialogHeader>
             <DialogTitle className="text-base font-bold font-heading flex items-center gap-2">
-              <IconUpload className="w-5 h-5" /> Upload Plugin
+              <IconUpload className="w-5 h-5" /> {t('plugins.upload.title', 'Upload Plugin')}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Upload a plugin package as a <code className="font-mono">.zip</code> (a plugin directory)
-              or a single <code className="font-mono">.php</code> file. It is staged{' '}
-              <strong>disabled</strong> for review — Enable it once you have inspected it.
+              {rt(
+                'plugins.upload.description',
+                'Upload a plugin package as a <0>.zip</0> (a plugin directory) or a single ' +
+                  '<1>.php</1> file. It is staged <2>disabled</2> for review — Enable it once ' +
+                  'you have inspected it.',
+                undefined,
+                [
+                  <code key="zip" className="font-mono" />,
+                  <code key="php" className="font-mono" />,
+                  <strong key="disabled" />,
+                ]
+              )}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3 py-2">
             <label className="block">
-              <span className="sr-only">Plugin package</span>
+              <span className="sr-only">{t('plugins.upload.fileLabel', 'Plugin package')}</span>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept=".zip,.php"
-                aria-label="Plugin package"
+                aria-label={t('plugins.upload.fileLabel', 'Plugin package')}
                 onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                 disabled={uploading}
                 className="block w-full text-xs text-muted-foreground file:me-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-semibold file:text-primary-foreground hover:file:bg-primary/80 file:cursor-pointer cursor-pointer"
@@ -569,18 +679,24 @@ export default function PluginsPage() {
             </label>
             {uploadFile && (
               <p className="text-[11px] text-muted-foreground">
-                Selected: <span className="font-mono">{uploadFile.name}</span>{' '}
-                ({(uploadFile.size / 1024).toFixed(1)} KiB)
+                {rt(
+                  'plugins.upload.selected',
+                  'Selected: <0>{name}</0> ({size} KiB)',
+                  { name: uploadFile.name, size: (uploadFile.size / 1024).toFixed(1) },
+                  [<span key="name" className="font-mono" />]
+                )}
               </p>
             )}
             <p className="text-[10px] text-muted-foreground/80">
-              Maximum size {MAX_UPLOAD_BYTES / (1024 * 1024)} MiB.
+              {t('plugins.upload.maxSize', 'Maximum size {max} MiB.', {
+                max: MAX_UPLOAD_BYTES / (1024 * 1024),
+              })}
             </p>
           </div>
 
           <DialogFooter className="gap-2">
             <Button variant="outline" size="sm" onClick={closeUploadDialog} disabled={uploading}>
-              Cancel
+              {t('plugins.upload.cancel', 'Cancel')}
             </Button>
             <Button
               size="sm"
@@ -590,7 +706,7 @@ export default function PluginsPage() {
               className="gap-1 font-semibold"
             >
               {!uploading && <IconUpload size={14} />}
-              Upload
+              {t('plugins.upload.submit', 'Upload')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -608,7 +724,7 @@ export default function PluginsPage() {
                 <div>
                   <DialogTitle className="text-base font-bold font-heading">{detailPlugin.name}</DialogTitle>
                   <DialogDescription className="text-xs font-mono font-semibold">
-                    ID: {detailPlugin.id}
+                    {t('plugins.detail.id', 'ID: {id}', { id: detailPlugin.id })}
                   </DialogDescription>
                 </div>
               </div>
@@ -617,7 +733,9 @@ export default function PluginsPage() {
             <div className="space-y-4 py-4 border-t border-b border-border my-2">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <h4 className="font-semibold text-muted-foreground">Status</h4>
+                  <h4 className="font-semibold text-muted-foreground">
+                    {t('plugins.detail.status', 'Status')}
+                  </h4>
                   <Badge
                     variant={
                       detailPlugin.status === 'active'
@@ -628,18 +746,25 @@ export default function PluginsPage() {
                     }
                     className="font-medium capitalize mt-1"
                   >
-                    {detailPlugin.status || (detailPlugin.enabled ? 'enabled' : 'disabled')}
+                    {detailPlugin.status ||
+                      (detailPlugin.enabled
+                        ? t('plugins.status.enabled', 'enabled')
+                        : t('plugins.status.disabled', 'disabled'))}
                   </Badge>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-muted-foreground">Version</h4>
+                  <h4 className="font-semibold text-muted-foreground">
+                    {t('plugins.detail.version', 'Version')}
+                  </h4>
                   <p className="mt-1 font-medium">{detailPlugin.version || '1.0.0'}</p>
                 </div>
               </div>
 
               {detailPlugin.file && (
                 <div>
-                  <h4 className="font-semibold text-muted-foreground">Disk File</h4>
+                  <h4 className="font-semibold text-muted-foreground">
+                    {t('plugins.detail.file', 'Disk File')}
+                  </h4>
                   <p className="mt-1 font-mono break-all">{detailPlugin.file}</p>
                 </div>
               )}
@@ -648,11 +773,17 @@ export default function PluginsPage() {
               {detailPlugin.status === 'failed' && (
                 <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-xl space-y-2 text-destructive">
                   <div className="flex items-center gap-1.5 font-bold">
-                    <IconAlertCircle size={16} /> Failed State Details
+                    <IconAlertCircle size={16} />{' '}
+                    {t('plugins.detail.failedTitle', 'Failed State Details')}
                   </div>
                   {(detailPlugin as ExtendedPluginEntry).consecutive_errors !== undefined && (
                     <p className="text-[11px]">
-                      Consecutive failures: <strong>{(detailPlugin as ExtendedPluginEntry).consecutive_errors}</strong>
+                      {rt(
+                        'plugins.detail.consecutiveFailures',
+                        'Consecutive failures: <0>{count}</0>',
+                        { count: (detailPlugin as ExtendedPluginEntry).consecutive_errors ?? 0 },
+                        [<strong key="count" />]
+                      )}
                     </p>
                   )}
                   {(detailPlugin as ExtendedPluginEntry).last_error && (
@@ -675,7 +806,7 @@ export default function PluginsPage() {
                     onClick={() => handleReEnable(detailPlugin.id)}
                     className="w-full text-xs font-semibold"
                   >
-                    Clear Error & Re-enable
+                    {t('plugins.detail.reEnable', 'Clear Error & Re-enable')}
                   </PermissionButton>
                 </div>
               )}
@@ -683,9 +814,13 @@ export default function PluginsPage() {
               {/* Routes List */}
               {detailPlugin.routes_count !== undefined && (
                 <div>
-                  <h4 className="font-semibold text-muted-foreground mb-1.5">Registered Routes</h4>
+                  <h4 className="font-semibold text-muted-foreground mb-1.5">
+                    {t('plugins.detail.routesTitle', 'Registered Routes')}
+                  </h4>
                   <Badge variant="outline" className="font-medium">
-                    {detailPlugin.routes_count} active API route(s) registered
+                    {t('plugins.detail.routesCount', '{count} active API route(s) registered', {
+                      count: detailPlugin.routes_count,
+                    })}
                   </Badge>
                 </div>
               )}
@@ -693,9 +828,13 @@ export default function PluginsPage() {
               {/* Permissions List */}
               {detailPlugin.permissions_count !== undefined && (
                 <div>
-                  <h4 className="font-semibold text-muted-foreground mb-1.5">Custom Permissions</h4>
+                  <h4 className="font-semibold text-muted-foreground mb-1.5">
+                    {t('plugins.detail.permissionsTitle', 'Custom Permissions')}
+                  </h4>
                   <Badge variant="outline" className="font-medium">
-                    {detailPlugin.permissions_count} RBAC permission(s) added
+                    {t('plugins.detail.permissionsCount', '{count} RBAC permission(s) added', {
+                      count: detailPlugin.permissions_count,
+                    })}
                   </Badge>
                 </div>
               )}
@@ -715,10 +854,10 @@ export default function PluginsPage() {
                 onClick={() => confirmUninstall(detailPlugin)}
                 className="text-destructive border-destructive hover:bg-destructive/10 hover:text-destructive gap-1 font-semibold"
               >
-                <IconTrash size={14} /> Uninstall
+                <IconTrash size={14} /> {t('plugins.detail.uninstall', 'Uninstall')}
               </PermissionButton>
               <Button onClick={() => setDetailPlugin(null)} size="sm" variant="outline">
-                Close
+                {t('plugins.detail.close', 'Close')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -731,17 +870,24 @@ export default function PluginsPage() {
           <AlertDialogContent className="sm:max-w-md text-xs">
             <AlertDialogHeader>
               <AlertDialogTitle className="text-sm font-bold flex items-center gap-1.5 text-destructive font-heading">
-                <IconAlertCircle className="w-5 h-5" /> Confirm Plugin Uninstallation
+                <IconAlertCircle className="w-5 h-5" />{' '}
+                {t('plugins.uninstall.title', 'Confirm Plugin Uninstallation')}
               </AlertDialogTitle>
               <AlertDialogDescription className="text-xs text-muted-foreground space-y-2" asChild>
                 <div className="space-y-2">
                   <p>
-                    Are you absolutely sure you want to uninstall the plugin{' '}
-                    <strong className="text-foreground font-semibold font-heading">&ldquo;{uninstallTarget.name}&rdquo;</strong>?
+                    {rt(
+                      'plugins.uninstall.confirm',
+                      'Are you absolutely sure you want to uninstall the plugin <0>“{name}”</0>?',
+                      { name: uninstallTarget.name },
+                      [<strong key="name" className="text-foreground font-semibold font-heading" />]
+                    )}
                   </p>
 
                   <div className="pt-2 p-3 bg-muted/40 rounded-lg space-y-2 border border-border">
-                    <p className="text-[11px] font-semibold text-foreground/90">Database Cleanup Options</p>
+                    <p className="text-[11px] font-semibold text-foreground/90">
+                      {t('plugins.uninstall.cleanupTitle', 'Database Cleanup Options')}
+                    </p>
                     <label className="flex items-start gap-2 cursor-pointer">
                       <input
                         type="checkbox"
@@ -750,7 +896,13 @@ export default function PluginsPage() {
                         className="mt-0.5 rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
                       />
                       <span className="text-[10px] text-muted-foreground select-none leading-tight">
-                        <strong>Force deletion:</strong> Remove the plugin directory even if database migration rollback fails. Use with caution.
+                        {rt(
+                          'plugins.uninstall.force',
+                          '<0>Force deletion:</0> Remove the plugin directory even if database ' +
+                            'migration rollback fails. Use with caution.',
+                          undefined,
+                          [<strong key="label" />]
+                        )}
                       </span>
                     </label>
                   </div>
@@ -758,7 +910,9 @@ export default function PluginsPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter className="gap-2">
-              <AlertDialogCancel disabled={uninstalling}>Cancel</AlertDialogCancel>
+              <AlertDialogCancel disabled={uninstalling}>
+                {t('plugins.uninstall.cancel', 'Cancel')}
+              </AlertDialogCancel>
               <PermissionButton
                 permission={PLUGINS_UNINSTALL}
                 destructive
@@ -770,11 +924,11 @@ export default function PluginsPage() {
                 {uninstalling ? (
                   <>
                     <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary-foreground"></div>
-                    Uninstalling...
+                    {t('plugins.uninstall.busy', 'Uninstalling...')}
                   </>
                 ) : (
                   <>
-                    <IconTrash size={14} /> Confirm Uninstall
+                    <IconTrash size={14} /> {t('plugins.uninstall.submit', 'Confirm Uninstall')}
                   </>
                 )}
               </PermissionButton>
