@@ -61,16 +61,29 @@ import { LanguageContext } from './LanguageProvider'
 import { interpolate } from './useTranslation'
 
 /**
- * `<0>…</0>` — a numbered hole naming its index in `components`.
+ * The tags of a numbered hole: `<0>` opening, `</0>` closing.
  *
- * Deliberately NOT nested-aware. The pattern is non-greedy and matches the
- * nearest closing tag with the same index, so `<0>a <1>b</1></0>` renders the
- * inner tag's text literally instead of silently dropping half the sentence.
- * A sentence needing nested emphasis is rare enough to be worth splitting into
- * two components at the call site, and a recursive parser over tenant-editable
- * data is a much larger thing to get right.
+ * WHY NOT ONE PATTERN FOR THE WHOLE HOLE
+ * --------------------------------------
+ * The obvious pattern is `/<(\d+)>([\s\S]*?)<\/\1>/g`. It is quadratic: the
+ * lazy `[\s\S]*?` plus a backreference makes the engine rescan the tail from
+ * every candidate start (CodeQL js/polynomial-redos). That is high severity
+ * HERE in particular, because a translation is a TENANT-EDITABLE row — a
+ * stored string could otherwise hang the browser of everyone loading a screen
+ * that uses the key.
+ *
+ * Matching openings and then locating each closing tag with `indexOf` is NOT a
+ * fix, which is worth recording because it looks like one: on input with no
+ * closing tags at all, every `indexOf` scans to the end of the string, so it
+ * stays quadratic. Measured, it was slower than the regex it replaced.
+ *
+ * So both tag kinds are collected in ONE pass each and paired by position
+ * below. Neither pattern can backtrack, and the pairing only ever moves
+ * forward, so the whole parse is linear in the length of the string for any
+ * input at all.
  */
-const HOLE_PATTERN = /<(\d+)>([\s\S]*?)<\/\1>/g
+const HOLE_OPEN_PATTERN = /<(\d+)>/g
+const HOLE_CLOSE_PATTERN = /<\/(\d+)>/g
 
 /** The rich translation function a screen calls. */
 export type RichTranslateFn = (
@@ -86,6 +99,17 @@ export type RichTranslateFn = (
  * Everything outside a hole is interpolated text. Everything inside one is
  * interpolated text wrapped in the matching component. An index with no
  * component behind it degrades to its text, unwrapped.
+ *
+ * One left-to-right pass: find an opening tag, then locate its closing tag by
+ * direct search. No backtracking anywhere, so the cost is linear in the length
+ * of the string no matter what a translation row contains.
+ *
+ * Deliberately NOT nested-aware — it pairs an opening tag with the NEAREST
+ * closing tag of the same index, so `<0>a <1>b</1></0>` puts the literal text
+ * `a <1>b</1>` inside component 0 rather than silently dropping half the
+ * sentence. A sentence needing nested emphasis is rare enough to be worth two
+ * components at the call site, and a recursive parser over tenant-editable data
+ * is a much larger thing to get right.
  */
 export function renderRichText(
   resolved: string,
@@ -94,19 +118,57 @@ export function renderRichText(
 ): ReactNode {
   const nodes: ReactNode[] = []
   let cursor = 0
+
+  // Local, not module-scope: exec() on a /g regex carries lastIndex between
+  // calls, and a shared one would let a previous call truncate this one.
+  const openPattern = new RegExp(HOLE_OPEN_PATTERN.source, 'g')
+  const closePattern = new RegExp(HOLE_CLOSE_PATTERN.source, 'g')
+
+  // Every closing tag, by index, in ascending position — collected in a single
+  // pass so pairing never rescans the string.
+  const closings = new Map<string, number[]>()
+  let closeMatch: RegExpExecArray | null
+  while ((closeMatch = closePattern.exec(resolved)) !== null) {
+    const positions = closings.get(closeMatch[1])
+    if (positions === undefined) {
+      closings.set(closeMatch[1], [closeMatch.index])
+    } else {
+      positions.push(closeMatch.index)
+    }
+  }
+
+  // How far into each index's list we have already consumed. Openings are
+  // visited left to right and `cursor` only moves forward, so these pointers
+  // only advance — which is what keeps the pairing linear overall.
+  const consumed = new Map<string, number>()
   let match: RegExpExecArray | null
 
-  // exec() on a /g regex is stateful; this one is module-scope, so reset it
-  // before use or a previous call's lastIndex silently truncates this one.
-  HOLE_PATTERN.lastIndex = 0
+  while ((match = openPattern.exec(resolved)) !== null) {
+    const index = Number(match[1])
+    const contentStart = match.index + match[0].length
 
-  while ((match = HOLE_PATTERN.exec(resolved)) !== null) {
+    const positions = closings.get(match[1]) ?? []
+    let at = consumed.get(match[1]) ?? 0
+    while (at < positions.length && positions[at] < contentStart) {
+      at++
+    }
+    consumed.set(match[1], at)
+
+    if (at >= positions.length) {
+      // Unclosed. Leave the opening tag as literal text and keep scanning
+      // after it — losing the rest of the sentence would be far worse than
+      // showing a stray tag.
+      continue
+    }
+
+    const closeAt = positions[at]
+    const closeTag = `</${match[1]}>`
+
     if (match.index > cursor) {
       nodes.push(interpolate(resolved.slice(cursor, match.index), vars))
     }
 
-    const index = Number(match[1])
-    const inner = interpolate(match[2], vars)
+    const inner = interpolate(resolved.slice(contentStart, closeAt), vars)
     const element = components?.[index]
 
     if (element !== undefined && isValidElement(element)) {
@@ -117,7 +179,10 @@ export function renderRichText(
       nodes.push(inner)
     }
 
-    cursor = match.index + match[0].length
+    cursor = closeAt + closeTag.length
+    // Resume scanning past the hole, so a tag inside it is not re-read as the
+    // start of another one.
+    openPattern.lastIndex = cursor
   }
 
   if (cursor < resolved.length) {

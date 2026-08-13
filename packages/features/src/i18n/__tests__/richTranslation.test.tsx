@@ -110,6 +110,48 @@ describe('renderRichText', () => {
     expect(renderRichText('Just a sentence.')).toBe('Just a sentence.')
   })
 
+  // CodeQL js/polynomial-redos, high severity. A translation is a
+  // TENANT-EDITABLE row, so a quadratic parser turns a stored string into a way
+  // to hang the browser of everyone who loads a screen using that key.
+  //
+  // Two shapes, because they defeat different implementations:
+  //   - no closing tags at all defeats "match openings, then indexOf the
+  //     closer" — every indexOf scans to the end of the string;
+  //   - many DISTINCT indices defeats caching a per-index miss.
+  // The original /<(\d+)>([\s\S]*?)<\/\1>/g is quadratic on both.
+  //
+  // The budget is deliberately loose: it is not measuring throughput, only
+  // that the cost has not gone back to quadratic. Measured locally the
+  // rejected implementations took 1.2s–4.7s on these inputs and the current
+  // one takes 5–8ms, so a slow CI runner has an enormous margin.
+  it.each([
+    ['no closing tags', '<0>a'.repeat(50000)],
+    ['many distinct indices', Array.from({ length: 50000 }, (_, i) => `<${i}>a`).join('')],
+  ])('stays linear on a hostile string: %s', (_label, hostile) => {
+    const started = Date.now()
+    renderRichText(hostile, undefined, [<span />])
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('does not re-read a tag inside a hole as the start of another one', () => {
+    // Scanning must resume past the CLOSING tag, not just past the opening
+    // one, or the inner text gets parsed a second time.
+    render(
+      <p data-testid="out">
+        {renderRichText('start <0>a <1>b</1></0> end', undefined, [
+          <em data-testid="outer" />,
+          <strong data-testid="inner" />,
+        ])}
+      </p>
+    )
+
+    // Nearest-close pairing: the whole inner run belongs to component 0, and
+    // the <1> tags render as literal text rather than nesting.
+    expect(screen.getByTestId('outer')).toHaveTextContent('a <1>b</1>')
+    expect(screen.queryByTestId('inner')).toBeNull()
+    expect(screen.getByTestId('out')).toHaveTextContent('start a <1>b</1> end')
+  })
+
   it('handles two different holes in one sentence', () => {
     render(
       <p data-testid="out">
