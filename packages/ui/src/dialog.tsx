@@ -51,9 +51,12 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  closeLabel = "Close",
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
+  /** Accessible name for the corner close button (visually hidden). */
+  closeLabel?: string
 }) {
   const isDark = useIsDarkMode()
 
@@ -78,7 +81,7 @@ function DialogContent({
               size="icon-sm"
             >
               <IconX />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{closeLabel}</span>
             </Button>
           </DialogPrimitive.Close>
         )}
@@ -100,9 +103,12 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 function DialogFooter({
   className,
   showCloseButton = false,
+  closeLabel = "Close",
   ...props
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
+  /** Text of the footer's close button. */
+  closeLabel?: string
 }) {
   return (
     <div
@@ -112,7 +118,7 @@ function DialogFooter({
     >
       {showCloseButton && (
         <DialogPrimitive.Close asChild>
-          <Button variant="outline">Close</Button>
+          <Button variant="outline">{closeLabel}</Button>
         </DialogPrimitive.Close>
       )}
       {props.children}

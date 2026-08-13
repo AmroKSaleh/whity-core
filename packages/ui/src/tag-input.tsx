@@ -24,6 +24,16 @@ export interface TagInputProps {
   value: string[]
   onChange: (value: string[]) => void
   placeholder?: string
+  /** Shown when nothing is selected. Defaults to "No tags selected". */
+  emptyLabel?: string
+  /**
+   * Accessible name for a chip's remove button.
+   *
+   * A function, not a string, because the tag's name sits INSIDE the
+   * phrase and languages put it in different places — a caller given only
+   * the word "Remove" could not move it.
+   */
+  removeLabel?: (label: string) => string
   disabled?: boolean
   className?: string
 }
@@ -41,6 +51,8 @@ export function TagInput({
   value,
   onChange,
   placeholder = "Add…",
+  emptyLabel = "No tags selected",
+  removeLabel = (label: string) => `Remove ${label}`,
   disabled = false,
   className,
 }: TagInputProps) {
@@ -64,7 +76,7 @@ export function TagInput({
     <div data-slot="tag-input" className={cn("space-y-2", className)}>
       <div className="flex flex-wrap gap-1.5" data-testid="tag-input-chips">
         {selectedOptions.length === 0 ? (
-          <span className="text-xs text-muted-foreground">No tags selected</span>
+          <span className="text-xs text-muted-foreground">{emptyLabel}</span>
         ) : (
           selectedOptions.map((option) => (
             <Badge key={option.value} variant="secondary" className="gap-1 pe-1">
@@ -72,7 +84,7 @@ export function TagInput({
               {!disabled && (
                 <button
                   type="button"
-                  aria-label={`Remove ${option.label}`}
+                  aria-label={removeLabel(option.label)}
                   onClick={() => removeTag(option.value)}
                   className="rounded-full p-0.5 outline-none hover:bg-muted-foreground/20 focus-visible:ring-2 focus-visible:ring-ring/30"
                 >

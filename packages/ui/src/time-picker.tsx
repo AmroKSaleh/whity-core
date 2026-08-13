@@ -49,6 +49,12 @@ export interface TimePickerProps {
    * Placeholder text when no time is selected. Defaults to "Select time...".
    */
   placeholder?: string
+  /** Accessible name for the clear button. */
+  clearLabel?: string
+  /** Accessible name for a tooltip trigger. Defaults to "More information". */
+  tooltipTriggerLabel?: string
+  /** Heading above the time columns. */
+  timeHeadingLabel?: string
   /**
    * Time display format. Defaults to "12h".
    */
@@ -115,6 +121,9 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
       helperText,
       errorText,
       placeholder = "Select time...",
+      clearLabel = "Clear time",
+      tooltipTriggerLabel = "More information",
+      timeHeadingLabel = "Time",
       format = "12h",
       minuteStep = 1,
       disabled,
@@ -366,7 +375,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                   role="button"
                   tabIndex={-1}
                   onClick={handleClear}
-                  aria-label="Clear time"
+                  aria-label={clearLabel}
                   className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <IconX className="size-3.5" aria-hidden="true" />
@@ -379,7 +388,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
         <PopoverContent align="start" className="w-64 p-3 shadow-lg border border-border bg-popover text-popover-foreground rounded-xl">
           {/* Header & 12H/24H format selector + AM/PM toggle */}
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-border/50">
-            <span className="text-xs font-semibold text-foreground">Time</span>
+            <span className="text-xs font-semibold text-foreground">{timeHeadingLabel}</span>
             <div className="flex items-center gap-1.5">
               <div className="flex items-center rounded-md bg-muted p-0.5 text-[0.625rem] font-semibold">
                 <button
@@ -525,7 +534,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                         <TooltipTrigger asChild>
                           <button
                             type="button"
-                            aria-label="More information"
+                            aria-label={tooltipTriggerLabel}
                             className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded p-0.5"
                           >
                             <IconInfoCircle className="size-3.5 shrink-0" aria-hidden="true" />
@@ -565,7 +574,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label="More information"
+                      aria-label={tooltipTriggerLabel}
                       className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded p-0.5"
                     >
                       <IconInfoCircle className="size-3.5 shrink-0" aria-hidden="true" />

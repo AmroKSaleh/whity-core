@@ -51,6 +51,17 @@ export interface ColorPickerProps {
    * Placeholder text when no color is selected. Defaults to "Select color...".
    */
   placeholder?: string
+  /** Accessible name for the clear button. */
+  clearLabel?: string
+  /** Accessible name for a tooltip trigger. Defaults to "More information". */
+  tooltipTriggerLabel?: string
+  /** Tooltip on the copy-hex button. */
+  copyHexLabel?: string
+  /** Copy button text, before and after copying. */
+  copyLabel?: string
+  copiedLabel?: string
+  /** Heading above the preset swatches. */
+  presetsLabel?: string
   /**
    * Presets color swatches. Defaults to a modern curated color palette.
    */
@@ -109,6 +120,12 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
       helperText,
       errorText,
       placeholder = "Select color...",
+      clearLabel = "Clear color",
+      tooltipTriggerLabel = "More information",
+      copyHexLabel = "Copy HEX code",
+      copyLabel = "Copy",
+      copiedLabel = "Copied",
+      presetsLabel = "Presets",
       presets = DEFAULT_PRESETS,
       disabled,
       clearable = true,
@@ -202,7 +219,7 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
                   role="button"
                   tabIndex={-1}
                   onClick={handleClear}
-                  aria-label="Clear color"
+                  aria-label={clearLabel}
                   className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <IconX className="size-3.5" aria-hidden="true" />
@@ -228,18 +245,18 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
               <button
                 type="button"
                 onClick={handleCopy}
-                title="Copy HEX code"
+                title={copyHexLabel}
                 className="flex items-center gap-1 text-[0.6875rem] font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
                 {copied ? (
                   <>
                     <IconCheck className="size-3 text-emerald-500" />
-                    <span className="text-emerald-500 font-semibold">Copied</span>
+                    <span className="text-emerald-500 font-semibold">{copiedLabel}</span>
                   </>
                 ) : (
                   <>
                     <IconCopy className="size-3" />
-                    <span>Copy</span>
+                    <span>{copyLabel}</span>
                   </>
                 )}
               </button>
@@ -269,7 +286,7 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
 
           {/* Swatch Presets Grid */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[0.625rem] font-semibold text-muted-foreground uppercase">Presets</span>
+            <span className="text-[0.625rem] font-semibold text-muted-foreground uppercase">{presetsLabel}</span>
             <div className="grid grid-cols-6 gap-1.5">
               {presets.map((presetHex) => {
                 const isSelected = selectedColor?.toLowerCase() === presetHex.toLowerCase()
@@ -337,7 +354,7 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
                         <TooltipTrigger asChild>
                           <button
                             type="button"
-                            aria-label="More information"
+                            aria-label={tooltipTriggerLabel}
                             className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded p-0.5"
                           >
                             <IconInfoCircle className="size-3.5 shrink-0" aria-hidden="true" />
@@ -377,7 +394,7 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label="More information"
+                      aria-label={tooltipTriggerLabel}
                       className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded p-0.5"
                     >
                       <IconInfoCircle className="size-3.5 shrink-0" aria-hidden="true" />

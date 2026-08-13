@@ -21,6 +21,11 @@ export interface ScreenTooSmallProps extends Omit<React.ComponentProps<"div">, "
   description?: React.ReactNode
   /** Minimum width the feature needs, in px — shown to explain the gate. */
   minWidth?: number
+  /**
+   * The "needs a wider window" line. A function because the pixel count sits
+   * inside the sentence and languages order it differently.
+   */
+  minWidthHint?: (minWidth: number) => string
   /** e.g. a "Back to dashboard" link, so the screen is never a dead end. */
   action?: React.ReactNode
 }
@@ -31,6 +36,7 @@ function ScreenTooSmall({
   title = "This screen is too small",
   description,
   minWidth,
+  minWidthHint = (px: number) => `Needs a window at least ${px}px wide.`,
   action,
   ...props
 }: ScreenTooSmallProps) {
@@ -53,7 +59,7 @@ function ScreenTooSmall({
         {description ?? "Please switch to a larger screen to continue."}
       </p>
       {minWidth !== undefined && (
-        <p className="text-xs text-muted-foreground/80">Needs a window at least {minWidth}px wide.</p>
+        <p className="text-xs text-muted-foreground/80">{minWidthHint(minWidth)}</p>
       )}
       {action}
     </div>

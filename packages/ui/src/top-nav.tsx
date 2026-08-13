@@ -50,6 +50,27 @@ export interface TopNavProps {
    * Placeholder for default command palette search trigger. Defaults to "Search or press ⌘K...".
    */
   searchPlaceholder?: string
+  /** Accessible name for the mobile-menu button. */
+  mobileMenuLabel?: string
+  /** Accessible name for the notifications button. */
+  notificationsLabel?: string
+  /**
+   * Tooltip on the theme toggle, given the theme it would switch TO.
+   * A function because the mode name sits inside the phrase.
+   */
+  themeToggleLabel?: (next: "light" | "dark") => string
+  /** Tooltip on the language toggle, given the language it would switch TO. */
+  languageToggleLabel?: (next: string) => string
+  /**
+   * Notification-count summary. A function for the same reason `Pagination`'s
+   * `entriesLabel` is one: the number is inside the sentence, and plural rules
+   * differ between languages.
+   */
+  notificationSummary?: (count: number) => string
+  /** Labels of the DEFAULT user-menu items (ignored when `userMenuItems` is given). */
+  profileLabel?: string
+  settingsLabel?: string
+  signOutLabel?: string
   /**
    * Called when the default search trigger is clicked.
    */
@@ -110,6 +131,16 @@ export function TopNav({
   leftContent,
   searchContent,
   searchPlaceholder = "Search or press ⌘K...",
+  mobileMenuLabel = "Open mobile navigation",
+  notificationsLabel = "Notifications",
+  themeToggleLabel = (next: "light" | "dark") =>
+    next === "light" ? "Switch to Light mode" : "Switch to Dark mode",
+  languageToggleLabel = (next: string) => `Switch to ${next}`,
+  notificationSummary = (count: number) =>
+    count > 0 ? `${count} new notifications` : "No new notifications",
+  profileLabel = "Profile",
+  settingsLabel = "Settings",
+  signOutLabel = "Sign out",
   onSearchClick,
   user,
   onProfileClick,
@@ -140,7 +171,7 @@ export function TopNav({
         {onMobileMenuToggle && (
           <button
             type="button"
-            aria-label="Open mobile navigation"
+            aria-label={mobileMenuLabel}
             onClick={onMobileMenuToggle}
             className="flex size-8 shrink-0 items-center justify-center rounded-md border border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 md:hidden"
           >
@@ -185,7 +216,7 @@ export function TopNav({
                   <IconLanguage className="size-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>Switch to {language === "en" ? "Arabic (العربية)" : "English"}</TooltipContent>
+              <TooltipContent>{languageToggleLabel(language === "en" ? "Arabic (العربية)" : "English")}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         )}
@@ -204,7 +235,7 @@ export function TopNav({
                   {theme === "dark" ? <IconSun className="size-4" /> : <IconMoon className="size-4" />}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>Switch to {theme === "dark" ? "Light mode" : "Dark mode"}</TooltipContent>
+              <TooltipContent>{themeToggleLabel(theme === "dark" ? "light" : "dark")}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         )}
@@ -217,7 +248,7 @@ export function TopNav({
                 <button
                   type="button"
                   onClick={onNotificationClick}
-                  aria-label="Notifications"
+                  aria-label={notificationsLabel}
                   className="relative flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <IconBell className="size-4" />
@@ -227,7 +258,7 @@ export function TopNav({
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                {notificationCount > 0 ? `${notificationCount} new notifications` : "No new notifications"}
+                {notificationSummary(notificationCount)}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -270,17 +301,17 @@ export function TopNav({
                   <DropdownMenuGroup>
                     <DropdownMenuItem onClick={onProfileClick}>
                       <IconUser className="me-2 size-3.5 text-muted-foreground" />
-                      <span>Profile</span>
+                      <span>{profileLabel}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={onSettingsClick}>
                       <IconSettings className="me-2 size-3.5 text-muted-foreground" />
-                      <span>Settings</span>
+                      <span>{settingsLabel}</span>
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={onLogoutClick} className="text-destructive focus:text-destructive">
                     <IconLogout className="me-2 size-3.5" />
-                    <span>Sign out</span>
+                    <span>{signOutLabel}</span>
                   </DropdownMenuItem>
                 </>
               )}
