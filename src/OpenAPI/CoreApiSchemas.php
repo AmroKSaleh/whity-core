@@ -3387,6 +3387,61 @@ final class CoreApiSchemas
                 'message' => self::str(),
                 'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
             ], ['key', 'outcome', 'state', 'message', 'blockers'])),
+            // One action over many records. The action is a BODY field rather
+            // than a path segment so the batch path stays unambiguous against
+            // the single-record routes — see the route registration in
+            // public/index.php for why that matters more than symmetry here.
+            'DataTypeBulkRequest' => self::object([
+                'action' => ['type' => 'string', 'enum' => ['trash', 'restore', 'retire', 'delete']],
+                'ids' => [
+                    'type' => 'array',
+                    'items' => ['oneOf' => [['type' => 'string'], ['type' => 'integer']]],
+                    'description' => 'Record keys. Duplicates are collapsed; the ceiling is the '
+                        . '`data_types.bulk_max_ids` setting and exceeding it is refused, never truncated.',
+                ],
+            ], ['action', 'ids']),
+            // ONE record's line in a batch report. `outcome`, `state`, `reason`,
+            // `message` and `blockers` are the SAME fields, carrying the SAME
+            // stable vocabulary, that the single-record call answers with —
+            // there is no second refusal vocabulary for bulk. `status` is the
+            // status that single-record call would have returned, published so a
+            // client already rendering (status, reason) pairs reuses that code
+            // unchanged.
+            'DataTypeBulkResult' => self::object([
+                'id' => self::str(),
+                'status' => self::int(),
+                'outcome' => ['type' => 'string', 'enum' => [
+                    'ok',
+                    'not_found',
+                    'blocked',
+                    'refused',
+                    'unsupported',
+                    'forbidden',
+                ]],
+                'state' => self::str(true),
+                'reason' => self::str(true),
+                'message' => self::str(),
+                'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
+                'required' => self::str(),
+            ], ['id', 'status', 'outcome', 'state', 'reason', 'message', 'blockers']),
+            // Pre-counted so "43 done, 7 refused" needs no walk over `results`.
+            // `refused` counts every entry whose `outcome` is not `ok` — a state
+            // refusal, a reference, a veto and a missing record alike — and is
+            // exactly `unique - ok`. `requested` is what the caller sent and
+            // `unique` what survived de-duplication, so a batch producing fewer
+            // results than ids says why on its face.
+            'DataTypeBulkCounts' => self::object([
+                'requested' => self::int(),
+                'unique' => self::int(),
+                'ok' => self::int(),
+                'refused' => self::int(),
+            ], ['requested', 'unique', 'ok', 'refused']),
+            'DataTypeBulkResponse' => self::dataEnvelope(self::object([
+                'key' => self::str(),
+                'action' => ['type' => 'string', 'enum' => ['trash', 'restore', 'retire', 'delete']],
+                'counts' => SchemaBuilder::ref('DataTypeBulkCounts'),
+                'results' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBulkResult')],
+            ], ['key', 'action', 'counts', 'results'])),
         ];
     }
 
@@ -3512,6 +3567,37 @@ final class CoreApiSchemas
                         409 => self::errorResponse(
                             'Refused: rows still reference this record, the record is retired '
                             . '(permanent), or a trashable type\'s record has not been trashed first'
+                        ),
+                    ] + $recordErrors,
+                ],
+            ],
+            // The batch surface. 200 is the answer whenever the batch RAN — a
+            // record refusing is reported per record, not as an envelope status,
+            // and an all-refused batch is still a 200 because the operation
+            // (attempt these and report) succeeded. There is no 409 here for the
+            // same reason: a mixed batch has no single conflict to report.
+            [
+                'method' => 'POST',
+                'path' => '/api/data-types/{type}/bulk',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Perform one lifecycle action over many records, skipping and reporting '
+                        . 'refusals rather than aborting the batch',
+                    'tags' => ['data-types'],
+                    'parameters' => [$typeParam],
+                    'request' => 'DataTypeBulkRequest',
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Per-record outcomes. The batch ran; individual records may have refused, '
+                            . 'including all of them',
+                            'DataTypeBulkResponse'
+                        ),
+                        400 => self::errorResponse(
+                            'Unknown `action`, or `ids` is not a non-empty array of record ids'
+                        ),
+                        422 => self::errorResponse(
+                            'More ids than the `data_types.bulk_max_ids` ceiling allows for this tenant'
                         ),
                     ] + $recordErrors,
                 ],

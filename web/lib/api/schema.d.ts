@@ -535,6 +535,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-types/{type}/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Perform one lifecycle action over many records, skipping and reporting refusals rather than aborting the batch */
+        post: operations["post_api_v1_data_types_type_bulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/data-types/{type}/{id}": {
         parameters: {
             query?: never;
@@ -2615,6 +2632,38 @@ export interface components {
             table: string;
             label: string;
             count: number;
+        };
+        DataTypeBulkCounts: {
+            requested: number;
+            unique: number;
+            ok: number;
+            refused: number;
+        };
+        DataTypeBulkRequest: {
+            /** @enum {string} */
+            action: "trash" | "restore" | "retire" | "delete";
+            /** @description Record keys. Duplicates are collapsed; the ceiling is the `data_types.bulk_max_ids` setting and exceeding it is refused, never truncated. */
+            ids: (string | number)[];
+        };
+        DataTypeBulkResponse: {
+            data: {
+                key: string;
+                /** @enum {string} */
+                action: "trash" | "restore" | "retire" | "delete";
+                counts: components["schemas"]["DataTypeBulkCounts"];
+                results: components["schemas"]["DataTypeBulkResult"][];
+            };
+        };
+        DataTypeBulkResult: {
+            id: string;
+            status: number;
+            /** @enum {string} */
+            outcome: "ok" | "not_found" | "blocked" | "refused" | "unsupported" | "forbidden";
+            state: string | null;
+            reason: string | null;
+            message: string;
+            blockers: components["schemas"]["DataTypeBlocker"][];
+            required?: string;
         };
         DataTypeComposition: {
             table: string;
@@ -6431,6 +6480,96 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_data_types_type_bulk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The namespaced data-type key, e.g. `democatalog:item` */
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataTypeBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-record outcomes. The batch ran; individual records may have refused, including all of them */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataTypeBulkResponse"];
+                };
+            };
+            /** @description Unknown `action`, or `ids` is not a non-empty array of record ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unknown data type, or no such record in the caller's tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This data type does not offer that action */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description More ids than the `data_types.bulk_max_ids` ceiling allows for this tenant */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

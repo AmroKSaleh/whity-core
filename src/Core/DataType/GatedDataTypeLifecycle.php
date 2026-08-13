@@ -65,6 +65,17 @@ use Whity\Sdk\DataType\DataTypeLifecycle;
  * queue worker or a CLI command with no request. It is not a way in: the
  * permission is resolved per (profile, tenant), so it holds only where the actor
  * genuinely holds it there.
+ *
+ * Batches go through the same gates, one record at a time
+ * ------------------------------------------------------
+ * {@see self::performMany()} is the loop behind `POST /api/data-types/{type}/bulk`
+ * (WC-746). It is a public method rather than a member of the SDK's write
+ * contract, and it does not shortcut anything: it calls the SAME
+ * {@see self::perform()} the four single-record mutators call, per id, so there
+ * is no second path on which a check could be skipped. It lives here rather than
+ * in the HTTP handler so the batch's semantics — one transaction per record,
+ * duplicates collapsed, a refusal skipped and reported — sit beside the gates
+ * they are constrained by, instead of in a layer that is only about HTTP.
  */
 final class GatedDataTypeLifecycle implements DataTypeLifecycle
 {
@@ -135,6 +146,86 @@ final class GatedDataTypeLifecycle implements DataTypeLifecycle
         int $actorProfileId
     ): LifecycleResult {
         return $this->perform(LifecycleAction::DELETE, $dataType, $tenantId, $id, $actorProfileId);
+    }
+
+    /**
+     * Perform ONE action over MANY records — skipping and reporting, never
+     * aborting (WC-746).
+     *
+     * The semantics, and why they are these
+     * -------------------------------------
+     * A refusal on record 7 does NOT abort the batch. Clearing 493 of 500 items
+     * and reporting why 7 refused is the behaviour adopters need; an "empty
+     * trash" that fails entirely because one item is still referenced is the
+     * failure mode this exists to remove. So every record is attempted, and
+     * every record's verdict is returned.
+     *
+     * EACH RECORD IS ITS OWN UNIT OF WORK. There is deliberately no transaction
+     * around this loop, and adding one would be a bug rather than a
+     * strengthening: it would reintroduce all-or-nothing through the back door
+     * (a failure on record 500 would undo the 499 the caller was told
+     * succeeded), and it would hold one lock across the whole batch. Each call
+     * below reaches {@see DataTypeLifecycleService::transactionally()}, which
+     * opens and commits per record — so records 1–6 are committed and durable
+     * before record 7 is even evaluated.
+     *
+     * When a CALLER already holds a transaction open, that transaction is the
+     * atomicity — exactly as it is for a single call, and for the same reason
+     * (PDO has no savepoint nesting, and ending somebody else's unit of work is
+     * not core's call). The skip-and-report guarantee then holds only as far as
+     * their unit of work does. An in-process bulk sweep should not hold one.
+     *
+     * The gates are not re-implemented here
+     * -------------------------------------
+     * Every id goes through {@see self::perform()} — the SAME private method the
+     * four single-record mutators use, which applies {@see self::authorize()}
+     * and then the same {@see DataTypeLifecycleService} transition. A bulk call
+     * therefore cannot skip a check a single call enforces, because there is no
+     * second path to skip it on. The veto hook fires per record, unchanged, and
+     * one plugin refusing one record has no effect on the others.
+     *
+     * Duplicates are collapsed, first occurrence wins
+     * ----------------------------------------------
+     * The same id twice is one attempt and one result entry. Attempting it twice
+     * would be wrong in both directions: the second attempt of a successful
+     * trash reports a no-op success that the caller reads as a second record,
+     * and the second attempt of a delete reports `not_found` for a record the
+     * batch itself removed. Comparison is on the string form, since that is the
+     * form a path parameter arrives in and the form a JSON body may carry either
+     * `7` or `"7"` as.
+     *
+     * @param string                  $action         A {@see LifecycleAction} constant.
+     * @param string                  $dataType       The namespaced type key.
+     * @param int                     $tenantId       The resolved tenant id.
+     * @param list<int|string>        $ids            The records to act on, in caller order.
+     * @param int                     $actorProfileId The profile performing the transitions.
+     * @return list<array{id: string, result: LifecycleResult}> One entry per DISTINCT
+     *         id, in first-occurrence order.
+     */
+    public function performMany(
+        string $action,
+        string $dataType,
+        int $tenantId,
+        array $ids,
+        int $actorProfileId
+    ): array {
+        $outcomes = [];
+        $seen = [];
+
+        foreach ($ids as $id) {
+            $key = (string) $id;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $outcomes[] = [
+                'id' => $key,
+                'result' => $this->perform($action, $dataType, $tenantId, $key, $actorProfileId),
+            ];
+        }
+
+        return $outcomes;
     }
 
     /**

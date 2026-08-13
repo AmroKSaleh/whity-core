@@ -421,6 +421,7 @@ others.
 | `POST /api/data-types/{type}/{id}/restore` | Restore |
 | `POST /api/data-types/{type}/{id}/retire` | Retire |
 | `DELETE /api/data-types/{type}/{id}` | Delete for real, if every guard permits |
+| `POST /api/data-types/{type}/bulk` | One action over many records, [skipping and reporting](#bulk-operations-one-request-many-records) |
 
 Permissions vary per type, so these routes carry no route-level
 `requiredPermission`; the handler resolves the type's declared permission
@@ -553,6 +554,13 @@ prose is not an API, and the sentences may be reworded without notice.
 The state keys are produced by the **same evaluator** the endpoints enforce
 with, and the `*_not_offered` keys are the same ones the `405` body carries, so
 what a screen predicts and what a click gets cannot drift apart.
+
+This is also **the** vocabulary for [bulk](#bulk-operations-one-request-many-records):
+a per-record refusal in a batch carries exactly these keys, so you branch on one
+set whether you called singly or over many. The three keys a batch adds —
+`unknown_action`, `invalid_ids`, `batch_too_large` — describe the **request**
+rather than a record, have no single-record equivalent to duplicate, and never
+appear inside a `results` entry.
 
 `refusals` covers all four mutating actions — `trash`, `restore`, `retire`,
 `delete` — and an entry is present **only** when the action is unavailable now.
@@ -825,10 +833,10 @@ not a parallel shape kept in step by hand. So `reason` is the same stable key,
 `httpStatus()` the same status. A plugin calling in-process and a client calling
 over HTTP branch on **one** contract.
 
-### Bulk operations: loop over single-record calls
+### In-process bulk: loop over the single-record calls
 
-Emptying a trash or retiring a selection is a **loop**, and that is the
-sanctioned pattern rather than a stopgap:
+Emptying a trash or retiring a selection **in your own code** is a loop, and that
+is the sanctioned pattern rather than a stopgap:
 
 ```php
 foreach ($ids as $id) {
@@ -850,10 +858,143 @@ That bypasses **every** guard, **every** veto and **every** hook at once, and it
 does so silently — the exact "bypassed through a secondary path" failure declared
 guards exist to end. The loop is slower and correct.
 
-There is deliberately **no bulk API yet**. It needs a decision that has not been
-made: does one veto abort the whole batch, or is that record skipped and
-reported? Shipping either as an implicit default would be worse than shipping
-none, so it is a separate conversation.
+**There is deliberately no `bulk()` method on `DataTypeLifecycle`, and that is
+now a decision rather than an open question.** The batch endpoint below exists to
+amortise **HTTP round trips**; an in-process caller pays none, so a contract
+method here would be a three-line loop wearing a permanent compatibility
+promise — and it would have to publish a second result shape into a contract
+whose present strength is that `LifecycleOutcome` is the *same object* the
+endpoint answers with. The loop above already gets identical gating, identical
+per-record transactions and identical reasons.
+
+---
+
+## Bulk operations: one request, many records
+
+`POST /api/data-types/{type}/bulk` performs **one action over many records**. It
+exists for the screens every adopter builds — "empty the trash", "retire this
+selection" — which until now meant N HTTP round trips for one user gesture.
+
+```http
+POST /api/v1/data-types/acme:record/bulk
+{ "action": "delete", "ids": [12, 13, 14, 15] }
+```
+
+```json
+{
+  "data": {
+    "key": "acme:record",
+    "action": "delete",
+    "counts": { "requested": 4, "unique": 4, "ok": 3, "refused": 1 },
+    "results": [
+      { "id": "12", "status": 200, "outcome": "ok",      "state": null, "reason": null, "message": "Done", "blockers": [] },
+      { "id": "13", "status": 200, "outcome": "ok",      "state": null, "reason": null, "message": "Done", "blockers": [] },
+      { "id": "14", "status": 409, "outcome": "blocked", "state": "trashed",
+        "reason": "still_referenced",
+        "message": "Still referenced by 3 catalogue notes",
+        "blockers": [ { "table": "acme_entries", "label": "catalogue notes", "count": 3 } ] },
+      { "id": "15", "status": 200, "outcome": "ok",      "state": null, "reason": null, "message": "Done", "blockers": [] }
+    ]
+  }
+}
+```
+
+The action is a **body field, not a path segment**. That is not a style
+preference: `Router::match()` returns the first pattern that matches, so a path
+shaped `{type}/bulk/<action>` would also parse as `{type}/{id}/<action>` with
+`id = "bulk"` — which handler ran would depend on registration order, and a
+string-keyed type could never address a record whose key really is `bulk`.
+
+### Skip and report — never all-or-nothing
+
+**A refused record does not abort the batch.** 493 of 500 cleared, with a reason
+for each of the 7 that refused, is the intended outcome; an "empty the trash"
+that fails entirely because one item is still referenced is the failure mode this
+exists to remove.
+
+Four consequences, all load-bearing:
+
+* **Each record is its own transaction.** A refusal on record 7 leaves records
+  1–6 **committed** — not pending, not rolled back. There is no transaction
+  around the batch, and adding one would silently restore all-or-nothing (and
+  hold one lock for the whole batch).
+* **The veto hook fires per record**, exactly as it does for a single call. A
+  plugin refusing one record has no effect on the others.
+* **Every refusal reuses the existing vocabulary.** `still_referenced`,
+  `trash_before_deleting`, `retired_records_are_permanent`,
+  `composition_still_referenced`, `blocked_by_plugin`, `not_found` — the same
+  keys, the same sentences, the same `blockers`, from the same objects. There is
+  no bulk-specific vocabulary to learn, and no bulk-specific gate to bypass: each
+  id goes through the same enforcement path a single call goes through.
+* **Order is preserved**, and a batch is processed in the order you submitted it.
+
+### The status is 200 — including when every record refused
+
+The status describes the **operation**, and the operation is "attempt these and
+report what happened to each". A batch in which every record refused performed
+that faithfully: `200`, with `counts.ok = 0`.
+
+`207 Multi-Status` is the semantically apt code and is deliberately **not** used.
+Too much of the stack between an API and a browser handles it badly — generated
+clients, fetch wrappers and proxies routinely funnel anything that is not `200`
+into an error branch — and a bulk call that lands in your error handler sends you
+straight back to the loop this replaces. Nothing is lost: every record carries
+the exact `status` its single-record call would have answered, so per-record
+status codes are still there, one level down.
+
+A **non-200 means the batch never ran at all**:
+
+| Status | `details.reason` | Cause |
+|---|---|---|
+| `400` | `unknown_action` | `action` is missing or is not `trash` / `restore` / `retire` / `delete` |
+| `400` | `invalid_ids` | `ids` is missing, not a JSON array, empty, or holds something that is not a non-empty string or integer |
+| `422` | `batch_too_large` | more ids than this tenant's ceiling; `details.limit` and `details.requested` say by how much |
+| `404` | `unknown_data_type` | the type is unregistered — or one you may not read |
+| `405` | `<action>_not_offered` | the type does not offer that action |
+| `403` | `insufficient_permissions` | you lack the permission the type declares; `details.required` names it |
+
+The last three are per *(type, action, caller)* rather than per record, so they
+are answered **once for the batch**, in the same envelope and under the same key
+the single-record call publishes for the same condition. A caller who lacks
+`acme:manage` lacks it for all 500 ids; repeating that verdict 500 times would
+say nothing extra while inviting you to wonder whether some rows went through.
+
+### Duplicates, no-ops, and the size ceiling
+
+**Duplicate ids are collapsed**, first occurrence wins, and produce **one**
+attempt and **one** result entry. `counts.requested` (what you sent) and
+`counts.unique` (what survived de-duplication) both appear, so a batch that
+returns fewer results than ids says why on its face. Attempting a duplicate twice
+would be wrong in both directions: the second attempt of a delete reports
+`not_found` for a record the batch itself removed, and the second attempt of a
+trash reports a no-op success you would read as a second record.
+
+**An idempotent no-op is a success, not a refusal.** Trashing an already-trashed
+record is `outcome: "ok"` here exactly as it is for a single call — a stale
+selection re-submitted from an "empty the trash" screen must not light up with
+refusals for records that are already where the user wanted them.
+
+**The batch is bounded** by `data_types.bulk_max_ids` — a per-tenant-overridable
+setting (tenant override → global → registry default, **500**), because an
+unbounded id list is a denial-of-service with a polite name. Exceeding it is a
+`422` naming the limit, **never a truncation**: a client that asked to clear 900
+records and was quietly given 500 has no way to notice the other 400 are still
+there. The ceiling is counted against what you **sent**, before de-duplication —
+the bound caps the request, and a request is as large as it is.
+
+### Audit: one row per record
+
+A bulk delete writes the **same audit entry per record** a single delete writes —
+same action, same actor, same `from`/`to`, same `cascaded` metadata. So
+"who deleted this record?" is answered by the same query regardless of which
+entry point was used, which a single batch-shaped row could not do without a JSON
+scan (and could not carry per-record `from`/`to` at all).
+
+That means bulk saves you HTTP round trips and request overhead — **not** audit
+volume, hook dispatches or transactions. Those are per record by design, and each
+one is a guarantee: the transaction is what makes a refusal skippable, the hook
+is what makes a veto possible, and the audit row is what makes the deletion
+attributable.
 
 ## Keeping your own delete route
 

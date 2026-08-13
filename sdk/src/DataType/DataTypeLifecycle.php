@@ -67,10 +67,19 @@ namespace Whity\Sdk\DataType;
  * slower and correct; check each outcome as you go, since a record that refuses
  * is normal.
  *
- * There is deliberately no bulk method yet. It needs a decision this contract
- * has not made — does one veto abort the batch, or is it skipped and reported?
- * — and shipping either answer as an implicit default would be worse than not
- * shipping one.
+ * There is deliberately NO bulk method here, and that is now a decision rather
+ * than an open question. The open question was the semantics — does one veto
+ * abort the batch, or is that record skipped and reported? — and it has been
+ * answered: SKIP AND REPORT, published over HTTP as
+ * `POST /api/data-types/{type}/bulk` (see docs/wiki/Plugin-Data-Types.md).
+ *
+ * That endpoint exists to amortise HTTP ROUND TRIPS, which an in-process caller
+ * does not pay. A `bulk()` here would therefore be a three-line loop wearing a
+ * permanent compatibility promise, and it would have to publish a second result
+ * shape — a per-record outcome collection — into a contract whose present
+ * strength is that {@see LifecycleOutcome} is the VERY OBJECT the endpoint
+ * answers with. The loop above already gets identical gating, its own
+ * transaction per record, and identical reason keys.
  *
  * Idempotent, not destructive-by-accident
  * ---------------------------------------

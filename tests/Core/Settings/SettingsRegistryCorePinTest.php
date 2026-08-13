@@ -88,6 +88,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_rows',
             'documents.render_max_pages',
             'documents.render_max_template_bytes',
+            'data_types.bulk_max_ids',
             'error_tracking.enabled',
             'error_tracking.provider',
             'error_tracking.environment',
@@ -184,6 +185,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_rows' => '500',
             'documents.render_max_pages' => '2000',
             'documents.render_max_template_bytes' => '2000000',
+            'data_types.bulk_max_ids' => '500',
             'error_tracking.enabled' => 'false',
             'error_tracking.provider' => 'internal',
             'error_tracking.environment' => '',
@@ -257,6 +259,14 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['error_tracking.retention_days', 'forever', false],
             ['documents.render_max_template_bytes', '1024', true],
             ['documents.render_max_template_bytes', '1023', false],
+            // The bulk lifecycle batch ceiling. `0` is rejected rather than
+            // clamped: a zero ceiling refuses every batch, which is
+            // indistinguishable from the endpoint being broken.
+            ['data_types.bulk_max_ids', '1', true],
+            ['data_types.bulk_max_ids', '10000', true],
+            ['data_types.bulk_max_ids', '0', false],
+            ['data_types.bulk_max_ids', '10001', false],
+            ['data_types.bulk_max_ids', 'lots', false],
             ['branding_favicon', 'anything', false],
             ['not_a_setting_at_all', 'x', false],
         ];

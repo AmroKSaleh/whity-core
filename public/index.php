@@ -1695,7 +1695,8 @@ $gatedDataTypeLifecycle = new \Whity\Core\DataType\GatedDataTypeLifecycle(
 $dataTypesHandler = new \Whity\Api\DataTypesApiHandler(
     $dataTypeRegistry,
     $dataTypeLifecycle,
-    $gatedDataTypeLifecycle
+    $gatedDataTypeLifecycle,
+    $settingsService
 );
 
 // The host-owned sequence allocator (migration 092). Registered under the SDK
@@ -1713,6 +1714,14 @@ $router->register('POST',   '/api/data-types/{type}/{id}/trash',     [$dataTypes
 $router->register('POST',   '/api/data-types/{type}/{id}/restore',   [$dataTypesHandler, 'restore']);
 $router->register('POST',   '/api/data-types/{type}/{id}/retire',    [$dataTypesHandler, 'retire']);
 $router->register('DELETE', '/api/data-types/{type}/{id}',           [$dataTypesHandler, 'delete']);
+// The batch surface (WC-746). THREE segments and a POST, which is what keeps it
+// unambiguous: the single-record transitions are four-segment POSTs, and the
+// three-segment `{type}/{id}` routes are GET and DELETE. Router::match() returns
+// the FIRST pattern that matches, so a bulk path that could also parse as
+// `{type}/{id}/<action>` would make the surface depend on registration order and
+// quietly reserve `bulk` as an id nobody could address. The action rides in the
+// body instead, beside the ids it applies to.
+$router->register('POST',   '/api/data-types/{type}/bulk',           [$dataTypesHandler, 'bulk']);
 
 // 13b-quater. Generic async-job submission + status API (WC-jobs-api). Wraps the
 // durable queue: POST enqueues an ALLOW-LISTED job for the caller's tenant (with

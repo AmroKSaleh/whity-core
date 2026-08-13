@@ -134,10 +134,42 @@ final class DataTypeEntryPointWiringTest extends TestCase
                 "'/api/data-types/{type}/{id}/trash'",
                 "'/api/data-types/{type}/{id}/restore'",
                 "'/api/data-types/{type}/{id}/retire'",
+                "'/api/data-types/{type}/bulk'",
             ] as $fragment
         ) {
             self::assertStringContainsString($fragment, $source, "Missing route registration: {$fragment}");
         }
+    }
+
+    /**
+     * The batch path must stay UNAMBIGUOUS against the single-record ones.
+     *
+     * {@see \Whity\Core\Router::match()} returns the FIRST registered pattern
+     * that matches, so a bulk path shaped `{type}/bulk/<action>` would also parse
+     * as `{type}/{id}/<action>` with `id = "bulk"` — and which handler ran would
+     * then depend on registration order, while a string-keyed type could never
+     * address a record whose key really is `bulk`. Three segments and a POST
+     * cannot collide with anything registered: the single-record transitions are
+     * four-segment POSTs and the `{type}/{id}` routes are GET and DELETE.
+     *
+     * Pinned because the failure would be silent — the wrong handler answering a
+     * well-formed request, not an error.
+     */
+    public function testTheBulkRouteCannotBeParsedAsASingleRecordTransition(): void
+    {
+        $source = $this->read(__DIR__ . '/../../public/index.php');
+
+        self::assertMatchesRegularExpression(
+            "/'POST',\s*'\/api\/data-types\/\{type\}\/bulk'/",
+            $source,
+            'The batch route must be a three-segment POST, with the action in the body.'
+        );
+        self::assertStringNotContainsString(
+            '/api/data-types/{type}/bulk/',
+            $source,
+            'A bulk path with a fourth segment would also match {type}/{id}/<action>, making the '
+            . 'surface depend on registration order and reserving "bulk" as an unaddressable id.'
+        );
     }
 
     // ==================== CLI ====================

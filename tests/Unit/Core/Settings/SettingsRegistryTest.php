@@ -38,6 +38,8 @@ final class SettingsRegistryTest extends TestCase
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
+             // WC-746: the bulk data-type lifecycle batch ceiling.
+             'data_types.bulk_max_ids',
              // WC-error-tracking. The DSN is deliberately absent: it is a
              // credential, stored encrypted under a reserved key, never exposed
              // through the settings surface this list describes.
@@ -75,10 +77,13 @@ final class SettingsRegistryTest extends TestCase
         self::assertNotContains('storage.driver', SettingsRegistry::tenantTextKeys());
         // Only the genuinely tenant-overridable text keys remain: site_name,
         // timezone, locale, support_email, mcp.enabled, the desktop login TTL,
-        // and the three render batch limits (ADR 0012 — a per-tenant ceiling is
-        // meaningful, unlike the render_enabled master switch itself).
+        // the three render batch limits (ADR 0012 — a per-tenant ceiling is
+        // meaningful, unlike the render_enabled master switch itself) and the
+        // bulk lifecycle batch ceiling (WC-746, per-tenant for the same reason).
         self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
-        self::assertCount(9, SettingsRegistry::tenantTextKeys());
+        self::assertContains('data_types.bulk_max_ids', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('data_types.bulk_max_ids'));
+        self::assertCount(10, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -201,7 +206,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(50, $describe);
+        self::assertCount(51, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
