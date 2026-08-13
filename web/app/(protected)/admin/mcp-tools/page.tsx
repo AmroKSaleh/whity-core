@@ -8,6 +8,7 @@ import { AdminHeader } from '@/components/admin/admin-header';
 import { Badge } from '@amroksaleh/ui/badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { IconLock, IconLockOpen } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { McpTool } from './types';
 
 interface McpToolListResponse {
@@ -25,11 +26,12 @@ interface McpToolListResponse {
 export default function McpToolsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
 
   const { data, loading: isLoading, error } = useFetch(async () => {
     const response = await apiClient('/api/v1/admin/mcp/tools');
     if (!response.ok) {
-      throw new Error('Failed to fetch MCP tools');
+      throw new Error(t('mcpTools.error.load', 'Failed to fetch MCP tools'));
     }
     const body = (await response.json()) as McpToolListResponse;
     return body.data ?? [];
@@ -45,8 +47,10 @@ export default function McpToolsPage() {
 
   const accessLabel = (tool: McpTool): string => {
     if (tool.requiredPermission) return tool.requiredPermission;
-    if (tool.requiredRole) return `role: ${tool.requiredRole}`;
-    return 'open';
+    if (tool.requiredRole) {
+      return t('mcpTools.access.role', 'role: {role}', { role: tool.requiredRole });
+    }
+    return t('mcpTools.access.open', 'open');
   };
 
   const isRestricted = (tool: McpTool): boolean =>
@@ -55,7 +59,7 @@ export default function McpToolsPage() {
   const columns: DataTableColumn<McpTool>[] = [
     {
       accessorKey: 'name',
-      header: 'Tool',
+      header: t('mcpTools.table.tool', 'Tool'),
       enableSorting: true,
       enableColumnFilter: true,
       cell: (tool) => (
@@ -64,13 +68,13 @@ export default function McpToolsPage() {
     },
     {
       accessorKey: 'description',
-      header: 'Description',
+      header: t('mcpTools.table.description', 'Description'),
       cell: (tool) => tool.description || '-',
       className: 'max-w-md',
     },
     {
       id: 'access',
-      header: 'Access',
+      header: t('mcpTools.table.access', 'Access'),
       cell: (tool) => (
         <span className="inline-flex items-center gap-1.5">
           {isRestricted(tool) ? (
@@ -92,8 +96,11 @@ export default function McpToolsPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="MCP Tools"
-        description="Read-only view of API operations exposed as MCP tools, with their required access controls"
+        title={t('mcpTools.title', 'MCP Tools')}
+        description={t(
+          'mcpTools.description',
+          'Read-only view of API operations exposed as MCP tools, with their required access controls'
+        )}
       />
 
       <DataTable
@@ -101,16 +108,29 @@ export default function McpToolsPage() {
         data={tools}
         getRowId={(tool) => tool.name}
         isLoading={isLoading}
-        emptyState={{ title: 'No MCP tools found' }}
+        emptyState={{ title: t('mcpTools.empty.title', 'No MCP tools found') }}
         enableGlobalFilter
-        globalFilterPlaceholder="Search tools…"
+        globalFilterPlaceholder={t('mcpTools.searchPlaceholder', 'Search tools…')}
         pagination={{ pageSize: 15 }}
       />
 
+      {/* One whole sentence per plural form, with the count as a hole in it —
+          rather than a count glued to a bare "tool"/"tools" fragment, which a
+          translator cannot decline and cannot reorder. */}
       <p className="text-xs text-muted-foreground">
-        {tools.length} {tools.length === 1 ? 'tool' : 'tools'} derived from
-        schema-bearing API routes. An AI principal must hold the indicated
-        permission to invoke restricted tools.
+        {tools.length === 1
+          ? t(
+              'mcpTools.summary.one',
+              '{count} tool derived from schema-bearing API routes. An AI principal must hold ' +
+                'the indicated permission to invoke restricted tools.',
+              { count: tools.length }
+            )
+          : t(
+              'mcpTools.summary.other',
+              '{count} tools derived from schema-bearing API routes. An AI principal must hold ' +
+                'the indicated permission to invoke restricted tools.',
+              { count: tools.length }
+            )}
       </p>
     </div>
   );
