@@ -10,7 +10,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@amroksaleh/ui/dialog';
+} from '@/components/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
 import { IconAlertCircle } from '@tabler/icons-react';
 import type { Tenant } from './page';

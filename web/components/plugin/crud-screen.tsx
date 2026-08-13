@@ -26,14 +26,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@amroksaleh/ui/dialog';
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import {
   Select,

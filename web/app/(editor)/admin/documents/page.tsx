@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ScreenTooSmall, useViewportAtLeast } from '@amroksaleh/ui/screen-too-small';
+import { ScreenTooSmall, useViewportAtLeast } from '@/components/ui/screen-too-small';
 import { Button } from '@amroksaleh/ui/button';
 import { DocumentDesigner } from '@/components/documents/document-designer';
 

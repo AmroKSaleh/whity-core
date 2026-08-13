@@ -8,7 +8,7 @@ import { generateSequence, type SequenceConfig } from '@/lib/documents/batch';
 import { parseDelimited, parseJsonRows } from '@/lib/documents/csv';
 import { SHEET_PRESETS, cellsPerSheet, sheetCount, type SheetSpec } from '@/lib/documents/sheet';
 import { PAGE_PRESETS } from '@/lib/documents/presets';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@amroksaleh/ui/switch';
 import { Button } from '@amroksaleh/ui/button';
 import { MathText } from '@amroksaleh/ui/math-text';

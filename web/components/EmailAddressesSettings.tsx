@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { IconMail, IconPlus } from '@tabler/icons-react';
 

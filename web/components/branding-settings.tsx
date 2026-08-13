@@ -27,7 +27,7 @@ import {
 } from '@/lib/api/branding-upload';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import {
   IconDeviceFloppy,

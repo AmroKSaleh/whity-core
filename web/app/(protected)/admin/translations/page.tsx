@@ -9,7 +9,7 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { TRANSLATIONS_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@amroksaleh/ui/badge';
 import {
   Select,

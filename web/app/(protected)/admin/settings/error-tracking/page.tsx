@@ -11,7 +11,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@amroksaleh/ui/badge';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';

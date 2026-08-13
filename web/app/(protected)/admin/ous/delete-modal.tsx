@@ -9,7 +9,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@amroksaleh/ui/dialog';
+} from '@/components/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import type { OU } from './types';

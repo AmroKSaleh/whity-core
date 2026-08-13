@@ -64,12 +64,12 @@ import type {
   VisibleWhen,
 } from '@/lib/plugin-features';
 import { Chart } from '@amroksaleh/ui/chart';
-import { DataTable as SharedDataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
-import { Input } from '@amroksaleh/ui/input';
+import { DataTable as SharedDataTable, type DataTableColumn } from '@/components/ui/data-table';
+import { Input } from '@/components/ui/input';
 import { BilingualInput } from '@amroksaleh/ui/bilingual-input';
 import { MathText } from '@amroksaleh/ui/math-text';
 import { renderMarkdown } from '@/lib/safe-markdown';
-import { Pagination } from '@amroksaleh/ui/pagination';
+import { Pagination } from '@/components/ui/pagination';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import {
   Select,

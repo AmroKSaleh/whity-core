@@ -9,7 +9,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from '@amroksaleh/ui/sheet';
+} from '@/components/ui/sheet';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Skeleton } from '@amroksaleh/ui/skeleton';

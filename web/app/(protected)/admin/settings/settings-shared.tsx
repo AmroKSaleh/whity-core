@@ -22,7 +22,7 @@ import * as React from 'react';
 import type { components } from '@/lib/api/schema';
 import type { useToast } from '@/lib/toast-context';
 import { Badge } from '@amroksaleh/ui/badge';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@amroksaleh/ui/switch';
 import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 

@@ -6,7 +6,7 @@ import type { PluginFeature } from '@/lib/plugin-features';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { ErrorState } from '@amroksaleh/ui/empty-state';
 import { useTranslation } from '@amroksaleh/features/i18n';
