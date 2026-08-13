@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useToast } from '@/lib/toast-context';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { EmptyState } from '@amroksaleh/ui/empty-state';
@@ -42,25 +43,44 @@ interface ListResponse {
   counts: Record<ErrorStatus, number>;
 }
 
-const TABS: { key: ErrorStatus; label: string }[] = [
-  { key: 'unresolved', label: 'Unresolved' },
-  { key: 'resolved', label: 'Resolved' },
-  { key: 'ignored', label: 'Ignored' },
+/**
+ * The tab labels reach `t()` through this table rather than as literals at the
+ * call site, which no static scanner can read — so they are declared here and
+ * the extractor takes the catalogue from this block. The English stays on the
+ * record as the runtime fallback.
+ *
+ * @i18n-keys admin
+ *   errors.tab.unresolved = Unresolved
+ *   errors.tab.resolved = Resolved
+ *   errors.tab.ignored = Ignored
+ */
+const TABS: { key: ErrorStatus; labelKey: string; label: string }[] = [
+  { key: 'unresolved', labelKey: 'errors.tab.unresolved', label: 'Unresolved' },
+  { key: 'resolved', labelKey: 'errors.tab.resolved', label: 'Resolved' },
+  { key: 'ignored', labelKey: 'errors.tab.ignored', label: 'Ignored' },
 ];
 
-function when(iso: string): string {
+/**
+ * How long ago, in the coarsest unit that still reads as a duration.
+ *
+ * Takes the translate function rather than reaching for the hook: it is a plain
+ * function, not a component, and each bucket is its own key so a language can
+ * put the number where its grammar needs it.
+ */
+function when(iso: string, t: TranslateFn): string {
   const then = new Date(iso.replace(' ', 'T') + (/[Z+]/.test(iso) ? '' : 'Z'));
   if (Number.isNaN(then.getTime())) return iso;
   const s = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
-  if (s < 90) return `${s}s ago`;
-  if (s < 5400) return `${Math.round(s / 60)}m ago`;
-  if (s < 172800) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
+  if (s < 90) return t('errors.when.seconds', '{count}s ago', { count: s });
+  if (s < 5400) return t('errors.when.minutes', '{count}m ago', { count: Math.round(s / 60) });
+  if (s < 172800) return t('errors.when.hours', '{count}h ago', { count: Math.round(s / 3600) });
+  return t('errors.when.days', '{count}d ago', { count: Math.round(s / 86400) });
 }
 
 export default function ErrorsPage() {
   const { has, loading: capsLoading } = useCapabilities();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const canManage = has('settings:manage');
 
   const [tab, setTab] = useState<ErrorStatus>('unresolved');
@@ -83,18 +103,18 @@ export default function ErrorsPage() {
       setGroups(body.data ?? []);
       setCounts(body.counts ?? {});
     } catch {
-      addToast('Could not load errors', 'error');
+      addToast(t('errors.toast.loadFailed', 'Could not load errors'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, t]);
 
   useEffect(() => {
     if (!canManage) return;
     // Scheduled, not called synchronously in the effect body — a setState that
     // lands during the effect triggers a cascading render.
-    const t = setTimeout(() => void load(tab), 0);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => void load(tab), 0);
+    return () => clearTimeout(timer);
   }, [canManage, tab, load]);
 
   const setStatus = async (id: number, status: ErrorStatus) => {
@@ -108,10 +128,17 @@ export default function ErrorsPage() {
         body: JSON.stringify({ status }),
       });
       if (!res.ok) throw new Error(String(res.status));
-      addToast(status === 'resolved' ? 'Marked resolved' : `Marked ${status}`, 'success');
+      addToast(
+        status === 'resolved'
+          ? t('errors.toast.markedResolved', 'Marked resolved')
+          : status === 'ignored'
+            ? t('errors.toast.markedIgnored', 'Marked ignored')
+            : t('errors.toast.markedUnresolved', 'Marked unresolved'),
+        'success'
+      );
       void load(tab);
     } catch {
-      addToast('Could not update the error', 'error');
+      addToast(t('errors.toast.updateFailed', 'Could not update the error'), 'error');
     }
   };
 
@@ -121,32 +148,40 @@ export default function ErrorsPage() {
 
   if (!canManage) {
     return (
-      <AccessDenied description="You do not have the required permissions (`settings:manage`) to view the error inbox." />
+      <AccessDenied
+        description={t(
+          'errors.accessDenied',
+          'You do not have the required permissions (`settings:manage`) to view the error inbox.'
+        )}
+      />
     );
   }
 
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Errors</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('errors.title', 'Errors')}</h1>
         <p className="text-sm text-muted-foreground">
-          Errors recorded on this deployment, grouped so a repeating failure stays one entry.
+          {t(
+            'errors.description',
+            'Errors recorded on this deployment, grouped so a repeating failure stays one entry.'
+          )}
         </p>
       </header>
 
       <div className="flex gap-2" role="tablist">
-        {TABS.map((t) => (
+        {TABS.map((entry) => (
           <Button
-            key={t.key}
+            key={entry.key}
             role="tab"
-            aria-selected={tab === t.key}
-            variant={tab === t.key ? 'default' : 'outline'}
+            aria-selected={tab === entry.key}
+            variant={tab === entry.key ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setTab(t.key)}
+            onClick={() => setTab(entry.key)}
           >
-            {t.label}
-            {counts[t.key] !== undefined ? (
-              <span className="ml-2 text-xs opacity-70">{counts[t.key]}</span>
+            {t(entry.labelKey, entry.label)}
+            {counts[entry.key] !== undefined ? (
+              <span className="ml-2 text-xs opacity-70">{counts[entry.key]}</span>
             ) : null}
           </Button>
         ))}
@@ -159,10 +194,19 @@ export default function ErrorsPage() {
         </div>
       ) : groups.length === 0 ? (
         <EmptyState
-          title={tab === 'unresolved' ? 'No unresolved errors' : `No ${tab} errors`}
+          title={
+            tab === 'unresolved'
+              ? t('errors.empty.unresolved', 'No unresolved errors')
+              : tab === 'resolved'
+                ? t('errors.empty.resolved', 'No resolved errors')
+                : t('errors.empty.ignored', 'No ignored errors')
+          }
           description={
             tab === 'unresolved'
-              ? 'Nothing has failed since the last time errors were cleared.'
+              ? t(
+                  'errors.empty.unresolvedDescription',
+                  'Nothing has failed since the last time errors were cleared.'
+                )
               : undefined
           }
         />
@@ -181,29 +225,33 @@ export default function ErrorsPage() {
                     <span className="font-medium">{g.type}</span>
                     {g.environment ? <Badge variant="outline">{g.environment}</Badge> : null}
                     <Badge variant={g.occurrences > 1 ? 'default' : 'outline'}>
-                      {g.occurrences}×
+                      {t('errors.row.occurrences', '{count}×', { count: g.occurrences })}
                     </Badge>
                   </div>
                   <p className="mt-1 truncate text-sm text-muted-foreground">{g.message}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {g.file ? `${g.file}:${g.line ?? 0}` : 'unknown location'} · last seen{' '}
-                    {when(g.last_seen_at)}
+                    {t('errors.row.lastSeen', '{location} · last seen {when}', {
+                      location: g.file
+                        ? `${g.file}:${g.line ?? 0}`
+                        : t('errors.row.unknownLocation', 'unknown location'),
+                      when: when(g.last_seen_at, t),
+                    })}
                   </p>
                 </button>
 
                 <div className="flex shrink-0 gap-2">
                   {g.status !== 'resolved' ? (
                     <Button size="sm" variant="outline" onClick={() => void setStatus(g.id, 'resolved')}>
-                      Resolve
+                      {t('errors.action.resolve', 'Resolve')}
                     </Button>
                   ) : (
                     <Button size="sm" variant="outline" onClick={() => void setStatus(g.id, 'unresolved')}>
-                      Reopen
+                      {t('errors.action.reopen', 'Reopen')}
                     </Button>
                   )}
                   {g.status !== 'ignored' ? (
                     <Button size="sm" variant="ghost" onClick={() => void setStatus(g.id, 'ignored')}>
-                      Ignore
+                      {t('errors.action.ignore', 'Ignore')}
                     </Button>
                   ) : null}
                 </div>
@@ -212,11 +260,15 @@ export default function ErrorsPage() {
               {expanded === g.id ? (
                 <dl className="mt-3 grid gap-1 rounded-lg bg-muted p-3 text-xs">
                   <div className="flex gap-2">
-                    <dt className="text-muted-foreground">First seen</dt>
-                    <dd>{when(g.first_seen_at)}</dd>
+                    <dt className="text-muted-foreground">
+                      {t('errors.detail.firstSeen', 'First seen')}
+                    </dt>
+                    <dd>{when(g.first_seen_at, t)}</dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="text-muted-foreground">Message</dt>
+                    <dt className="text-muted-foreground">
+                      {t('errors.detail.message', 'Message')}
+                    </dt>
                     <dd className="break-all">{g.message}</dd>
                   </div>
                 </dl>
@@ -227,8 +279,11 @@ export default function ErrorsPage() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Messages and stack traces are scrubbed before they are stored — credentials, tokens and
-        email addresses are redacted at capture.
+        {t(
+          'errors.footnote',
+          'Messages and stack traces are scrubbed before they are stored — credentials, tokens ' +
+            'and email addresses are redacted at capture.'
+        )}
       </p>
     </div>
   );

@@ -9,6 +9,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconCheck, IconInbox, IconX } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Pending self-service password-reset requests
@@ -41,6 +42,7 @@ interface PendingPasswordReset {
 export default function PasswordResetApprovalsPage() {
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canApprove = hasPermission(PASSWORD_RESETS_APPROVE);
 
@@ -87,19 +89,45 @@ export default function PasswordResetApprovalsPage() {
         credentials: 'include',
       });
       if (!res.ok) {
-        addToast(`Failed to ${action} the request for ${item.email} (${res.status}).`, 'error');
+        addToast(
+          action === 'approve'
+            ? t(
+                'passwordResets.approve.failedStatus',
+                'Failed to approve the request for {email} ({status}).',
+                { email: item.email, status: res.status }
+              )
+            : t(
+                'passwordResets.reject.failedStatus',
+                'Failed to reject the request for {email} ({status}).',
+                { email: item.email, status: res.status }
+              ),
+          'error'
+        );
         void load();
         return;
       }
       addToast(
         action === 'approve'
-          ? `Approved the password reset for ${item.email}.`
-          : `Rejected the password reset for ${item.email}.`,
+          ? t('passwordResets.approve.success', 'Approved the password reset for {email}.', {
+              email: item.email,
+            })
+          : t('passwordResets.reject.success', 'Rejected the password reset for {email}.', {
+              email: item.email,
+            }),
         'success'
       );
       setItems((prev) => prev.filter((i) => i.id !== item.id));
     } catch {
-      addToast(`Failed to ${action} the request for ${item.email}.`, 'error');
+      addToast(
+        action === 'approve'
+          ? t('passwordResets.approve.failed', 'Failed to approve the request for {email}.', {
+              email: item.email,
+            })
+          : t('passwordResets.reject.failed', 'Failed to reject the request for {email}.', {
+              email: item.email,
+            }),
+        'error'
+      );
     } finally {
       setBusyId(null);
     }
@@ -119,10 +147,13 @@ export default function PasswordResetApprovalsPage() {
         <ApprovalGatingTabs active="password-resets" />
         <AccessDenied
           data-testid="password-resets-access-denied"
-          description="You don't have permission to review pending password-reset requests."
+          description={t(
+            'passwordResets.accessDenied',
+            "You don't have permission to review pending password-reset requests."
+          )}
           action={
             <Button onClick={() => window.history.back()} variant="outline">
-              Go Back
+              {t('passwordResets.goBack', 'Go Back')}
             </Button>
           }
         />
@@ -134,19 +165,26 @@ export default function PasswordResetApprovalsPage() {
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <ApprovalGatingTabs active="password-resets" />
       <AdminHeader
-        title="Password Reset Approvals"
-        description="Review self-service password-reset requests staged for approval before the new password takes effect."
+        title={t('passwordResets.title', 'Password Reset Approvals')}
+        description={t(
+          'passwordResets.description',
+          'Review self-service password-reset requests staged for approval before the new ' +
+            'password takes effect.'
+        )}
       />
 
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Awaiting approval</h2>
+            <h2>{t('passwordResets.list.title', 'Awaiting approval')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
-            Approving applies the requester&rsquo;s new password immediately and signs them out of
-            every existing session. Rejecting discards the staged password; the account keeps its
-            current one.
+            {t(
+              'passwordResets.list.description',
+              'Approving applies the requester’s new password immediately and signs them out of ' +
+                'every existing session. Rejecting discards the staged password; the account ' +
+                'keeps its current one.'
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -156,9 +194,9 @@ export default function PasswordResetApprovalsPage() {
             </div>
           ) : loadError ? (
             <div className="text-sm text-destructive" data-testid="password-resets-load-error">
-              Failed to load pending password-reset requests.{' '}
+              {t('passwordResets.loadError', 'Failed to load pending password-reset requests.')}{' '}
               <button type="button" onClick={() => void load()} className="underline font-medium">
-                Retry
+                {t('passwordResets.retry', 'Retry')}
               </button>
             </div>
           ) : items.length === 0 ? (
@@ -167,7 +205,9 @@ export default function PasswordResetApprovalsPage() {
               data-testid="password-resets-empty"
             >
               <IconInbox size={40} className="mb-3 opacity-60" />
-              <p className="text-sm">No pending password-reset requests.</p>
+              <p className="text-sm">
+                {t('passwordResets.empty', 'No pending password-reset requests.')}
+              </p>
             </div>
           ) : (
             <ul className="divide-y divide-border" data-testid="password-resets-list">
@@ -191,7 +231,7 @@ export default function PasswordResetApprovalsPage() {
                       data-testid={`password-reset-approve-${item.id}`}
                     >
                       <IconCheck className="w-4 h-4" />
-                      Approve
+                      {t('passwordResets.action.approve', 'Approve')}
                     </Button>
                     <Button
                       type="button"
@@ -203,7 +243,7 @@ export default function PasswordResetApprovalsPage() {
                       data-testid={`password-reset-reject-${item.id}`}
                     >
                       <IconX className="w-4 h-4" />
-                      Reject
+                      {t('passwordResets.action.reject', 'Reject')}
                     </Button>
                   </div>
                 </li>
