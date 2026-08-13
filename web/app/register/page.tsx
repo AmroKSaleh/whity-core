@@ -11,7 +11,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useRichTranslation, useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Self-service registration (WC-235). Provisions a NEW workspace (tenant) with
@@ -29,6 +29,7 @@ export default function RegisterPage() {
   const { addToast } = useToast();
   const branding = useBranding();
   const t = useTranslation('auth');
+  const rt = useRichTranslation('auth');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -271,18 +272,19 @@ export default function RegisterPage() {
           <CardContent>
             <div className="space-y-4 text-center" data-testid="registration-pending-verification">
               <Alert>
-                {/* DELIBERATELY NOT TRANSLATED: the emphasised address sits in
-                    the MIDDLE of the sentence, so `t()` — which returns a
-                    string — could only cover it by splitting the sentence into
-                    "…verification link to" + address + ". Open it to confirm…".
-                    A translator cannot reorder halves they never see together,
-                    and the second half opening on a full stop is unrepairable.
-                    Needs a rich-text/`<Trans>`-style helper, which does not
-                    exist yet; left whole rather than badly split. */}
+                {/* One key for the whole sentence, with the address as a hole
+                    rather than a seam: `<0>` can move anywhere the translator's
+                    grammar needs it. Splitting this into "…link to" + address +
+                    ". Open it…" would have frozen English word order and handed
+                    a translator a fragment beginning with a full stop. */}
                 <AlertDescription>
-                  Thanks for signing up! We&rsquo;ve sent a verification link to{' '}
-                  <span className="font-medium">{email}</span>. Open it to confirm your address,
-                  then sign in. The link expires in 24 hours.
+                  {rt(
+                    'register.pendingVerification.body',
+                    'Thanks for signing up! We’ve sent a verification link to <0>{email}</0>. ' +
+                      'Open it to confirm your address, then sign in. The link expires in 24 hours.',
+                    { email },
+                    [<span key="email" className="font-medium" />]
+                  )}
                 </AlertDescription>
               </Alert>
               <Button asChild className="w-full">

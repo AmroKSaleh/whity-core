@@ -89,11 +89,20 @@ final class TranslationKeyExtractor
      */
     public const DYNAMIC_IGNORE_TAG = '@i18n-dynamic-ignore:';
 
-    /** The hook whose argument names the domain a translate function serves. */
-    private const TRANSLATE_HOOK = 'useTranslation';
+    /**
+     * The hooks whose argument names the domain a translate function serves.
+     *
+     * `useRichTranslation` is here rather than in a scanner of its own because
+     * its call shape is identical — (key, English, vars?, …) — so every rule
+     * below already applies to it: the key must be literal and well-formed, the
+     * English text is mandatory, the domain must be resolvable. A sentence that
+     * renders content inside itself is still one catalogue key, and keeping it
+     * on this path is what puts it under the drift guard.
+     */
+    private const TRANSLATE_HOOKS = ['useTranslation', 'useRichTranslation'];
 
-    /** The exported type of a translate function passed between functions. */
-    private const TRANSLATE_FN_TYPE = 'TranslateFn';
+    /** The exported types of a translate function passed between functions. */
+    private const TRANSLATE_FN_TYPES = ['TranslateFn', 'RichTranslateFn'];
 
     /**
      * Where user-facing strings live, relative to the repository root.
@@ -345,7 +354,7 @@ final class TranslationKeyExtractor
                         . 'inherit. Bind it locally, or declare the key with a `%s <domain>` block.',
                         $key,
                         $site['name'],
-                        self::TRANSLATE_HOOK,
+                        implode('()/', self::TRANSLATE_HOOKS),
                         self::KEYS_TAG
                     ),
                 ];
@@ -671,7 +680,10 @@ final class TranslationKeyExtractor
         $names = [];
 
         preg_match_all(
-            '/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*' . self::TRANSLATE_HOOK . '\s*\(([^)]*)\)/',
+            // The hook is captured, not just matched, so a diagnostic can name
+            // the one the author actually wrote.
+            '/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*('
+                . implode('|', self::TRANSLATE_HOOKS) . ')\s*\(([^)]*)\)/',
             $code,
             $matches,
             PREG_OFFSET_CAPTURE | PREG_SET_ORDER
@@ -679,7 +691,8 @@ final class TranslationKeyExtractor
 
         foreach ($matches as $match) {
             $name = $match[1][0];
-            $domain = self::literalValue($match[2][0]);
+            $hook = $match[2][0];
+            $domain = self::literalValue($match[3][0]);
 
             if ($domain === null) {
                 $problems[] = [
@@ -690,7 +703,7 @@ final class TranslationKeyExtractor
                         '%s() is called with a computed domain, so no scanner can tell which bundle '
                         . '`%s` writes into. Pass a literal domain, or declare this file\'s keys with a '
                         . '`%s <domain>` block.',
-                        self::TRANSLATE_HOOK,
+                        $hook,
                         $name,
                         self::KEYS_TAG
                     ),
@@ -720,7 +733,7 @@ final class TranslationKeyExtractor
         // A helper that receives the translate function as a parameter — the
         // shape `ssoErrorMessage(t: TranslateFn, reason: string)` uses.
         preg_match_all(
-            '/\b([A-Za-z_$][\w$]*)\s*:\s*' . self::TRANSLATE_FN_TYPE . '\b/',
+            '/\b([A-Za-z_$][\w$]*)\s*:\s*(?:' . implode('|', self::TRANSLATE_FN_TYPES) . ')\b/',
             $code,
             $typed,
             PREG_SET_ORDER
@@ -878,8 +891,11 @@ final class TranslationKeyExtractor
             return null;
         }
         if (self::endOfString($trimmed, 0) !== strlen($trimmed)) {
-            // The literal ends before the expression does: `'a' + b`.
-            return null;
+            // The literal ends before the expression does. That is either a
+            // run of literals joined with `+` — which is ONE constant string
+            // and must be read as such — or something computed, which is not
+            // readable at all.
+            return self::foldedLiteral($trimmed);
         }
 
         $body = substr($trimmed, 1, -1);
@@ -888,6 +904,75 @@ final class TranslationKeyExtractor
         }
 
         return self::decodeEscapes($body);
+    }
+
+    /**
+     * Read `'one long ' + 'sentence'` as the single constant it is.
+     *
+     * A rich sentence is a whole paragraph on one argument, and nobody leaves
+     * that on one 200-column line — it gets split with `+`, which is still a
+     * compile-time constant and still exactly one catalogue entry. Refusing it
+     * would report `missing-source-text` on a string that is right there in the
+     * source, and the only way to satisfy the scanner would be to make the file
+     * less readable.
+     *
+     * Only literal operands count. A single computed piece anywhere — `'Hi ' +
+     * name` — makes the whole expression unreadable, and returning null is what
+     * puts that in front of the author as a problem rather than seeding half a
+     * sentence.
+     */
+    private static function foldedLiteral(string $expression): ?string
+    {
+        $folded = '';
+        $offset = 0;
+        $length = strlen($expression);
+        $expectOperand = true;
+
+        while ($offset < $length) {
+            $char = $expression[$offset];
+
+            if ($char === ' ' || $char === "\t" || $char === "\n" || $char === "\r") {
+                $offset++;
+                continue;
+            }
+
+            if ($expectOperand) {
+                if ($char !== '"' && $char !== "'" && $char !== '`') {
+                    return null;
+                }
+
+                // endOfString() stops at the line end (or the end of input) for
+                // an unterminated quote rather than returning a failure, so the
+                // closing quote has to be confirmed here — otherwise a broken
+                // literal would be folded in as if it had closed.
+                $end = self::endOfString($expression, $offset);
+                if ($end - $offset < 2 || $expression[$end - 1] !== $char) {
+                    return null;
+                }
+
+                $body = substr($expression, $offset + 1, $end - $offset - 2);
+                if ($char === '`' && str_contains($body, '${')) {
+                    return null;
+                }
+
+                $folded .= self::decodeEscapes($body);
+                $offset = $end;
+                $expectOperand = false;
+                continue;
+            }
+
+            // Between operands only concatenation is allowed; anything else
+            // (`,`, `?`, a method call on the literal) is not a constant.
+            if ($char !== '+') {
+                return null;
+            }
+
+            $offset++;
+            $expectOperand = true;
+        }
+
+        // A trailing `+` means the expression was cut short.
+        return $expectOperand ? null : $folded;
     }
 
     /**

@@ -4,6 +4,10 @@
  * Exported components:
  * - LanguageProvider: Context provider that wraps your app
  * - useTranslation: Hook to translate strings in a domain
+ * - useRichTranslation: Hook for ONE sentence that renders content inside
+ *   itself (a bolded value, a link). `t()` returns a string, so covering such a
+ *   sentence with it means splitting it into fragments a translator sees
+ *   separately and cannot reorder — see useRichTranslation.tsx.
  * - useCurrentLanguage: Hook to get/set the current language
  * - useLanguageDirection: Hook for the resolved language's writing direction
  * - useI18nEnabled: Hook for whether this instance offers a language CHOICE
@@ -43,6 +47,11 @@
 
 export { LanguageProvider, type LanguageProviderProps } from './LanguageProvider'
 export { useTranslation, interpolate, type TranslateFn } from './useTranslation'
+export {
+  useRichTranslation,
+  renderRichText,
+  type RichTranslateFn,
+} from './useRichTranslation'
 export { useCurrentLanguage, type UseCurrentLanguageReturn } from './useCurrentLanguage'
 export { useLanguageDirection } from './useLanguageDirection'
 export { useI18nEnabled, useI18nAvailability, type I18nAvailability } from './useI18nEnabled'
