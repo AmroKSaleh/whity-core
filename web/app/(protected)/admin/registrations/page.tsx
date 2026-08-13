@@ -11,6 +11,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconCheck, IconInbox, IconX } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Pending self-service registrations (WC-235 admin-approval activation).
@@ -47,6 +48,7 @@ export default function PendingRegistrationsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canApprove = hasPermission(REGISTRATIONS_APPROVE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -100,21 +102,43 @@ export default function PendingRegistrationsPage() {
         credentials: 'include',
       });
       if (!res.ok) {
-        addToast(`Failed to ${action} ${item.tenant_name} (${res.status}).`, 'error');
+        addToast(
+          action === 'approve'
+            ? t('registrations.approve.failedStatus', 'Failed to approve {tenant} ({status}).', {
+                tenant: item.tenant_name,
+                status: res.status,
+              })
+            : t('registrations.reject.failedStatus', 'Failed to reject {tenant} ({status}).', {
+                tenant: item.tenant_name,
+                status: res.status,
+              }),
+          'error'
+        );
         // Re-sync in case the row was already handled elsewhere.
         void load();
         return;
       }
       addToast(
         action === 'approve'
-          ? `Approved ${item.tenant_name}. The owner can now sign in.`
-          : `Rejected ${item.tenant_name}.`,
+          ? t('registrations.approve.success', 'Approved {tenant}. The owner can now sign in.', {
+              tenant: item.tenant_name,
+            })
+          : t('registrations.reject.success', 'Rejected {tenant}.', { tenant: item.tenant_name }),
         'success'
       );
       // Drop the handled row locally (avoids a full refetch flicker).
       setItems((prev) => prev.filter((i) => i.membership_id !== item.membership_id));
     } catch {
-      addToast(`Failed to ${action} ${item.tenant_name}.`, 'error');
+      addToast(
+        action === 'approve'
+          ? t('registrations.approve.failed', 'Failed to approve {tenant}.', {
+              tenant: item.tenant_name,
+            })
+          : t('registrations.reject.failed', 'Failed to reject {tenant}.', {
+              tenant: item.tenant_name,
+            }),
+        'error'
+      );
     } finally {
       setBusyId(null);
     }
@@ -132,6 +156,14 @@ export default function PendingRegistrationsPage() {
   // operation. Gate on BOTH the system tenant and the permission, matching the
   // backend (which 403s any other caller).
   if (!isSystemTenant || !canApprove) {
+    // ONE translatable sentence with a {link} hole, split at render time so the
+    // Website Settings link stays a link without fragmenting the sentence for
+    // translators.
+    const [beforeLink, afterLink] = t(
+      'registrations.accessDenied',
+      'Pending registrations can only be reviewed from the system tenant. Your tenant’s settings are on the {link} page.'
+    ).split('{link}');
+
     return (
       <div className="space-y-6 max-w-4xl mx-auto px-4 md:px-0 pb-16">
         <ApprovalGatingTabs active="signup" />
@@ -139,17 +171,16 @@ export default function PendingRegistrationsPage() {
           data-testid="registrations-access-denied"
           description={
             <>
-              Pending registrations can only be reviewed from the system tenant. Your
-              tenant&rsquo;s settings are on the{' '}
+              {beforeLink}
               <Link href="/admin/settings" className="font-medium underline">
-                Website Settings
-              </Link>{' '}
-              page.
+                {t('registrations.accessDenied.link', 'Website Settings')}
+              </Link>
+              {afterLink}
             </>
           }
           action={
             <Button onClick={() => window.history.back()} variant="outline">
-              Go Back
+              {t('registrations.goBack', 'Go Back')}
             </Button>
           }
         />
@@ -161,18 +192,23 @@ export default function PendingRegistrationsPage() {
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <ApprovalGatingTabs active="signup" />
       <AdminHeader
-        title="Pending Registrations"
-        description="Review and approve new self-service workspace sign-ups before their owners can sign in."
+        title={t('registrations.title', 'Pending Registrations')}
+        description={t(
+          'registrations.description',
+          'Review and approve new self-service workspace sign-ups before their owners can sign in.'
+        )}
       />
 
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Awaiting approval</h2>
+            <h2>{t('registrations.list.title', 'Awaiting approval')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
-            Each entry is a new workspace whose owner cannot log in until you approve it. Rejecting
-            suspends the account; you can approve it later.
+            {t(
+              'registrations.list.description',
+              'Each entry is a new workspace whose owner cannot log in until you approve it. Rejecting suspends the account; you can approve it later.'
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -182,9 +218,9 @@ export default function PendingRegistrationsPage() {
             </div>
           ) : loadError ? (
             <div className="text-sm text-destructive" data-testid="registrations-load-error">
-              Failed to load pending registrations.{' '}
+              {t('registrations.loadError', 'Failed to load pending registrations.')}{' '}
               <button type="button" onClick={() => void load()} className="underline font-medium">
-                Retry
+                {t('registrations.retry', 'Retry')}
               </button>
             </div>
           ) : items.length === 0 ? (
@@ -193,7 +229,7 @@ export default function PendingRegistrationsPage() {
               data-testid="registrations-empty"
             >
               <IconInbox size={40} className="mb-3 opacity-60" />
-              <p className="text-sm">No pending registrations.</p>
+              <p className="text-sm">{t('registrations.empty', 'No pending registrations.')}</p>
             </div>
           ) : (
             <ul className="divide-y divide-border" data-testid="registrations-list">
@@ -219,7 +255,7 @@ export default function PendingRegistrationsPage() {
                       data-testid={`registration-approve-${item.membership_id}`}
                     >
                       <IconCheck className="w-4 h-4" />
-                      Approve
+                      {t('registrations.action.approve', 'Approve')}
                     </Button>
                     <Button
                       type="button"
@@ -231,7 +267,7 @@ export default function PendingRegistrationsPage() {
                       data-testid={`registration-reject-${item.membership_id}`}
                     >
                       <IconX className="w-4 h-4" />
-                      Reject
+                      {t('registrations.action.reject', 'Reject')}
                     </Button>
                   </div>
                 </li>

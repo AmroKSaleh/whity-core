@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateAiPrincipalModal } from './create-modal';
 import { CredentialModal } from './credential-modal';
 import { RevokeAiPrincipalModal } from './revoke-modal';
@@ -32,6 +33,7 @@ export default function AiPrincipalsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
+  const t = useTranslation('admin');
   const canManage = hasPermission(MCP_TOKENS_MANAGE);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);

@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateRoleModal } from './create-modal';
 import { EditRoleModal } from './edit-modal';
 import { DeleteRoleModal } from './delete-modal';
@@ -26,6 +27,7 @@ export default function RolesPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
+  const t = useTranslation('admin');
   const canCreate = hasPermission(ROLES_WRITE);
   const canEdit = hasPermission(ROLES_WRITE);
   const canDelete = hasPermission(ROLES_DELETE);
@@ -48,7 +50,7 @@ export default function RolesPage() {
   const { data, loading: isLoading, error, refetch: fetchRoles } = useFetch(async () => {
     const response = await apiClient('/api/v1/roles?per_page=100');
     if (!response.ok) {
-      throw new Error('Failed to fetch roles');
+      throw new Error(t('roles.error.load', 'Failed to fetch roles'));
     }
     const data = await response.json();
     return (data.data ?? []) as Role[];
@@ -83,26 +85,43 @@ export default function RolesPage() {
   const handleCloneClick = async (role: Role) => {
     try {
       const response = await apiClient(`/api/v1/roles/${role.id}`);
-      if (!response.ok) throw new Error('Failed to load role to clone');
+      if (!response.ok) throw new Error(t('roles.clone.loadError', 'Failed to load role to clone'));
       const detail = await response.json();
       const permissionIds: number[] = (detail.data?.permissions ?? []).map(
         (p: { id: number }) => p.id
       );
       setCloneInitial({
-        name: `${role.name} (copy)`,
+        name: t('roles.clone.name', '{name} (copy)', { name: role.name }),
         description: role.description,
         permissionIds,
       });
       setIsCreateModalOpen(true);
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to clone role', 'error');
+      addToast(
+        err instanceof Error ? err.message : t('roles.clone.error', 'Failed to clone role'),
+        'error'
+      );
     }
   };
 
   const columns: DataTableColumn<Role>[] = [
-    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'description', header: 'Description', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'permissionCount', header: 'Permission Count', enableSorting: false },
+    {
+      accessorKey: 'name',
+      header: t('roles.table.name', 'Name'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    {
+      accessorKey: 'description',
+      header: t('roles.table.description', 'Description'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    {
+      accessorKey: 'permissionCount',
+      header: t('roles.table.permissionCount', 'Permission Count'),
+      enableSorting: false,
+    },
   ];
 
   const rowActions = (role: Role) => {
@@ -124,11 +143,11 @@ export default function RolesPage() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={() => handleViewPermissions(role)}>
-            View Permissions
+            {t('roles.action.viewPermissions', 'View Permissions')}
           </DropdownMenuItem>
           {canCreate && (
             <DropdownMenuItem onClick={() => void handleCloneClick(role)}>
-              Clone
+              {t('roles.action.clone', 'Clone')}
             </DropdownMenuItem>
           )}
           {canEdit && (
@@ -136,14 +155,17 @@ export default function RolesPage() {
               disabled={editDisabled}
               title={
                 editDisabled
-                  ? 'Global base roles can only be edited by the system tenant.'
+                  ? t(
+                      'roles.action.edit.disabled',
+                      'Global base roles can only be edited by the system tenant.'
+                    )
                   : undefined
               }
               onClick={
                 editDisabled ? undefined : () => handleEditClick(role)
               }
             >
-              Edit
+              {t('roles.action.edit', 'Edit')}
             </DropdownMenuItem>
           )}
           {canDelete && (
@@ -151,7 +173,10 @@ export default function RolesPage() {
               disabled={deleteDisabled}
               title={
                 deleteDisabled
-                  ? 'Global base roles can only be deleted by the system tenant.'
+                  ? t(
+                      'roles.action.delete.disabled',
+                      'Global base roles can only be deleted by the system tenant.'
+                    )
                   : undefined
               }
               onClick={
@@ -159,7 +184,7 @@ export default function RolesPage() {
               }
               className="text-destructive focus:text-destructive"
             >
-              Delete
+              {t('roles.action.delete', 'Delete')}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -170,8 +195,8 @@ export default function RolesPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Roles"
-        description="Manage roles and their permissions"
+        title={t('roles.title', 'Roles')}
+        description={t('roles.description', 'Manage roles and their permissions')}
         action={
           canCreate ? (
             <Button
@@ -179,7 +204,7 @@ export default function RolesPage() {
               className="gap-2"
             >
               <IconPlus size={18} />
-              Create Role
+              {t('roles.header.create', 'Create Role')}
             </Button>
           ) : undefined
         }
@@ -192,7 +217,7 @@ export default function RolesPage() {
         rowActions={rowActions}
         isLoading={isLoading}
         enableGlobalFilter
-        globalFilterPlaceholder="Search roles…"
+        globalFilterPlaceholder={t('roles.searchPlaceholder', 'Search roles…')}
         pagination={{ pageSize: 10 }}
       />
 
