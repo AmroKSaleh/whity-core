@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@amroksaleh/ui/alert-dialog';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { IconDeviceDesktop, IconDeviceDesktopOff } from '@tabler/icons-react';
 
 /**
@@ -49,13 +50,14 @@ interface Session {
 }
 
 function formatWhen(value: string): string {
-  const t = Date.parse(value.replace(' ', 'T') + 'Z');
-  return Number.isNaN(t) ? value : new Date(t).toLocaleString();
+  const parsed = Date.parse(value.replace(' ', 'T') + 'Z');
+  return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
 }
 
 export function SessionsSettings() {
   const { apiClient, refreshAuth } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('auth');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -92,13 +94,18 @@ export function SessionsSettings() {
     try {
       const res = await apiClient(`/api/v1/me/sessions/${session.id}`, { method: 'DELETE' });
       if (!res.ok && res.status !== 404) {
-        addToast(`Failed to sign out that session (${res.status}).`, 'error');
+        addToast(
+          t('sessions.revoke.errorWithStatus', 'Failed to sign out that session ({status}).', {
+            status: res.status,
+          }),
+          'error'
+        );
         return;
       }
-      addToast('Session signed out.', 'success');
+      addToast(t('sessions.revoke.success', 'Session signed out.'), 'success');
       setSessions((prev) => prev.filter((s) => s.id !== session.id));
     } catch {
-      addToast('Failed to sign out that session.', 'error');
+      addToast(t('sessions.revoke.error', 'Failed to sign out that session.'), 'error');
     } finally {
       setBusy(false);
     }
@@ -109,13 +116,16 @@ export function SessionsSettings() {
     try {
       const res = await apiClient('/api/v1/me/sessions', { method: 'DELETE' });
       if (!res.ok) {
-        addToast('Failed to sign out other sessions.', 'error');
+        addToast(t('sessions.revokeOthers.error', 'Failed to sign out other sessions.'), 'error');
         return;
       }
-      addToast('Signed out of all other sessions.', 'success');
+      addToast(
+        t('sessions.revokeOthers.success', 'Signed out of all other sessions.'),
+        'success'
+      );
       await load();
     } catch {
-      addToast('Failed to sign out other sessions.', 'error');
+      addToast(t('sessions.revokeOthers.error', 'Failed to sign out other sessions.'), 'error');
     } finally {
       setBusy(false);
     }
@@ -126,14 +136,20 @@ export function SessionsSettings() {
     try {
       const res = await apiClient('/api/v1/me/logout-others', { method: 'POST' });
       if (!res.ok) {
-        addToast('Failed to sign out everywhere.', 'error');
+        addToast(t('sessions.logoutEverywhere.error', 'Failed to sign out everywhere.'), 'error');
         return;
       }
       await refreshAuth();
-      addToast('Signed out of all other sessions and devices.', 'success');
+      addToast(
+        t(
+          'sessions.logoutEverywhere.success',
+          'Signed out of all other sessions and devices.'
+        ),
+        'success'
+      );
       await load();
     } catch {
-      addToast('Failed to sign out everywhere.', 'error');
+      addToast(t('sessions.logoutEverywhere.error', 'Failed to sign out everywhere.'), 'error');
     } finally {
       setBusy(false);
     }
@@ -149,14 +165,14 @@ export function SessionsSettings() {
         </div>
       ) : loadError ? (
         <div className="text-sm text-destructive" data-testid="sessions-load-error">
-          Failed to load your sessions.{' '}
+          {t('sessions.load.error', 'Failed to load your sessions.')}{' '}
           <button type="button" onClick={() => void load()} className="underline font-medium">
-            Retry
+            {t('sessions.load.retry', 'Retry')}
           </button>
         </div>
       ) : sessions.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="sessions-empty">
-          No active sessions.
+          {t('sessions.empty', 'No active sessions.')}
         </p>
       ) : (
         <ul className="divide-y divide-border" data-testid="sessions-list">
@@ -173,16 +189,22 @@ export function SessionsSettings() {
                     className="text-sm font-medium text-foreground truncate"
                     title={session.user_agent || undefined}
                   >
-                    {session.device || 'Unknown device'}
+                    {session.device || t('sessions.unknownDevice', 'Unknown device')}
                     {session.current && (
                       <Badge className="ms-2 align-middle" data-testid="session-current-badge">
-                        This device
+                        {t('sessions.currentBadge', 'This device')}
                       </Badge>
                     )}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {session.ip_address ? `${session.ip_address} · ` : ''}
-                    Last active {formatWhen(session.last_seen_at)}
+                    {session.ip_address
+                      ? t('sessions.ipAndLastActive', '{ip} · Last active {when}', {
+                          ip: session.ip_address,
+                          when: formatWhen(session.last_seen_at),
+                        })
+                      : t('sessions.lastActive', 'Last active {when}', {
+                          when: formatWhen(session.last_seen_at),
+                        })}
                   </p>
                 </div>
               </div>
@@ -196,7 +218,7 @@ export function SessionsSettings() {
                   className="shrink-0"
                   data-testid={`session-revoke-${session.id}`}
                 >
-                  Sign out
+                  {t('sessions.signOut', 'Sign out')}
                 </Button>
               )}
             </li>
@@ -215,7 +237,7 @@ export function SessionsSettings() {
             data-testid="sessions-revoke-others"
           >
             <IconDeviceDesktopOff className="w-4 h-4" />
-            Sign out all other sessions
+            {t('sessions.signOutOthers', 'Sign out all other sessions')}
           </Button>
 
           <AlertDialog>
@@ -227,24 +249,31 @@ export function SessionsSettings() {
                 className="gap-2 text-muted-foreground"
                 data-testid="sessions-logout-everywhere"
               >
-                Sign out everywhere (including devices)
+                {t('sessions.signOutEverywhere', 'Sign out everywhere (including devices)')}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Sign out everywhere, including devices?</AlertDialogTitle>
+                <AlertDialogTitle>
+                  {t(
+                    'sessions.signOutEverywhere.confirm.title',
+                    'Sign out everywhere, including devices?'
+                  )}
+                </AlertDialogTitle>
                 <AlertDialogDescription>
-                  This keeps you signed in here but signs you out of every other browser, app, and
-                  registered device (they&rsquo;ll each need to sign in again). This can&rsquo;t be undone.
+                  {t(
+                    'sessions.signOutEverywhere.confirm.body',
+                    'This keeps you signed in here but signs you out of every other browser, app, and registered device (they’ll each need to sign in again). This can’t be undone.'
+                  )}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogCancel>{t('sessions.confirm.cancel', 'Cancel')}</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => void logoutEverywhere()}
                   data-testid="sessions-logout-everywhere-confirm"
                 >
-                  Sign out everywhere
+                  {t('sessions.signOutEverywhere.confirm.submit', 'Sign out everywhere')}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

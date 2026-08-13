@@ -96,7 +96,7 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
         $profileStmt = $this->pdo->prepare(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                  two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('tabs-test', 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('tabs-test', 'x', false, 0, 0, datetime('now'), datetime('now'))"
         );
         $profileStmt->execute();
         $profileId = (int) $this->pdo->lastInsertId();
@@ -137,7 +137,7 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
         $profileStmt = $this->pdo->prepare(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                  two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('tabs-role-test', 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('tabs-role-test', 'x', false, 0, 0, datetime('now'), datetime('now'))"
         );
         $profileStmt->execute();
         $profileId = (int) $this->pdo->lastInsertId();

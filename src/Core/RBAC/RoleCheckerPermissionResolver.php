@@ -89,9 +89,22 @@ final class RoleCheckerPermissionResolver implements PermissionResolver
     /**
      * @inheritDoc
      */
-    public function hasRole(int $profileId, int $tenantId, string $role): bool
-    {
-        return $this->roleChecker->hasRoleForProfile($profileId, $role, $tenantId);
+    public function hasRole(
+        int $profileId,
+        int $tenantId,
+        string $role,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): bool {
+        [$resourceType, $resourceId] = self::normaliseScope($resourceType, $resourceId);
+
+        return $this->roleChecker->hasRoleForProfile(
+            $profileId,
+            $role,
+            $tenantId,
+            $resourceType,
+            $resourceId
+        );
     }
 
     /**
@@ -124,9 +137,9 @@ final class RoleCheckerPermissionResolver implements PermissionResolver
      * A type without an id (or an id without a type) does not identify a record.
      * Treating it as a resource would mean matching rows on one column and
      * ignoring the other — quietly returning grants from the WRONG resource.
-     * Both methods normalise identically so the parity identity documented on
-     * {@see PermissionResolver::effectivePermissions()} holds for partial input
-     * too.
+     * All three methods normalise identically so the parity identities documented
+     * on {@see PermissionResolver::effectivePermissions()} and
+     * {@see PermissionResolver::hasRole()} hold for partial input too.
      *
      * @return array{0: string|null, 1: int|null}
      */

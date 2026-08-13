@@ -761,6 +761,11 @@ final class MembershipRbacMutationTest extends TestCase
             (2, 'user',   '', NULL, datetime('now')),
             (3, 'viewer', '', NULL, datetime('now'))");
 
+        // Explicit ids do not move PostgreSQL's sequence, so seedRole() below
+        // would be handed one of them back and die on roles_pkey. SQLite hides
+        // this because its counter reads the table.
+        SchemaFromMigrations::syncSequences($pdo);
+
         return $pdo;
     }
 

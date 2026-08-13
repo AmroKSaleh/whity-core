@@ -81,14 +81,16 @@ final class SettingsApiRealEngineTest extends TestCase
         $data = $this->decode($response)['data'];
         self::assertSame('Whity', $data['effective']['site_name']);
         self::assertSame('UTC', $data['effective']['timezone']);
-        // 9 tenant-overridable text keys: site_name, timezone, locale,
-        // support_email, mcp.enabled, auth.desktop_login_max_hours, and the
-        // three render batch limits (documents.render_max_rows/_max_pages/
-        // _max_template_bytes — ADR 0012, meaningfully per-tenant). The
-        // instance-governance / storage / mail / billing keys — and the
+        // 10 tenant-overridable text keys: site_name, timezone, locale,
+        // support_email, mcp.enabled, auth.desktop_login_max_hours, the three
+        // render batch limits (documents.render_max_rows/_max_pages/
+        // _max_template_bytes — ADR 0012, meaningfully per-tenant) and
+        // data_types.bulk_max_ids (WC-746, the bulk lifecycle batch ceiling —
+        // per-tenant for the same reason: one tenant's trash is not another's).
+        // The instance-governance / storage / mail / billing keys — and the
         // documents.render_enabled MASTER SWITCH itself — are GLOBAL-ONLY
         // (WC-696206d8) and excluded from the per-tenant surface.
-        self::assertCount(9, $data['registry']);
+        self::assertCount(10, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

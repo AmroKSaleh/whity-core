@@ -319,7 +319,7 @@ final class PasswordResetServiceTest extends TestCase
 
         $emailStmt = $this->pdo->prepare(
             'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (:pid, :email, 1, 1, datetime(\'now\'))'
+             VALUES (:pid, :email, true, true, datetime(\'now\'))'
         );
         $emailStmt->execute([':pid' => $profileId, ':email' => $email]);
 

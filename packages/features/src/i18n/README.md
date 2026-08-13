@@ -5,9 +5,12 @@ Frontend internationalization (i18n) support for Whity Core applications. Provid
 ## Features
 
 - **Language Management**: Switch between available languages with one hook call
+- **Direction Follows the Language**: each language carries its own `'ltr'`/`'rtl'`, so choosing Arabic mirrors the interface — there is no separate direction toggle, and no code branches on a language code
+- **The Whole Surface Is Flaggable**: an operator can switch i18n off entirely (`i18n.enabled`), and the product becomes single-language, left-to-right, with no language affordance anywhere — without losing a single stored preference or translation. See [Switching i18n Off](#switching-i18n-off)
+- **Lazy Domains**: asking for a domain is what loads it; there is no central list to maintain
 - **Translation Caching**: LocalStorage caching with 24-hour TTL reduces API calls
 - **Bilingual Support**: Multiple languages cached simultaneously for instant switching
-- **Fallback Chain**: Automatic fallback chain (translation → English → key)
+- **Fallback Chain**: Automatic fallback chain (translation → supplied English fallback → key)
 - **Type-Safe**: Full TypeScript support with types for all API responses
 - **No External Dependencies**: Uses standard React hooks and Web APIs
 
@@ -117,34 +120,50 @@ export function Header() {
 The i18n system uses the following backend API endpoints:
 
 ### GET /api/v1/languages
-Public endpoint (no auth required) that returns available languages.
+Public endpoint (no auth required) that returns available languages. Each record
+carries its `direction` — the interface writing direction that language implies.
+`i18n_enabled` is the instance's `i18n.enabled` flag; it rides on this call
+because it must be known before a session exists (the sign-in screen mounts the
+provider too).
 
 **Response:**
 ```json
 {
   "languages": [
-    { "code": "en", "name": "English" },
-    { "code": "ar", "name": "العربية" }
-  ]
+    { "code": "en", "name": "English", "direction": "ltr" },
+    { "code": "ar", "name": "العربية", "direction": "rtl" }
+  ],
+  "i18n_enabled": true
 }
 ```
 
+The `languages` array is **not** narrowed when the flag is off — it is the
+catalogue, and the admin translations screen reads it to prepare a language
+before the feature is switched on.
+
 ### GET /api/v1/settings/language
-Authenticated endpoint that returns user's language preference.
+Authenticated endpoint that returns the user's EFFECTIVE language preference.
+While `i18n_enabled` is `false` that is `null` (= the default language) whatever
+the profile stores; the stored value is untouched and comes back the moment the
+flag is switched on again.
 
 **Response:**
 ```json
 {
   "language_code": "ar",
   "available_languages": [
-    { "code": "en", "name": "English" },
-    { "code": "ar", "name": "العربية" }
-  ]
+    { "code": "en", "name": "English", "direction": "ltr" },
+    { "code": "ar", "name": "العربية", "direction": "rtl" }
+  ],
+  "i18n_enabled": true
 }
 ```
 
 ### PATCH /api/v1/settings/language
-Authenticated endpoint to update user's language preference.
+Authenticated endpoint to update user's language preference. **Refused with 503
+while `i18n.enabled` is off** — storing a preference nothing would honour is a
+silent no-op, and the refusal is what guarantees no stored language is
+overwritten while the feature is disabled.
 
 **Request:**
 ```json
@@ -245,22 +264,29 @@ t('unknown.key', 'Default text')
 
 Returns a translation function for the specified domain.
 
+Calling it also REGISTERS the domain, which is what loads that bundle.
+
 **Parameters:**
-- `domain` (string): Translation domain name (e.g., 'common', 'email', 'errors')
+- `domain` (string): Translation domain — bare for core (`'auth'`, `'common'`), namespaced for a plugin (`'acme:catalog'`)
 
 **Returns:**
 ```typescript
-(key: string, fallback?: string) => string
+(key: string, fallback?: string, vars?: Record<string, string | number>) => string
 ```
 
-**Throws:** Error if used outside `<LanguageProvider>`
+**Outside a `<LanguageProvider>` it does NOT throw** — it returns the fallback,
+exactly as it does before a bundle has loaded. A translated component must stay
+renderable in a unit test or a Storybook story without every one of them wiring
+up a provider (and paying for the two network fetches it makes on mount, which
+is how ordered fetch mocks desync). `useCurrentLanguage` still throws, since
+switching the language genuinely needs the provider.
 
 **Example:**
 ```tsx
-const t = useTranslation('common')
-const saved = t('messages.saved')  // From translations
-const missing = t('missing.key')    // Returns 'missing.key'
-const withDefault = t('missing.key', 'Not found')  // Returns 'Not found'
+const t = useTranslation('auth')
+const submit = t('login.submit', 'Sign in')             // Translated, or 'Sign in'
+const missing = t('missing.key')                        // Returns 'missing.key'
+const hello = t('login.welcome', 'Welcome to {site}', { site: 'Acme' })
 ```
 
 ### `useCurrentLanguage()`
@@ -287,14 +313,54 @@ const { currentLanguage, setLanguage, availableLanguages } = useCurrentLanguage(
 // Switch language
 await setLanguage('ar')
 
-// Check current language
-if (currentLanguage === 'ar') {
-  // ...
-}
-
-// Render available languages
-availableLanguages.forEach(lang => console.log(lang.code, lang.name))
+// Render available languages — each carries its own writing direction
+availableLanguages.forEach(lang => console.log(lang.code, lang.name, lang.direction))
 ```
+
+Never branch on a language code to decide layout — read `useLanguageDirection()`
+instead, so a language added later needs no code change.
+
+### `useLanguageDirection()`
+
+Returns `'ltr'` or `'rtl'` for the resolved language, read off the language
+record. Non-throwing: `'ltr'` when no provider is mounted, and before a language
+resolves.
+
+```tsx
+const dir = useLanguageDirection()
+```
+
+### `useI18nEnabled()`
+
+Returns whether this instance offers a CHOICE of language (`i18n.enabled`).
+Non-throwing, like `useLanguageDirection`: `false` when no provider is mounted,
+and `false` until the catalogue has answered — no affordance is drawn until the
+instance has said it offers one.
+
+Read it wherever the interface would otherwise present a language affordance, so
+that the surrounding chrome disappears with the control:
+
+```tsx
+const isI18nEnabled = useI18nEnabled()
+
+{isI18nEnabled && (
+  <div className="language-row">
+    <GlobeIcon />
+    <LanguageSwitcher variant="dropdown" />
+  </div>
+)}
+```
+
+It does **not** gate translation: `useTranslation` returns real text either way.
+
+### `useI18nAvailability()`
+
+`'unknown' | 'enabled' | 'disabled'` — the same fact, three-valued, for the
+rarer caller that must tell "off" apart from "not answered yet". Use it for
+anything that ASSERTS the feature is off (the admin notices do), so the
+assertion is not rendered for a couple of hundred milliseconds on every load
+before the catalogue lands. For hiding a control, `useI18nEnabled()` is the
+right read: collapsing `unknown` into "hide it" is exactly what you want there.
 
 ### `<LanguageProvider>`
 
@@ -303,13 +369,22 @@ Context provider that manages language state and translations.
 **Props:**
 - `children` (ReactNode): App content to wrap
 - `defaultLanguage` (string, default: 'en'): Fallback language if user preference unavailable
+- `identityKey` (string | number | null): An opaque handle for who is signed in
+  (a profile id, or null). Changing it re-resolves the language from the new
+  identity's profile. Without it, signing in — a client-side navigation — would
+  leave the anonymous language in place until the next full page load. The
+  provider takes a handle rather than reading an auth context so non-Next
+  shells can supply their own notion of identity.
 
 **Example:**
 ```tsx
-<LanguageProvider defaultLanguage="en">
+<LanguageProvider defaultLanguage="en" identityKey={user?.id ?? null}>
   <App />
 </LanguageProvider>
 ```
+
+Language resolution order: **profile preference → the code remembered in
+localStorage (for signed-out visitors) → `defaultLanguage`.**
 
 ### `<LanguageSwitcher />`
 
@@ -396,34 +471,110 @@ try {
 - **No Runtime Overhead**: Pure React hooks, no external state managers
 - **Efficient Caching**: Only API calls if cache miss or expired
 
-## Supported Domains
+## Domain Naming
 
-The following translation domains are supported by default:
+A **domain** is the bundle a set of keys belongs to, and the unit the client
+fetches. There is exactly one naming rule, and it is enforced server-side by
+`src/Core/i18n/TranslationDomain.php`:
 
-- `common` — UI chrome and generic strings
-- `email` — Email template strings
-- `errors` — Error messages
+- **core domains are BARE** — `auth`, `common`, `errors`, `email`
+- **a plugin's are `<source-slug>:<slug>`** — `acme:catalog`
 
-Additional domains can be added by:
-1. Adding translations in the backend database
-2. Requesting them in the LanguageProvider (see `LanguageProvider.tsx` line 80)
+The separator and the reasoning are identical to `ResourceTypeRegistry`'s
+`acme:record`: the prefix comes from the SOURCE the plugin loader supplies,
+never from the plugin's own data. So two plugins both shipping a `catalog`
+domain get different bundles and cannot overwrite each other's strings, and no
+plugin can produce a bare key that shadows a core domain. Core stays unprefixed
+because that is how `common`/`email`/`errors` are already stored.
+
+**Keys inside a domain** are dot-delimited lowercase paths, named for the SCREEN
+or feature rather than for the English text: `login.email.label`, not
+`enter_your_email`. Rewording copy must never require renaming a key — a rename
+orphans that string in every other language at once.
+
+There is **no list of domains to register.** Calling `useTranslation('auth')` is
+what loads `auth`; the provider fetches each (language, domain) pair once.
+Converting a screen is a local change to that screen plus its seeded rows.
 
 ## RTL Support
 
-The i18n system is language-agnostic and works with RTL (right-to-left) languages like Arabic. The app layout direction is controlled separately via `direction-context.tsx` (see web/).
+**Direction is a property of the LANGUAGE, not a separate setting.** Every
+language record carries `direction` (`'ltr'`/`'rtl'`, `languages.direction`), the
+provider resolves it alongside the language, and the app sets `<html dir>` from
+it (`web/lib/direction-context.tsx`). Choosing Arabic mirrors the interface;
+choosing English un-mirrors it.
+
+Nothing in this package — or in any consumer — tests a language CODE to decide
+direction. Adding Hebrew, Farsi or Urdu is one row through the admin languages
+API, not a code change. Read the current direction with `useLanguageDirection()`.
+
+Style with LOGICAL CSS utilities (`ms`/`me`, `ps`/`pe`, `start`/`end`,
+`border-s`/`border-e`, `text-start`/`text-end`) so components follow the
+direction automatically.
+
+## Switching i18n Off
+
+A deployment that is not ready to ship a second language sets the operator flag
+`i18n.enabled` to `false` (admin → Settings → Feature Flags, system tenant +
+`settings:manage`). It defaults to **`true`**: i18n shipped before the flag did,
+so an upgrade must never switch a live feature off underneath a deployment
+already using it.
+
+With the flag off:
+
+| | Behaviour |
+|---|---|
+| Resolved language | `defaultLanguage` for everyone, whatever `profiles.language_code` says |
+| `<html dir>` | `ltr`, pinned — not read off the default language's record |
+| `useI18nEnabled()` | `false` |
+| `<LanguageSwitcher />` | renders `null`; its surrounding chrome must gate on `useI18nEnabled()` too |
+| `useTranslation` / `t()` | **unchanged** — bundles still load, real text still resolves, a key is never rendered raw |
+| `PATCH /api/v1/settings/language` | refused, 503 |
+| Admin Languages + Translations pages | **still reachable and fully functional**, with a notice explaining the flag |
+
+**Disabling is never a data migration.** `profiles.language_code` keeps its
+value, the locally remembered code is neither read nor overwritten, and
+translation rows are untouched — so switching the flag back on restores every
+user's language exactly as they left it. That property is what makes the switch
+safe to flip while investigating a problem, and it is pinned by a test.
+
+The admin surfaces stay reachable on purpose: preparing the languages and
+strings BEFORE turning the feature on is the entire reason to have a flag rather
+than a code branch. Hiding them would make the feature impossible to get ready.
 
 ## Known Limitations
 
 1. Translations are per-language, per-domain — there's no per-message RTL override
 2. Cache is per-user (localStorage is browser-specific, not synced across devices)
-3. Language preference is per-profile (not per-browser)
+3. Language preference is per-profile; a signed-out visitor falls back to the
+   code remembered in localStorage, and the profile wins as soon as there is a session
 4. Maximum cache size depends on browser localStorage quota (~5-10MB typical)
 
 ## Contributing
 
-When adding new translation domains:
+Reference conversions: `web/app/login/page.tsx` (the first) and
+`web/app/(protected)/admin/translations/*` (done end to end through the
+tooling). The full playbook is `docs/wiki/Internationalization.md`.
 
-1. Add the domain name to the backend's translation table
-2. Add it to the `LanguageProvider`'s domain list (see `LanguageProvider.tsx` line 80)
-3. Ensure translations are seeded via migrations
-4. Test with multiple languages before shipping
+1. Pick the domain by the rule above; keys name the screen, not the words
+2. Pass the English source string as the `t()` fallback at every call site, so
+   the screen reads normally in a diff and renders before the bundle arrives.
+   **That fallback IS the English catalogue** — it is extracted from the source,
+   so there is no parallel file to keep in sync, and a missing one fails CI
+3. Keep sentences whole with `{placeholders}` — never concatenate fragments,
+   whose order differs between languages
+4. Declare any key a scanner cannot read (`t(entry.key)`) with an `@i18n-keys
+   <domain>` block, or record why it cannot be enumerated with
+   `// @i18n-dynamic-ignore: <reason>`. A reason is mandatory
+5. Regenerate and seed:
+   ```bash
+   php bin/whity-cli i18n:extract   # source → database/i18n/<domain>.json (commit it)
+   php bin/whity-cli i18n:sync      # → the translations table, English only
+   ```
+   Do NOT write other languages by hand and do not machine-translate: a row
+   containing English but labelled Arabic is indistinguishable from a finished
+   translation. Missing rows are how `/admin/translations` reports the gap.
+   (Migration 091 seeded `ar` for the sign-in screen when the whole scope was
+   one screen; that route is closed — a numbered migration per converted area
+   collides on the next number the moment two people convert two areas.)
+6. Test with multiple languages before shipping

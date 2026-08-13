@@ -21,6 +21,7 @@ import {
   IconShieldLock,
   IconTrash,
 } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import { api } from '@/lib/api/client';
 import {
@@ -141,6 +142,7 @@ export default function SsoProvidersPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: capsLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canManage = hasPermission(AUTH_PROVIDERS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -162,7 +164,9 @@ export default function SsoProvidersPage() {
   } = useFetch<IdentityProvider[]>(async () => {
     const res = await apiClient('/api/v1/identity-providers');
     if (!res.ok) {
-      throw new Error(await readError(res, 'Failed to load identity providers'));
+      throw new Error(
+        await readError(res, t('settings.sso.error.load', 'Failed to load identity providers'))
+      );
     }
     const body: unknown = await res.json();
     return body && typeof body === 'object' && Array.isArray((body as { data?: unknown }).data)
@@ -184,15 +188,14 @@ export default function SsoProvidersPage() {
   if (!canManage) {
     return (
       <AccessDenied
-        description={
-          <>
-            You need the <code>auth_providers:manage</code> permission to configure single
-            sign-on.
-          </>
-        }
+        description={t(
+          'settings.sso.accessDenied',
+          'You need the {permission} permission to configure single sign-on.',
+          { permission: AUTH_PROVIDERS_MANAGE }
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.sso.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -207,10 +210,13 @@ export default function SsoProvidersPage() {
   const handleDelete = async (id: number) => {
     const res = await apiClient(`/api/v1/identity-providers/${id}`, { method: 'DELETE' });
     if (!res.ok && res.status !== 204) {
-      addToast(await readError(res, 'Failed to delete provider'), 'error');
+      addToast(
+        await readError(res, t('settings.sso.error.delete', 'Failed to delete provider')),
+        'error'
+      );
       return;
     }
-    addToast('Identity provider deleted.', 'success');
+    addToast(t('settings.sso.toast.deleted', 'Identity provider deleted.'), 'success');
     setPendingDelete(null);
     if (editing?.id === id) closeForm();
     refetch();
@@ -219,11 +225,17 @@ export default function SsoProvidersPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Single sign-on"
+        title={t('settings.sso.title', 'Single sign-on')}
         description={
           isSystemTenant
-            ? 'Configure the operator (global) identity providers offered on every workspace that has not set its own.'
-            : "Configure the identity providers your workspace's members can sign in with."
+            ? t(
+                'settings.sso.description.system',
+                'Configure the operator (global) identity providers offered on every workspace that has not set its own.'
+              )
+            : t(
+                'settings.sso.description.tenant',
+                "Configure the identity providers your workspace's members can sign in with."
+              )
         }
         action={
           !adding && !editing ? (
@@ -236,7 +248,7 @@ export default function SsoProvidersPage() {
               }}
             >
               <IconPlus className="w-4 h-4" />
-              Add provider
+              {t('settings.sso.addProvider', 'Add provider')}
             </Button>
           ) : undefined
         }
@@ -248,9 +260,11 @@ export default function SsoProvidersPage() {
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <IconShieldLock className="w-4 h-4 text-primary" aria-hidden="true" />
         <span>
-          Scope:{' '}
+          {t('settings.sso.scope.label', 'Scope:')}{' '}
           <span className="font-medium text-foreground">
-            {isSystemTenant ? 'Operator (global)' : 'This workspace'}
+            {isSystemTenant
+              ? t('settings.sso.scope.operator', 'Operator (global)')
+              : t('settings.sso.scope.workspace', 'This workspace')}
           </span>
         </span>
       </div>
@@ -285,8 +299,10 @@ export default function SsoProvidersPage() {
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
             <IconShieldLock className="w-8 h-8 text-muted-foreground" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">
-              No identity providers configured yet. Add one to offer &ldquo;Sign in with&hellip;&rdquo; on
-              the login screen.
+              {t(
+                'settings.sso.empty',
+                'No identity providers configured yet. Add one to offer “Sign in with…” on the login screen.'
+              )}
             </p>
           </CardContent>
         </Card>
@@ -310,31 +326,40 @@ export default function SsoProvidersPage() {
                       variant={p.enabled ? 'default' : 'outline'}
                       className="text-[10px]"
                     >
-                      {p.enabled ? 'Enabled' : 'Disabled'}
+                      {p.enabled
+                        ? t('settings.sso.status.enabled', 'Enabled')
+                        : t('settings.sso.status.disabled', 'Disabled')}
                     </Badge>
                     <Badge variant={p.has_secret ? 'secondary' : 'destructive'} className="text-[10px]">
-                      {p.has_secret ? 'Secret set' : 'No secret'}
+                      {p.has_secret
+                        ? t('settings.sso.secret.set', 'Secret set')
+                        : t('settings.sso.secret.none', 'No secret')}
                     </Badge>
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
-                    <span className="text-foreground/70">Issuer:</span> {p.issuer}
+                    <span className="text-foreground/70">
+                      {t('settings.sso.provider.issuer.label', 'Issuer:')}
+                    </span>{' '}
+                    {p.issuer}
                   </p>
                   <RedirectUri uri={redirectUriFor(p.provider_key)} addToast={addToast} />
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {pendingDelete === p.id ? (
                     <>
-                      <span className="text-xs text-muted-foreground">Delete?</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t('settings.sso.delete.confirm', 'Delete?')}
+                      </span>
                       <Button
                         variant="destructive"
                         size="sm"
                         data-testid={`sso-confirm-delete-${p.id}`}
                         onClick={() => void handleDelete(p.id)}
                       >
-                        Yes, delete
+                        {t('settings.sso.delete.confirmYes', 'Yes, delete')}
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => setPendingDelete(null)}>
-                        Cancel
+                        {t('settings.sso.delete.cancel', 'Cancel')}
                       </Button>
                     </>
                   ) : (
@@ -350,7 +375,7 @@ export default function SsoProvidersPage() {
                         }}
                       >
                         <IconEdit className="w-3.5 h-3.5" />
-                        Edit
+                        {t('settings.sso.provider.edit', 'Edit')}
                       </Button>
                       <Button
                         variant="ghost"
@@ -360,7 +385,7 @@ export default function SsoProvidersPage() {
                         onClick={() => setPendingDelete(p.id)}
                       >
                         <IconTrash className="w-3.5 h-3.5" />
-                        Delete
+                        {t('settings.sso.provider.delete', 'Delete')}
                       </Button>
                     </>
                   )}
@@ -383,10 +408,17 @@ const SSO_ENABLED_KEY = 'auth.sso_enabled';
  * `enabled` flag, so it lives right above the provider list it gates.
  */
 function SsoMasterToggle({ addToast }: { addToast: ReturnType<typeof useToast>['addToast'] }) {
+  const t = useTranslation('admin');
+
   const { data, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load the SSO master switch'));
+      throw new Error(
+        errorMessage(
+          getError,
+          t('settings.sso.masterToggle.error.load', 'Failed to load the SSO master switch')
+        )
+      );
     }
     return body.data;
   }, []);
@@ -412,12 +444,24 @@ function SsoMasterToggle({ addToast }: { addToast: ReturnType<typeof useToast>['
         body: { settings: { [SSO_ENABLED_KEY]: next } },
       });
       if (patchError) {
-        throw new Error(errorMessage(patchError, 'Failed to save'));
+        throw new Error(
+          errorMessage(patchError, t('settings.sso.masterToggle.error.save', 'Failed to save'))
+        );
       }
-      addToast(next === 'true' ? 'Single sign-on enabled.' : 'Single sign-on disabled.', 'success');
+      addToast(
+        next === 'true'
+          ? t('settings.sso.masterToggle.toast.enabled', 'Single sign-on enabled.')
+          : t('settings.sso.masterToggle.toast.disabled', 'Single sign-on disabled.'),
+        'success'
+      );
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('settings.sso.masterToggle.error.save', 'Failed to save'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -459,6 +503,8 @@ function RedirectUri({
   uri: string;
   addToast: (m: string, t: 'success' | 'error' | 'info' | 'warning') => void;
 }) {
+  const t = useTranslation('admin');
+
   return (
     <div className="flex items-center gap-2">
       <code className="min-w-0 truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
@@ -468,11 +514,15 @@ function RedirectUri({
         type="button"
         variant="ghost"
         size="icon-xs"
-        aria-label="Copy redirect URI"
+        aria-label={t('settings.sso.redirectUri.copy', 'Copy redirect URI')}
         onClick={() => {
           void navigator.clipboard?.writeText(uri).then(
-            () => addToast('Redirect URI copied.', 'success'),
-            () => addToast('Could not copy to clipboard.', 'error')
+            () => addToast(t('settings.sso.redirectUri.copied', 'Redirect URI copied.'), 'success'),
+            () =>
+              addToast(
+                t('settings.sso.redirectUri.copyFailed', 'Could not copy to clipboard.'),
+                'error'
+              )
           );
         }}
       >
@@ -497,6 +547,7 @@ function ProviderFormCard({
   onSaved: () => void;
   addToast: (m: string, t: 'success' | 'error' | 'info' | 'warning') => void;
 }) {
+  const t = useTranslation('admin');
   const [form, setForm] = useState<ProviderForm>(initial);
   const [saving, setSaving] = useState(false);
 
@@ -523,11 +574,20 @@ function ProviderFormCard({
 
   const submit = async () => {
     if (form.display_name.trim() === '' || form.client_id.trim() === '' || form.issuer.trim() === '') {
-      addToast('Display name, client ID and issuer are required.', 'error');
+      addToast(
+        t('settings.sso.form.error.required', 'Display name, client ID and issuer are required.'),
+        'error'
+      );
       return;
     }
     if (!editing && form.client_secret.trim() === '') {
-      addToast('A client secret is required when adding a provider.', 'error');
+      addToast(
+        t(
+          'settings.sso.form.error.secretRequired',
+          'A client secret is required when adding a provider.'
+        ),
+        'error'
+      );
       return;
     }
 
@@ -561,10 +621,18 @@ function ProviderFormCard({
             body: JSON.stringify(body),
           });
       if (!res.ok) {
-        addToast(await readError(res, 'Failed to save provider'), 'error');
+        addToast(
+          await readError(res, t('settings.sso.form.error.save', 'Failed to save provider')),
+          'error'
+        );
         return;
       }
-      addToast(editing ? 'Identity provider updated.' : 'Identity provider added.', 'success');
+      addToast(
+        editing
+          ? t('settings.sso.form.toast.updated', 'Identity provider updated.')
+          : t('settings.sso.form.toast.added', 'Identity provider added.'),
+        'success'
+      );
       onSaved();
     } finally {
       setSaving(false);
@@ -575,14 +643,21 @@ function ProviderFormCard({
     <Card className="border border-primary/30 bg-card shadow-sm" data-testid="sso-form">
       <CardHeader>
         <CardTitle className="text-lg font-bold font-heading">
-          <h2>{editing ? `Edit ${editing.display_name}` : 'Add identity provider'}</h2>
+          <h2>
+            {editing
+              ? t('settings.sso.form.editTitle', 'Edit {name}', { name: editing.display_name })
+              : t('settings.sso.form.addTitle', 'Add identity provider')}
+          </h2>
         </CardTitle>
         <CardDescription className="text-sm">
-          Register this exact redirect URI with the provider&rsquo;s OAuth client.
+          {t(
+            'settings.sso.form.description',
+            'Register this exact redirect URI with the provider’s OAuth client.'
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <Field label="Provider" htmlFor="sso-provider-key">
+        <Field label={t('settings.sso.form.provider.label', 'Provider')} htmlFor="sso-provider-key">
           <select
             id="sso-provider-key"
             className={NATIVE_SELECT_CLASS}
@@ -599,11 +674,16 @@ function ProviderFormCard({
         </Field>
 
         <div className="space-y-1.5">
-          <span className="text-sm font-medium text-foreground">Redirect URI</span>
+          <span className="text-sm font-medium text-foreground">
+            {t('settings.sso.form.redirectUri.label', 'Redirect URI')}
+          </span>
           <RedirectUri uri={redirectUriFor(form.provider_key)} addToast={addToast} />
         </div>
 
-        <Field label="Display name" htmlFor="sso-display-name">
+        <Field
+          label={t('settings.sso.form.displayName.label', 'Display name')}
+          htmlFor="sso-display-name"
+        >
           <Input
             id="sso-display-name"
             value={form.display_name}
@@ -612,7 +692,7 @@ function ProviderFormCard({
           />
         </Field>
 
-        <Field label="Client ID" htmlFor="sso-client-id">
+        <Field label={t('settings.sso.form.clientId.label', 'Client ID')} htmlFor="sso-client-id">
           <Input
             id="sso-client-id"
             value={form.client_id}
@@ -622,28 +702,45 @@ function ProviderFormCard({
         </Field>
 
         <Field
-          label="Client secret"
+          label={t('settings.sso.form.clientSecret.label', 'Client secret')}
           htmlFor="sso-client-secret"
           hint={
             editing
               ? editing.has_secret
-                ? 'A secret is set. Leave blank to keep it, or type a new one to replace it.'
-                : 'No secret set. Enter one to enable this provider.'
-              : 'Encrypted at rest; never shown again after saving.'
+                ? t(
+                    'settings.sso.form.clientSecret.hint.set',
+                    'A secret is set. Leave blank to keep it, or type a new one to replace it.'
+                  )
+                : t(
+                    'settings.sso.form.clientSecret.hint.unset',
+                    'No secret set. Enter one to enable this provider.'
+                  )
+              : t(
+                  'settings.sso.form.clientSecret.hint.new',
+                  'Encrypted at rest; never shown again after saving.'
+                )
           }
         >
           <Input
             id="sso-client-secret"
             type="password"
             autoComplete="new-password"
-            placeholder={editing && editing.has_secret ? '•••••••• (unchanged)' : ''}
+            placeholder={
+              editing && editing.has_secret
+                ? t('settings.sso.form.clientSecret.placeholder', '•••••••• (unchanged)')
+                : ''
+            }
             value={form.client_secret}
             disabled={saving}
             onChange={(e) => set('client_secret', e.target.value)}
           />
         </Field>
 
-        <Field label="Issuer" htmlFor="sso-issuer" hint="https URL, e.g. https://accounts.google.com">
+        <Field
+          label={t('settings.sso.form.issuer.label', 'Issuer')}
+          htmlFor="sso-issuer"
+          hint={t('settings.sso.form.issuer.hint', 'https URL, e.g. https://accounts.google.com')}
+        >
           <Input
             id="sso-issuer"
             type="url"
@@ -654,9 +751,12 @@ function ProviderFormCard({
         </Field>
 
         <Field
-          label="Discovery URL"
+          label={t('settings.sso.form.discoveryUrl.label', 'Discovery URL')}
           htmlFor="sso-discovery-url"
-          hint="Optional. Defaults to <issuer>/.well-known/openid-configuration"
+          hint={t(
+            'settings.sso.form.discoveryUrl.hint',
+            'Optional. Defaults to <issuer>/.well-known/openid-configuration'
+          )}
         >
           <Input
             id="sso-discovery-url"
@@ -667,7 +767,11 @@ function ProviderFormCard({
           />
         </Field>
 
-        <Field label="Scopes" htmlFor="sso-scopes" hint="Space-separated OAuth scopes.">
+        <Field
+          label={t('settings.sso.form.scopes.label', 'Scopes')}
+          htmlFor="sso-scopes"
+          hint={t('settings.sso.form.scopes.hint', 'Space-separated OAuth scopes.')}
+        >
           <Input
             id="sso-scopes"
             value={form.scopes}
@@ -676,7 +780,11 @@ function ProviderFormCard({
           />
         </Field>
 
-        <Field label="Domain hint" htmlFor="sso-domain" hint="Optional email domain hint.">
+        <Field
+          label={t('settings.sso.form.domain.label', 'Domain hint')}
+          htmlFor="sso-domain"
+          hint={t('settings.sso.form.domain.hint', 'Optional email domain hint.')}
+        >
           <Input
             id="sso-domain"
             value={form.domain}
@@ -688,11 +796,18 @@ function ProviderFormCard({
         <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-muted/20 p-4">
           <div className="space-y-0.5">
             <label htmlFor="sso-enabled" className="text-sm font-medium text-foreground">
-              Enabled
+              {t('settings.sso.form.enabled.label', 'Enabled')}
             </label>
             <p className="text-xs text-muted-foreground">
-              When on, a &ldquo;Sign in with {form.display_name || 'this provider'}&rdquo; button appears
-              on the login screen.
+              {t(
+                'settings.sso.form.enabled.help',
+                'When on, a “Sign in with {name}” button appears on the login screen.',
+                {
+                  name:
+                    form.display_name ||
+                    t('settings.sso.form.enabled.thisProvider', 'this provider'),
+                }
+              )}
             </p>
           </div>
           <Switch
@@ -706,10 +821,14 @@ function ProviderFormCard({
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={onCancel} disabled={saving}>
-            Cancel
+            {t('settings.sso.form.cancel', 'Cancel')}
           </Button>
           <Button onClick={() => void submit()} disabled={saving} data-testid="sso-save-provider">
-            {saving ? 'Saving…' : editing ? 'Save changes' : 'Add provider'}
+            {saving
+              ? t('settings.sso.form.saving', 'Saving…')
+              : editing
+                ? t('settings.sso.form.save', 'Save changes')
+                : t('settings.sso.form.add', 'Add provider')}
           </Button>
         </div>
       </CardContent>

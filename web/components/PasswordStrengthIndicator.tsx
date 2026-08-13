@@ -18,6 +18,8 @@
  * "red-500") so the indicator respects both light and dark themes.
  */
 
+import { useTranslation } from '@amroksaleh/features/i18n';
+
 export type StrengthLevel = 'weak' | 'fair' | 'good' | 'strong';
 
 interface Criteria {
@@ -52,14 +54,31 @@ function level(s: number): StrengthLevel {
   return 'strong';
 }
 
-const LEVEL_META: Record<
+/**
+ * The four strength labels reach `t()` through a lookup (`LEVEL_META[lvl]`)
+ * rather than a literal, which no static scanner can read — so they are
+ * declared here and the extractor takes the catalogue from this block. The
+ * English stays on the record as the runtime fallback, exactly as the sign-in
+ * screen's SSO error map does.
+ *
+ * The four sit under `password.strength.level.` rather than alongside
+ * `password.strength.announcement`, so "everything under this prefix is the
+ * lookup" stays a true statement — see the declaration drift test.
+ *
+ * @i18n-keys auth
+ *   password.strength.level.weak = Weak
+ *   password.strength.level.fair = Fair
+ *   password.strength.level.good = Good
+ *   password.strength.level.strong = Strong
+ */
+export const LEVEL_META: Record<
   StrengthLevel,
-  { label: string; bars: number; barClass: string; labelClass: string }
+  { key: string; label: string; bars: number; barClass: string; labelClass: string }
 > = {
-  weak:   { label: 'Weak',   bars: 1, barClass: 'bg-destructive',        labelClass: 'text-destructive' },
-  fair:   { label: 'Fair',   bars: 2, barClass: 'bg-warning',             labelClass: 'text-warning' },
-  good:   { label: 'Good',   bars: 3, barClass: 'bg-muted-foreground',    labelClass: 'text-muted-foreground' },
-  strong: { label: 'Strong', bars: 4, barClass: 'bg-success',             labelClass: 'text-success' },
+  weak:   { key: 'password.strength.level.weak',   label: 'Weak',   bars: 1, barClass: 'bg-destructive',     labelClass: 'text-destructive' },
+  fair:   { key: 'password.strength.level.fair',   label: 'Fair',   bars: 2, barClass: 'bg-warning',          labelClass: 'text-warning' },
+  good:   { key: 'password.strength.level.good',   label: 'Good',   bars: 3, barClass: 'bg-muted-foreground', labelClass: 'text-muted-foreground' },
+  strong: { key: 'password.strength.level.strong', label: 'Strong', bars: 4, barClass: 'bg-success',          labelClass: 'text-success' },
 };
 
 interface PasswordStrengthIndicatorProps {
@@ -69,15 +88,23 @@ interface PasswordStrengthIndicatorProps {
 export function PasswordStrengthIndicator({
   password,
 }: PasswordStrengthIndicatorProps) {
+  // Called before the early return: a hook must run on every render.
+  const t = useTranslation('auth');
+
   if (!password) return null;
 
   const criteria = evaluate(password);
   const s = score(criteria);
   const lvl = level(s);
   const meta = LEVEL_META[lvl];
+  const label = t(meta.key, meta.label);
 
   return (
-    <div className="space-y-1" aria-live="polite" aria-label={`Password strength: ${meta.label}`}>
+    <div
+      className="space-y-1"
+      aria-live="polite"
+      aria-label={t('password.strength.announcement', 'Password strength: {level}', { level: label })}
+    >
       <div className="flex gap-1">
         {Array.from({ length: 4 }, (_, i) => (
           <div
@@ -91,7 +118,7 @@ export function PasswordStrengthIndicator({
         ))}
       </div>
       <p className={['text-xs', meta.labelClass].join(' ')}>
-        {meta.label}
+        {label}
       </p>
     </div>
   );

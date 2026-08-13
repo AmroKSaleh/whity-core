@@ -1,5 +1,7 @@
 'use client';
 
+'use client';
+
 import type { ReactNode } from 'react';
 import type { DocElement, ElementType } from '@/lib/documents/types';
 import { BLOCK_SCOPES, type DocBlock } from '@/lib/documents/blocks';
@@ -39,6 +41,7 @@ import {
   IconFilePlus,
   IconFiles,
 } from '@tabler/icons-react';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 
 /**
  * THE COMMAND REGISTRY for the document editor.
@@ -61,7 +64,9 @@ import {
  * This module is PURE: it holds no state and calls nothing on its own. The
  * designer owns all state and passes it in as `EditorCommandContext`, which
  * also makes the whole chrome trivially renderable in Storybook from a plain
- * object.
+ * object. The labels are translated, so every builder also takes the translate
+ * function as a parameter rather than calling a hook — `useEditorChrome()` at
+ * the bottom of this file is the single place it is bound.
  */
 
 // ── the context the designer supplies ───────────────────────────────────────
@@ -190,21 +195,24 @@ const SHORTCUTS: Record<string, string> = {
 const hint = (mod: string, id: string): string | undefined => SHORTCUTS[id]?.replace(/%/g, mod);
 
 /** Every shortcut, resolved for the current platform — for the Help sheet. */
-export function listEditorShortcuts(modLabel: string): Array<{ id: string; label: string; keys: string }> {
+export function listEditorShortcuts(
+  modLabel: string,
+  t: TranslateFn
+): Array<{ id: string; label: string; keys: string }> {
   const LABELS: Record<string, string> = {
-    save: 'Save template',
-    print: 'Print',
-    undo: 'Undo',
-    redo: 'Redo',
-    cut: 'Cut selection',
-    copy: 'Copy selection',
-    paste: 'Paste',
-    duplicate: 'Duplicate selection',
-    'select-all': 'Select all on page',
-    'delete-selection': 'Delete selection',
-    deselect: 'Deselect',
-    nudge: 'Nudge selection by 1mm',
-    'nudge-fast': 'Nudge selection by 5mm',
+    save: t('commands.shortcut.save', 'Save template'),
+    print: t('commands.shortcut.print', 'Print'),
+    undo: t('commands.shortcut.undo', 'Undo'),
+    redo: t('commands.shortcut.redo', 'Redo'),
+    cut: t('commands.shortcut.cut', 'Cut selection'),
+    copy: t('commands.shortcut.copy', 'Copy selection'),
+    paste: t('commands.shortcut.paste', 'Paste'),
+    duplicate: t('commands.shortcut.duplicate', 'Duplicate selection'),
+    'select-all': t('commands.shortcut.selectAll', 'Select all on page'),
+    'delete-selection': t('commands.shortcut.deleteSelection', 'Delete selection'),
+    deselect: t('commands.shortcut.deselect', 'Deselect'),
+    nudge: t('commands.shortcut.nudge', 'Nudge selection by 1mm'),
+    'nudge-fast': t('commands.shortcut.nudgeFast', 'Nudge selection by 5mm'),
   };
   return Object.keys(SHORTCUTS).map((id) => ({
     id,
@@ -215,25 +223,68 @@ export function listEditorShortcuts(modLabel: string): Array<{ id: string; label
 
 // ── element types offered by Insert ────────────────────────────────────────
 
-const INSERTABLE: ReadonlyArray<{ type: ElementType; label: string; icon: ReactNode }> = [
-  { type: 'text', label: 'Text', icon: <IconTypography /> },
-  { type: 'dynamicText', label: 'Dynamic text', icon: <IconVariable /> },
-  { type: 'image', label: 'Image / logo', icon: <IconPhoto /> },
-  { type: 'barcode', label: 'Barcode', icon: <IconBarcode /> },
-  { type: 'qr', label: 'QR code', icon: <IconQrcode /> },
-  { type: 'rect', label: 'Rectangle', icon: <IconSquare /> },
-  { type: 'line', label: 'Line', icon: <IconLine /> },
-  { type: 'math', label: 'Math', icon: <IconMathFunction /> },
+const INSERTABLE: ReadonlyArray<{ type: ElementType; icon: ReactNode }> = [
+  { type: 'text', icon: <IconTypography /> },
+  { type: 'dynamicText', icon: <IconVariable /> },
+  { type: 'image', icon: <IconPhoto /> },
+  { type: 'barcode', icon: <IconBarcode /> },
+  { type: 'qr', icon: <IconQrcode /> },
+  { type: 'rect', icon: <IconSquare /> },
+  { type: 'line', icon: <IconLine /> },
+  { type: 'math', icon: <IconMathFunction /> },
 ];
 
-const ALIGNMENTS: ReadonlyArray<{ kind: AlignKind; label: string; icon: ReactNode }> = [
-  { kind: 'left', label: 'Left', icon: <IconLayoutAlignLeft /> },
-  { kind: 'hcenter', label: 'Horizontal centre', icon: <IconLayoutAlignCenter /> },
-  { kind: 'right', label: 'Right', icon: <IconLayoutAlignRight /> },
-  { kind: 'top', label: 'Top', icon: <IconLayoutAlignTop /> },
-  { kind: 'vmiddle', label: 'Vertical middle', icon: <IconLayoutAlignMiddle /> },
-  { kind: 'bottom', label: 'Bottom', icon: <IconLayoutAlignBottom /> },
+/** What Insert calls each element type — in the menu and in the toolbar. */
+function insertLabels(t: TranslateFn): Record<ElementType, string> {
+  return {
+    text: t('commands.insert.text', 'Text'),
+    dynamicText: t('commands.insert.dynamicText', 'Dynamic text'),
+    image: t('commands.insert.image', 'Image / logo'),
+    barcode: t('commands.insert.barcode', 'Barcode'),
+    qr: t('commands.insert.qr', 'QR code'),
+    rect: t('commands.insert.rect', 'Rectangle'),
+    line: t('commands.insert.line', 'Line'),
+    math: t('commands.insert.math', 'Math'),
+  };
+}
+
+const ALIGNMENTS: ReadonlyArray<{ kind: AlignKind; icon: ReactNode }> = [
+  { kind: 'left', icon: <IconLayoutAlignLeft /> },
+  { kind: 'hcenter', icon: <IconLayoutAlignCenter /> },
+  { kind: 'right', icon: <IconLayoutAlignRight /> },
+  { kind: 'top', icon: <IconLayoutAlignTop /> },
+  { kind: 'vmiddle', icon: <IconLayoutAlignMiddle /> },
+  { kind: 'bottom', icon: <IconLayoutAlignBottom /> },
 ];
+
+/** The Format ▸ Align submenu's names, where "Align" is already the heading. */
+function alignLabels(t: TranslateFn): Record<AlignKind, string> {
+  return {
+    left: t('commands.align.left', 'Left'),
+    hcenter: t('commands.align.hcenter', 'Horizontal centre'),
+    right: t('commands.align.right', 'Right'),
+    top: t('commands.align.top', 'Top'),
+    vmiddle: t('commands.align.vmiddle', 'Vertical middle'),
+    bottom: t('commands.align.bottom', 'Bottom'),
+  };
+}
+
+/**
+ * The toolbar's names for the same commands. Spelled out per alignment rather
+ * than pasted together from "Align" + the submenu name: word order and casing
+ * are English-only facts, and a translator cannot fix a sentence assembled
+ * after they have seen its halves.
+ */
+function alignToolbarLabels(t: TranslateFn): Record<AlignKind, string> {
+  return {
+    left: t('commands.toolbar.alignLeft', 'Align left'),
+    hcenter: t('commands.toolbar.alignHcenter', 'Align horizontal centre'),
+    right: t('commands.toolbar.alignRight', 'Align right'),
+    top: t('commands.toolbar.alignTop', 'Align top'),
+    vmiddle: t('commands.toolbar.alignVmiddle', 'Align vertical middle'),
+    bottom: t('commands.toolbar.alignBottom', 'Align bottom'),
+  };
+}
 
 /** Blocks as menu nodes, grouped under a heading per visibility scope. */
 function blockNodes(ctx: EditorCommandContext): MenuBarNode[] {
@@ -263,9 +314,11 @@ function blockNodes(ctx: EditorCommandContext): MenuBarNode[] {
  * the things you configure once per template, matching where a Docs/Word user
  * already expects to find each of them.
  */
-export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
+export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): MenuBarMenu[] {
   const mod = ctx.modLabel;
   const k = (id: string) => hint(mod, id);
+  const insert = insertLabels(t);
+  const align = alignLabels(t);
 
   // Most editing commands are meaningless in preview (view-only) or need a
   // selection; these two predicates cover nearly every `disabled` below.
@@ -275,35 +328,35 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
   return [
     {
       id: 'file',
-      label: 'File',
+      label: t('commands.menu.file', 'File'),
       items: [
-        { id: 'new', label: 'New document', icon: <IconFilePlus />, onSelect: ctx.onNew },
-        { id: 'save', label: 'Save', shortcut: k('save'), disabled: ctx.blockEditing, onSelect: ctx.onSave },
+        { id: 'new', label: t('commands.file.new', 'New document'), icon: <IconFilePlus />, onSelect: ctx.onNew },
+        { id: 'save', label: t('commands.file.save', 'Save'), shortcut: k('save'), disabled: ctx.blockEditing, onSelect: ctx.onSave },
         { kind: 'separator', id: 'file-sep-1' },
-        { id: 'import', label: 'Import JSON…', onSelect: ctx.onImport },
-        { id: 'export', label: 'Export JSON', onSelect: ctx.onExport },
+        { id: 'import', label: t('commands.file.import', 'Import JSON…'), onSelect: ctx.onImport },
+        { id: 'export', label: t('commands.file.export', 'Export JSON'), onSelect: ctx.onExport },
         { kind: 'separator', id: 'file-sep-2' },
-        { id: 'print', label: 'Print…', shortcut: k('print'), onSelect: ctx.onPrint },
+        { id: 'print', label: t('commands.file.print', 'Print…'), shortcut: k('print'), onSelect: ctx.onPrint },
         { kind: 'separator', id: 'file-sep-3' },
-        { id: 'close-editor', label: 'Close editor', onSelect: ctx.onCloseEditor },
+        { id: 'close-editor', label: t('commands.file.close', 'Close editor'), onSelect: ctx.onCloseEditor },
       ],
     },
     {
       id: 'edit',
-      label: 'Edit',
+      label: t('commands.menu.edit', 'Edit'),
       items: [
-        { id: 'undo', label: 'Undo', icon: <IconArrowBackUp />, shortcut: k('undo'), disabled: !ctx.canUndo, onSelect: ctx.onUndo },
-        { id: 'redo', label: 'Redo', icon: <IconArrowForwardUp />, shortcut: k('redo'), disabled: !ctx.canRedo, onSelect: ctx.onRedo },
+        { id: 'undo', label: t('commands.edit.undo', 'Undo'), icon: <IconArrowBackUp />, shortcut: k('undo'), disabled: !ctx.canUndo, onSelect: ctx.onUndo },
+        { id: 'redo', label: t('commands.edit.redo', 'Redo'), icon: <IconArrowForwardUp />, shortcut: k('redo'), disabled: !ctx.canRedo, onSelect: ctx.onRedo },
         { kind: 'separator', id: 'edit-sep-1' },
-        { id: 'cut', label: 'Cut', icon: <IconScissors />, shortcut: k('cut'), disabled: noSelection, onSelect: ctx.onCut },
-        { id: 'copy', label: 'Copy', icon: <IconClipboardCopy />, shortcut: k('copy'), disabled: noSelection, onSelect: ctx.onCopy },
-        { id: 'paste', label: 'Paste', icon: <IconClipboard />, shortcut: k('paste'), disabled: ctx.preview || !ctx.hasClipboard, onSelect: ctx.onPaste },
-        { id: 'duplicate', label: 'Duplicate', icon: <IconCopy />, shortcut: k('duplicate'), disabled: noSelection, onSelect: ctx.onDuplicate },
+        { id: 'cut', label: t('commands.edit.cut', 'Cut'), icon: <IconScissors />, shortcut: k('cut'), disabled: noSelection, onSelect: ctx.onCut },
+        { id: 'copy', label: t('commands.edit.copy', 'Copy'), icon: <IconClipboardCopy />, shortcut: k('copy'), disabled: noSelection, onSelect: ctx.onCopy },
+        { id: 'paste', label: t('commands.edit.paste', 'Paste'), icon: <IconClipboard />, shortcut: k('paste'), disabled: ctx.preview || !ctx.hasClipboard, onSelect: ctx.onPaste },
+        { id: 'duplicate', label: t('commands.edit.duplicate', 'Duplicate'), icon: <IconCopy />, shortcut: k('duplicate'), disabled: noSelection, onSelect: ctx.onDuplicate },
         { kind: 'separator', id: 'edit-sep-2' },
-        { id: 'select-all', label: 'Select all on page', shortcut: k('select-all'), disabled: noEdit, onSelect: ctx.onSelectAll },
+        { id: 'select-all', label: t('commands.edit.selectAll', 'Select all on page'), shortcut: k('select-all'), disabled: noEdit, onSelect: ctx.onSelectAll },
         {
           id: 'delete-selection',
-          label: 'Delete',
+          label: t('commands.edit.delete', 'Delete'),
           icon: <IconTrash />,
           shortcut: k('delete-selection'),
           disabled: noSelection,
@@ -314,12 +367,12 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
     },
     {
       id: 'insert',
-      label: 'Insert',
+      label: t('commands.menu.insert', 'Insert'),
       items: [
         ...INSERTABLE.map(
           (item): MenuBarNode => ({
             id: `insert-${item.type}`,
-            label: item.label,
+            label: insert[item.type],
             icon: item.icon,
             disabled: ctx.preview,
             onSelect: () => ctx.onAddElement(item.type),
@@ -329,28 +382,28 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
         {
           kind: 'submenu',
           id: 'insert-block',
-          label: 'Block',
+          label: t('commands.insert.block', 'Block'),
           icon: <IconComponents />,
           items: blockNodes(ctx),
-          emptyLabel: 'No blocks in your library',
+          emptyLabel: t('commands.insert.blockEmpty', 'No blocks in your library'),
         },
         { kind: 'separator', id: 'insert-sep-2' },
-        { id: 'insert-page', label: 'Page', icon: <IconFilePlus />, disabled: ctx.blockEditing, onSelect: ctx.onAddPage },
+        { id: 'insert-page', label: t('commands.insert.page', 'Page'), icon: <IconFilePlus />, disabled: ctx.blockEditing, onSelect: ctx.onAddPage },
       ],
     },
     {
       id: 'format',
-      label: 'Format',
+      label: t('commands.menu.format', 'Format'),
       items: [
         {
           kind: 'submenu',
           id: 'align',
-          label: 'Align',
+          label: t('commands.format.align', 'Align'),
           icon: <IconLayoutAlignLeft />,
           disabled: noSelection,
           items: ALIGNMENTS.map((a) => ({
             id: `align-${a.kind}`,
-            label: a.label,
+            label: align[a.kind],
             icon: a.icon,
             onSelect: () => ctx.onAlign(a.kind),
           })),
@@ -360,36 +413,36 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
           id: 'distribute',
           // Needs 3+ elements to mean anything: the outer two stay put and the
           // rest are spaced between them.
-          label: 'Distribute',
+          label: t('commands.format.distribute', 'Distribute'),
           icon: <IconArrowsHorizontal />,
           disabled: ctx.preview || ctx.selectedCount < 3,
           items: [
-            { id: 'distribute-h', label: 'Horizontally', icon: <IconArrowsHorizontal />, onSelect: () => ctx.onDistribute('h') },
-            { id: 'distribute-v', label: 'Vertically', icon: <IconArrowsVertical />, onSelect: () => ctx.onDistribute('v') },
+            { id: 'distribute-h', label: t('commands.distribute.horizontally', 'Horizontally'), icon: <IconArrowsHorizontal />, onSelect: () => ctx.onDistribute('h') },
+            { id: 'distribute-v', label: t('commands.distribute.vertically', 'Vertically'), icon: <IconArrowsVertical />, onSelect: () => ctx.onDistribute('v') },
           ],
         },
         {
           kind: 'submenu',
           id: 'arrange',
-          label: 'Arrange',
+          label: t('commands.format.arrange', 'Arrange'),
           icon: <IconStackPush />,
           disabled: noSelection,
           items: [
-            { id: 'bring-forward', label: 'Bring to front', icon: <IconStackPush />, onSelect: () => ctx.onArrange('up') },
-            { id: 'send-backward', label: 'Send to back', icon: <IconStackPop />, onSelect: () => ctx.onArrange('down') },
+            { id: 'bring-forward', label: t('commands.arrange.front', 'Bring to front'), icon: <IconStackPush />, onSelect: () => ctx.onArrange('up') },
+            { id: 'send-backward', label: t('commands.arrange.back', 'Send to back'), icon: <IconStackPop />, onSelect: () => ctx.onArrange('down') },
           ],
         },
         { kind: 'separator', id: 'format-sep-1' },
         {
           id: 'toggle-lock',
-          label: ctx.selectionLocked ? 'Unlock' : 'Lock',
+          label: ctx.selectionLocked ? t('commands.format.unlock', 'Unlock') : t('commands.format.lock', 'Lock'),
           icon: ctx.selectionLocked ? <IconLockOpen /> : <IconLock />,
           disabled: noSelection,
           onSelect: ctx.onToggleSelectionLock,
         },
         {
           id: 'toggle-hidden',
-          label: ctx.selectionHidden ? 'Show' : 'Hide',
+          label: ctx.selectionHidden ? t('commands.format.show', 'Show') : t('commands.format.hide', 'Hide'),
           icon: ctx.selectionHidden ? <IconEye /> : <IconEyeOff />,
           disabled: noSelection,
           onSelect: ctx.onToggleSelectionHidden,
@@ -399,13 +452,13 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
         // can be promoted INTO a block.
         ...(ctx.soleSelectedType === 'blockInstance'
           ? ([
-              { id: 'edit-block', label: 'Edit block…', icon: <IconComponents />, disabled: ctx.blockEditing, onSelect: ctx.onEditSelectedBlock },
-              { id: 'detach-block', label: 'Detach from block', onSelect: ctx.onDetachSelectedBlock },
+              { id: 'edit-block', label: t('commands.format.editBlock', 'Edit block…'), icon: <IconComponents />, disabled: ctx.blockEditing, onSelect: ctx.onEditSelectedBlock },
+              { id: 'detach-block', label: t('commands.format.detachBlock', 'Detach from block'), onSelect: ctx.onDetachSelectedBlock },
             ] as MenuBarNode[])
           : ([
               {
                 id: 'save-as-block',
-                label: 'Save selection as block…',
+                label: t('commands.format.saveAsBlock', 'Save selection as block…'),
                 icon: <IconComponents />,
                 disabled: noSelection || ctx.blockEditing,
                 onSelect: ctx.onSaveAsBlock,
@@ -415,25 +468,25 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
     },
     {
       id: 'page',
-      label: 'Page',
+      label: t('commands.menu.page', 'Page'),
       items: [
-        { id: 'page-setup', label: 'Page setup…', onSelect: () => ctx.onOpenInspectorTab('page') },
+        { id: 'page-setup', label: t('commands.page.setup', 'Page setup…'), onSelect: () => ctx.onOpenInspectorTab('page') },
         { kind: 'separator', id: 'page-sep-1' },
-        { id: 'add-page', label: 'Add page', icon: <IconFilePlus />, disabled: ctx.blockEditing, onSelect: ctx.onAddPage },
-        { id: 'duplicate-page', label: 'Duplicate page', icon: <IconFiles />, disabled: ctx.blockEditing, onSelect: ctx.onDuplicatePage },
+        { id: 'add-page', label: t('commands.page.add', 'Add page'), icon: <IconFilePlus />, disabled: ctx.blockEditing, onSelect: ctx.onAddPage },
+        { id: 'duplicate-page', label: t('commands.page.duplicate', 'Duplicate page'), icon: <IconFiles />, disabled: ctx.blockEditing, onSelect: ctx.onDuplicatePage },
         {
           id: 'delete-page',
-          label: 'Delete page',
+          label: t('commands.page.delete', 'Delete page'),
           icon: <IconTrash />,
           disabled: ctx.pageCount <= 1,
           destructive: true,
           onSelect: ctx.onDeletePage,
         },
         { kind: 'separator', id: 'page-sep-2' },
-        { id: 'move-page-left', label: 'Move page earlier', disabled: ctx.pageIndex === 0, onSelect: () => ctx.onMovePage('left') },
+        { id: 'move-page-left', label: t('commands.page.moveEarlier', 'Move page earlier'), disabled: ctx.pageIndex === 0, onSelect: () => ctx.onMovePage('left') },
         {
           id: 'move-page-right',
-          label: 'Move page later',
+          label: t('commands.page.moveLater', 'Move page later'),
           disabled: ctx.pageIndex >= ctx.pageCount - 1,
           onSelect: () => ctx.onMovePage('right'),
         },
@@ -441,10 +494,10 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
         {
           kind: 'submenu',
           id: 'go-to-page',
-          label: 'Go to page',
+          label: t('commands.page.goTo', 'Go to page'),
           items: Array.from({ length: ctx.pageCount }, (_, i) => ({
             id: `go-to-page-${i}`,
-            label: `Page ${i + 1}`,
+            label: t('commands.page.nth', 'Page {n}', { n: i + 1 }),
             disabled: i === ctx.pageIndex,
             onSelect: () => ctx.onGoToPage(i),
           })),
@@ -453,56 +506,56 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
     },
     {
       id: 'view',
-      label: 'View',
+      label: t('commands.menu.view', 'View'),
       items: [
-        { kind: 'checkbox', id: 'preview', label: 'Preview', checked: ctx.preview, onCheckedChange: ctx.onTogglePreview },
+        { kind: 'checkbox', id: 'preview', label: t('commands.view.preview', 'Preview'), checked: ctx.preview, onCheckedChange: ctx.onTogglePreview },
         { kind: 'separator', id: 'view-sep-1' },
         // Edit-time aids only — preview and print never show them.
-        { kind: 'checkbox', id: 'grid', label: 'Grid', checked: ctx.showGrid, disabled: ctx.preview, onCheckedChange: ctx.onSetShowGrid },
-        { kind: 'checkbox', id: 'rulers', label: 'Rulers', checked: ctx.showRulers, disabled: ctx.preview, onCheckedChange: ctx.onSetShowRulers },
-        { kind: 'checkbox', id: 'snap', label: 'Snap to grid & guides', checked: ctx.snap, disabled: ctx.preview, onCheckedChange: ctx.onSetSnap },
+        { kind: 'checkbox', id: 'grid', label: t('commands.view.grid', 'Grid'), checked: ctx.showGrid, disabled: ctx.preview, onCheckedChange: ctx.onSetShowGrid },
+        { kind: 'checkbox', id: 'rulers', label: t('commands.view.rulers', 'Rulers'), checked: ctx.showRulers, disabled: ctx.preview, onCheckedChange: ctx.onSetShowRulers },
+        { kind: 'checkbox', id: 'snap', label: t('commands.view.snap', 'Snap to grid & guides'), checked: ctx.snap, disabled: ctx.preview, onCheckedChange: ctx.onSetSnap },
         { kind: 'separator', id: 'view-sep-2' },
-        { kind: 'checkbox', id: 'rail', label: 'Side panel', checked: ctx.railOpen, onCheckedChange: ctx.onSetRailOpen },
+        { kind: 'checkbox', id: 'rail', label: t('commands.view.rail', 'Side panel'), checked: ctx.railOpen, onCheckedChange: ctx.onSetRailOpen },
         { kind: 'separator', id: 'view-sep-3' },
-        { id: 'zoom-in', label: 'Zoom in', onSelect: () => ctx.onZoom('in') },
-        { id: 'zoom-out', label: 'Zoom out', onSelect: () => ctx.onZoom('out') },
-        { id: 'zoom-reset', label: 'Zoom to 100%', onSelect: () => ctx.onZoom('reset') },
-        { id: 'zoom-fit', label: 'Fit page in window', onSelect: () => ctx.onZoom('fit') },
+        { id: 'zoom-in', label: t('commands.view.zoomIn', 'Zoom in'), onSelect: () => ctx.onZoom('in') },
+        { id: 'zoom-out', label: t('commands.view.zoomOut', 'Zoom out'), onSelect: () => ctx.onZoom('out') },
+        { id: 'zoom-reset', label: t('commands.view.zoomReset', 'Zoom to 100%'), onSelect: () => ctx.onZoom('reset') },
+        { id: 'zoom-fit', label: t('commands.view.zoomFit', 'Fit page in window'), onSelect: () => ctx.onZoom('fit') },
       ],
     },
     {
       id: 'data',
-      label: 'Data',
+      label: t('commands.menu.data', 'Data'),
       items: [
-        { id: 'placeholders', label: 'Placeholders…', onSelect: () => ctx.onOpenInspectorTab('data') },
+        { id: 'placeholders', label: t('commands.data.placeholders', 'Placeholders…'), onSelect: () => ctx.onOpenInspectorTab('data') },
         { kind: 'separator', id: 'data-sep-1' },
-        { id: 'batch', label: 'Variable data / batch…', onSelect: () => ctx.onOpenInspectorTab('batch') },
-        { id: 'clear-batch', label: 'Clear batch', disabled: !ctx.batchActive, onSelect: ctx.onClearBatch },
+        { id: 'batch', label: t('commands.data.batch', 'Variable data / batch…'), onSelect: () => ctx.onOpenInspectorTab('batch') },
+        { id: 'clear-batch', label: t('commands.data.clearBatch', 'Clear batch'), disabled: !ctx.batchActive, onSelect: ctx.onClearBatch },
         { kind: 'separator', id: 'data-sep-2' },
         {
           id: 'batch-prev',
-          label: 'Previous data row',
+          label: t('commands.data.previousRow', 'Previous data row'),
           disabled: !ctx.batchActive || ctx.batchIndex <= 0,
           onSelect: () => ctx.onStepBatch(-1),
         },
         {
           id: 'batch-next',
-          label: 'Next data row',
+          label: t('commands.data.nextRow', 'Next data row'),
           disabled: !ctx.batchActive || ctx.batchIndex >= ctx.batchTotal - 1,
           onSelect: () => ctx.onStepBatch(1),
         },
         { kind: 'separator', id: 'data-sep-3' },
-        { id: 'sheet-layout', label: 'Label sheet layout…', onSelect: () => ctx.onOpenInspectorTab('sheet') },
+        { id: 'sheet-layout', label: t('commands.data.sheetLayout', 'Label sheet layout…'), onSelect: () => ctx.onOpenInspectorTab('sheet') },
       ],
     },
     {
       id: 'templates',
-      label: 'Templates',
+      label: t('commands.menu.templates', 'Templates'),
       items: [
         {
           kind: 'submenu',
           id: 'start-from',
-          label: 'Start from',
+          label: t('commands.templates.startFrom', 'Start from'),
           items: STARTER_TEMPLATES.map((s) => ({
             id: `start-from-${s.id}`,
             label: s.label,
@@ -513,19 +566,19 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
         {
           kind: 'submenu',
           id: 'open-saved',
-          label: 'Open saved',
+          label: t('commands.templates.openSaved', 'Open saved'),
           items: ctx.savedTemplates.map((s) => ({
             id: `open-saved-${s.id}`,
             label: s.name,
             disabled: s.id === ctx.currentSavedId,
             onSelect: () => ctx.onOpenSaved(s.id),
           })),
-          emptyLabel: 'No saved templates yet',
+          emptyLabel: t('commands.templates.openSavedEmpty', 'No saved templates yet'),
         },
         { kind: 'separator', id: 'templates-sep-2' },
         {
           id: 'delete-saved',
-          label: 'Delete this saved template',
+          label: t('commands.templates.deleteSaved', 'Delete this saved template'),
           icon: <IconTrash />,
           disabled: ctx.currentSavedId === null,
           destructive: true,
@@ -535,8 +588,8 @@ export function buildEditorMenus(ctx: EditorCommandContext): MenuBarMenu[] {
     },
     {
       id: 'help',
-      label: 'Help',
-      items: [{ id: 'shortcuts', label: 'Keyboard shortcuts…', onSelect: ctx.onShowShortcuts }],
+      label: t('commands.menu.help', 'Help'),
+      items: [{ id: 'shortcuts', label: t('commands.help.shortcuts', 'Keyboard shortcuts…'), onSelect: ctx.onShowShortcuts }],
     },
   ];
 }
@@ -565,33 +618,35 @@ export interface ToolbarGroup {
  * menus — never a command that exists only here — so the menu bar stays the
  * complete, discoverable index of what the editor can do.
  */
-export function buildEditorToolbar(ctx: EditorCommandContext): ToolbarGroup[] {
+export function buildEditorToolbar(ctx: EditorCommandContext, t: TranslateFn): ToolbarGroup[] {
   const mod = ctx.modLabel;
   const k = (id: string) => hint(mod, id);
+  const insert = insertLabels(t);
+  const align = alignToolbarLabels(t);
   const noSelection = ctx.preview || ctx.selectedCount === 0;
 
   return [
     {
       id: 'history',
       buttons: [
-        { id: 'undo', label: 'Undo', icon: <IconArrowBackUp />, shortcut: k('undo'), disabled: !ctx.canUndo, onSelect: ctx.onUndo },
-        { id: 'redo', label: 'Redo', icon: <IconArrowForwardUp />, shortcut: k('redo'), disabled: !ctx.canRedo, onSelect: ctx.onRedo },
+        { id: 'undo', label: t('commands.edit.undo', 'Undo'), icon: <IconArrowBackUp />, shortcut: k('undo'), disabled: !ctx.canUndo, onSelect: ctx.onUndo },
+        { id: 'redo', label: t('commands.edit.redo', 'Redo'), icon: <IconArrowForwardUp />, shortcut: k('redo'), disabled: !ctx.canRedo, onSelect: ctx.onRedo },
       ],
     },
     {
       id: 'clipboard',
       buttons: [
-        { id: 'cut', label: 'Cut', icon: <IconScissors />, shortcut: k('cut'), disabled: noSelection, onSelect: ctx.onCut },
-        { id: 'copy', label: 'Copy', icon: <IconClipboardCopy />, shortcut: k('copy'), disabled: noSelection, onSelect: ctx.onCopy },
-        { id: 'paste', label: 'Paste', icon: <IconClipboard />, shortcut: k('paste'), disabled: ctx.preview || !ctx.hasClipboard, onSelect: ctx.onPaste },
-        { id: 'duplicate', label: 'Duplicate', icon: <IconCopy />, shortcut: k('duplicate'), disabled: noSelection, onSelect: ctx.onDuplicate },
+        { id: 'cut', label: t('commands.edit.cut', 'Cut'), icon: <IconScissors />, shortcut: k('cut'), disabled: noSelection, onSelect: ctx.onCut },
+        { id: 'copy', label: t('commands.edit.copy', 'Copy'), icon: <IconClipboardCopy />, shortcut: k('copy'), disabled: noSelection, onSelect: ctx.onCopy },
+        { id: 'paste', label: t('commands.edit.paste', 'Paste'), icon: <IconClipboard />, shortcut: k('paste'), disabled: ctx.preview || !ctx.hasClipboard, onSelect: ctx.onPaste },
+        { id: 'duplicate', label: t('commands.edit.duplicate', 'Duplicate'), icon: <IconCopy />, shortcut: k('duplicate'), disabled: noSelection, onSelect: ctx.onDuplicate },
       ],
     },
     {
       id: 'insert',
       buttons: INSERTABLE.map((item) => ({
         id: `insert-${item.type}`,
-        label: item.label,
+        label: insert[item.type],
         icon: item.icon,
         disabled: ctx.preview,
         onSelect: () => ctx.onAddElement(item.type),
@@ -601,7 +656,7 @@ export function buildEditorToolbar(ctx: EditorCommandContext): ToolbarGroup[] {
       id: 'align',
       buttons: ALIGNMENTS.map((a) => ({
         id: `align-${a.kind}`,
-        label: `Align ${a.label.toLowerCase()}`,
+        label: align[a.kind],
         icon: a.icon,
         disabled: noSelection,
         onSelect: () => ctx.onAlign(a.kind),
@@ -612,14 +667,14 @@ export function buildEditorToolbar(ctx: EditorCommandContext): ToolbarGroup[] {
       buttons: [
         {
           id: 'distribute-h',
-          label: 'Distribute horizontally',
+          label: t('commands.toolbar.distributeHorizontally', 'Distribute horizontally'),
           icon: <IconArrowsHorizontal />,
           disabled: ctx.preview || ctx.selectedCount < 3,
           onSelect: () => ctx.onDistribute('h'),
         },
         {
           id: 'distribute-v',
-          label: 'Distribute vertically',
+          label: t('commands.toolbar.distributeVertically', 'Distribute vertically'),
           icon: <IconArrowsVertical />,
           disabled: ctx.preview || ctx.selectedCount < 3,
           onSelect: () => ctx.onDistribute('v'),
@@ -629,11 +684,11 @@ export function buildEditorToolbar(ctx: EditorCommandContext): ToolbarGroup[] {
     {
       id: 'arrange',
       buttons: [
-        { id: 'bring-forward', label: 'Bring to front', icon: <IconStackPush />, disabled: noSelection, onSelect: () => ctx.onArrange('up') },
-        { id: 'send-backward', label: 'Send to back', icon: <IconStackPop />, disabled: noSelection, onSelect: () => ctx.onArrange('down') },
+        { id: 'bring-forward', label: t('commands.arrange.front', 'Bring to front'), icon: <IconStackPush />, disabled: noSelection, onSelect: () => ctx.onArrange('up') },
+        { id: 'send-backward', label: t('commands.arrange.back', 'Send to back'), icon: <IconStackPop />, disabled: noSelection, onSelect: () => ctx.onArrange('down') },
         {
           id: 'toggle-lock',
-          label: ctx.selectionLocked ? 'Unlock' : 'Lock',
+          label: ctx.selectionLocked ? t('commands.format.unlock', 'Unlock') : t('commands.format.lock', 'Lock'),
           icon: ctx.selectionLocked ? <IconLockOpen /> : <IconLock />,
           disabled: noSelection,
           active: ctx.selectionLocked,
@@ -641,7 +696,7 @@ export function buildEditorToolbar(ctx: EditorCommandContext): ToolbarGroup[] {
         },
         {
           id: 'toggle-hidden',
-          label: ctx.selectionHidden ? 'Show' : 'Hide',
+          label: ctx.selectionHidden ? t('commands.format.show', 'Show') : t('commands.format.hide', 'Hide'),
           icon: ctx.selectionHidden ? <IconEyeOff /> : <IconEye />,
           disabled: noSelection,
           active: ctx.selectionHidden,
@@ -650,4 +705,25 @@ export function buildEditorToolbar(ctx: EditorCommandContext): ToolbarGroup[] {
       ],
     },
   ];
+}
+
+// ── binding the chrome's translations ──────────────────────────────────────
+
+/**
+ * The menu bar and the toolbar, with their labels translated.
+ *
+ * The builders above stay PURE — they take the translate function as an
+ * argument — but a translate function can only come from a hook, so this is
+ * the one place the editor chrome's DOMAIN is named. Binding it in this file
+ * rather than in the chrome that renders it keeps the domain next to the
+ * labels it names, which is also what lets the catalogue extractor resolve
+ * every `t()` call above (see docs/wiki/Internationalization.md).
+ */
+export function useEditorChrome(ctx: EditorCommandContext): {
+  menus: MenuBarMenu[];
+  groups: ToolbarGroup[];
+} {
+  const t = useTranslation('documents');
+
+  return { menus: buildEditorMenus(ctx, t), groups: buildEditorToolbar(ctx, t) };
 }

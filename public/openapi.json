@@ -2865,6 +2865,126 @@
                 }
             }
         },
+        "/api/v1/data-types/{type}/bulk": {
+            "post": {
+                "operationId": "post_api_v1_data_types_type_bulk",
+                "summary": "Perform one lifecycle action over many records, skipping and reporting refusals rather than aborting the batch",
+                "tags": [
+                    "data-types"
+                ],
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The namespaced data-type key, e.g. `democatalog:item`"
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DataTypeBulkRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Per-record outcomes. The batch ran; individual records may have refused, including all of them",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DataTypeBulkResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown `action`, or `ids` is not a non-empty array of record ids",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown data type, or no such record in the caller's tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "This data type does not offer that action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "More ids than the `data_types.bulk_max_ids` ceiling allows for this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/data-types/{type}/{id}": {
             "delete": {
                 "operationId": "delete_api_v1_data_types_type_id",
@@ -7505,17 +7625,29 @@
                                                     },
                                                     "name": {
                                                         "type": "string"
+                                                    },
+                                                    "direction": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "ltr",
+                                                            "rtl"
+                                                        ]
                                                     }
                                                 },
                                                 "required": [
                                                     "code",
-                                                    "name"
+                                                    "name",
+                                                    "direction"
                                                 ]
                                             }
+                                        },
+                                        "i18n_enabled": {
+                                            "type": "boolean"
                                         }
                                     },
                                     "required": [
-                                        "languages"
+                                        "languages",
+                                        "i18n_enabled"
                                     ]
                                 }
                             }
@@ -14653,7 +14785,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "The user's language preference and available languages",
+                        "description": "The user's EFFECTIVE language preference (null while i18n is disabled, whatever the profile stores) and the available languages",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -14673,18 +14805,30 @@
                                                     },
                                                     "name": {
                                                         "type": "string"
+                                                    },
+                                                    "direction": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "ltr",
+                                                            "rtl"
+                                                        ]
                                                     }
                                                 },
                                                 "required": [
                                                     "code",
-                                                    "name"
+                                                    "name",
+                                                    "direction"
                                                 ]
                                             }
+                                        },
+                                        "i18n_enabled": {
+                                            "type": "boolean"
                                         }
                                     },
                                     "required": [
                                         "language_code",
-                                        "available_languages"
+                                        "available_languages",
+                                        "i18n_enabled"
                                     ]
                                 }
                             }
@@ -14849,6 +14993,16 @@
                     },
                     "500": {
                         "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Language selection is disabled on this instance (i18n.enabled is off)",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -17509,6 +17663,15 @@
                         "schema": {
                             "type": "string"
                         }
+                    },
+                    {
+                        "name": "untranslated",
+                        "in": "query",
+                        "required": false,
+                        "description": "Set to 1 to list only keys this language has no text for",
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {
@@ -17678,6 +17841,82 @@
                     },
                     "422": {
                         "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/translations/coverage": {
+            "get": {
+                "operationId": "get_api_v1_translations_coverage",
+                "summary": "Translation coverage per language and domain (admin)",
+                "tags": [
+                    "languages"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Per-language, per-domain coverage counts",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TranslationCoverageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -18934,6 +19173,12 @@
                             "$ref": "#/components/schemas/DataTypeReference"
                         }
                     },
+                    "cascade_delete": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DataTypeComposition"
+                        }
+                    },
                     "actions": {
                         "type": "array",
                         "items": {
@@ -18960,6 +19205,7 @@
                     "label",
                     "lifecycle",
                     "blocks_delete",
+                    "cascade_delete",
                     "actions"
                 ]
             },
@@ -18980,6 +19226,171 @@
                     "table",
                     "label",
                     "count"
+                ]
+            },
+            "DataTypeBulkCounts": {
+                "type": "object",
+                "properties": {
+                    "requested": {
+                        "type": "integer"
+                    },
+                    "unique": {
+                        "type": "integer"
+                    },
+                    "ok": {
+                        "type": "integer"
+                    },
+                    "refused": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "requested",
+                    "unique",
+                    "ok",
+                    "refused"
+                ]
+            },
+            "DataTypeBulkRequest": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "trash",
+                            "restore",
+                            "retire",
+                            "delete"
+                        ]
+                    },
+                    "ids": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "description": "Record keys. Duplicates are collapsed; the ceiling is the `data_types.bulk_max_ids` setting and exceeding it is refused, never truncated."
+                    }
+                },
+                "required": [
+                    "action",
+                    "ids"
+                ]
+            },
+            "DataTypeBulkResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "key": {
+                                "type": "string"
+                            },
+                            "action": {
+                                "type": "string",
+                                "enum": [
+                                    "trash",
+                                    "restore",
+                                    "retire",
+                                    "delete"
+                                ]
+                            },
+                            "counts": {
+                                "$ref": "#/components/schemas/DataTypeBulkCounts"
+                            },
+                            "results": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/DataTypeBulkResult"
+                                }
+                            }
+                        },
+                        "required": [
+                            "key",
+                            "action",
+                            "counts",
+                            "results"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DataTypeBulkResult": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "integer"
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "enum": [
+                            "ok",
+                            "not_found",
+                            "blocked",
+                            "refused",
+                            "unsupported",
+                            "forbidden"
+                        ]
+                    },
+                    "state": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "reason": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "blockers": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DataTypeBlocker"
+                        }
+                    },
+                    "required": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "status",
+                    "outcome",
+                    "state",
+                    "reason",
+                    "message",
+                    "blockers"
+                ]
+            },
+            "DataTypeComposition": {
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string"
+                    },
+                    "column": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "table",
+                    "column",
+                    "label"
                 ]
             },
             "DataTypeLifecycle": {
@@ -19068,6 +19479,12 @@
                                     "$ref": "#/components/schemas/DataTypeBlocker"
                                 }
                             },
+                            "cascade": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/DataTypeBlocker"
+                                }
+                            },
                             "refusals": {
                                 "$ref": "#/components/schemas/DataTypeRefusals"
                             }
@@ -19080,6 +19497,7 @@
                             "restorable",
                             "deletable",
                             "blockers",
+                            "cascade",
                             "refusals"
                         ]
                     }
@@ -19124,6 +19542,9 @@
                         "type": "string",
                         "enum": [
                             "still_referenced",
+                            "composition_still_referenced",
+                            "composition_is_permanent",
+                            "cascade_would_nest",
                             "trash_before_deleting",
                             "retired_records_are_permanent",
                             "retired_records_cannot_be_trashed",
@@ -20579,6 +21000,13 @@
                     "name": {
                         "type": "string"
                     },
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "ltr",
+                            "rtl"
+                        ]
+                    },
                     "enabled": {
                         "type": "boolean"
                     },
@@ -20593,6 +21021,7 @@
                     "id",
                     "code",
                     "name",
+                    "direction",
                     "enabled",
                     "created_at",
                     "updated_at"
@@ -20606,6 +21035,13 @@
                     },
                     "name": {
                         "type": "string"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "ltr",
+                            "rtl"
+                        ]
                     },
                     "enabled": {
                         "type": "boolean"
@@ -20646,6 +21082,13 @@
                 "properties": {
                     "name": {
                         "type": "string"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "ltr",
+                            "rtl"
+                        ]
                     },
                     "enabled": {
                         "type": "boolean"
@@ -23885,12 +24328,21 @@
                                 "$ref": "#/components/schemas/TranslationRowRef"
                             }
                         ]
+                    },
+                    "source_text": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "translated": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
                     "key",
                     "system_default",
-                    "tenant_override"
+                    "tenant_override",
+                    "source_text",
+                    "translated"
                 ]
             },
             "TranslationBundleResponse": {
@@ -23905,6 +24357,32 @@
                 },
                 "required": [
                     "translations"
+                ]
+            },
+            "TranslationCoverageResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "source_language_code": {
+                                "type": "string"
+                            },
+                            "languages": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/TranslationLanguageCoverage"
+                                }
+                            }
+                        },
+                        "required": [
+                            "source_language_code",
+                            "languages"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "TranslationCreateRequest": {
@@ -23939,6 +24417,63 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "TranslationDomainCoverage": {
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "translated": {
+                        "type": "integer"
+                    },
+                    "missing": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "domain",
+                    "total",
+                    "translated",
+                    "missing"
+                ]
+            },
+            "TranslationLanguageCoverage": {
+                "type": "object",
+                "properties": {
+                    "language_code": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "translated": {
+                        "type": "integer"
+                    },
+                    "missing": {
+                        "type": "integer"
+                    },
+                    "domains": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TranslationDomainCoverage"
+                        }
+                    }
+                },
+                "required": [
+                    "language_code",
+                    "name",
+                    "total",
+                    "translated",
+                    "missing",
+                    "domains"
                 ]
             },
             "TranslationRowRef": {

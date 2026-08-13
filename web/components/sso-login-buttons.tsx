@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@amroksaleh/ui/button';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { IconBrandGoogle, IconBrandWindows, IconLock } from '@tabler/icons-react';
 
 /**
@@ -36,6 +37,7 @@ function ProviderIcon({ providerKey }: { providerKey: string }) {
  * password-only instance is visually unchanged.
  */
 export function SsoLoginButtons() {
+  const t = useTranslation('auth');
   const [providers, setProviders] = useState<SsoProvider[]>([]);
 
   useEffect(() => {
@@ -71,7 +73,7 @@ export function SsoLoginButtons() {
     <div className="space-y-3" data-testid="sso-login-buttons">
       <div className="flex items-center gap-3">
         <span className="h-px flex-1 bg-border" />
-        <span className="text-xs text-muted-foreground">or</span>
+        <span className="text-xs text-muted-foreground">{t('sso.divider', 'or')}</span>
         <span className="h-px flex-1 bg-border" />
       </div>
       {providers.map((provider) => (
@@ -84,7 +86,9 @@ export function SsoLoginButtons() {
         >
           <a href={startUrl(provider.provider_key)}>
             <ProviderIcon providerKey={provider.provider_key} />
-            {`Sign in with ${provider.display_name}`}
+            {t('sso.signInWith', 'Sign in with {provider}', {
+              provider: provider.display_name,
+            })}
           </a>
         </Button>
       ))}

@@ -35,6 +35,7 @@ final class DataTypeRegistryTest extends TestCase
         $tables->register('Acme', [
             'acme_records' => TableOwnershipRegistry::SCOPE_TENANT,
             'acme_entries' => TableOwnershipRegistry::SCOPE_TENANT,
+            'acme_lines' => TableOwnershipRegistry::SCOPE_TENANT,
             'acme_counter' => TableOwnershipRegistry::SCOPE_GLOBAL,
         ]);
         $tables->register('Globex', [
@@ -477,6 +478,159 @@ final class DataTypeRegistryTest extends TestCase
         $this->registry()->register('Acme', [
             'record' => $this->declaration([
                 'blocks_delete' => [['table' => 'acme_entries', 'column' => 'record_id']],
+            ]),
+        ]);
+    }
+
+    // ==================== Composition (`cascade_delete`) ====================
+
+    public function testACompositionIsAcceptedAndPublishedBesideTheGuards(): void
+    {
+        // The two lists answer the same question with opposite answers, and both
+        // are round-tripped so an adopter can diff what they wrote against what
+        // took effect rather than reading core's source.
+        $registry = $this->registry();
+        $registry->register('Acme', [
+            'record' => $this->declaration([
+                'cascade_delete' => [
+                    ['table' => 'acme_lines', 'column' => 'record_id', 'label' => 'line items'],
+                ],
+            ]),
+        ]);
+
+        $entry = $registry->get('acme:record')?->toArray();
+        self::assertIsArray($entry);
+        self::assertSame(
+            [['table' => 'acme_lines', 'column' => 'record_id', 'label' => 'line items']],
+            $entry['cascade_delete']
+        );
+        self::assertSame('acme_entries', $entry['blocks_delete'][0]['table'], 'and the guards are untouched');
+    }
+
+    public function testATypeThatDeclaresNoCompositionPublishesAnEmptyList(): void
+    {
+        // Present-and-empty, not absent: "this type declares no composition" is
+        // a fact a reader needs to be able to see, and a missing key reads as a
+        // host that dropped the field.
+        $registry = $this->registry();
+        $registry->register('Acme', ['record' => $this->declaration()]);
+
+        self::assertSame([], $registry->get('acme:record')?->toArray()['cascade_delete']);
+    }
+
+    public function testAPluginIsRefusedACompositionOverATableItDoesNotOwn(): void
+    {
+        // The same gate guards pass, and it matters MORE here: a guard turns a
+        // declaration into a COUNT over somebody else's table, a cascade turns it
+        // into a DELETE.
+        $this->expectException(InvalidDataTypeException::class);
+        $this->expectExceptionMessage('globex_secrets');
+
+        $this->registry()->register('Acme', [
+            'record' => $this->declaration([
+                'cascade_delete' => [
+                    ['table' => 'globex_secrets', 'column' => 'record_id', 'label' => 'theirs'],
+                ],
+            ]),
+        ]);
+    }
+
+    public function testACompositionOverAGlobalTableIsRefused(): void
+    {
+        // No tenant column means no tenant predicate could be bound to the
+        // DELETE, and an unscoped cascade is the single most destructive
+        // statement core could be talked into generating.
+        $this->expectException(InvalidDataTypeException::class);
+
+        $this->registry()->register('Acme', [
+            'record' => $this->declaration([
+                'cascade_delete' => [
+                    ['table' => 'acme_counter', 'column' => 'record_id', 'label' => 'counters'],
+                ],
+            ]),
+        ]);
+    }
+
+    public function testACompositionCarryingAnIgnoreWhenFilterIsRefused(): void
+    {
+        // A guard legitimately disregards some referencing rows. A cascade that
+        // did would leave exactly the orphans it exists to remove — so the field
+        // is refused rather than accepted and ignored, which would be the
+        // quietest possible way to be wrong.
+        $this->expectException(InvalidDataTypeException::class);
+        $this->expectExceptionMessage("'ignore_when' is not accepted");
+
+        $this->registry()->register('Acme', [
+            'record' => $this->declaration([
+                'cascade_delete' => [
+                    [
+                        'table' => 'acme_lines',
+                        'column' => 'record_id',
+                        'label' => 'line items',
+                        'ignore_when' => ['status' => ['kept']],
+                    ],
+                ],
+            ]),
+        ]);
+    }
+
+    public function testATableDeclaredBothBlockingAndOwnedIsRefused(): void
+    {
+        // "Refuse the delete while these exist" and "delete these" are opposite
+        // instructions about the same rows. There is no reading under which both
+        // hold, and letting the host pick one silently discards half of what was
+        // declared.
+        $this->expectException(InvalidDataTypeException::class);
+        $this->expectExceptionMessage('already declared in blocks_delete');
+
+        $this->registry()->register('Acme', [
+            'record' => $this->declaration([
+                'cascade_delete' => [
+                    ['table' => 'acme_entries', 'column' => 'record_id', 'label' => 'recorded entries'],
+                ],
+            ]),
+        ]);
+    }
+
+    public function testATypeCannotDeclareACompositionOverItsOwnTable(): void
+    {
+        // Either a no-op or a self-recursive composition core does not
+        // implement, and neither is what the declarer meant.
+        $this->expectException(InvalidDataTypeException::class);
+        $this->expectExceptionMessage("this type's own table");
+
+        $this->registry()->register('Acme', [
+            'record' => $this->declaration([
+                'cascade_delete' => [
+                    ['table' => 'acme_records', 'column' => 'parent_id', 'label' => 'sub-records'],
+                ],
+            ]),
+        ]);
+    }
+
+    public function testACompositionWithoutALabelIsRefused(): void
+    {
+        // The label is what the delete preview calls those rows. Without it the
+        // warning "this will also delete 4 …" has nothing to end with.
+        $this->expectException(InvalidDataTypeException::class);
+        $this->expectExceptionMessage("'label' is required");
+
+        $this->registry()->register('Acme', [
+            'record' => $this->declaration([
+                'cascade_delete' => [['table' => 'acme_lines', 'column' => 'record_id']],
+            ]),
+        ]);
+    }
+
+    public function testACompositionWithAMalformedIdentifierIsRefused(): void
+    {
+        $this->expectException(InvalidDataTypeException::class);
+
+        $this->registry()->register('Acme', [
+            'record' => $this->declaration([
+                'cascade_delete' => [
+                    ['table' => 'acme_lines', 'column' => 'record_id; DROP TABLE roles; --', 'label' => 'lines'],
+                ],
             ]),
         ]);
     }

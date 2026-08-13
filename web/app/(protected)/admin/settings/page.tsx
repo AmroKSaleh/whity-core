@@ -11,6 +11,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconDeviceFloppy } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from './settings-tabs';
 import {
   SETTINGS_READ,
@@ -18,7 +19,7 @@ import {
   SETTINGS_MANAGE,
   SYSTEM_TENANT_ID,
   GENERAL_SETTING_KEYS,
-  FIELD_LABELS,
+  generalFieldLabels,
   RegistrySettingControl,
   groupRegistry,
   validate,
@@ -40,6 +41,7 @@ export default function AdminSettingsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canRead = hasPermission(SETTINGS_READ);
   const canWrite = hasPermission(SETTINGS_WRITE);
@@ -57,15 +59,14 @@ export default function AdminSettingsPage() {
   if (!canRead) {
     return (
       <AccessDenied
-        description={
-          <>
-            You do not have the required permission (<code>settings:read</code>) to view
-            Website Settings.
-          </>
-        }
+        description={t(
+          'settings.accessDenied',
+          'You do not have the required permission ({permission}) to view Website Settings.',
+          { permission: SETTINGS_READ }
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -75,8 +76,11 @@ export default function AdminSettingsPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="General"
-        description="Your tenant's instance identity. Cleared fields fall back to the platform-wide global default. Editing requires the settings:write permission."
+        title={t('settings.title', 'General')}
+        description={t(
+          'settings.description',
+          "Your tenant's instance identity. Cleared fields fall back to the platform-wide global default. Editing requires the settings:write permission."
+        )}
       />
       <SettingsTabs active="general" />
       <TenantSettingsSection canWrite={canWrite} addToast={addToast} />
@@ -92,10 +96,11 @@ function TenantSettingsSection({
   canWrite: boolean;
   addToast: AddToast;
 }) {
+  const t = useTranslation('admin');
   const { data, loading, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load settings'));
+      throw new Error(errorMessage(getError, t('settings.tenant.loadFailed', 'Failed to load settings')));
     }
     return body.data;
   }, []);
@@ -132,7 +137,7 @@ function TenantSettingsSection({
       support_email: valueOf('support_email'),
     };
 
-    const validationError = validate(current, false);
+    const validationError = validate(current, false, t);
     if (validationError) {
       addToast(validationError, 'error');
       return;
@@ -151,13 +156,16 @@ function TenantSettingsSection({
         body: { settings },
       });
       if (patchError) {
-        throw new Error(errorMessage(patchError, 'Failed to save settings'));
+        throw new Error(errorMessage(patchError, t('settings.tenant.saveFailed', 'Failed to save settings')));
       }
-      addToast('Tenant settings saved.', 'success');
+      addToast(t('settings.tenant.saved', 'Tenant settings saved.'), 'success');
       setDraft({});
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save settings', 'error');
+      addToast(
+        err instanceof Error ? err.message : t('settings.tenant.saveFailed', 'Failed to save settings'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -167,12 +175,19 @@ function TenantSettingsSection({
     <Card className="border border-border bg-card shadow-sm">
       <CardHeader>
         <CardTitle className="text-lg font-bold font-heading">
-          <h2>Tenant settings</h2>
+          <h2>{t('settings.tenant.title', 'Tenant settings')}</h2>
         </CardTitle>
         <CardDescription className="text-sm">
-          Overrides for your current tenant. Cleared fields fall back to the global default.
+          {t(
+            'settings.tenant.description',
+            'Overrides for your current tenant. Cleared fields fall back to the global default.'
+          )}
           {effective && tenantOverridable && !canWrite &&
-            ' You have read-only access (settings:write required to edit).'}
+            ' ' +
+              t(
+                'settings.tenant.readOnly',
+                'You have read-only access (settings:write required to edit).'
+              )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -191,7 +206,12 @@ function TenantSettingsSection({
             role="note"
             className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground"
           >
-            <p>As the system tenant, you have no per-tenant overrides. Edit the platform-wide values below.</p>
+            <p>
+              {t(
+                'settings.tenant.noOverrideNotice',
+                'As the system tenant, you have no per-tenant overrides. Edit the platform-wide values below.'
+              )}
+            </p>
           </div>
         ) : (
           <>
@@ -200,7 +220,7 @@ function TenantSettingsSection({
                 key={key}
                 settingKey={key}
                 idPrefix="tenant"
-                label={FIELD_LABELS[key]}
+                label={generalFieldLabels(t)[key]}
                 value={valueOf(key)}
                 disabled={!canWrite}
                 onChange={(value) => setField(key, value)}
@@ -211,7 +231,9 @@ function TenantSettingsSection({
               <div className="flex justify-end pt-2">
                 <Button onClick={handleSave} disabled={saving} className="gap-2">
                   <IconDeviceFloppy className="w-4 h-4" />
-                  {saving ? 'Saving…' : 'Save tenant settings'}
+                  {saving
+                    ? t('settings.saving', 'Saving…')
+                    : t('settings.tenant.save', 'Save tenant settings')}
                 </Button>
               </div>
             )}
@@ -231,10 +253,13 @@ function TenantSettingsSection({
  * each other instead of on a separate route.
  */
 function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
+  const t = useTranslation('admin');
   const { data, loading, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load global defaults'));
+      throw new Error(
+        errorMessage(getError, t('settings.platform.loadFailed', 'Failed to load global defaults'))
+      );
     }
     return body.data;
   }, []);
@@ -245,9 +270,15 @@ function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
 
   const global = data?.global as SettingsMap | undefined;
   const registry = useMemo<RegistryEntry[]>(() => data?.registry ?? [], [data]);
+  // General + Integrations are core's own platform-wide fields; `plugins` is the
+  // section holding whatever the installed plugins declared with `admin => true`
+  // (#713 item 1). The remaining sections live on their own dedicated tabs.
   const sections = useMemo(
-    () => groupRegistry(registry).filter((s) => s.section.id === 'general' || s.section.id === 'integrations'),
-    [registry]
+    () =>
+      groupRegistry(registry, t).filter(
+        (s) => s.section.id === 'general' || s.section.id === 'integrations' || s.section.id === 'plugins'
+      ),
+    [registry, t]
   );
   const dirty = Object.keys(draft).length > 0;
 
@@ -281,13 +312,20 @@ function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
       const { error: patchError } = await api.PATCH('/api/v1/settings/global', { body: { settings } });
       if (patchError) {
         setFieldErrors(fieldErrorsFrom(patchError));
-        throw new Error(errorMessage(patchError, 'Failed to save global defaults'));
+        throw new Error(
+          errorMessage(patchError, t('settings.platform.saveFailed', 'Failed to save global defaults'))
+        );
       }
-      addToast('Global defaults saved.', 'success');
+      addToast(t('settings.platform.saved', 'Global defaults saved.'), 'success');
       setDraft({});
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save global defaults', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('settings.platform.saveFailed', 'Failed to save global defaults'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -298,7 +336,7 @@ function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Platform defaults</h2>
+            <h2>{t('settings.platform.title', 'Platform defaults')}</h2>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -320,11 +358,18 @@ function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
         >
           <CardHeader>
             <CardTitle className="text-lg font-bold font-heading">
-              <h2>{section.id === 'general' ? 'Platform defaults' : section.title}</h2>
+              <h2>
+                {section.id === 'general'
+                  ? t('settings.platform.title', 'Platform defaults')
+                  : section.title}
+              </h2>
             </CardTitle>
             <CardDescription className="text-sm">
               {section.id === 'general'
-                ? 'Instance-wide fallback values applied to every tenant that has not overridden them.'
+                ? t(
+                    'settings.platform.description',
+                    'Instance-wide fallback values applied to every tenant that has not overridden them.'
+                  )
                 : section.description}
             </CardDescription>
           </CardHeader>
@@ -351,7 +396,9 @@ function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
           data-testid="platform-defaults-save"
         >
           <IconDeviceFloppy className="w-4 h-4" />
-          {saving ? 'Saving…' : 'Save platform defaults'}
+          {saving
+            ? t('settings.saving', 'Saving…')
+            : t('settings.platform.save', 'Save platform defaults')}
         </Button>
       </div>
     </div>

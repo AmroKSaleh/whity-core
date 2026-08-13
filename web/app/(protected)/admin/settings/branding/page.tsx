@@ -12,12 +12,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amro
 import { IconDeviceFloppy } from '@tabler/icons-react';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { BrandingSettings } from '@/components/branding-settings';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_READ,
   SETTINGS_WRITE,
   SYSTEM_TENANT_ID,
-  FIELD_LABELS,
+  generalFieldLabels,
   errorMessage,
   SettingsField,
   type AddToast,
@@ -33,6 +34,7 @@ export default function BrandingSettingsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canRead = hasPermission(SETTINGS_READ);
   const canWrite = hasPermission(SETTINGS_WRITE);
@@ -57,15 +59,14 @@ export default function BrandingSettingsPage() {
   if (!canRead) {
     return (
       <AccessDenied
-        description={
-          <>
-            You do not have the required permission (<code>settings:read</code>) to view
-            Branding.
-          </>
-        }
+        description={t(
+          'settings.branding.accessDenied',
+          'You do not have the required permission ({permission}) to view Branding.',
+          { permission: SETTINGS_READ }
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.branding.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -75,8 +76,11 @@ export default function BrandingSettingsPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Branding"
-        description="Language, logos, favicon, and colors for this tenant."
+        title={t('settings.branding.title', 'Branding')}
+        description={t(
+          'settings.branding.description',
+          'Language, logos, favicon, and colors for this tenant.'
+        )}
       />
       <SettingsTabs active="branding" />
       <LocaleSection canWrite={canWrite} tenantOverridable={tenantOverridable} addToast={addToast} />
@@ -101,10 +105,13 @@ function LocaleSection({
   tenantOverridable: boolean;
   addToast: AddToast;
 }) {
+  const t = useTranslation('admin');
   const { data, loading, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load settings'));
+      throw new Error(
+        errorMessage(getError, t('settings.branding.locale.loadFailed', 'Failed to load settings'))
+      );
     }
     return body.data;
   }, []);
@@ -135,13 +142,20 @@ function LocaleSection({
         body: { settings: { locale: trimmed === '' ? '' : trimmed } },
       });
       if (patchError) {
-        throw new Error(errorMessage(patchError, 'Failed to save language'));
+        throw new Error(
+          errorMessage(patchError, t('settings.branding.locale.saveFailed', 'Failed to save language'))
+        );
       }
-      addToast('Language saved.', 'success');
+      addToast(t('settings.branding.locale.saved', 'Language saved.'), 'success');
       setDraft(null);
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save language', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('settings.branding.locale.saveFailed', 'Failed to save language'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -151,10 +165,13 @@ function LocaleSection({
     <Card className="border border-border bg-card shadow-sm">
       <CardHeader>
         <CardTitle className="text-lg font-bold font-heading">
-          <h2>Language</h2>
+          <h2>{t('settings.branding.locale.title', 'Language')}</h2>
         </CardTitle>
         <CardDescription className="text-sm">
-          Default interface language for this tenant. Cleared falls back to the global default.
+          {t(
+            'settings.branding.locale.description',
+            'Default interface language for this tenant. Cleared falls back to the global default.'
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -164,7 +181,7 @@ function LocaleSection({
           <SettingsField
             settingKey="locale"
             idPrefix="branding"
-            label={FIELD_LABELS.locale}
+            label={generalFieldLabels(t).locale}
             value={value}
             disabled={!canWrite}
             onChange={setDraft}
@@ -175,7 +192,9 @@ function LocaleSection({
           <div className="flex justify-end">
             <Button onClick={handleSave} disabled={saving || draft === null} className="gap-2">
               <IconDeviceFloppy className="w-4 h-4" />
-              {saving ? 'Saving…' : 'Save language'}
+              {saving
+                ? t('settings.branding.saving', 'Saving…')
+                : t('settings.branding.locale.save', 'Save language')}
             </Button>
           </div>
         )}

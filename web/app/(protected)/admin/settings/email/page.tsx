@@ -19,6 +19,7 @@ import {
   IconMail,
   IconSend,
 } from '@tabler/icons-react';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -91,6 +92,7 @@ export default function EmailSettingsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: capsLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canManage = hasPermission(SETTINGS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -106,15 +108,14 @@ export default function EmailSettingsPage() {
   if (!isSystemTenant || !canManage) {
     return (
       <AccessDenied
-        description={
-          <>
-            Outgoing email is an instance-wide setting managed by the system tenant with
-            the <code>settings:manage</code> permission.
-          </>
-        }
+        description={t(
+          'settings.email.accessDenied',
+          'Outgoing email is an instance-wide setting managed by the system tenant with the {permission} permission.',
+          { permission: SETTINGS_MANAGE }
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.email.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -136,10 +137,12 @@ function EmailSettingsForm({
   adminEmail: string;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
+  const t = useTranslation('admin');
+
   const { data, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load settings'));
+      throw new Error(errorMessage(getError, t('settings.email.error.load', 'Failed to load settings')));
     }
     return body.data;
   }, []);
@@ -217,13 +220,20 @@ function EmailSettingsForm({
       const { error: patchError } = await api.PATCH('/api/v1/settings/global', { body: { settings } });
       if (patchError) {
         setFieldErrors(fieldErrorsFrom(patchError));
-        throw new Error(errorMessage(patchError, 'Failed to save email settings'));
+        throw new Error(
+          errorMessage(patchError, t('settings.email.error.save', 'Failed to save email settings'))
+        );
       }
-      addToast('Email settings saved.', 'success');
+      addToast(t('settings.email.saved', 'Email settings saved.'), 'success');
       setDraft({});
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save email settings', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('settings.email.error.save', 'Failed to save email settings'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -238,10 +248,22 @@ function EmailSettingsForm({
         body: JSON.stringify({ password: passwordInput }),
       });
       if (!res.ok && res.status !== 204) {
-        addToast(await readError(res, 'Could not save the SMTP password'), 'error');
+        addToast(
+          await readError(
+            res,
+            t('settings.email.smtp.password.error.save', 'Could not save the SMTP password'),
+            t
+          ),
+          'error'
+        );
         return;
       }
-      addToast(passwordInput === '' ? 'SMTP password cleared.' : 'SMTP password saved.', 'success');
+      addToast(
+        passwordInput === ''
+          ? t('settings.email.smtp.password.cleared', 'SMTP password cleared.')
+          : t('settings.email.smtp.password.saved', 'SMTP password saved.'),
+        'success'
+      );
       setPasswordInput('');
       refetchStatus();
     } finally {
@@ -251,7 +273,10 @@ function EmailSettingsForm({
 
   const handleSendTest = async () => {
     if (testTo.trim() === '') {
-      addToast('Enter a recipient address for the test email.', 'error');
+      addToast(
+        t('settings.email.test.recipientRequired', 'Enter a recipient address for the test email.'),
+        'error'
+      );
       return;
     }
     setTesting(true);
@@ -262,10 +287,16 @@ function EmailSettingsForm({
         body: JSON.stringify({ to: testTo.trim() }),
       });
       if (!res.ok) {
-        addToast(await readError(res, 'Test email failed'), 'error');
+        addToast(await readError(res, t('settings.email.test.error', 'Test email failed'), t), 'error');
         return;
       }
-      addToast('Test email sent — check the inbox (Mailpit at http://localhost:8025 in dev).', 'success');
+      addToast(
+        t(
+          'settings.email.test.sent',
+          'Test email sent — check the inbox (Mailpit at http://localhost:8025 in dev).'
+        ),
+        'success'
+      );
     } finally {
       setTesting(false);
     }
@@ -274,8 +305,11 @@ function EmailSettingsForm({
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Email"
-        description="Outgoing email (SMTP) for this instance. Managed by the system tenant."
+        title={t('settings.email.title', 'Email')}
+        description={t(
+          'settings.email.description',
+          'Outgoing email (SMTP) for this instance. Managed by the system tenant.'
+        )}
       />
       <SettingsTabs active="email" />
 
@@ -288,9 +322,11 @@ function EmailSettingsForm({
             </span>
             <div>
               <CardTitle className="text-lg font-bold font-heading">
-                <h2>Delivery</h2>
+                <h2>{t('settings.email.delivery.title', 'Delivery')}</h2>
               </CardTitle>
-              <CardDescription className="text-sm">How outgoing email leaves this instance.</CardDescription>
+              <CardDescription className="text-sm">
+                {t('settings.email.delivery.description', 'How outgoing email leaves this instance.')}
+              </CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -298,13 +334,18 @@ function EmailSettingsForm({
           {control(MAIL_KEYS.transport)}
           {transport === 'none' && (
             <Alert variant="info" data-testid="email-transport-note">
-              <AlertDescription>Email is disabled — nothing is sent.</AlertDescription>
+              <AlertDescription>
+                {t('settings.email.transport.none.note', 'Email is disabled — nothing is sent.')}
+              </AlertDescription>
             </Alert>
           )}
           {transport === 'log' && (
             <Alert variant="info" data-testid="email-transport-note">
               <AlertDescription>
-                Emails are written to the server log (dev only) — not delivered.
+                {t(
+                  'settings.email.transport.log.note',
+                  'Emails are written to the server log (dev only) — not delivered.'
+                )}
               </AlertDescription>
             </Alert>
           )}
@@ -316,10 +357,13 @@ function EmailSettingsForm({
         <Card className="border border-border bg-card shadow-sm" data-testid="email-smtp-card">
           <CardHeader>
             <CardTitle className="text-lg font-bold font-heading">
-              <h2>SMTP connection</h2>
+              <h2>{t('settings.email.smtp.title', 'SMTP connection')}</h2>
             </CardTitle>
             <CardDescription className="text-sm">
-              The server that relays your mail. In dev, point this at Mailpit.
+              {t(
+                'settings.email.smtp.description',
+                'The server that relays your mail. In dev, point this at Mailpit.'
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -332,14 +376,16 @@ function EmailSettingsForm({
             <div className="space-y-1.5" data-testid="email-password-field">
               <div className="flex items-center justify-between gap-2">
                 <label htmlFor="email-smtp-password" className="text-sm font-medium text-foreground">
-                  Password
+                  {t('settings.email.smtp.password.label', 'Password')}
                 </label>
                 <Badge
                   data-testid="email-password-status"
                   variant={hasPassword ? 'secondary' : 'outline'}
                   className="text-[10px]"
                 >
-                  {hasPassword ? 'Password is set' : 'Not set'}
+                  {hasPassword
+                    ? t('settings.email.smtp.password.status.set', 'Password is set')
+                    : t('settings.email.smtp.password.status.unset', 'Not set')}
                 </Badge>
               </div>
               <div className="flex items-center gap-2">
@@ -347,7 +393,11 @@ function EmailSettingsForm({
                   id="email-smtp-password"
                   type="password"
                   autoComplete="new-password"
-                  placeholder={hasPassword ? '•••••••• (unchanged)' : 'Enter SMTP password'}
+                  placeholder={
+                    hasPassword
+                      ? t('settings.email.smtp.password.placeholder.set', '•••••••• (unchanged)')
+                      : t('settings.email.smtp.password.placeholder.unset', 'Enter SMTP password')
+                  }
                   value={passwordInput}
                   disabled={savingPassword}
                   onChange={(e) => setPasswordInput(e.target.value)}
@@ -358,11 +408,16 @@ function EmailSettingsForm({
                   disabled={savingPassword}
                   data-testid="email-save-password"
                 >
-                  {savingPassword ? 'Saving…' : 'Save password'}
+                  {savingPassword
+                    ? t('settings.email.smtp.password.saving', 'Saving…')
+                    : t('settings.email.smtp.password.save', 'Save password')}
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Stored encrypted; never shown again. Leave blank and save to clear it.
+                {t(
+                  'settings.email.smtp.password.help',
+                  'Stored encrypted; never shown again. Leave blank and save to clear it.'
+                )}
               </p>
             </div>
 
@@ -376,10 +431,18 @@ function EmailSettingsForm({
       <Card className="border border-border bg-card shadow-sm" data-testid="email-notifications-card">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Notifications</h2>
+            <h2>{t('settings.email.notifications.title', 'Notifications')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
-            Which transactional emails this instance sends{transport === 'none' ? ' (requires a transport above)' : ''}.
+            {transport === 'none'
+              ? t(
+                  'settings.email.notifications.description.noTransport',
+                  'Which transactional emails this instance sends (requires a transport above).'
+                )
+              : t(
+                  'settings.email.notifications.description',
+                  'Which transactional emails this instance sends.'
+                )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -391,7 +454,9 @@ function EmailSettingsForm({
       <div className="flex justify-end">
         <Button onClick={() => void handleSave()} disabled={saving || !dirty} className="gap-2" data-testid="email-save">
           <IconDeviceFloppy className="w-4 h-4" />
-          {saving ? 'Saving…' : 'Save email settings'}
+          {saving
+            ? t('settings.email.saving', 'Saving…')
+            : t('settings.email.save', 'Save email settings')}
         </Button>
       </div>
 
@@ -399,17 +464,24 @@ function EmailSettingsForm({
       <Card className="border border-border bg-card shadow-sm" data-testid="email-test-card">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Send a test email</h2>
+            <h2>{t('settings.email.test.title', 'Send a test email')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
-            Sends a message using the current (saved) configuration to confirm it works.
+            {t(
+              'settings.email.test.description',
+              'Sends a message using the current (saved) configuration to confirm it works.'
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {/* The placeholder is an address literal, not prose: `example.com`
+                is the reserved documentation domain and a translated local part
+                would show an address that is not a valid example — the same
+                reason the sign-in screen left its `000000` mask alone. */}
             <Input
               type="email"
-              aria-label="Test recipient"
+              aria-label={t('settings.email.test.recipient.label', 'Test recipient')}
               placeholder="you@example.com"
               value={testTo}
               disabled={testing}
@@ -423,12 +495,17 @@ function EmailSettingsForm({
               data-testid="email-send-test"
             >
               <IconSend className="w-4 h-4" />
-              {testing ? 'Sending…' : 'Send test email'}
+              {testing
+                ? t('settings.email.test.sending', 'Sending…')
+                : t('settings.email.test.send', 'Send test email')}
             </Button>
           </div>
           {transport === 'none' && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Choose a transport above to enable test sends.
+              {t(
+                'settings.email.test.transportRequired',
+                'Choose a transport above to enable test sends.'
+              )}
             </p>
           )}
         </CardContent>
@@ -438,9 +515,9 @@ function EmailSettingsForm({
 }
 
 /** Read the `{ error }` envelope from a failed response; friendly 404 fallback. */
-async function readError(res: Response, fallback: string): Promise<string> {
+async function readError(res: Response, fallback: string, t: TranslateFn): Promise<string> {
   if (res.status === 404) {
-    return 'Email is not available on this server yet.';
+    return t('settings.email.error.unavailable', 'Email is not available on this server yet.');
   }
   try {
     const body: unknown = await res.json();

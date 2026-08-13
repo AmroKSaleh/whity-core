@@ -50,6 +50,15 @@ import {
   IconPlus,
   IconShieldLock,
 } from '@tabler/icons-react';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+
+/**
+ * i18n (domain `plugin`): only the CHROME this file authors is keyed. The
+ * schema-derived model is plugin DATA and is rendered verbatim — every
+ * `field.label`, `column.label`, `select` option, `feature.label`,
+ * `feature.plugin`, `feature.requiredPermission`, the titleField row title,
+ * and any `{ error }` message the backend returns.
+ */
 
 /**
  * Row view-model for the schema-driven table: a plain record of unknown cell
@@ -182,10 +191,18 @@ function initialFormValues(
   return values;
 }
 
-/** Client-side required/number/maxLength checks; the server stays authoritative. */
+/**
+ * Client-side required/number/maxLength checks; the server stays authoritative.
+ *
+ * Takes `t` as a parameter because a plain function cannot call a hook; the
+ * file has exactly one domain, so the extractor still attributes these keys to
+ * it. `field.label` is plugin data and travels as a placeholder — the sentence
+ * around it stays one translatable unit.
+ */
 function validateFormValues(
   fields: CrudField[],
-  values: FormValues
+  values: FormValues,
+  t: TranslateFn
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const field of fields) {
@@ -198,23 +215,34 @@ function validateFormValues(
       // Required means AT LEAST ONE language is filled — Phase-1 does not
       // force translating both languages before saving.
       if (field.required && !localized.ar?.trim() && !localized.en?.trim()) {
-        errors[field.name] = `${field.label} is required (at least one language)`;
+        errors[field.name] = t(
+          'crud.field.requiredLocalized',
+          '{label} is required (at least one language)',
+          { label: field.label }
+        );
       }
       continue;
     }
     const value = values[field.name];
     const text = typeof value === 'string' ? value.trim() : '';
     if (field.required && text === '') {
-      errors[field.name] = `${field.label} is required`;
+      errors[field.name] = t('crud.field.required', '{label} is required', {
+        label: field.label,
+      });
       continue;
     }
     if (text !== '' && field.kind === 'number' && Number.isNaN(Number(text))) {
-      errors[field.name] = `${field.label} must be a number`;
+      errors[field.name] = t('crud.field.number', '{label} must be a number', {
+        label: field.label,
+      });
       continue;
     }
     if (field.maxLength !== undefined && text.length > field.maxLength) {
-      errors[field.name] =
-        `${field.label} must be at most ${field.maxLength} characters`;
+      errors[field.name] = t(
+        'crud.field.maxLength',
+        '{label} must be at most {max} characters',
+        { label: field.label, max: field.maxLength }
+      );
     }
   }
   return errors;
@@ -275,6 +303,7 @@ function ReferenceField({
   error: string | undefined;
   onChange: (value: string) => void;
 }) {
+  const t = useTranslation('plugin');
   const inputId = `crud-field-${field.name}`;
   const state = usePluginData<Array<Record<string, unknown>>>(
     reference.resource,
@@ -309,9 +338,9 @@ function ReferenceField({
       </label>
       {state.status === 'error' ? (
         <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground">
-          <span>Failed to load options.</span>
+          <span>{t('crud.options.loadError', 'Failed to load options.')}</span>
           <Button type="button" variant="outline" size="sm" onClick={state.retry}>
-            Retry
+            {t('crud.retry', 'Retry')}
           </Button>
         </div>
       ) : (
@@ -328,8 +357,10 @@ function ReferenceField({
             <SelectValue
               placeholder={
                 state.status === 'loading'
-                  ? 'Loading…'
-                  : `Select ${field.label.toLowerCase()}`
+                  ? t('crud.loading', 'Loading…')
+                  : t('crud.select.placeholder', 'Select {label}', {
+                      label: field.label.toLowerCase(),
+                    })
               }
             />
           </SelectTrigger>
@@ -365,6 +396,10 @@ interface CrudFormDialogProps {
  * Generic create/edit dialog built from derived schema fields. The parent
  * remounts it via `key` on each open, so plain useState defaults reset
  * without a synchronous setState in an effect.
+ *
+ * `title`, `description`, `submitLabel` and `busyLabel` are the CALLER's
+ * strings and are never keyed here — the caller owns their wording (and keys
+ * them itself where they are ours).
  */
 function CrudFormDialog({
   title,
@@ -377,6 +412,7 @@ function CrudFormDialog({
   busyLabel,
   onSubmit,
 }: CrudFormDialogProps) {
+  const t = useTranslation('plugin');
   const [values, setValues] = useState<FormValues>(() =>
     initialFormValues(fields, initialRow)
   );
@@ -388,7 +424,7 @@ function CrudFormDialog({
   };
 
   const handleSubmit = async () => {
-    const validationErrors = validateFormValues(fields, values);
+    const validationErrors = validateFormValues(fields, values, t);
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
       return;
@@ -413,7 +449,7 @@ function CrudFormDialog({
         <div className="space-y-4 py-2">
           {fields.length === 0 && (
             <p className="text-sm text-muted-foreground">
-              This action takes no input.
+              {t('crud.form.empty', 'This action takes no input.')}
             </p>
           )}
           {fields.map((field) => {
@@ -495,7 +531,11 @@ function CrudFormDialog({
                       className="w-full"
                       aria-invalid={error !== undefined}
                     >
-                      <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
+                      <SelectValue
+                        placeholder={t('crud.select.placeholder', 'Select {label}', {
+                          label: field.label.toLowerCase(),
+                        })}
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       {(field.options ?? []).map((option) => (
@@ -537,7 +577,7 @@ function CrudFormDialog({
             onClick={() => onOpenChange(false)}
             disabled={isSubmitting}
           >
-            Cancel
+            {t('crud.dialog.cancel', 'Cancel')}
           </Button>
           <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
             {isSubmitting ? busyLabel : submitLabel}
@@ -566,6 +606,7 @@ function CrudDeleteDialog({
   onOpenChange,
   onConfirm,
 }: CrudDeleteDialogProps) {
+  const t = useTranslation('plugin');
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleConfirm = async () => {
@@ -581,10 +622,16 @@ function CrudDeleteDialog({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete {resourceLabel}</DialogTitle>
+          {/* `resourceLabel` is the caller's (plugin-supplied) noun; the
+              sentence around it is ours, so it stays one unit with a hole. */}
+          <DialogTitle>
+            {t('crud.delete.title', 'Delete {resource}', { resource: resourceLabel })}
+          </DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete this item? This action cannot be
-            undone.
+            {t(
+              'crud.delete.description',
+              'Are you sure you want to delete this item? This action cannot be undone.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -603,7 +650,7 @@ function CrudDeleteDialog({
             onClick={() => onOpenChange(false)}
             disabled={isDeleting}
           >
-            Cancel
+            {t('crud.dialog.cancel', 'Cancel')}
           </Button>
           <Button
             type="button"
@@ -611,7 +658,9 @@ function CrudDeleteDialog({
             onClick={handleConfirm}
             disabled={isDeleting}
           >
-            {isDeleting ? 'Deleting...' : 'Delete'}
+            {isDeleting
+              ? t('crud.delete.pending', 'Deleting...')
+              : t('crud.delete.submit', 'Delete')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -633,7 +682,19 @@ function CrudDeleteDialog({
 export function CrudScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
   const { dir } = useDirection();
+  const t = useTranslation('plugin');
   const basePath = feature.resource?.basePath ?? null;
+
+  // Resolved at render rather than inside the load effect below. A STRING
+  // dependency is compared by value, so the list is not re-fetched merely
+  // because `t` took a new identity when the bundle arrived — only if the text
+  // itself actually changed (a language switch).
+  const schemaErrorText = t(
+    'crud.error.schema',
+    'Failed to load the API schema for this feature'
+  );
+  const listErrorText = t('crud.error.list', 'Failed to load records');
+  const listShapeErrorText = t('crud.error.listShape', 'Unexpected list response shape');
 
   const [model, setModel] = useState<CrudModel | null>(null);
   const [rows, setRows] = useState<CrudRow[]>([]);
@@ -663,7 +724,7 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
 
         if (spec === null) {
           setModel(null);
-          addToast('Failed to load the API schema for this feature', 'error');
+          addToast(schemaErrorText, 'error');
         } else {
           setModel(deriveCrudModel(spec, basePath));
         }
@@ -676,9 +737,9 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
         setIsForbidden(false);
 
         if (!listResponse.ok) {
-          throw new Error(
-            await readErrorMessage(listResponse, 'Failed to load records')
-          );
+          // The backend's own `{ error }` message wins when present; only our
+          // fallback is keyed.
+          throw new Error(await readErrorMessage(listResponse, listErrorText));
         }
 
         const body: unknown = await listResponse.json();
@@ -687,12 +748,11 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
             ? (body as { data: unknown }).data
             : null;
         if (!Array.isArray(data)) {
-          throw new Error('Unexpected list response shape');
+          throw new Error(listShapeErrorText);
         }
         setRows(toRows(data));
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Failed to load records';
+        const message = error instanceof Error ? error.message : listErrorText;
         addToast(message, 'error');
       } finally {
         setIsLoading(false);
@@ -700,7 +760,14 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     };
 
     void load();
-  }, [basePath, reloadKey, addToast]);
+  }, [
+    basePath,
+    reloadKey,
+    addToast,
+    schemaErrorText,
+    listErrorText,
+    listShapeErrorText,
+  ]);
 
   // Guard: callers only render CrudScreen for crud features with a resource,
   // but a defensive placeholder beats a crash if that invariant slips.
@@ -711,10 +778,15 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
           size={32}
           className="mx-auto mb-3 text-muted-foreground"
         />
-        <h2 className="font-heading text-sm font-medium">No resource</h2>
+        <h2 className="font-heading text-sm font-medium">
+          {t('crud.noResource.title', 'No resource')}
+        </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          The &apos;{feature.id}&apos; feature does not declare a REST resource
-          to render.
+          {t(
+            'crud.noResource.description',
+            "The '{id}' feature does not declare a REST resource to render.",
+            { id: feature.id }
+          )}
         </p>
       </div>
     );
@@ -746,12 +818,12 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     });
     if (!response.ok) {
       addToast(
-        await readErrorMessage(response, 'Failed to create record'),
+        await readErrorMessage(response, t('crud.error.create', 'Failed to create record')),
         'error'
       );
       return false;
     }
-    addToast('Record created successfully', 'success');
+    addToast(t('crud.toast.created', 'Record created successfully'), 'success');
     setIsCreateOpen(false);
     refetch();
     return true;
@@ -773,12 +845,12 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     );
     if (!response.ok) {
       addToast(
-        await readErrorMessage(response, 'Failed to update record'),
+        await readErrorMessage(response, t('crud.error.update', 'Failed to update record')),
         'error'
       );
       return false;
     }
-    addToast('Record updated successfully', 'success');
+    addToast(t('crud.toast.updated', 'Record updated successfully'), 'success');
     setIsEditOpen(false);
     setSelected(null);
     refetch();
@@ -795,19 +867,23 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     );
     if (!response.ok) {
       addToast(
-        await readErrorMessage(response, 'Failed to delete record'),
+        await readErrorMessage(response, t('crud.error.delete', 'Failed to delete record')),
         'error'
       );
       return false;
     }
-    addToast('Record deleted successfully', 'success');
+    addToast(t('crud.toast.deleted', 'Record deleted successfully'), 'success');
     setIsDeleteOpen(false);
     setSelected(null);
     refetch();
     return true;
   };
 
-  const description = `Manage ${feature.label.toLowerCase()} provided by the ${feature.plugin} plugin.`;
+  const description = t(
+    'crud.header.description',
+    'Manage {resource} provided by the {plugin} plugin.',
+    { resource: feature.label.toLowerCase(), plugin: feature.plugin }
+  );
 
   if (isForbidden) {
     return (
@@ -815,8 +891,12 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
         <AdminHeader title={feature.label} description={description} />
         <ErrorState
           icon={<IconShieldLock />}
-          title="Access denied"
-          description={`You need the ${feature.requiredPermission} permission to use this feature.`}
+          title={t('crud.forbidden.title', 'Access denied')}
+          description={t(
+            'crud.forbidden.description',
+            'You need the {permission} permission to use this feature.',
+            { permission: feature.requiredPermission }
+          )}
         />
       </div>
     );
@@ -854,7 +934,7 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
           const displayRow: CrudRow = { ...row };
           for (const key of localizedColumnKeys) {
             const preferred = preferredLocalizedText(toLocalizedTextValue(row[key]), dir);
-            displayRow[key] = preferred ?? 'Untranslated';
+            displayRow[key] = preferred ?? t('crud.localizedText.untranslated', 'Untranslated');
           }
           return displayRow;
         });
@@ -866,7 +946,11 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
           return (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Row actions">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t('crud.rowActions.label', 'Row actions')}
+              >
                 <IconMenu2 />
               </Button>
             </DropdownMenuTrigger>
@@ -878,7 +962,7 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
                     setIsEditOpen(true);
                   }}
                 >
-                  Edit
+                  {t('crud.rowActions.edit', 'Edit')}
                 </DropdownMenuItem>
               )}
               {capabilities.canDelete && (
@@ -889,7 +973,7 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
                     setIsDeleteOpen(true);
                   }}
                 >
-                  Delete
+                  {t('crud.rowActions.delete', 'Delete')}
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -907,7 +991,7 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
           capabilities.canCreate ? (
             <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
               <IconPlus size={18} />
-              Create
+              {t('crud.create.action', 'Create')}
             </Button>
           ) : undefined
         }
@@ -926,11 +1010,13 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
               className="mx-auto mb-3 text-muted-foreground"
             />
             <h2 className="font-heading text-sm font-medium">
-              Schema unavailable
+              {t('crud.schemaUnavailable.title', 'Schema unavailable')}
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              The API schema for this feature could not be loaded, so the
-              screen cannot be rendered.
+              {t(
+                'crud.schemaUnavailable.description',
+                'The API schema for this feature could not be loaded, so the screen cannot be rendered.'
+              )}
             </p>
           </div>
         )
@@ -941,10 +1027,10 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
           rowActions={rowActions}
           isLoading={isLoading}
           emptyState={{
-            title: 'No records yet',
+            title: t('crud.empty.title', 'No records yet'),
             description: capabilities.canCreate
-              ? 'Create the first record to get started.'
-              : 'Nothing to show for this feature yet.',
+              ? t('crud.empty.description.canCreate', 'Create the first record to get started.')
+              : t('crud.empty.description', 'Nothing to show for this feature yet.'),
           }}
         />
       )}
@@ -954,14 +1040,16 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
           // Remount on each open so the form resets to its defaults without a
           // synchronous setState in an effect.
           key={isCreateOpen ? 'create-open' : 'create-closed'}
-          title={`Create ${feature.label}`}
-          description={`Add a new record via the ${feature.plugin} plugin.`}
+          title={t('crud.create.title', 'Create {resource}', { resource: feature.label })}
+          description={t('crud.create.description', 'Add a new record via the {plugin} plugin.', {
+            plugin: feature.plugin,
+          })}
           fields={model.createFields}
           initialRow={null}
           isOpen={isCreateOpen}
           onOpenChange={setIsCreateOpen}
-          submitLabel="Create"
-          busyLabel="Creating..."
+          submitLabel={t('crud.create.action', 'Create')}
+          busyLabel={t('crud.create.pending', 'Creating...')}
           onSubmit={handleCreate}
         />
       )}
@@ -969,8 +1057,10 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
       {model !== null && selected !== null && (
         <CrudFormDialog
           key={`edit-${String(selected.id)}-${isEditOpen ? 'open' : 'closed'}`}
-          title={`Edit ${feature.label}`}
-          description={`Update ${rowTitle(selected)}.`}
+          title={t('crud.edit.title', 'Edit {resource}', { resource: feature.label })}
+          description={t('crud.edit.description', 'Update {item}.', {
+            item: rowTitle(selected),
+          })}
           fields={model.editFields}
           initialRow={selected}
           isOpen={isEditOpen}
@@ -980,8 +1070,8 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
               setSelected(null);
             }
           }}
-          submitLabel="Save changes"
-          busyLabel="Saving..."
+          submitLabel={t('crud.edit.submit', 'Save changes')}
+          busyLabel={t('crud.edit.pending', 'Saving...')}
           onSubmit={handleEdit}
         />
       )}

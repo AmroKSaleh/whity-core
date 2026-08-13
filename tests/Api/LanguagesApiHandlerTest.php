@@ -13,6 +13,10 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
+use Whity\Core\Settings\GlobalSettingsRepository;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
+use Whity\Core\Settings\TenantSettingsRepository;
 use Whity\Core\i18n\LanguageRegistry;
 use Whity\Core\i18n\LanguageRepository;
 use Whity\Core\i18n\TranslationRepository;
@@ -37,6 +41,7 @@ final class LanguagesApiHandlerTest extends TestCase
     private LanguagesApiHandler $handler;
     private LanguageRegistry $languageRegistry;
     private LanguageRepository $languageRepository;
+    private SettingsService $settings;
     private int $testProfileId;
 
     protected function setUp(): void
@@ -58,7 +63,21 @@ final class LanguagesApiHandlerTest extends TestCase
         $this->languageRegistry->boot();
 
         $roleChecker = new RoleChecker(I18nAdminTestSeed::wrap($this->pdo), new PermissionRegistry());
-        $this->handler = new LanguagesApiHandler($this->pdo, $this->languageRegistry, $this->languageRepository, $roleChecker);
+        // Real settings service over the real tables: the i18n master switch is
+        // read from the GLOBAL layer per request, so the tests below flip it by
+        // writing the setting an operator would write, not by stubbing a
+        // boolean past the resolution chain.
+        $this->settings = new SettingsService(
+            new GlobalSettingsRepository($this->pdo),
+            new TenantSettingsRepository($this->pdo)
+        );
+        $this->handler = new LanguagesApiHandler(
+            $this->pdo,
+            $this->languageRegistry,
+            $this->languageRepository,
+            $roleChecker,
+            $this->settings
+        );
 
         // Create a test profile for authenticated tests
         $this->testProfileId = $this->createTestProfile();
@@ -427,7 +446,295 @@ final class LanguagesApiHandlerTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
     }
 
+    // ============ direction as a property of the LANGUAGE (migration 090) ============
+
+    /**
+     * The seeded base languages carry their own direction, and the PUBLIC list
+     * serves it — this is what the client sets <html dir> from, so the switcher
+     * changing the language is also what changes the direction.
+     */
+    public function testPublicLanguageListCarriesEachLanguagesDirection(): void
+    {
+        $response = $this->handler->list(new Request('GET', '/api/languages'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $byCode = [];
+        foreach (json_decode($response->getBody(), true)['languages'] as $language) {
+            $byCode[$language['code']] = $language;
+        }
+
+        $this->assertSame('ltr', $byCode['en']['direction'], 'English is left-to-right.');
+        $this->assertSame('rtl', $byCode['ar']['direction'], 'Arabic is right-to-left.');
+    }
+
+    /**
+     * The per-user settings payload carries direction too, so a client that
+     * only calls the authenticated endpoint still resolves a direction.
+     */
+    public function testLanguageSettingsPayloadCarriesDirection(): void
+    {
+        $request = new Request('GET', '/api/settings/language');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->getLanguage($request);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $directions = array_column(
+            json_decode($response->getBody(), true)['available_languages'],
+            'direction',
+            'code'
+        );
+        $this->assertSame('rtl', $directions['ar']);
+        $this->assertSame('ltr', $directions['en']);
+    }
+
+    /**
+     * THE POINT OF THE COLUMN: a THIRD right-to-left language is DATA. Creating
+     * Hebrew through the admin API with direction 'rtl' makes the interface
+     * mirror for it — no branch anywhere tests the code 'he', or 'ar' for that
+     * matter.
+     */
+    public function testANewRightToLeftLanguageNeedsNoCodeChange(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode([
+            'code' => 'he',
+            'name' => 'עברית',
+            'direction' => 'rtl',
+        ]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+        $this->assertSame('rtl', json_decode($response->getBody(), true)['data']['direction']);
+
+        // And it reaches the public list the client actually reads.
+        $this->languageRegistry->invalidateCache();
+        $listed = array_column(
+            json_decode($this->handler->list(new Request('GET', '/api/languages'))->getBody(), true)['languages'],
+            'direction',
+            'code'
+        );
+        $this->assertSame('rtl', $listed['he']);
+    }
+
+    public function testCreateLanguageDefaultsToLeftToRightWhenDirectionOmitted(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode(['code' => 'fr', 'name' => 'Français']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame('ltr', json_decode($response->getBody(), true)['data']['direction']);
+    }
+
+    /**
+     * A typo'd direction is REFUSED rather than coerced: silently handing an
+     * admin a left-to-right interface for a right-to-left language is worse
+     * than a 422 they can act on.
+     */
+    public function testCreateLanguageRejectsAnUnsupportedDirection(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode([
+            'code' => 'fa',
+            'name' => 'فارسی',
+            'direction' => 'rlt',
+        ]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertNull($this->languageRepository->findByCode('fa'), 'Nothing is written on a rejected direction.');
+    }
+
+    public function testUpdateLanguageChangesDirection(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $english = $this->languageRepository->findByCode('en');
+        self::assertNotNull($english);
+
+        $request = new Request('PATCH', '/api/languages/' . $english->id, [], (string) json_encode(['direction' => 'rtl']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->update($request, ['id' => (string) $english->id]);
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $this->assertSame('rtl', json_decode($response->getBody(), true)['data']['direction']);
+        $this->assertSame('rtl', $this->languageRepository->findByCode('en')?->direction);
+    }
+
+    public function testUpdateLanguageRejectsAnUnsupportedDirection(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $arabic = $this->languageRepository->findByCode('ar');
+        self::assertNotNull($arabic);
+
+        $request = new Request('PATCH', '/api/languages/' . $arabic->id, [], (string) json_encode(['direction' => 'sideways']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->update($request, ['id' => (string) $arabic->id]);
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('rtl', $this->languageRepository->findByCode('ar')?->direction, 'Unchanged.');
+    }
+
+    // ============ the i18n feature flag (WC-i18n-feature-flag) ============
+
+    /**
+     * With i18n off the API reports the EFFECTIVE preference — the default
+     * language — for a profile that has explicitly chosen Arabic. That is what
+     * makes a client render English left-to-right without having to know about
+     * the flag at all.
+     */
+    public function testLanguageSettingsReportTheDefaultWhileI18nIsDisabled(): void
+    {
+        $this->setUserLanguage($this->testProfileId, 'ar');
+        $this->disableI18n();
+
+        $request = new Request('GET', '/api/settings/language');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $body = json_decode($this->handler->getLanguage($request)->getBody(), true);
+
+        $this->assertNull($body['language_code'], 'No preference is in force while i18n is off.');
+        $this->assertFalse($body['i18n_enabled']);
+    }
+
+    /**
+     * THE PROPERTY THE FLAG RESTS ON: disabling is not a data migration. The
+     * stored column is untouched throughout, and the API reports the user's own
+     * language again the moment the operator switches the feature back on.
+     */
+    public function testDisablingI18nDestroysNothingAndReEnablingRestoresThePreference(): void
+    {
+        $this->setUserLanguage($this->testProfileId, 'ar');
+
+        $this->disableI18n();
+        $request = new Request('GET', '/api/settings/language');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+        $this->handler->getLanguage($request);
+
+        // Read the COLUMN, not the payload: what matters is that the row still
+        // holds the user's choice while the feature is off.
+        $this->assertSame('ar', $this->storedLanguageFor($this->testProfileId));
+
+        $this->settings->setGlobal(SettingsRegistry::I18N_ENABLED, 'true');
+
+        $restored = json_decode($this->handler->getLanguage($request)->getBody(), true);
+        $this->assertSame('ar', $restored['language_code']);
+        $this->assertTrue($restored['i18n_enabled']);
+    }
+
+    /**
+     * A write the instance would not honour is REFUSED, not silently accepted.
+     * Accepting it would be the worst of both worlds: a preference that appears
+     * to save and never takes effect — and, since the switcher is gone, one the
+     * user could not undo.
+     */
+    public function testPatchIsRefusedWhileI18nIsDisabled(): void
+    {
+        $this->setUserLanguage($this->testProfileId, 'ar');
+        $this->disableI18n();
+
+        $request = new Request('PATCH', '/api/settings/language', [], (string) json_encode(['language_code' => 'en']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->patchLanguage($request);
+
+        $this->assertSame(503, $response->getStatusCode());
+        $this->assertStringContainsString('disabled', (string) $response->getBody());
+        // And the refusal is what protects the stored value: nothing was written.
+        $this->assertSame('ar', $this->storedLanguageFor($this->testProfileId));
+    }
+
+    /**
+     * Even the null-clearing form is refused. `{"language_code": null}` is the
+     * one request that would DESTROY a stored preference, so it is precisely
+     * the one that must not slip through while the feature is off.
+     */
+    public function testPatchCannotClearAStoredPreferenceWhileI18nIsDisabled(): void
+    {
+        $this->setUserLanguage($this->testProfileId, 'ar');
+        $this->disableI18n();
+
+        $request = new Request('PATCH', '/api/settings/language', [], (string) json_encode(['language_code' => null]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $this->assertSame(503, $this->handler->patchLanguage($request)->getStatusCode());
+        $this->assertSame('ar', $this->storedLanguageFor($this->testProfileId));
+    }
+
+    /**
+     * The CATALOGUE is not narrowed. The admin translations screen reads this
+     * public list to prepare a language before the operator switches i18n on —
+     * which is the entire reason for having a flag rather than a code branch —
+     * and it cannot use the system-tenant-only admin listing because it is open
+     * to any tenant holding `translations:manage`.
+     */
+    public function testThePublicCatalogueStillListsEveryLanguageWhileDisabled(): void
+    {
+        $this->disableI18n();
+
+        $body = json_decode($this->handler->list(new Request('GET', '/api/languages'))->getBody(), true);
+
+        $this->assertFalse($body['i18n_enabled'], 'The flag is what a client reads, not the list length.');
+        $this->assertContains('ar', array_column($body['languages'], 'code'));
+    }
+
+    public function testThePublicCatalogueReportsI18nEnabledByDefault(): void
+    {
+        $body = json_decode($this->handler->list(new Request('GET', '/api/languages'))->getBody(), true);
+
+        $this->assertTrue(
+            $body['i18n_enabled'],
+            'A fresh instance ships with i18n ON; an upgrade must not switch a live feature off.'
+        );
+    }
+
+    /**
+     * Admin management stays fully functional with the feature off — otherwise
+     * an operator could never prepare the languages they intend to enable.
+     */
+    public function testAdminLanguageManagementStillWorksWhileI18nIsDisabled(): void
+    {
+        $this->disableI18n();
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+
+        $request = new Request('POST', '/api/languages', [], (string) json_encode([
+            'code' => 'he',
+            'name' => 'עברית',
+            'direction' => 'rtl',
+        ]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+        $this->assertSame('rtl', $this->languageRepository->findByCode('he')?->direction);
+    }
+
     // Helper methods
+
+    /** Switch the instance's i18n master switch off, as an operator would. */
+    private function disableI18n(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::I18N_ENABLED, 'false');
+    }
+
+    /** The language actually stored on the profile row. */
+    private function storedLanguageFor(int $profileId): ?string
+    {
+        $stmt = $this->pdo->prepare('SELECT language_code FROM profiles WHERE id = ?');
+        $stmt->execute([$profileId]);
+        $stored = $stmt->fetchColumn();
+
+        return is_string($stored) ? $stored : null;
+    }
 
     /**
      * Grant a permission to $profileId via a fresh role + active membership in
@@ -436,6 +743,15 @@ final class LanguagesApiHandlerTest extends TestCase
      */
     private function grantPermission(int $profileId, int $tenantId, string $permission): void
     {
+        // The tenant has to EXIST before a role can point at it. Only the system
+        // tenant (id 0) comes out of the migrations, so a grant in tenant 1 was
+        // writing a role whose `tenant_id` referenced nothing — accepted by
+        // SQLite, which does not enforce foreign keys unless asked to, and
+        // rejected outright by PostgreSQL (`roles_tenant_id_fkey`). The fixture
+        // was building a row production could never hold.
+        $this->pdo->prepare('INSERT OR IGNORE INTO tenants (id, name) VALUES (?, ?)')
+            ->execute([$tenantId, 'lang-test-tenant-' . $tenantId]);
+
         $roleId = 90000 + $profileId;
         $this->pdo->prepare(
             'INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES (?, ?, ?, ?, NOW())'

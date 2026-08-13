@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -24,19 +24,30 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import type { Tenant } from './page';
 
 // Slug validation: lowercase, hyphens, no spaces or special chars
 const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-const editTenantSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  slug: z.string()
-    .min(1, 'Slug is required')
-    .regex(slugRegex, 'Slug must contain only lowercase letters, numbers, and hyphens'),
-});
+// Built from `t` rather than declared at module scope: a validation message is
+// user-facing text like any other, and a schema frozen at import time would
+// always speak English.
+const buildEditTenantSchema = (t: TranslateFn) =>
+  z.object({
+    name: z.string().min(1, t('tenants.edit.validation.nameRequired', 'Name is required')),
+    slug: z.string()
+      .min(1, t('tenants.edit.validation.slugRequired', 'Slug is required'))
+      .regex(
+        slugRegex,
+        t(
+          'tenants.edit.validation.slugFormat',
+          'Slug must contain only lowercase letters, numbers, and hyphens'
+        )
+      ),
+  });
 
-type EditTenantFormData = z.infer<typeof editTenantSchema>;
+type EditTenantFormData = z.infer<ReturnType<typeof buildEditTenantSchema>>;
 
 interface EditTenantModalProps {
   isOpen: boolean;
@@ -53,10 +64,12 @@ export function EditTenantModal({
 }: EditTenantModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const schema = useMemo(() => buildEditTenantSchema(t), [t]);
   const form = useForm<EditTenantFormData>({
-    resolver: zodResolver(editTenantSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
       name: tenant.name || '',
       slug: tenant.slug || '',

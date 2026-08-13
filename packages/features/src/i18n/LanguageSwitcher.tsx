@@ -6,6 +6,14 @@
  * Renders a button/dropdown that allows users to switch between available languages.
  * Automatically updates the app language and persists the preference to the server.
  *
+ * RENDERS NOTHING when the operator has switched i18n off (`i18n.enabled`).
+ * That check lives here, in the component itself, rather than only at each call
+ * site: "removes the buttons to remove confusion" has to hold for EVERY place
+ * the switcher is mounted, including ones added later, and a call site that
+ * forgets to ask would put the affordance back. Chrome that wraps the switcher
+ * in its own frame (an icon, a bordered row) should ALSO call `useI18nEnabled`,
+ * so an empty box does not survive the switcher inside it.
+ *
  * Usage:
  *   <LanguageSwitcher />
  *
@@ -15,6 +23,7 @@
 
 import { useState, useCallback } from 'react'
 import { useCurrentLanguage } from './useCurrentLanguage'
+import { useI18nEnabled } from './useI18nEnabled'
 
 export interface LanguageSwitcherProps {
   variant?: 'buttons' | 'dropdown'
@@ -36,6 +45,7 @@ export function LanguageSwitcher({
 }: LanguageSwitcherProps) {
   const { currentLanguage, availableLanguages, isLoading, error, setLanguage } =
     useCurrentLanguage()
+  const i18nEnabled = useI18nEnabled()
   const [isSwitching, setIsSwitching] = useState(false)
 
   const handleLanguageChange = useCallback(
@@ -55,6 +65,12 @@ export function LanguageSwitcher({
     },
     [currentLanguage, isSwitching, setLanguage]
   )
+
+  // i18n off: no control, and no placeholder either — not a disabled select, not
+  // a "single language" note. There is nothing for a user to decide.
+  if (!i18nEnabled) {
+    return null
+  }
 
   if (isLoading) {
     return <div className={`language-switcher loading ${className}`}>Loading...</div>

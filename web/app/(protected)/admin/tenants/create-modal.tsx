@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -24,18 +24,29 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 
 // Slug validation: lowercase, hyphens, no spaces or special chars
 const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-const createTenantSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  slug: z.string()
-    .min(1, 'Slug is required')
-    .regex(slugRegex, 'Slug must contain only lowercase letters, numbers, and hyphens'),
-});
+// Built from `t` rather than declared at module scope: a validation message is
+// user-facing text like any other, and a schema frozen at import time would
+// always speak English.
+const buildCreateTenantSchema = (t: TranslateFn) =>
+  z.object({
+    name: z.string().min(1, t('tenants.create.validation.nameRequired', 'Name is required')),
+    slug: z.string()
+      .min(1, t('tenants.create.validation.slugRequired', 'Slug is required'))
+      .regex(
+        slugRegex,
+        t(
+          'tenants.create.validation.slugFormat',
+          'Slug must contain only lowercase letters, numbers, and hyphens'
+        )
+      ),
+  });
 
-type CreateTenantFormData = z.infer<typeof createTenantSchema>;
+type CreateTenantFormData = z.infer<ReturnType<typeof buildCreateTenantSchema>>;
 
 interface CreateTenantModalProps {
   isOpen: boolean;
@@ -60,10 +71,12 @@ export function CreateTenantModal({
 }: CreateTenantModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const schema = useMemo(() => buildCreateTenantSchema(t), [t]);
   const form = useForm<CreateTenantFormData>({
-    resolver: zodResolver(createTenantSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
       name: '',
       slug: '',
@@ -93,16 +106,18 @@ export function CreateTenantModal({
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
-          errorData.message || 'Failed to create tenant'
+          errorData.message || t('tenants.create.error', 'Failed to create tenant')
         );
       }
 
-      addToast('Tenant created successfully', 'success');
+      addToast(t('tenants.create.success', 'Tenant created successfully'), 'success');
       form.reset();
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to create tenant';
+        error instanceof Error
+          ? error.message
+          : t('tenants.create.error', 'Failed to create tenant');
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
@@ -113,9 +128,12 @@ export function CreateTenantModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create New Tenant</DialogTitle>
+          <DialogTitle>{t('tenants.create.title', 'Create New Tenant')}</DialogTitle>
           <DialogDescription>
-            Add a new tenant to your system. The slug is auto-generated but can be customized.
+            {t(
+              'tenants.create.description',
+              'Add a new tenant to your system. The slug is auto-generated but can be customized.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -126,10 +144,10 @@ export function CreateTenantModal({
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Name</FormLabel>
+                  <FormLabel>{t('tenants.create.name.label', 'Name')}</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="My Company"
+                      placeholder={t('tenants.create.name.placeholder', 'My Company')}
                       {...field}
                       onChange={(e) => handleNameChange(e.target.value)}
                     />
@@ -144,15 +162,18 @@ export function CreateTenantModal({
               name="slug"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Slug</FormLabel>
+                  <FormLabel>{t('tenants.create.slug.label', 'Slug')}</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="my-company"
+                      placeholder={t('tenants.create.slug.placeholder', 'my-company')}
                       {...field}
                     />
                   </FormControl>
                   <p className="text-xs text-muted-foreground">
-                    Auto-generated from name, but you can customize it
+                    {t(
+                      'tenants.create.slug.hint',
+                      'Auto-generated from name, but you can customize it'
+                    )}
                   </p>
                   <FormMessage />
                 </FormItem>
@@ -165,10 +186,12 @@ export function CreateTenantModal({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
               >
-                Cancel
+                {t('tenants.create.cancel', 'Cancel')}
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Creating...' : 'Create Tenant'}
+                {isSubmitting
+                  ? t('tenants.create.submitting', 'Creating...')
+                  : t('tenants.create.submit', 'Create Tenant')}
               </Button>
             </DialogFooter>
           </form>

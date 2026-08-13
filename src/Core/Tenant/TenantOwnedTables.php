@@ -190,6 +190,27 @@ final class TenantOwnedTables
         // read/write binds tenant_id so a tenant only sees/edits its own sender.
         'tenant_notification_settings' => '073_create_tenant_notification_settings.php',
 
+        // WC-723 Door 2 — where a trashed record's PRIOR lifecycle state waits
+        // for its restore (migration 089), keyed (tenant_id, data_type,
+        // record_id). Core-owned on purpose: a restore that returns a record to
+        // the state it actually held must not require every plugin to add a
+        // column. `record_id` can carry no FK (the target table varies by data
+        // type), so LifecycleStateMemory forgets the row on a hard delete
+        // itself. Every read/write binds tenant_id — the key includes a foreign
+        // tenant's record ids, so an unscoped lookup would read across tenants.
+        'data_type_restore_states' => '089_create_data_type_restore_states.php',
+
+        // The host-owned counters behind Whity\Sdk\Sql\SequenceAllocator
+        // (migration 092), keyed (tenant_id, name). Core-owned so a plugin that
+        // needs uniquely numbered records ships no table and writes no SQL, and
+        // so the read-then-write allocation race is impossible in ONE place
+        // rather than avoidable in N. tenant_id is a real column with a real
+        // cascade precisely so this guard polices it: one tenant's `invoice`
+        // counter must not be advanceable by naming it from another tenant.
+        // A platform-wide counter is the system tenant's (id 0) counter, which
+        // keeps one storage shape rather than a second, unpoliceable global one.
+        'sequence_counters' => '092_create_sequence_counters.php',
+
         // WC-i18n — per-tenant translation overrides (migration 081).
         // Translations are global-scoped (tenant_id NULL = system defaults) but
         // also support tenant-specific overrides (tenant_id > 0). Every query

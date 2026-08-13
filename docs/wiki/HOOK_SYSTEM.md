@@ -132,6 +132,8 @@ These events are dispatched by the current core code (verify in source before re
 | `role.updating` / `role.updated` | `RolesApiHandler::update()` | Filter before / notify after update. |
 | `role.deleting` / `role.deleted` | `RolesApiHandler::delete()` | Filter before / notify after delete. |
 | `role.deleted.async` | `RolesApiHandler::delete()` | Queued async after delete. |
+| `datatype.lifecycle.changing` | `DataTypeLifecycleService` | **Vetoable.** Fires before the write for `trash`/`restore`/`retire`/`delete` on a plugin-declared data type. See [Plugin-Data-Types](Plugin-Data-Types.md#refusing-a-transition-datatypelifecyclechanging). |
+| `datatype.lifecycle.changed` | `DataTypeLifecycleService` | Observation only, after a transition that actually committed. Same payload. |
 
 `UsersApiHandler`, `TenantsApiHandler`, and `OusApiHandler` are also constructed with the `HookManager`, so check those handlers for the exact `user.*` / `tenant.*` / `ou.*` events they emit; treat any event not in the table above as something to confirm in source rather than assume.
 
@@ -164,7 +166,7 @@ Throw `HookVetoException` from either hook to refuse the deletion deliberately; 
 3. **Keep payloads scalar** — pass ids/strings, not live model objects, so listeners can't mutate shared object state and escape the chain.
 4. **No request state in statics** — workers persist; never accumulate per-request state in a static variable inside a listener.
 5. **Fail loudly in validators** — throwing in a sync `*.creating`/`*.updating` listener is fine; the plugin error boundary will catch a plugin listener's throw, log it, and leave the data unchanged (and count it toward the plugin's failure threshold).
-6. **Veto with `HookVetoException`, not a bare throw** — on the deletion paths it is the only Throwable that reaches the caller as a clean 409 with your reason; anything else is a generic 500. Write `reason()` for a human administrator, never as raw internal error text — it is shown to the client.
+6. **Veto with `HookVetoException`, not a bare throw** — on the deletion paths and on `datatype.lifecycle.changing` it is the only Throwable that reaches the caller as a clean 409 with your reason; anything else is a generic 500 (deletion) or is swallowed while the transition proceeds (data-type lifecycle). Write `reason()` for a human administrator, never as raw internal error text — it is shown to the client. A veto never counts toward the plugin failure breaker.
 
 ## Summary
 

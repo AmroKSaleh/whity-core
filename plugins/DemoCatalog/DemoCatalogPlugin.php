@@ -6,9 +6,11 @@ namespace DemoCatalog;
 
 use DemoCatalog\Api\DemoCatalogApiHandler;
 use DemoCatalog\Migrations\AddSyncColumnsToDemoCatalogItems;
+use DemoCatalog\Migrations\CreateDemoCatalogItemLinesTable;
 use DemoCatalog\Migrations\CreateDemoCatalogItemNotesTable;
 use DemoCatalog\Migrations\CreateDemoCatalogItemsTable;
 use DemoCatalog\Migrations\GrantDemoCatalogPermissionsToAdmin;
+use DemoCatalog\Migrations\RetireDemoCatalogChangeSeqTable;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
@@ -16,6 +18,7 @@ use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
+use Whity\Sdk\Settings\PluginSettingsInterface;
 use Whity\Sdk\Tenant\PluginTablesInterface;
 
 /**
@@ -54,7 +57,8 @@ final class DemoCatalogPlugin implements
     PluginFrontendInterface,
     PluginResourceTypesInterface,
     PluginTablesInterface,
-    PluginDataTypesInterface
+    PluginDataTypesInterface,
+    PluginSettingsInterface
 {
     /**
      * @inheritDoc
@@ -302,6 +306,60 @@ final class DemoCatalogPlugin implements
     }
 
     /**
+     * The settings this plugin owns (#713 item 1).
+     *
+     * Declared as BARE keys; the host namespaces them under this plugin's name,
+     * so `sync_page_size` is stored as `democatalog:sync_page_size` in CORE'S
+     * `app_settings` / `tenant_settings` tables and resolves through core's own
+     * per-tenant ?? global ?? declared-default chain. There is no plugin-private
+     * settings table, and there is no migration: an undisturbed key simply
+     * resolves to the default below.
+     *
+     * The three keys illustrate the three decisions a declaration makes:
+     *
+     *  - `sync_page_size` is a bounded int an operator legitimately tunes per
+     *    tenant, so it is admin-visible and NOT global-only.
+     *  - `sync_mode` is an enum whose options core enforces on every write; a
+     *    value outside them is a 422, not a row.
+     *  - `last_sync_cursor` is this plugin's own bookkeeping. It opts OUT of the
+     *    admin surface (no `admin => true`): it is stored, resolved and
+     *    validated exactly like the other two, but it has no business on a
+     *    screen gated by core's settings permissions, and an operator editing it
+     *    by hand would only corrupt a sync.
+     *
+     * @inheritDoc
+     */
+    public function getSettings(): array
+    {
+        return [
+            'sync_page_size' => [
+                'type' => 'int',
+                'default' => 100,
+                'min' => 1,
+                'max' => 1000,
+                'label' => ['en' => 'Sync page size', 'ar' => 'حجم صفحة المزامنة'],
+                'description' => 'How many catalogue items the changes feed returns per page.',
+                'admin' => true,
+            ],
+            'sync_mode' => [
+                'type' => 'enum',
+                'options' => ['off', 'incremental', 'full'],
+                'default' => 'incremental',
+                'label' => ['en' => 'Sync mode', 'ar' => 'وضع المزامنة'],
+                'description' => 'Whether clients sync nothing, only changes, or the whole catalogue.',
+                'admin' => true,
+            ],
+            'last_sync_cursor' => [
+                'type' => 'string',
+                'default' => '',
+                'max_length' => 64,
+                'label' => ['en' => 'Last sync cursor'],
+                'description' => 'Internal bookkeeping; managed by the plugin, not by an operator.',
+            ],
+        ];
+    }
+
+    /**
      * The resource types this plugin owns (WC-712 §2).
      *
      * Declared as the BARE slug. The host namespaces it under this plugin's
@@ -327,10 +385,11 @@ final class DemoCatalogPlugin implements
      * says which tables, never who said so — and refuses anything core or an
      * earlier plugin already claimed.
      *
-     * `demo_catalog_change_seq` is deliberately GLOBAL: it is a one-row
-     * monotonic counter with no tenant column, so no tenant predicate could be
-     * bound to it. Declaring that honestly is what stops a data type or a guard
-     * ever being built over it.
+     * This list used to include `demo_catalog_change_seq`, a one-row monotonic
+     * counter declared GLOBAL because it had no tenant column and no tenant
+     * predicate could be bound to it. The change-feed cursor now comes from the
+     * host's allocator, so the table is gone — and with it the one table here
+     * that no isolation guard could say anything useful about.
      *
      * @inheritDoc
      */
@@ -339,7 +398,7 @@ final class DemoCatalogPlugin implements
         return [
             'demo_catalog_items' => self::SCOPE_TENANT,
             'demo_catalog_item_notes' => self::SCOPE_TENANT,
-            'demo_catalog_change_seq' => self::SCOPE_GLOBAL,
+            'demo_catalog_item_lines' => self::SCOPE_TENANT,
         ];
     }
 
@@ -348,7 +407,7 @@ final class DemoCatalogPlugin implements
      * (WC-723).
      *
      * One bare slug, `item`, which the host namespaces to `democatalog:item`.
-     * The declaration hands core exactly three things and nothing more:
+     * The declaration hands core exactly four things and nothing more:
      *
      *  - WHERE the record lives (`demo_catalog_items`, keyed by `id`, scoped by
      *    `tenant_id`);
@@ -356,10 +415,23 @@ final class DemoCatalogPlugin implements
      *    removal, `retired` is a finished item that other rows still resolve
      *    against, and the two are not the same thing;
      *  - WHICH rows still point at it (`demo_catalog_item_notes.item_id`), and
-     *    what to CALL them when refusing a delete ("catalogue notes").
+     *    what to CALL them when refusing a delete ("catalogue notes");
+     *  - WHICH rows are PART of it (`demo_catalog_item_lines.item_id`), so a
+     *    delete takes them with it instead of leaving them pointing at an id
+     *    that no longer resolves.
+     *
+     * The last two are the halves an adopter has to see together. The two tables
+     * are shaped identically and are handled in opposite ways: a note must
+     * outlive the item and refuses the delete while it exists; a line is part of
+     * the item and dies with it. Nothing in the schema says which is which —
+     * there are no foreign keys here, by convention — so both are declared, and
+     * a table may not appear in both lists.
      *
      * `ignore_when` says a note that is itself trashed does not keep its item
-     * alive — without it a trashed child would pin its parent forever.
+     * alive — without it a trashed child would pin its parent forever. It has no
+     * counterpart on `cascade_delete` and is refused there: a cascade that
+     * skipped some of the rows it owns would orphan exactly what it exists to
+     * remove.
      *
      * Note on the sync tombstone: `deleted_at` remains the offline-sync
      * transport's own concern (it is how a deletion propagates to a client) and
@@ -395,6 +467,14 @@ final class DemoCatalogPlugin implements
                         'ignore_when' => ['status' => ['trashed']],
                     ],
                 ],
+                'cascade_delete' => [
+                    [
+                        'table' => 'demo_catalog_item_lines',
+                        'column' => 'item_id',
+                        'label' => 'line items',
+                        'tenant_column' => 'tenant_id',
+                    ],
+                ],
                 'permissions' => [
                     'read' => 'demo_catalog:view',
                     'trash' => 'demo_catalog:manage',
@@ -426,6 +506,8 @@ final class DemoCatalogPlugin implements
             AddSyncColumnsToDemoCatalogItems::class,
             GrantDemoCatalogPermissionsToAdmin::class,
             CreateDemoCatalogItemNotesTable::class,
+            CreateDemoCatalogItemLinesTable::class,
+            RetireDemoCatalogChangeSeqTable::class,
         ];
     }
 
@@ -500,7 +582,28 @@ final class DemoCatalogPlugin implements
      */
     private function handler(): DemoCatalogApiHandler
     {
-        return new DemoCatalogApiHandler($this->resolvePdo());
+        return new DemoCatalogApiHandler($this->resolvePdo(), $this->resolveSequences());
+    }
+
+    /**
+     * Resolve the host's sequence allocator from the service container.
+     *
+     * Named by its SDK INTERFACE, never by the host class implementing it: that
+     * is what lets an out-of-repo plugin depend on `whity/plugin-sdk` alone and
+     * still get correctly-allocated numbers.
+     */
+    private function resolveSequences(): \Whity\Sdk\Sql\SequenceAllocator
+    {
+        $sequences = \Whity\app(\Whity\Sdk\Sql\SequenceAllocator::class);
+        if (!$sequences instanceof \Whity\Sdk\Sql\SequenceAllocator) {
+            throw new \RuntimeException(
+                'Host did not provide a Whity\Sdk\Sql\SequenceAllocator. Without it a '
+                . 'change-feed cursor would have to be allocated by hand, which is the '
+                . 'read-then-write race this plugin stopped shipping.'
+            );
+        }
+
+        return $sequences;
     }
 
     /**

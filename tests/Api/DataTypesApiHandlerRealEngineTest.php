@@ -11,11 +11,17 @@ use Whity\Api\DataTypesApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\DataType\DataTypeLifecycleService;
 use Whity\Core\DataType\DataTypeRegistry;
+use Whity\Core\DataType\GatedDataTypeLifecycle;
+use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
+use Whity\Core\Settings\GlobalSettingsRepository;
+use Whity\Core\Settings\SettingsService;
+use Whity\Core\Settings\TenantSettingsRepository;
 use Whity\Core\Tenant\TableOwnershipRegistry;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
+use Whity\Sdk\Hooks\HookVetoException;
 use Whity\Sdk\Http\Response;
 
 /**
@@ -115,7 +121,83 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         self::assertSame(['read', 'trash', 'restore', 'retire', 'delete'], $entry['actions']);
     }
 
+    public function testThePublishedEntryRoundTripsTheCompositionBesideTheGuards(): void
+    {
+        // The two lists are only readable together: `blocks_delete` names rows
+        // that must OUTLIVE the record, `cascade_delete` names rows that die
+        // WITH it, and the tables are shaped identically. A reader shown one and
+        // not the other draws the wrong conclusion about their own schema.
+        $entry = $this->onlyEntry($this->handler->list($this->request(self::MANAGER_A, self::TENANT_A)));
+
+        self::assertSame(
+            [['table' => 'acme_lines', 'column' => 'record_id', 'label' => 'line items']],
+            $entry['cascade_delete'],
+            'The composition must be reconstructable from the response, exactly as the guards are.'
+        );
+        self::assertArrayNotHasKey(
+            'ignore_when',
+            $entry['cascade_delete'][0],
+            'and it must not sprout a field that cannot be declared: an empty filter reads as one '
+            . 'that matched nothing rather than one this declaration does not have.'
+        );
+    }
+
     // ==================== 2. An unavailable action explains itself ====================
+
+    public function testTheRecordPayloadPublishesWhatADeleteWouldAlsoRemove(): void
+    {
+        // A composition is invisible in every other field of this payload, and
+        // invisible destruction is the worst kind. This is what lets a generated
+        // confirmation say "and 2 line items" instead of taking them silently.
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+        $this->seedLine(self::TENANT_A, $recordId);
+        $this->seedLine(self::TENANT_A, $recordId);
+
+        $body = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        ));
+
+        self::assertSame(
+            [['table' => 'acme_lines', 'label' => 'line items', 'count' => 2]],
+            $body['cascade']
+        );
+        self::assertTrue($body['deletable'], 'Composition is a warning, not a blocker.');
+        self::assertSame([], $body['blockers'], 'and it stays out of the field that answers a different question');
+    }
+
+    public function testARecordThatOwnsNothingPublishesAnEmptyCascade(): void
+    {
+        $body = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $this->seedRecord(self::TENANT_A, 'trashed')]
+        ));
+
+        self::assertSame([], $body['cascade']);
+    }
+
+    public function testDeletingThroughTheEndpointRemovesTheCompositionWithTheRecord(): void
+    {
+        // End to end at the boundary an adopter actually calls, read back with
+        // SQL: the 200 is not the evidence here, the row counts are.
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+        $this->seedLine(self::TENANT_A, $recordId);
+        $survivor = $this->seedLine(self::TENANT_A, $this->seedRecord(self::TENANT_A, 'active'));
+
+        $response = $this->handler->delete(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        );
+
+        self::assertSame(200, $response->getStatusCode(), $response->getBody());
+        $remaining = $this->pdo->query('SELECT id FROM acme_lines');
+        self::assertNotFalse($remaining);
+        self::assertSame(
+            [(string) $survivor],
+            array_map(static fn (mixed $id): string => (string) $id, $remaining->fetchAll(PDO::FETCH_COLUMN)),
+            'The deleted record\'s line is gone and the other record\'s line is untouched.'
+        );
+    }
 
     public function testAPolicyRefusalIsPublishedWithItsReasonAndAnEmptyBlockerList(): void
     {
@@ -334,25 +416,185 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         )->getStatusCode());
     }
 
+    // ==================== 4. A plugin veto is a refusal, not a crash ====================
+
+    /**
+     * A listener refusing a transition reaches the caller as `409` carrying the
+     * veto's own sentence — for ALL FOUR mutating actions — and the record is
+     * UNCHANGED in the database.
+     *
+     * Asserted against the row rather than the response, because the failure
+     * being prevented is precisely a response and a database that disagree: a
+     * 409 over a write that happened anyway is worse than no veto at all, since
+     * the caller now believes nothing changed.
+     */
+    public function testAVetoedTransitionIs409WithTheVetosReasonAndChangesNothing(): void
+    {
+        foreach (
+            [
+                'trash' => 'active',
+                'restore' => 'trashed',
+                'retire' => 'active',
+                'delete' => 'trashed',
+            ] as $action => $startingState
+        ) {
+            $handler = $this->handlerFor(null, $this->vetoingHooks());
+            $recordId = $this->seedRecord(self::TENANT_A, $startingState);
+            $params = ['type' => 'acme:record', 'id' => (string) $recordId];
+            $request = $this->request(self::MANAGER_A, self::TENANT_A);
+
+            $response = match ($action) {
+                'trash' => $handler->trash($request, $params),
+                'restore' => $handler->restore($request, $params),
+                'retire' => $handler->retire($request, $params),
+                default => $handler->delete($request, $params),
+            };
+
+            self::assertSame(409, $response->getStatusCode(), "A vetoed '{$action}' must be a 409.");
+
+            $body = json_decode($response->getBody(), true);
+            self::assertIsArray($body);
+            self::assertIsArray($body['details']);
+            self::assertSame(
+                'blocked_by_plugin',
+                $body['details']['reason'],
+                'One stable key, so a client branches on `reason` exactly as it does for a core refusal.'
+            );
+            self::assertSame(
+                'A downstream record depends on this one.',
+                $body['error'],
+                "The plugin's own client-safe sentence is the message; core has nothing better to say."
+            );
+            self::assertSame([], $body['details']['blockers'], 'A veto is not a reference.');
+            self::assertSame($startingState, $body['details']['state']);
+
+            self::assertSame(
+                $startingState,
+                $this->statusOf($recordId),
+                "The row must be untouched after a vetoed '{$action}' — a 409 is not evidence that it is."
+            );
+        }
+    }
+
+    /**
+     * The raw exception text never reaches the client.
+     *
+     * `HookVetoException::getMessage()` prefixes the reason with
+     * `Hook listener vetoed "<event>": …`. #715 established that only `reason()`
+     * crosses to a response (the WC-186 leak guard); this pins that the data-type
+     * surface honours the same boundary rather than re-leaking it.
+     */
+    public function testTheRawVetoExceptionMessageNeverReachesTheClient(): void
+    {
+        $handler = $this->handlerFor(null, $this->vetoingHooks());
+        $recordId = $this->seedRecord(self::TENANT_A, 'active');
+
+        $body = $handler->trash(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        )->getBody();
+
+        self::assertStringNotContainsString('Hook listener vetoed', $body);
+        self::assertStringNotContainsString('datatype.lifecycle.changing', $body);
+    }
+
+    /**
+     * The documented gap, pinned so it cannot be closed by accident: the
+     * pre-flight preview predicts CORE's refusals and cannot predict a veto —
+     * and it must NOT dispatch the hook to find out, because a `GET` running
+     * plugin listeners is surprising and potentially side-effecting.
+     *
+     * So an action the preview publishes as available may still be refused when
+     * attempted. That narrowing is real, and it is documented in
+     * docs/wiki/Plugin-Data-Types.md rather than papered over; this test is the
+     * executable half of that note.
+     */
+    public function testThePreviewDoesNotDispatchTheHookAndCannotPredictAVeto(): void
+    {
+        $dispatched = 0;
+        $hooks = new HookManager();
+        $hooks->listen(
+            DataTypeLifecycleService::HOOK_CHANGING,
+            static function (array $data) use (&$dispatched): array {
+                $dispatched++;
+
+                throw HookVetoException::forEvent(
+                    DataTypeLifecycleService::HOOK_CHANGING,
+                    'A downstream record depends on this one.'
+                );
+            }
+        );
+
+        $handler = $this->handlerFor(null, $hooks);
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+        $params = ['type' => 'acme:record', 'id' => (string) $recordId];
+
+        $preview = $this->data($handler->show($this->request(self::MANAGER_A, self::TENANT_A), $params));
+
+        self::assertSame(0, $dispatched, 'A GET must never run plugin listeners.');
+        self::assertTrue(
+            $preview['deletable'],
+            'The preview answers for core\'s rules, and by those the delete is available.'
+        );
+        self::assertArrayNotHasKey('delete', $preview['refusals']);
+
+        // And the attempt is nevertheless refused — the gap, made concrete.
+        $response = $handler->delete($this->request(self::MANAGER_A, self::TENANT_A), $params);
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame(1, $dispatched, 'The hook runs at ATTEMPT time, which is the only honest moment.');
+        self::assertSame('trashed', $this->statusOf($recordId));
+    }
+
     // ==================== Helpers ====================
+
+    private function vetoingHooks(): HookManager
+    {
+        $hooks = new HookManager();
+        $hooks->listen(DataTypeLifecycleService::HOOK_CHANGING, static function (array $data): array {
+            throw HookVetoException::forEvent(
+                DataTypeLifecycleService::HOOK_CHANGING,
+                'A downstream record depends on this one.'
+            );
+        });
+
+        return $hooks;
+    }
+
+    private function statusOf(int $recordId): ?string
+    {
+        $statement = $this->pdo->prepare('SELECT status FROM acme_records WHERE id = ?');
+        $statement->execute([$recordId]);
+        $value = $statement->fetchColumn();
+
+        return $value === false ? null : (string) $value;
+    }
+
 
     /**
      * A handler over the declared type, optionally with a REDUCED permission
-     * map — the way a type stops offering an action.
+     * map — the way a type stops offering an action — and optionally with a
+     * live hook manager, the way a plugin gets to veto a transition.
      *
      * @param array<string, string>|null $permissions Override the declaration's permissions.
+     * @param HookManager|null           $hooks       Listeners the lifecycle consults.
      */
-    private function handlerFor(?array $permissions = null): DataTypesApiHandler
+    private function handlerFor(?array $permissions = null, ?HookManager $hooks = null): DataTypesApiHandler
     {
         $registry = new PermissionRegistry();
         $registry->register('Acme', ['acme:read', 'acme:manage', 'acme:retire']);
 
         $types = $this->dataTypes($permissions);
 
+        $service = new DataTypeLifecycleService($this->pdo, $types, $hooks);
+
         return new DataTypesApiHandler(
             $types,
-            new DataTypeLifecycleService($this->pdo, $types),
-            new RoleChecker($this->wrap($this->pdo), $registry)
+            $service,
+            new GatedDataTypeLifecycle($types, $service, new RoleChecker($this->wrap($this->pdo), $registry)),
+            new SettingsService(
+                new GlobalSettingsRepository($this->pdo),
+                new TenantSettingsRepository($this->pdo)
+            )
         );
     }
 
@@ -365,6 +607,7 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         $tables->register('Acme', [
             'acme_records' => TableOwnershipRegistry::SCOPE_TENANT,
             'acme_entries' => TableOwnershipRegistry::SCOPE_TENANT,
+            'acme_lines' => TableOwnershipRegistry::SCOPE_TENANT,
         ]);
 
         $registry = new DataTypeRegistry($tables);
@@ -386,6 +629,11 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
                     'column' => 'record_id',
                     'label' => 'recorded entries',
                     'ignore_when' => ['status' => ['trashed', 'void']],
+                ]],
+                'cascade_delete' => [[
+                    'table' => 'acme_lines',
+                    'column' => 'record_id',
+                    'label' => 'line items',
                 ]],
                 'permissions' => $permissions ?? [
                     'read' => 'acme:read',
@@ -442,6 +690,24 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
                 status VARCHAR(50) NOT NULL DEFAULT \'active\'
             )
         ');
+        // The composition half: rows that are PART of a record and die with it.
+        // Shaped exactly like the table above, deliberately — nothing but the
+        // declaration says which of the two a plugin meant.
+        $this->pdo->exec('
+            CREATE TABLE acme_lines (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                record_id INTEGER NOT NULL
+            )
+        ');
+    }
+
+    private function seedLine(int $tenantId, int $recordId): int
+    {
+        $this->pdo->prepare('INSERT INTO acme_lines (tenant_id, record_id) VALUES (?, ?)')
+            ->execute([$tenantId, $recordId]);
+
+        return (int) $this->pdo->lastInsertId();
     }
 
     private function grant(int $roleId, string $permission): void

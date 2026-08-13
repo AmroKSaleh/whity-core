@@ -1451,10 +1451,20 @@ final class CoreApiSchemas
      */
     private static function languageRoutes(): array
     {
+        // The public language shape. `direction` travels WITH the language —
+        // the client sets <html dir> from it, so switching language flips the
+        // interface direction and there is no separate direction preference.
         $languageObject = self::object([
             'code' => self::str(),
             'name' => self::str(),
-        ], ['code', 'name']);
+            'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
+        ], ['code', 'name', 'direction']);
+
+        // Whether this instance offers more than one language at all
+        // (`i18n.enabled`). Served on both END-USER payloads so a client can
+        // hide its language switcher from one explicit field, rather than
+        // inferring it from how many languages the catalogue happens to hold.
+        $i18nEnabled = ['type' => 'boolean'];
 
         return [
             [
@@ -1470,7 +1480,8 @@ final class CoreApiSchemas
                             'The list of available languages',
                             self::object([
                                 'languages' => ['type' => 'array', 'items' => $languageObject],
-                            ], ['languages'])
+                                'i18n_enabled' => $i18nEnabled,
+                            ], ['languages', 'i18n_enabled'])
                         ),
                         500 => self::errorResponse('Internal error'),
                     ],
@@ -1486,11 +1497,12 @@ final class CoreApiSchemas
                     'tags' => ['languages'],
                     'responses' => [
                         200 => self::jsonResponse(
-                            'The user\'s language preference and available languages',
+                            'The user\'s EFFECTIVE language preference (null while i18n is disabled, whatever the profile stores) and the available languages',
                             self::object([
                                 'language_code' => self::str(nullable: true),
                                 'available_languages' => ['type' => 'array', 'items' => $languageObject],
-                            ], ['language_code', 'available_languages'])
+                                'i18n_enabled' => $i18nEnabled,
+                            ], ['language_code', 'available_languages', 'i18n_enabled'])
                         ),
                         403 => self::errorResponse('Authentication required'),
                         404 => self::errorResponse('User profile not found'),
@@ -1518,6 +1530,7 @@ final class CoreApiSchemas
                         400 => self::errorResponse('Invalid request body'),
                         403 => self::errorResponse('Authentication required'),
                         422 => self::errorResponse('Invalid language code'),
+                        503 => self::errorResponse('Language selection is disabled on this instance (i18n.enabled is off)'),
                     ] + self::authErrors(),
                 ],
             ],
@@ -1586,12 +1599,23 @@ final class CoreApiSchemas
                     ],
                 ],
             ],
+            self::permissionRoute('GET', '/api/translations/coverage', 'translations:manage', [
+                'summary' => 'Translation coverage per language and domain (admin)',
+                'description' => 'What still needs translating. Missing keys have no rows, so a plain '
+                    . 'listing can only ever show work already done; this reports the gap between each '
+                    . 'language and the source language, per domain.',
+                'tags' => ['languages'],
+                'responses' => [
+                    200 => self::jsonResponse('Per-language, per-domain coverage counts', 'TranslationCoverageResponse'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/translations', 'translations:manage', [
                 'summary' => 'List raw translation rows for a language + domain (admin)',
                 'tags' => ['languages'],
                 'parameters' => [
                     self::queryParam('language_code', 'string', 'The language code (required)'),
                     self::queryParam('domain', 'string', 'The translation domain (required)'),
+                    self::queryParam('untranslated', 'string', 'Set to 1 to list only keys this language has no text for'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('System-default and tenant-override rows, per key', 'TranslationAdminListResponse'),
@@ -2271,24 +2295,30 @@ final class CoreApiSchemas
 
             // ── i18n admin management (WC-583) ────────────────────────────────
             // A language row (admin shape — the public GET /api/languages list
-            // returns only {code, name}, declared inline in languageRoutes()).
+            // returns {code, name, direction}, declared inline in languageRoutes()).
+            // `direction` is the interface writing direction the client applies
+            // to <html dir>; it is a property of the LANGUAGE, so adding a
+            // right-to-left language is a POST here rather than a code change.
             'Language' => self::object([
                 'id' => self::int(),
                 'code' => self::str(),
                 'name' => self::str(),
+                'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
                 'enabled' => self::bool(),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
-            ], ['id', 'code', 'name', 'enabled', 'created_at', 'updated_at']),
+            ], ['id', 'code', 'name', 'direction', 'enabled', 'created_at', 'updated_at']),
             'LanguageDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Language')),
             'LanguageListResponse' => self::listEnvelope('Language'),
             'LanguageCreateRequest' => self::object([
                 'code' => self::str(),
                 'name' => self::str(),
+                'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
                 'enabled' => self::bool(),
             ], ['code', 'name']),
             'LanguageUpdateRequest' => self::object([
                 'name' => self::str(),
+                'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
                 'enabled' => self::bool(),
             ], []),
             // A translation row. tenant_id is nullable: NULL = system default,
@@ -2319,12 +2349,37 @@ final class CoreApiSchemas
                 'id' => self::int(),
                 'translation' => self::str(),
             ], ['id', 'translation']),
+            // `source_text` is the English this key is translated FROM, and is
+            // why a key with no row in the requested language still appears:
+            // listing only what exists would show a translator an empty table
+            // and call the language finished.
             'TranslationAdminRow' => self::object([
                 'key' => self::str(),
                 'system_default' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('TranslationRowRef')]],
                 'tenant_override' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('TranslationRowRef')]],
-            ], ['key', 'system_default', 'tenant_override']),
+                'source_text' => self::str(true),
+                'translated' => self::bool(),
+            ], ['key', 'system_default', 'tenant_override', 'source_text', 'translated']),
             'TranslationAdminListResponse' => self::listEnvelope('TranslationAdminRow'),
+            // GET /api/v1/translations/coverage: the gap, per language and domain.
+            'TranslationDomainCoverage' => self::object([
+                'domain' => self::str(),
+                'total' => self::int(),
+                'translated' => self::int(),
+                'missing' => self::int(),
+            ], ['domain', 'total', 'translated', 'missing']),
+            'TranslationLanguageCoverage' => self::object([
+                'language_code' => self::str(),
+                'name' => self::str(),
+                'total' => self::int(),
+                'translated' => self::int(),
+                'missing' => self::int(),
+                'domains' => ['type' => 'array', 'items' => SchemaBuilder::ref('TranslationDomainCoverage')],
+            ], ['language_code', 'name', 'total', 'translated', 'missing', 'domains']),
+            'TranslationCoverageResponse' => self::dataEnvelope(self::object([
+                'source_language_code' => self::str(),
+                'languages' => ['type' => 'array', 'items' => SchemaBuilder::ref('TranslationLanguageCoverage')],
+            ], ['source_language_code', 'languages'])),
             // GET /api/v1/translations/{language_code}/{domain} (public bundle):
             // an open-ended key => translated-string map (the resolved fallback
             // chain), not a fixed shape.
@@ -3243,17 +3298,37 @@ final class CoreApiSchemas
                     'additionalProperties' => ['type' => 'array', 'items' => self::str()],
                 ],
             ], ['table', 'column', 'label', 'ignore_when']),
+            // One declared edge of the COMPOSITION graph: rows that are PART of
+            // the record and are deleted WITH it. The exact opposite of a
+            // DataTypeReference, published beside it because the pair is only
+            // readable together — nothing about a table's shape says which of
+            // the two a plugin meant, and with no foreign keys between plugin
+            // tables the database will not choose either.
+            //
+            // No `ignore_when` here, and its absence is the contract: a cascade
+            // that skipped some of the rows it owns would leave exactly the
+            // orphans it exists to remove, so a declaration carrying one is
+            // refused rather than honoured half-way.
+            'DataTypeComposition' => self::object([
+                'table' => self::str(),
+                'column' => self::str(),
+                'label' => self::str(),
+            ], ['table', 'column', 'label']),
             'DataType' => self::object([
                 'key' => self::str(),
                 'source' => self::str(),
                 'label' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
                 'lifecycle' => SchemaBuilder::ref('DataTypeLifecycle'),
                 'blocks_delete' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeReference')],
+                'cascade_delete' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeComposition')],
                 'actions' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['read', 'trash', 'restore', 'retire', 'delete']]],
                 'permissions' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
-            ], ['key', 'source', 'label', 'lifecycle', 'blocks_delete', 'actions']),
+            ], ['key', 'source', 'label', 'lifecycle', 'blocks_delete', 'cascade_delete', 'actions']),
             'DataTypeListResponse' => self::listEnvelope('DataType'),
-            // A single guard's blocking rows, with the plugin's own label.
+            // A counted set of rows with the plugin's own label for them. Used
+            // for both questions a delete raises: what is in the way
+            // (`blockers`) and what would go with it (`cascade`). One shape, so
+            // a renderer needs no second code path to say "3 catalogue notes".
             'DataTypeBlocker' => self::object([
                 'table' => self::str(),
                 'label' => self::str(),
@@ -3264,13 +3339,25 @@ final class CoreApiSchemas
             // own sentence, offered as a fallback and never as the contract —
             // string-matching prose is not an API.
             //
-            // Three causes, one vocabulary: a reference, the record's state, or
-            // the type not offering the action. The `*_not_offered` keys are the
-            // SAME ones the mutation endpoint's 405 body carries, so the preview
+            // Four causes, one vocabulary: a reference, the record's state, the
+            // type not offering the action, or the record's COMPOSITION —
+            // something points at a row this record owns
+            // (`composition_still_referenced`), one of those rows is retired
+            // (`composition_is_permanent`), or an owned table owns rows of its
+            // own (`cascade_would_nest`). The `*_not_offered` keys are the SAME
+            // ones the mutation endpoint's 405 body carries, so the preview
             // predicts the endpoint's answer down to the reason.
+            //
+            // `still_referenced` and `composition_still_referenced` are separate
+            // keys deliberately: one says "detach what points at this record",
+            // the other "something points at one of its parts", and they send
+            // the reader to different places.
             'DataTypeRefusal' => self::object([
                 'reason' => ['type' => 'string', 'enum' => [
                     'still_referenced',
+                    'composition_still_referenced',
+                    'composition_is_permanent',
+                    'cascade_would_nest',
                     'trash_before_deleting',
                     'retired_records_are_permanent',
                     'retired_records_cannot_be_trashed',
@@ -3309,6 +3396,13 @@ final class CoreApiSchemas
             // nothing to refuse, and `state` sits right beside them.
             // `referenceable` is false for BOTH trashed and retired;
             // `pending_removal` is what separates the two.
+            //
+            // `cascade` is a THIRD question and stays apart from both: not what
+            // stops this delete, and not which action is unavailable, but what
+            // ELSE this delete would remove. A record with composition is still
+            // deletable — this is what lets a confirmation dialog say "and 4
+            // line items" instead of destroying them silently. Empty means
+            // nothing else goes; zero-count edges are omitted, as in `blockers`.
             'DataTypeRecordState' => self::dataEnvelope(self::object([
                 'key' => self::str(),
                 'state' => self::str(true),
@@ -3317,6 +3411,7 @@ final class CoreApiSchemas
                 'restorable' => self::bool(),
                 'deletable' => self::bool(),
                 'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
+                'cascade' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
                 'refusals' => SchemaBuilder::ref('DataTypeRefusals'),
             ], [
                 'key',
@@ -3326,6 +3421,7 @@ final class CoreApiSchemas
                 'restorable',
                 'deletable',
                 'blockers',
+                'cascade',
                 'refusals',
             ])),
             'DataTypeTransitionResponse' => self::dataEnvelope(self::object([
@@ -3336,6 +3432,61 @@ final class CoreApiSchemas
                 'message' => self::str(),
                 'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
             ], ['key', 'outcome', 'state', 'message', 'blockers'])),
+            // One action over many records. The action is a BODY field rather
+            // than a path segment so the batch path stays unambiguous against
+            // the single-record routes — see the route registration in
+            // public/index.php for why that matters more than symmetry here.
+            'DataTypeBulkRequest' => self::object([
+                'action' => ['type' => 'string', 'enum' => ['trash', 'restore', 'retire', 'delete']],
+                'ids' => [
+                    'type' => 'array',
+                    'items' => ['oneOf' => [['type' => 'string'], ['type' => 'integer']]],
+                    'description' => 'Record keys. Duplicates are collapsed; the ceiling is the '
+                        . '`data_types.bulk_max_ids` setting and exceeding it is refused, never truncated.',
+                ],
+            ], ['action', 'ids']),
+            // ONE record's line in a batch report. `outcome`, `state`, `reason`,
+            // `message` and `blockers` are the SAME fields, carrying the SAME
+            // stable vocabulary, that the single-record call answers with —
+            // there is no second refusal vocabulary for bulk. `status` is the
+            // status that single-record call would have returned, published so a
+            // client already rendering (status, reason) pairs reuses that code
+            // unchanged.
+            'DataTypeBulkResult' => self::object([
+                'id' => self::str(),
+                'status' => self::int(),
+                'outcome' => ['type' => 'string', 'enum' => [
+                    'ok',
+                    'not_found',
+                    'blocked',
+                    'refused',
+                    'unsupported',
+                    'forbidden',
+                ]],
+                'state' => self::str(true),
+                'reason' => self::str(true),
+                'message' => self::str(),
+                'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
+                'required' => self::str(),
+            ], ['id', 'status', 'outcome', 'state', 'reason', 'message', 'blockers']),
+            // Pre-counted so "43 done, 7 refused" needs no walk over `results`.
+            // `refused` counts every entry whose `outcome` is not `ok` — a state
+            // refusal, a reference, a veto and a missing record alike — and is
+            // exactly `unique - ok`. `requested` is what the caller sent and
+            // `unique` what survived de-duplication, so a batch producing fewer
+            // results than ids says why on its face.
+            'DataTypeBulkCounts' => self::object([
+                'requested' => self::int(),
+                'unique' => self::int(),
+                'ok' => self::int(),
+                'refused' => self::int(),
+            ], ['requested', 'unique', 'ok', 'refused']),
+            'DataTypeBulkResponse' => self::dataEnvelope(self::object([
+                'key' => self::str(),
+                'action' => ['type' => 'string', 'enum' => ['trash', 'restore', 'retire', 'delete']],
+                'counts' => SchemaBuilder::ref('DataTypeBulkCounts'),
+                'results' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBulkResult')],
+            ], ['key', 'action', 'counts', 'results'])),
         ];
     }
 
@@ -3461,6 +3612,37 @@ final class CoreApiSchemas
                         409 => self::errorResponse(
                             'Refused: rows still reference this record, the record is retired '
                             . '(permanent), or a trashable type\'s record has not been trashed first'
+                        ),
+                    ] + $recordErrors,
+                ],
+            ],
+            // The batch surface. 200 is the answer whenever the batch RAN — a
+            // record refusing is reported per record, not as an envelope status,
+            // and an all-refused batch is still a 200 because the operation
+            // (attempt these and report) succeeded. There is no 409 here for the
+            // same reason: a mixed batch has no single conflict to report.
+            [
+                'method' => 'POST',
+                'path' => '/api/data-types/{type}/bulk',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Perform one lifecycle action over many records, skipping and reporting '
+                        . 'refusals rather than aborting the batch',
+                    'tags' => ['data-types'],
+                    'parameters' => [$typeParam],
+                    'request' => 'DataTypeBulkRequest',
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Per-record outcomes. The batch ran; individual records may have refused, '
+                            . 'including all of them',
+                            'DataTypeBulkResponse'
+                        ),
+                        400 => self::errorResponse(
+                            'Unknown `action`, or `ids` is not a non-empty array of record ids'
+                        ),
+                        422 => self::errorResponse(
+                            'More ids than the `data_types.bulk_max_ids` ceiling allows for this tenant'
                         ),
                     ] + $recordErrors,
                 ],

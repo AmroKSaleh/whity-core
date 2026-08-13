@@ -243,6 +243,12 @@ rebase (`git push --force-with-lease`).
 
 ### TypeScript (frontend)
 
+- **User-facing text goes through `t()`**, with the English string passed as the
+  fallback at the call site: `t('login.submit', 'Sign in')`. That second
+  argument IS the English catalogue — `php bin/whity-cli i18n:extract` derives
+  `database/i18n/<domain>.json` from it and a CI guard fails on drift, so a
+  hardcoded string is a string no translator can ever see. See
+  [Internationalization](docs/wiki/Internationalization.md).
 - **Strict types** — `strict: true` is on in `web/tsconfig.json`. Do **not** use
   `any`; prefer precise types, `unknown` + narrowing, or generics.
 - **ESLint** must pass: `cd web && npm run lint` (config in
@@ -320,11 +326,35 @@ API-created roles being undeletable). When a test asserts how a query behaves,
 run it against a genuine engine.
 
 **Verify data-layer / migration / auth changes on real PostgreSQL.** The SQLite
-suite masks Postgres-only bugs (reserved words, DDL/type/cast, `rowCount()` on a
-`SELECT`). CI's `postgres-integration` job runs `migrate run` + `seed` + a second
-idempotent `migrate run` against a real PostgreSQL service; for every new
-tenant-owned table, extend `CrossTenantRejectionRealEngineTest` (it runs on the
-real engine).
+suite masks Postgres-only bugs, and it masks them *silently* — a removed
+`CAST(id AS TEXT)` leaves every test green while production answers
+`operator does not exist: character varying = integer`. No linter or query
+builder catches that class; only the real engine does.
+
+Set `PHPUNIT_PG_DSN` and any test using `SchemaFromMigrations` runs against real
+PostgreSQL instead of SQLite — no code change:
+
+```bash
+docker run -d --name whity_test_pg -p 55432:5432 \
+  -e POSTGRES_USER=whity -e POSTGRES_PASSWORD=whity_dev -e POSTGRES_DB=whity_core \
+  postgres:15-alpine
+
+docker exec whity_frankenphp env \
+  PHPUNIT_PG_DSN="pgsql:host=host.docker.internal;port=55432;dbname=whity_core" \
+  PHPUNIT_PG_USER=whity PHPUNIT_PG_PASSWORD=whity_dev \
+  vendor/bin/phpunit --no-coverage tests/Api/RolesApiHandlerRealEngineTest.php
+```
+
+CI runs three real-Postgres jobs: `postgres-migrations` (`migrate run` + `seed` +
+an idempotent re-`migrate`, plus `tests/Security`), `postgres-integration`
+(`tests/Integration`), and `postgres-dialect` (every other real-engine test —
+selected by content, so a new one is covered automatically). For every new
+tenant-owned table, extend `CrossTenantRejectionRealEngineTest`.
+
+See **[Testing Against PostgreSQL](docs/wiki/Testing-Against-PostgreSQL.md)** for
+the catalogue of dialect traps that pass silently on SQLite (type comparison,
+`GROUP BY` strictness, `LIKE` case sensitivity, NULL ordering, unenforced foreign
+keys, aborted transactions) and for the plugin-side harness.
 
 ### Running backend tests
 
@@ -389,8 +419,14 @@ seeded accounts and shared-database discipline.
        OpenAPI-spec drift check, `phpstan analyse src tests plugins sdk`, the
        plugin-load smoke, the tenant-predicate guard, and the plugin
        tenant-isolation conformance check.
+     - **i18n catalogue drift** — regenerates the English catalogue from the
+       `t()` calls in the source and fails if it differs from
+       `database/i18n/`. Runs on frontend changes too, because that is where
+       the drift comes from.
      - **Migrations + seed on real PostgreSQL** — migrate / seed / idempotent
-       re-migrate against a real Postgres service.
+       re-migrate against a real Postgres service, plus the Security suite.
+     - **Integration + dialect suites on real PostgreSQL** — `tests/Integration`
+       and every other real-engine test file, on the engine production speaks.
      - **Frontend types, tests & generated-artifact drift** (Node 22) — the
        typed-client (`schema.d.ts`) drift check, the design-token drift check,
        the shadcn registry build, `tsc --noEmit`, ESLint (zero errors), the

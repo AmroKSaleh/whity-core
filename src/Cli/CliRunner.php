@@ -21,6 +21,8 @@ class CliRunner
         'schedule:run' => 'Whity\Cli\Commands\ScheduleRunCommand',
         'scale:seed' => 'Whity\Cli\Commands\ScaleSeedCommand',
         'health:watch' => 'Whity\Cli\Commands\HealthWatchCommand',
+        'i18n:extract' => 'Whity\Cli\Commands\I18nCommand',
+        'i18n:sync' => 'Whity\Cli\Commands\I18nCommand',
     ];
 
     /**
@@ -57,6 +59,13 @@ class CliRunner
         try {
             /** @var \Whity\Cli\Commands\BaseCommand $command */
             $command = new $commandClass();
+
+            // A class that serves several command names is told which one was
+            // typed; everything else keeps the one-class-one-command shape.
+            if ($command instanceof \Whity\Cli\Commands\NamedSubcommand) {
+                return $command->execute($argv, $commandName);
+            }
+
             return $command->execute($argv);
         } catch (\Throwable $e) {
             echo "Error: " . $e->getMessage() . "\n";
@@ -80,7 +89,9 @@ class CliRunner
         echo "  queue:work Run the durable async job worker loop\n";
         echo "  schedule:run Run the cron-tick scheduler (exactly-once per minute across workers)\n";
         echo "  scale:seed Bulk-insert a parameterized, deterministic large-scale multi-tenant dataset\n";
-        echo "  health:watch Sample service health for the public /status page (runs outside the app)\n\n";
+        echo "  health:watch Sample service health for the public /status page (runs outside the app)\n";
+        echo "  i18n:extract Rebuild the English translation catalogue from the t() calls in the source\n";
+        echo "  i18n:sync    Seed catalogue keys missing from the translations table (never overwrites)\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }

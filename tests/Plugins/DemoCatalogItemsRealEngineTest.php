@@ -14,6 +14,7 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
+use Whity\Database\SequenceCounters;
 use Whity\Sdk\Http\Request;
 
 require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/DemoCatalogPlugin.php';
@@ -300,6 +301,12 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
         $db->forceConnect();
         \Whity\register_service(Database::class, $db);
 
+        // And the sequence allocator, under the SDK interface name — exactly as
+        // public/index.php and the CLI kernel register it. The plugin asks the
+        // container for the CONTRACT and never for the host class behind it, so
+        // this registration is the whole of what it depends on.
+        \Whity\register_service(\Whity\Sdk\Sql\SequenceAllocator::class, new SequenceCounters($this->pdo));
+
         $router = new Router('');
         $loader = new PluginLoader(dirname(__DIR__, 2) . '/plugins', $router, new PermissionRegistry(), new HookManager());
         $loader->load();
@@ -321,7 +328,7 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
 
     private function handler(): DemoCatalogApiHandler
     {
-        return new DemoCatalogApiHandler($this->pdo);
+        return new DemoCatalogApiHandler($this->pdo, new SequenceCounters($this->pdo));
     }
 
     /**
@@ -376,8 +383,18 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
         $pdo->exec(
             'CREATE UNIQUE INDEX idx_demo_catalog_items_tenant_uuid ON demo_catalog_items(tenant_id, client_uuid)'
         );
-        $pdo->exec('CREATE TABLE demo_catalog_change_seq (seq BIGINT NOT NULL)');
-        $pdo->exec('INSERT INTO demo_catalog_change_seq (seq) VALUES (0)');
+        // The change-feed cursor is allocated by the HOST now, so this schema
+        // carries the host's counter table (migration 092) rather than a
+        // plugin-owned one.
+        $pdo->exec('
+            CREATE TABLE sequence_counters (
+                tenant_id INTEGER NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                value BIGINT NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, name)
+            )
+        ');
 
         return $pdo;
     }

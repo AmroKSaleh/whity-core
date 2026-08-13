@@ -154,7 +154,7 @@ Resolved sets are memoized in two **worker-level static caches**: `$effectivePer
 
 ### Other helpers
 
-- `hasRole($userId, $role, $tenantId)` — true when `$role` is in the user's effective role set (direct role + OU/ancestor-OU roles, tenant scoped).
+- `hasRoleForProfile($profileId, $role, $tenantId, ?$resourceType = null, ?$resourceId = null)` — true when `$role` is in the profile's effective role set (direct role + OU/ancestor-OU roles, tenant scoped). Passing a resource type **and** id also consults role grants addressed at that one record (`resource_role_assignments`); the answer is then a superset of the tenant-wide one. It is exactly `in_array($role, getEffectiveRolesForProfile($profileId, $tenantId, $resourceType, $resourceId), true)`.
 - `getRoleForUser($userId)` — the user's primary (direct) role name only.
 - `getPermissionsForUser($userId)` — directly-granted permissions for the user's primary role (no inherited set).
 - `getEffectiveRolesForUser($userId, $tenantId)` — the effective role-name set (direct + OU/ancestor-OU inherited).
@@ -208,9 +208,9 @@ $caps = $rbac->effectivePermissions($profileId, $tenantId);
 
 | Method | Answers |
 | --- | --- |
-| `hasPermission(int $profileId, int $tenantId, string $permission): bool` | Does this profile effectively hold this permission in this tenant? |
-| `hasRole(int $profileId, int $tenantId, string $role): bool` | Is this role in the profile's effective role set (membership role + OU/ancestor-OU roles)? |
-| `effectivePermissions(int $profileId, int $tenantId): list<string>` | The full effective permission set. |
+| `hasPermission(int $profileId, int $tenantId, string $permission, ?string $resourceType = null, ?int $resourceId = null): bool` | Does this profile effectively hold this permission in this tenant — optionally, at **this record**? |
+| `hasRole(int $profileId, int $tenantId, string $role, ?string $resourceType = null, ?int $resourceId = null): bool` | Is this role in the profile's effective role set (membership role + OU/ancestor-OU roles) — optionally, at **this record**? |
+| `effectivePermissions(int $profileId, int $tenantId, ?string $resourceType = null, ?int $resourceId = null): list<string>` | The full effective permission set, tenant-wide or at one record. |
 
 Properties that make it safe to hand to plugin code:
 
@@ -218,6 +218,34 @@ Properties that make it safe to hand to plugin code:
 - **Read only.** Three question methods and nothing else — no `clearCache()`, no `\PDO`. Registering `RoleChecker` itself would have exposed both. It grants no authority a plugin lacks; it only lets the plugin ask the question *correctly*.
 - **`effectivePermissions()` is exactly the set `hasPermission()` answers `true` for.** `RoleChecker::getEffectivePermissionsForProfile()` deliberately returns the *raw* set (the document designer stores arbitrary tenant-defined tags in the same column); the resolver filters it through the registry so the two methods can never disagree. Passing the raw set straight through would have recreated the very divergence the contract exists to close.
 - **Fails closed.** `\Whity\app()` throws a `RuntimeException` when a service is not registered, and only ever auto-instantiates a concrete class that takes no constructor parameters at all and has not declared itself host-wired (see below). It will never improvise a security service — an auto-built `RoleChecker` with a different database handle, an empty registry or no delegation resolver would answer differently from the middleware.
+
+### Asking at one record (`$resourceType` / `$resourceId`)
+
+Earlier minors deliberately **omitted** these parameters rather than accept and discard them: authority was addressable only to a tenant or an OU, so a resource argument would have been silently ignored and the caller would have believed it held a record-scoped answer while holding the tenant-wide one — which fails *open*. With the polymorphic `resource_role_assignments` table (migration 088, issue #712 §2) they are **honoured**:
+
+```php
+// "May this caller act on THIS document?" — not "anywhere in the tenant".
+if (!$rbac->hasPermission($profileId, $tenantId, 'hello:manage', 'hello:document', $docId)) {
+    return Response::error('Insufficient permissions', 403);
+}
+
+// Since SDK 1.22 the ROLE question narrows the same way.
+if ($rbac->hasRole($profileId, $tenantId, 'approver', 'hello:document', $docId)) {
+    // …
+}
+```
+
+Rules that hold for all three methods:
+
+- **Additive.** Omitting the pair preserves the previous tenant-wide behaviour exactly, so every existing caller is unaffected.
+- **Both or neither.** A type without an id (or an id without a type) collapses to *no scope*. Matching one column and ignoring the other would return grants from the **wrong** resource.
+- **The scoped answer is a SUPERSET of the unscoped one.** A resource grant widens authority at that record; it never narrows it.
+- **Never a substitute for membership.** Membership is gated *before* resource grants are consulted, so a profile with no ACTIVE membership in the tenant resolves to nothing whatever is granted at the resource — a grant cannot become a back door into a tenant.
+- **Unregistered types resolve to nothing.** `$resourceType` must be one the host registered (core ships `ou`; plugins declare their own via `PluginResourceTypesInterface`, SDK 1.18). An unknown type is never a reason to widen authority.
+
+Because a role is now askable at a record, "this profile holds role X at record A and role Y at record B" needs **no** change to `memberships` — that table's `UNIQUE(profile_id, tenant_id)` still means one membership row per tenant, and per-record staffing is expressed as resource grants alongside it. Until SDK 1.22 only the *permission* side took the pair, so such a grant was representable in storage and resolvable by `RoleChecker::getEffectiveRolesForProfile()`, yet unreachable through `hasRole()` — which reads as a missing schema capability rather than a missing parameter.
+
+The route-level `requiredRole` / `requiredPermission` gate stays **flat and tenant-wide**: it runs before the handler, with no record in hand. A record-scoped grant therefore does not open a whole route — that is the point of resolving *inside* the handler.
 
 ### Host-wired services (`Whity\Core\Container\HostWiredService`)
 
@@ -234,8 +262,6 @@ A class carrying that marker is **never** auto-instantiated, whatever its constr
 Marked today: `PermissionRegistry`, `ResourceTypeRegistry`, `HealthProbeRegistry`, `TableOwnershipRegistry`, `DataTypeRegistry`, `JobRegistry`, `TransportRegistry`, `PromptRegistry`, `LanguageRegistry`. A convention test (`Tests\Core\Container\HostWiredRegistryConventionTest`) fails if a new stateful `*Registry` in `src/` is added without it.
 
 The marker is the safety net, not the fix: a host that *fills* a registry must **register the populated instance in both entry points** — `public/index.php` *and* `BaseCommand::setupKernel()`. A registry wired in only one of them means the same plugin, reached over HTTP and through a CLI command, disagrees about what exists (the divergence behind #717 and #724).
-
-There are intentionally **no** `$resourceType` / `$resourceId` parameters yet. Role grants are currently addressable only to a tenant or an OU, so a resource argument would be accepted and then silently ignored — the caller would believe it had a record-scoped answer while holding the tenant-wide one. That fails *open*. Resource-scoped overloads are additive and arrive with the polymorphic grant table (issue #712 §2).
 
 ## Roles API + tenant scoping
 

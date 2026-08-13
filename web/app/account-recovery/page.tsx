@@ -10,6 +10,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * "I lost my 2FA device" account-recovery entry point
@@ -40,6 +41,7 @@ function AccountRecoveryInner() {
   const token = searchParams.get('token');
   const { addToast } = useToast();
   const branding = useBranding();
+  const t = useTranslation('auth');
 
   const [status, setStatus] = useState<Status>(token ? 'confirming' : 'request-form');
 
@@ -52,6 +54,16 @@ function AccountRecoveryInner() {
   // The confirmation token is SINGLE-USE, so the confirm POST must fire
   // exactly once even under React strict-mode's double effect invocation.
   const confirmStarted = useRef(false);
+
+  // Resolved to a STRING at render, and depended on as a string below — NEVER
+  // `t` itself. `useTranslation` hands back a fresh callback the moment the
+  // translation bundle arrives, so listing `t` in the dependency array would
+  // re-run the confirm effect after load and re-POST a SINGLE-USE token. A
+  // string compares by value, so the English case never re-runs at all.
+  const submittedToastMessage = t(
+    'accountRecovery.toast.submitted',
+    'Your account-recovery request has been submitted for review.'
+  );
 
   useEffect(() => {
     if (!token) {
@@ -76,7 +88,7 @@ function AccountRecoveryInner() {
 
         if (response.status === 200) {
           setStatus('submitted');
-          addToast('Your account-recovery request has been submitted for review.', 'success');
+          addToast(submittedToastMessage, 'success');
           return;
         }
 
@@ -86,7 +98,7 @@ function AccountRecoveryInner() {
         setStatus('error');
       }
     })();
-  }, [token, addToast]);
+  }, [token, addToast, submittedToastMessage]);
 
   const handleRequestSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -94,7 +106,7 @@ function AccountRecoveryInner() {
 
     const trimmed = email.trim();
     if (!trimmed) {
-      setRequestError('Email is required');
+      setRequestError(t('accountRecovery.email.required', 'Email is required'));
       return;
     }
 
@@ -111,20 +123,35 @@ function AccountRecoveryInner() {
       });
 
       if (response.status === 422) {
-        setRequestError('Please enter a valid email address');
+        setRequestError(
+          t('accountRecovery.error.invalidEmail', 'Please enter a valid email address')
+        );
         return;
       }
       if (response.status === 429) {
-        setRequestError('Too many requests. Please wait a little while and try again.');
+        setRequestError(
+          t(
+            'accountRecovery.error.rateLimited',
+            'Too many requests. Please wait a little while and try again.'
+          )
+        );
         return;
       }
 
       // 202 (and any other non-error) → generic confirmation. We do NOT
       // reveal whether the address has an account.
       setRequestSent(true);
-      addToast('If that address has an account, a confirmation link is on its way.', 'success');
+      addToast(
+        t(
+          'accountRecovery.toast.requestSent',
+          'If that address has an account, a confirmation link is on its way.'
+        ),
+        'success'
+      );
     } catch {
-      setRequestError('Unable to reach the server. Please try again.');
+      setRequestError(
+        t('accountRecovery.error.transport', 'Unable to reach the server. Please try again.')
+      );
     } finally {
       setRequestSubmitting(false);
     }
@@ -145,20 +172,25 @@ function AccountRecoveryInner() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           {logo}
-          <CardTitle className="text-2xl">Account recovery</CardTitle>
+          <CardTitle className="text-2xl">
+            {t('accountRecovery.title', 'Account recovery')}
+          </CardTitle>
           <CardDescription>
             {status === 'confirming'
-              ? 'Confirming your recovery request…'
+              ? t('accountRecovery.subtitle.confirming', 'Confirming your recovery request…')
               : status === 'submitted'
-                ? 'Your request has been submitted'
-                : 'Lost your password and your two-factor device? Start recovery here'}
+                ? t('accountRecovery.subtitle.submitted', 'Your request has been submitted')
+                : t(
+                    'accountRecovery.subtitle',
+                    'Lost your password and your two-factor device? Start recovery here'
+                  )}
           </CardDescription>
         </CardHeader>
 
         <CardContent>
           {status === 'confirming' && (
             <p className="text-sm text-center text-muted-foreground" data-testid="account-recovery-pending">
-              Confirming your request…
+              {t('accountRecovery.pending', 'Confirming your request…')}
             </p>
           )}
 
@@ -166,13 +198,14 @@ function AccountRecoveryInner() {
             <div className="space-y-4 text-center" data-testid="account-recovery-submitted">
               <Alert>
                 <AlertDescription>
-                  Your account-recovery request has been submitted for administrator review. Once
-                  approved, your two-factor authentication will be cleared and you&rsquo;ll receive a
-                  password-reset link by email.
+                  {t(
+                    'accountRecovery.submitted',
+                    'Your account-recovery request has been submitted for administrator review. Once approved, your two-factor authentication will be cleared and you’ll receive a password-reset link by email.'
+                  )}
                 </AlertDescription>
               </Alert>
               <Button asChild className="w-full">
-                <Link href="/login">Back to sign in</Link>
+                <Link href="/login">{t('accountRecovery.backToSignIn', 'Back to sign in')}</Link>
               </Button>
             </div>
           )}
@@ -182,8 +215,10 @@ function AccountRecoveryInner() {
               {status === 'error' && (
                 <Alert variant="destructive">
                   <AlertDescription>
-                    This confirmation link is invalid or has expired. Enter your email below to start
-                    a new recovery request.
+                    {t(
+                      'accountRecovery.error.invalidLink',
+                      'This confirmation link is invalid or has expired. Enter your email below to start a new recovery request.'
+                    )}
                   </AlertDescription>
                 </Alert>
               )}
@@ -191,16 +226,19 @@ function AccountRecoveryInner() {
               {requestSent ? (
                 <Alert data-testid="account-recovery-request-sent">
                   <AlertDescription>
-                    If that address has an account, a confirmation link is on its way. Check your
-                    inbox.
+                    {t(
+                      'accountRecovery.request.sent',
+                      'If that address has an account, a confirmation link is on its way. Check your inbox.'
+                    )}
                   </AlertDescription>
                 </Alert>
               ) : (
                 <form onSubmit={handleRequestSubmit} className="space-y-4" data-testid="account-recovery-form">
                   <p className="text-sm text-muted-foreground">
-                    This is for the rare case you&rsquo;ve lost BOTH your password and your
-                    authenticator/backup codes. An administrator must review and approve every
-                    request before anything changes on your account.
+                    {t(
+                      'accountRecovery.request.intro',
+                      'This is for the rare case you’ve lost BOTH your password and your authenticator/backup codes. An administrator must review and approve every request before anything changes on your account.'
+                    )}
                   </p>
                   {requestError && (
                     <Alert variant="destructive">
@@ -209,12 +247,12 @@ function AccountRecoveryInner() {
                   )}
                   <div className="space-y-2">
                     <label htmlFor="email" className="text-sm font-medium">
-                      Email
+                      {t('accountRecovery.email.label', 'Email')}
                     </label>
                     <Input
                       id="email"
                       type="email"
-                      placeholder="you@example.com"
+                      placeholder={t('accountRecovery.email.placeholder', 'you@example.com')}
                       value={email}
                       onChange={(e) => {
                         setEmail(e.target.value);
@@ -225,20 +263,25 @@ function AccountRecoveryInner() {
                     />
                   </div>
                   <Button type="submit" className="w-full" disabled={requestSubmitting}>
-                    {requestSubmitting ? 'Sending…' : 'Request recovery'}
+                    {requestSubmitting
+                      ? t('accountRecovery.submit.pending', 'Sending…')
+                      : t('accountRecovery.submit', 'Request recovery')}
                   </Button>
                 </form>
               )}
 
+              {/* Prompt and link text are SEPARATE keys because they are
+                  separate elements — the shape the sign-in screen established
+                  with `login.recovery.prompt` / `login.recovery.link`. */}
               <p className="text-sm text-center text-muted-foreground">
-                Only lost your password?{' '}
+                {t('accountRecovery.forgotPassword.prompt', 'Only lost your password?')}{' '}
                 <Link href="/forgot-password" className="font-medium text-primary hover:underline">
-                  Reset it instead
+                  {t('accountRecovery.forgotPassword.link', 'Reset it instead')}
                 </Link>
               </p>
               <p className="text-sm text-center text-muted-foreground">
                 <Link href="/login" className="font-medium text-primary hover:underline">
-                  Back to sign in
+                  {t('accountRecovery.backToSignIn', 'Back to sign in')}
                 </Link>
               </p>
             </div>
@@ -250,11 +293,15 @@ function AccountRecoveryInner() {
 }
 
 export default function AccountRecoveryPage() {
+  const t = useTranslation('auth');
+
   return (
     <Suspense
       fallback={
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">
+            {t('accountRecovery.loading', 'Loading…')}
+          </p>
         </div>
       }
     >

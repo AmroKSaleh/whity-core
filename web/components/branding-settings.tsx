@@ -28,6 +28,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Input } from '@amroksaleh/ui/input';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import {
   IconDeviceFloppy,
   IconInfoCircle,
@@ -51,32 +52,54 @@ type AssetKey = 'logo_wide' | 'logo_square' | 'favicon';
 
 interface AssetMeta {
   key: AssetKey;
+  labelKey: string;
   label: string;
   accept: string;
   urlField: keyof Branding;
+  descriptionKey: string;
   description: string;
 }
 
-const ASSET_META: AssetMeta[] = [
+/**
+ * The asset labels and descriptions reach `t()` through this table rather than
+ * as literals at the call site, which no static scanner can read — so they are
+ * declared here and the extractor takes the catalogue from this block. The
+ * English stays on the record as the runtime fallback.
+ *
+ * @i18n-keys admin
+ *   branding.asset.logoWide.label = Wide logo
+ *   branding.asset.logoWide.description = Shown in the expanded sidebar. PNG, WebP or SVG, max 2 MB.
+ *   branding.asset.logoSquare.label = Square logo
+ *   branding.asset.logoSquare.description = Shown in the collapsed sidebar. PNG, WebP or SVG, max 2 MB.
+ *   branding.asset.favicon.label = Favicon
+ *   branding.asset.favicon.description = Browser tab icon. ICO or PNG, max 256 KB.
+ */
+export const ASSET_META: AssetMeta[] = [
   {
     key: 'logo_wide',
+    labelKey: 'branding.asset.logoWide.label',
     label: 'Wide logo',
     accept: 'image/png,image/webp,image/svg+xml',
     urlField: 'logoWideUrl',
+    descriptionKey: 'branding.asset.logoWide.description',
     description: 'Shown in the expanded sidebar. PNG, WebP or SVG, max 2 MB.',
   },
   {
     key: 'logo_square',
+    labelKey: 'branding.asset.logoSquare.label',
     label: 'Square logo',
     accept: 'image/png,image/webp,image/svg+xml',
     urlField: 'logoSquareUrl',
+    descriptionKey: 'branding.asset.logoSquare.description',
     description: 'Shown in the collapsed sidebar. PNG, WebP or SVG, max 2 MB.',
   },
   {
     key: 'favicon',
+    labelKey: 'branding.asset.favicon.label',
     label: 'Favicon',
     accept: 'image/x-icon,image/png',
     urlField: 'faviconUrl',
+    descriptionKey: 'branding.asset.favicon.description',
     description: 'Browser tab icon. ICO or PNG, max 256 KB.',
   },
 ];
@@ -106,9 +129,12 @@ interface AssetUploaderProps {
 }
 
 function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSuccess, onError }: AssetUploaderProps) {
+  const t = useTranslation('admin');
   const [uploading, setUploading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const label = t(meta.labelKey, meta.label);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -119,7 +145,14 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
       const updated = await uploadBrandingAsset(scope, meta.key, file);
       onSuccess(updated);
     } catch (err) {
-      onError(toErrorMessage(err, `Failed to upload ${meta.label.toLowerCase()}`));
+      onError(
+        toErrorMessage(
+          err,
+          t('branding.upload.error', 'Failed to upload {asset}', {
+            asset: label.toLowerCase(),
+          })
+        )
+      );
     } finally {
       setUploading(false);
       // Reset so the same file can be re-selected after a clear.
@@ -133,7 +166,14 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
       const updated = await clearBrandingAsset(scope, meta.key);
       (onClearSuccess ?? onSuccess)(updated);
     } catch (err) {
-      onError(toErrorMessage(err, `Failed to clear ${meta.label.toLowerCase()}`));
+      onError(
+        toErrorMessage(
+          err,
+          t('branding.clear.error', 'Failed to clear {asset}', {
+            asset: label.toLowerCase(),
+          })
+        )
+      );
     } finally {
       setClearing(false);
     }
@@ -143,8 +183,10 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-foreground">{meta.label}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{meta.description}</p>
+          <p className="text-sm font-medium text-foreground">{label}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {t(meta.descriptionKey, meta.description)}
+          </p>
         </div>
 
         {/* Live preview */}
@@ -152,7 +194,7 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
           <div className="shrink-0">
             <img
               src={currentUrl}
-              alt={`Current ${meta.label}`}
+              alt={t('branding.preview.alt', 'Current {asset}', { asset: label })}
               className="h-10 max-w-[120px] rounded border border-border object-contain bg-muted/20 p-1"
               data-testid={`branding-preview-${meta.key}-${scope}`}
             />
@@ -161,7 +203,7 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
           <div
             className="shrink-0 flex items-center justify-center h-10 w-16 rounded border border-dashed border-border bg-muted/20"
             data-testid={`branding-preview-${meta.key}-${scope}`}
-            aria-label={`No ${meta.label} set`}
+            aria-label={t('branding.preview.empty', 'No {asset} set', { asset: label })}
           >
             <IconPhoto className="h-4 w-4 text-muted-foreground/50" />
           </div>
@@ -178,7 +220,7 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
           disabled={disabled || uploading}
           onChange={handleFileChange}
           data-testid={`branding-file-input-${meta.key}-${scope}`}
-          aria-label={`Upload ${meta.label}`}
+          aria-label={t('branding.upload.label', 'Upload {asset}', { asset: label })}
         />
 
         {/* Visible Upload button */}
@@ -192,7 +234,9 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
           data-testid={`branding-upload-btn-${meta.key}-${scope}`}
         >
           <IconUpload className="h-3.5 w-3.5" />
-          {uploading ? 'Uploading…' : 'Upload'}
+          {uploading
+            ? t('branding.upload.pending', 'Uploading…')
+            : t('branding.upload', 'Upload')}
         </Button>
 
         {/* Clear button — only shown when there is an asset to clear */}
@@ -205,10 +249,12 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
             onClick={handleClear}
             className="gap-1.5 text-muted-foreground hover:text-destructive"
             data-testid={`branding-clear-btn-${meta.key}-${scope}`}
-            aria-label={`Clear ${meta.label}`}
+            aria-label={t('branding.clear.label', 'Clear {asset}', { asset: label })}
           >
             <IconTrash className="h-3.5 w-3.5" />
-            {clearing ? 'Clearing…' : 'Clear'}
+            {clearing
+              ? t('branding.clear.pending', 'Clearing…')
+              : t('branding.clear', 'Clear')}
           </Button>
         )}
       </div>
@@ -239,6 +285,7 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
   const { user } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canWrite = hasPermission(SETTINGS_WRITE);
 
@@ -266,18 +313,28 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
 
   const effectiveBranding = mutationResult ?? branding;
 
+  /** The translated display name of an asset, falling back to its raw key. */
+  const assetLabel = (key: AssetKey): string => {
+    const meta = ASSET_META.find((m) => m.key === key);
+    return meta ? t(meta.labelKey, meta.label) : key;
+  };
+
   const handleSuccess = (_scope: 'tenant' | 'global', key: AssetKey, updated: Branding) => {
     setMutationResult(updated);
     refetchBranding();
-    const label = ASSET_META.find((m) => m.key === key)?.label ?? key;
-    addToast(`${label} uploaded successfully.`, 'success');
+    addToast(
+      t('branding.upload.success', '{asset} uploaded successfully.', { asset: assetLabel(key) }),
+      'success'
+    );
   };
 
   const handleClearSuccess = (_scope: 'tenant' | 'global', key: AssetKey, updated: Branding) => {
     setMutationResult(updated);
     refetchBranding();
-    const label = ASSET_META.find((m) => m.key === key)?.label ?? key;
-    addToast(`${label} cleared.`, 'success');
+    addToast(
+      t('branding.clear.success', '{asset} cleared.', { asset: assetLabel(key) }),
+      'success'
+    );
   };
 
   const handleError = (message: string) => {
@@ -305,9 +362,12 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
       // own id, matching the PATH {id} the backend uses as the write target.
       const tenantId = user?.tenant_id ?? 0;
       await setBrandingHost(tenantId, trimmed);
-      addToast('Custom host saved.', 'success');
+      addToast(t('branding.host.success', 'Custom host saved.'), 'success');
     } catch (err) {
-      addToast(toErrorMessage(err, 'Failed to save custom host'), 'error');
+      addToast(
+        toErrorMessage(err, t('branding.host.error', 'Failed to save custom host')),
+        'error'
+      );
     } finally {
       setSavingHost(false);
     }
@@ -324,13 +384,15 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Branding</h2>
+            <h2>{t('branding.tenant.title', 'Branding')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
-            Upload logos and a favicon to white-label the app for this tenant. Cleared assets fall
-            back to the global default.
+            {t(
+              'branding.tenant.description',
+              'Upload logos and a favicon to white-label the app for this tenant. Cleared assets fall back to the global default.'
+            )}
             {tenantOverridable && !canWrite &&
-              ' You have read-only access (settings:write required to upload).'}
+              ` ${t('branding.tenant.readOnly', 'You have read-only access (settings:write required to upload).')}`}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -342,6 +404,13 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
               className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground"
             >
               <IconInfoCircle className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+              {/*
+                NOT translated, deliberately: "Global branding defaults" is
+                emphasised with <strong> in the MIDDLE of the sentence, and
+                `t()` returns a string — so preserving the emphasis would mean
+                handing a translator three fragments in English word order.
+                Needs the emphasis lifted out of the sentence first.
+              */}
               <p>
                 As the system tenant, you have no per-tenant branding overrides. Edit the
                 platform-wide branding assets under{' '}
@@ -380,11 +449,13 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
               </div>
               <div>
                 <CardTitle className="text-lg font-bold font-heading">
-                  <h2>Global branding defaults</h2>
+                  <h2>{t('branding.global.title', 'Global branding defaults')}</h2>
                 </CardTitle>
                 <CardDescription className="text-sm">
-                  Platform-wide branding applied to every tenant that has not uploaded its own
-                  assets (settings:manage).
+                  {t(
+                    'branding.global.description',
+                    'Platform-wide branding applied to every tenant that has not uploaded its own assets (settings:manage).'
+                  )}
                 </CardDescription>
               </div>
             </div>
@@ -409,7 +480,16 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
             {/* Custom host field */}
             <div className="pt-4 border-t border-border space-y-3">
               <div>
-                <p className="text-sm font-medium text-foreground">Custom hostname</p>
+                <p className="text-sm font-medium text-foreground">
+                  {t('branding.host.title', 'Custom hostname')}
+                </p>
+                {/*
+                  NOT translated, deliberately: the example domain is marked up
+                  with <code> in the MIDDLE of the sentence, and `t()` returns a
+                  string — preserving it would mean splitting the sentence into
+                  fragments a translator cannot reorder. Needs the example
+                  lifted out of the sentence first.
+                */}
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Map a custom domain (e.g. <code>app.acme.com</code>) to this tenant for pre-auth
                   branding (login page, favicon, title). Leave blank to use the slug-subdomain only.
@@ -423,7 +503,7 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
                   onChange={(e) => setCustomHost(e.target.value)}
                   className="max-w-xs"
                   data-testid="branding-custom-host-input"
-                  aria-label="Custom hostname"
+                  aria-label={t('branding.host.title', 'Custom hostname')}
                 />
                 <Button
                   type="button"
@@ -433,7 +513,9 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
                   data-testid="branding-custom-host-save"
                 >
                   <IconDeviceFloppy className="w-4 h-4" />
-                  {savingHost ? 'Saving…' : 'Save host'}
+                  {savingHost
+                    ? t('branding.host.pending', 'Saving…')
+                    : t('branding.host.submit', 'Save host')}
                 </Button>
               </div>
             </div>

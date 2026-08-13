@@ -1,13 +1,27 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect } from 'react';
+import { useLanguageDirection } from '@amroksaleh/features/i18n';
 
 /**
- * App-wide text/layout direction (LTR / RTL) for Arabic support.
+ * App-wide text/layout direction (LTR / RTL), DERIVED FROM THE CHOSEN LANGUAGE.
  *
- * Sets `dir` on <html> so the whole UI mirrors, and persists the choice in
- * localStorage. Direction is a UI-layout concern kept separate from message
- * translation (which lands later) — RTL must work regardless of copy.
+ * Direction is not a preference of its own. Each language record carries its
+ * own `direction` ('ltr'/'rtl' — `languages.direction`, migration 090), the
+ * LanguageProvider resolves it alongside the language, and this provider is the
+ * one place that writes it onto <html dir>. Switching to Arabic therefore
+ * mirrors the interface; switching back to English un-mirrors it. Adding
+ * Hebrew, Farsi or Urdu is a row in `languages`, not a change here — nothing in
+ * this file, or anywhere below it, tests a language code.
+ *
+ * This context is READ-ONLY. It exists because several components need to know
+ * the direction in JS (the sidebar's collapse chevron, the plugin CRUD screen's
+ * table affordances) and reading it from one place beats each of them
+ * re-deriving it. To CHANGE direction, change the language.
+ *
+ * Because the per-user language preference is stored on the profile
+ * (PATCH /api/v1/settings/language), direction follows the user across devices
+ * for free — there is no second thing to persist.
  *
  * Components should style with LOGICAL utilities (ms/me, ps/pe, start/end,
  * border-s/e, text-start/end) so they follow this direction automatically;
@@ -16,56 +30,44 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 
 export type Direction = 'ltr' | 'rtl';
 
-const STORAGE_KEY = 'whity.dir';
+/**
+ * The key the retired manual direction toggle used to write.
+ *
+ * It is REMOVED on mount and never read. A returning user who had toggled to
+ * RTL while running the interface in English would otherwise be stuck in a
+ * direction their language contradicts, with no toggle left to undo it — so the
+ * language wins and the stale key is cleared rather than migrated. There is
+ * nothing to migrate: the value it held was, by the old design's own admission,
+ * deliberately independent of the language and so cannot tell us anything about
+ * which language the user wants.
+ */
+const RETIRED_STORAGE_KEY = 'whity.dir';
 
 interface DirectionContextValue {
   dir: Direction;
-  setDir: (dir: Direction) => void;
-  toggle: () => void;
 }
 
 const DirectionContext = createContext<DirectionContextValue | null>(null);
 
 export function DirectionProvider({ children }: { children: React.ReactNode }) {
-  const [dir, setDirState] = useState<Direction>('ltr');
+  const dir = useLanguageDirection();
 
-  // Hydrate the stored preference after mount (deferred to stay clear of the
-  // set-state-in-effect rule while still applying on first paint).
-  useEffect(() => {
-    const p = Promise.resolve().then(() => {
-      const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-      if (stored === 'rtl' || stored === 'ltr') setDirState(stored);
-    });
-    void p;
-  }, []);
-
-  // Reflect the current direction onto <html> (DOM mutation, not React state).
+  // Reflect the language's direction onto <html> (DOM mutation, not React state).
   useEffect(() => {
     document.documentElement.dir = dir;
   }, [dir]);
 
-  const setDir = useCallback((next: Direction) => {
-    setDirState(next);
+  // Drop the retired toggle's key once, so it cannot linger in a browser
+  // profile forever looking like live state.
+  useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, next);
+      localStorage.removeItem(RETIRED_STORAGE_KEY);
     } catch {
-      // Ignore storage failures (private mode, quota) — direction still applies.
+      // Ignore storage failures (private mode) — the key is never read anyway.
     }
   }, []);
 
-  const toggle = useCallback(() => {
-    setDirState((prev) => {
-      const next = prev === 'rtl' ? 'ltr' : 'rtl';
-      try {
-        localStorage.setItem(STORAGE_KEY, next);
-      } catch {
-        // Ignore storage failures.
-      }
-      return next;
-    });
-  }, []);
-
-  return <DirectionContext.Provider value={{ dir, setDir, toggle }}>{children}</DirectionContext.Provider>;
+  return <DirectionContext.Provider value={{ dir }}>{children}</DirectionContext.Provider>;
 }
 
 export function useDirection(): DirectionContextValue {

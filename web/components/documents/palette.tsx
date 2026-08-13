@@ -12,29 +12,37 @@ import {
   IconEye,
   IconEyeOff,
 } from '@tabler/icons-react';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 
-function elementLabel(el: DocElement): string {
+/**
+ * A layer's name in the list: the element's own content when it has any, else
+ * the name of what it IS. The element's content is document data and stays
+ * verbatim; only the fallback names are ours to translate.
+ */
+function elementLabel(el: DocElement, t: TranslateFn): string {
   switch (el.type) {
     case 'text':
-      return el.text || 'Text';
+      return el.text || t('palette.layer.text', 'Text');
     case 'dynamicText':
-      return el.template || 'Dynamic text';
+      return el.template || t('palette.layer.dynamicText', 'Dynamic text');
     case 'image':
-      return el.binding ? `Image {{${el.binding}}}` : 'Image';
+      return el.binding
+        ? t('palette.layer.imageBound', 'Image {token}', { token: `{{${el.binding}}}` })
+        : t('palette.layer.image', 'Image');
     case 'barcode':
-      return `Barcode ${el.symbology}`;
+      return t('palette.layer.barcode', 'Barcode {symbology}', { symbology: el.symbology });
     case 'qr':
-      return 'QR code';
+      return t('palette.layer.qr', 'QR code');
     case 'rect':
-      return 'Rectangle';
+      return t('palette.layer.rect', 'Rectangle');
     case 'line':
-      return 'Line';
+      return t('palette.layer.line', 'Line');
     case 'math':
-      return el.expression || 'Math';
+      return el.expression || t('palette.layer.math', 'Math');
     case 'blockInstance':
-      return 'Block';
+      return t('palette.layer.block', 'Block');
     default:
-      return 'Element';
+      return t('palette.layer.element', 'Element');
   }
 }
 
@@ -70,6 +78,7 @@ export function Palette({
   onDeleteBlock: (blockId: string) => void;
   onSetBlockScope: (blockId: string, scope: BlockScope) => void;
 }) {
+  const t = useTranslation('documents');
   const frontToBack = [...elements].sort((a, b) => b.z - a.z);
   const selectedSet = new Set(selectedIds);
 
@@ -77,7 +86,9 @@ export function Palette({
     <div className="flex h-full flex-col gap-4">
       {blocks.length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Blocks</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t('palette.blocks.heading', 'Blocks')}
+          </h3>
           {BLOCK_SCOPES.filter((s) => blocks.some((b) => b.scope === s.id)).map((s) => (
             <div key={s.id} className="space-y-1">
               <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{s.label}</div>
@@ -92,7 +103,7 @@ export function Palette({
                       type="button"
                       data-testid={`doc-block-insert-${b.id}`}
                       className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-start"
-                      title={`Insert “${b.name}”`}
+                      title={t('palette.blocks.insert', 'Insert “{name}”', { name: b.name })}
                       onClick={() => onInsertBlock(b.id)}
                     >
                       <IconComponents className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -100,7 +111,7 @@ export function Palette({
                     </button>
                     <select
                       data-testid={`doc-block-scope-${b.id}`}
-                      aria-label={`Scope for ${b.name}`}
+                      aria-label={t('palette.blocks.scope', 'Scope for {name}', { name: b.name })}
                       className="h-6 rounded border border-input bg-input/20 px-1 text-[10px] outline-none focus-visible:ring-1 focus-visible:ring-ring/40"
                       value={b.scope}
                       onChange={(e) => onSetBlockScope(b.id, e.target.value as BlockScope)}
@@ -113,7 +124,7 @@ export function Palette({
                     </select>
                     <button
                       type="button"
-                      aria-label="Delete block"
+                      aria-label={t('palette.blocks.delete', 'Delete block')}
                       data-testid={`doc-block-delete-${b.id}`}
                       onClick={() => onDeleteBlock(b.id)}
                     >
@@ -128,11 +139,13 @@ export function Palette({
 
       <div className="min-h-0 flex-1">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Layers ({elements.length})
+          {t('palette.layers.heading', 'Layers ({count})', { count: elements.length })}
         </h3>
         <div className="space-y-1 overflow-y-auto">
           {frontToBack.length === 0 && (
-            <p className="text-xs text-muted-foreground">No elements yet — add one from the Insert menu.</p>
+            <p className="text-xs text-muted-foreground">
+              {t('palette.layers.empty', 'No elements yet — add one from the Insert menu.')}
+            </p>
           )}
           {frontToBack.map((el) => (
             <div
@@ -146,14 +159,18 @@ export function Palette({
                 data-testid={`doc-layer-select-${el.id}`}
                 className={`min-w-0 flex-1 truncate text-start ${el.hidden ? 'text-muted-foreground line-through' : ''}`}
                 onClick={(e) => onSelect(el.id, e.shiftKey || e.metaKey || e.ctrlKey)}
-                title={elementLabel(el)}
+                title={elementLabel(el, t)}
               >
-                {elementLabel(el)}
+                {elementLabel(el, t)}
               </button>
               <button
                 type="button"
                 data-testid={`doc-layer-lock-${el.id}`}
-                aria-label={el.locked ? 'Unlock element' : 'Lock element'}
+                aria-label={
+                  el.locked
+                    ? t('palette.layer.unlock', 'Unlock element')
+                    : t('palette.layer.lock', 'Lock element')
+                }
                 aria-pressed={!!el.locked}
                 onClick={() => onToggleLock(el.id)}
               >
@@ -166,7 +183,11 @@ export function Palette({
               <button
                 type="button"
                 data-testid={`doc-layer-hide-${el.id}`}
-                aria-label={el.hidden ? 'Show element' : 'Hide element'}
+                aria-label={
+                  el.hidden
+                    ? t('palette.layer.show', 'Show element')
+                    : t('palette.layer.hide', 'Hide element')
+                }
                 aria-pressed={!!el.hidden}
                 onClick={() => onToggleHidden(el.id)}
               >
@@ -176,15 +197,23 @@ export function Palette({
                   <IconEye className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
                 )}
               </button>
-              <button type="button" aria-label="Bring forward" onClick={() => onReorder(el.id, 'up')}>
+              <button
+                type="button"
+                aria-label={t('palette.layer.bringForward', 'Bring forward')}
+                onClick={() => onReorder(el.id, 'up')}
+              >
                 <IconChevronUp className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
               </button>
-              <button type="button" aria-label="Send backward" onClick={() => onReorder(el.id, 'down')}>
+              <button
+                type="button"
+                aria-label={t('palette.layer.sendBackward', 'Send backward')}
+                onClick={() => onReorder(el.id, 'down')}
+              >
                 <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
               </button>
               <button
                 type="button"
-                aria-label="Delete element"
+                aria-label={t('palette.layer.delete', 'Delete element')}
                 disabled={el.locked}
                 className="disabled:opacity-30"
                 onClick={() => onDelete(el.id)}

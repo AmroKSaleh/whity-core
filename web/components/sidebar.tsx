@@ -6,12 +6,11 @@ import { useAuth } from '@/lib/auth-context';
 import type { Membership } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
-import { useDirection } from '@/lib/direction-context';
 import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Switcher } from '@amroksaleh/ui/switcher';
-import { LanguageSwitcher } from '@amroksaleh/features/i18n';
+import { LanguageSwitcher, useI18nEnabled } from '@amroksaleh/features/i18n';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,
@@ -22,7 +21,6 @@ import {
   IconDashboard,
   IconUserCog,
   IconBuilding,
-  IconLanguage,
   IconWorld,
   IconSun,
   IconMoon,
@@ -126,8 +124,9 @@ export function Sidebar() {
   const { logout, user, memberships } = useAuth();
   const { items: navItemsFlat, getGroupedItems } = useNavigation();
   const branding = useBranding();
-  const { dir, toggle: toggleDirection } = useDirection();
   const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeMode();
+  // Whether this instance offers a language choice at all (`i18n.enabled`).
+  const isI18nEnabled = useI18nEnabled();
   const groupedItems = getGroupedItems();
 
   // The single most-specific nav item matching the current path (e.g. on
@@ -347,12 +346,22 @@ export function Sidebar() {
             collapsed={isCollapsed && !isMobile}
           />
           {/*
-            Interface language (WHIT-582) — deliberately independent of the
-            direction toggle below: switching language does NOT flip `dir`
-            (see lib/direction-context.tsx), so a right-to-left reader can
-            still run the UI in English LTR and vice versa.
+            Interface language. This is ALSO the direction control: each
+            language carries its own writing direction, so choosing Arabic
+            mirrors the interface and choosing English un-mirrors it (see
+            lib/direction-context.tsx). There is deliberately no separate
+            direction toggle — a language and a direction that disagree is not
+            a state a user can usefully be in, and the pair used to drift
+            apart. The choice is stored on the profile, so it follows the user
+            across devices.
+
+            The WHOLE ROW — frame, globe icon and control — is gated on
+            `i18n.enabled`. The switcher self-suppresses too, but this wrapper
+            has to ask as well: otherwise an instance with i18n off would show
+            an empty bordered box with a globe in it, which is a worse
+            affordance than the switcher was.
           */}
-          {(!isCollapsed || isMobile) && (
+          {isI18nEnabled && (!isCollapsed || isMobile) && (
             <div
               className="flex w-full items-center gap-2 rounded-lg border border-input bg-input/20 px-3 py-2"
               data-testid="language-switcher"
@@ -364,19 +373,6 @@ export function Sidebar() {
               />
             </div>
           )}
-          {/* Interface direction (LTR / RTL) — Arabic support (WC-rtl). */}
-          <Button
-            onClick={toggleDirection}
-            variant="outline"
-            size={isCollapsed && !isMobile ? 'icon' : 'default'}
-            className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
-            title={dir === 'rtl' ? 'Switch to left-to-right' : 'التبديل إلى العربية (RTL)'}
-            aria-label="Toggle interface direction"
-            data-testid="direction-toggle"
-          >
-            <IconLanguage size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
-            {(!isCollapsed || isMobile) && (dir === 'rtl' ? 'English (LTR)' : 'العربية (RTL)')}
-          </Button>
           {/* Light / dark color scheme (see lib/theme-mode-context.tsx). */}
           <Button
             onClick={toggleTheme}

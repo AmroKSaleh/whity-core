@@ -167,9 +167,80 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.20.0',
+            '1.26.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.20 adds the plugin-owned data-type contracts (WC-723 Door 2): '
+            'SDK 1.26 adds the undeclared-reference linter (Schema\UndeclaredReferenceLinter '
+            . 'and Schema\ReferenceDeclarations): it flags an *_id column that points at a '
+            . 'table that really exists, carries NO foreign key, and appears in NEITHER '
+            . 'blocks_delete NOR cascade_delete — a relationship core cannot see, which is '
+            . 'the orphaning bug. It deliberately does NOT flag an *_id column merely for '
+            . 'lacking a foreign key: no FKs between plugin tables is the convention here, '
+            . 'and a rule that fires on the intended design is muted within a day; '
+            . 'SDK 1.25 adds the portable writes: Sql\Upsert, whose tenantScoped() '
+            . 'takes the tenant id as a required separate argument and prepends it to '
+            . 'the conflict target, so an ON CONFLICT (client_uuid) that should have '
+            . 'been ON CONFLICT (tenant_id, client_uuid) — cross-tenant data loss '
+            . 'written as an ordinary create — cannot be expressed; and '
+            . 'Sql\SequenceAllocator, the host contract that deletes the '
+            . 'read-then-write counter a plugin would otherwise migrate and maintain '
+            . 'for itself; '
+            . 'SDK 1.24 adds the lifecycle WRITE contract (DataType\DataTypeLifecycle '
+            . 'and the DataType\LifecycleOutcome it answers with). Core told adopters '
+            . 'to route their lifecycle writes through core and then published only '
+            . 'the read-only DataType\DataTypeGuard, so a plugin that needed to '
+            . 'actually trash a record duck-typed Whity\Core\DataType\DataTypeLifecycleService '
+            . '— a host internal with no contract and no compatibility promise. That '
+            . 'is core\'s fault, not theirs. Reads keep their guarantee: the guard is '
+            . 'untouched and gains no mutators, because "holding this confers no '
+            . 'authority" is the one sentence that makes it safe to hand out. Writes '
+            . 'get a SECOND contract, bound to the same object the generated endpoints '
+            . 'authorize through — so an in-process call cannot skip a check the '
+            . 'endpoint enforces: a type the caller may not read is reported UNKNOWN '
+            . 'rather than forbidden (holding the contract must not become a way to '
+            . 'enumerate the catalogue), an action the type does not offer is refused, '
+            . 'and the action\'s declared permission is resolved through the same '
+            . 'RoleChecker the RBAC middleware uses. $actorProfileId is REQUIRED for '
+            . 'that reason — it is the subject of the permission check, so an optional '
+            . 'one could only fail closed or run ungated. The outcome is the vocabulary '
+            . 'the HTTP layer already publishes (reason as the stable key, message as '
+            . 'the fallback, blockers, and the status), so a plugin calling in-process '
+            . 'and a client calling over HTTP branch on ONE contract. Bulk lifecycle '
+            . 'work is a LOOP over these calls — a bulk UPDATE bypasses every guard, '
+            . 'veto and hook at once — and no bulk API ships here, because "does one '
+            . 'veto abort the batch or is it skipped and reported" is a decision that '
+            . 'has not been made; '
+            . 'SDK 1.23 adds the portable schema predicates (Schema\SchemaInspector '
+            . 'and the Schema\MigrationSchema trait). The SDK asks every migration '
+            . 'to be idempotent and the host runs them on PostgreSQL and SQLite, '
+            . 'but ALTER TABLE … ADD COLUMN IF NOT EXISTS is a PostgreSQL extension '
+            . 'SQLite rejects — so every plugin author ends up hand-writing the same '
+            . 'driver branch over information_schema and PRAGMA table_info, and a '
+            . 'wrong answer there gates DDL: it passes on the engine the author '
+            . 'develops against and fails on the other one, at enable time, on '
+            . 'somebody else\'s deployment; '
+            . 'SDK 1.22 makes the ROLE side of PermissionResolver resource-scoped: '
+            . 'hasRole() takes the same optional $resourceType/$resourceId pair '
+            . '1.17 gave hasPermission(). Host role resolution has honoured a '
+            . 'resource scope since 1.17 (getEffectiveRolesForProfile accepts '
+            . 'one), but hasRole() called it with no resource arguments, so a '
+            . 'role granted at ONE record through resource_role_assignments was '
+            . 'fully representable in storage and fully resolvable — yet '
+            . 'unreachable through the method any caller would use, which reads '
+            . 'as needing a memberships schema change it does not need. Additive: '
+            . 'omitting them preserves 1.21 behaviour exactly (WC-712 §2); '
+            . 'SDK 1.21 adds plugin-declared SETTINGS (Settings\PluginSettingsInterface, '
+            . '#713 item 1): a plugin contributes typed, validated, defaulted '
+            . 'configuration keys to the settings store the HOST already owns — the same '
+            . 'two tables, the same per-tenant ?? global ?? default chain, the same write '
+            . 'validation — instead of rebuilding the settings layer as a private table '
+            . 'with no declared keys and no validation. Host-namespaced under the plugin '
+            . 'name the loader supplies, so two plugins cannot collide and none can '
+            . 'shadow a core key. Publication on the core settings screens is an explicit '
+            . '`admin => true` opt-in, because those screens are gated on CORE settings '
+            . 'permissions rather than on the declaring plugin permissions. '
+            . 'Secret-shaped declarations are REFUSED rather than downgraded to a '
+            . 'readable string; '
+            . 'SDK 1.20 adds the plugin-owned data-type contracts (WC-723 Door 2): '
             . 'Tenant\PluginTablesInterface, by which a plugin declares WHICH '
             . 'tables it owns while the host stamps WHO owns them; '
             . 'DataType\PluginDataTypesInterface, by which it declares a record\'s '
@@ -247,6 +318,118 @@ final class SdkPackageContractTest extends TestCase
             (string) (new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, 'effectivePermissions'))
                 ->getReturnType()
         );
+
+        // SDK 1.22: the resource scope is on the ROLE side too. Every method that
+        // can be asked at a resource must take the SAME pair, or the contract is
+        // asymmetric again — a plugin could narrow a permission question to one
+        // record and not the role question about that same record.
+        $signature = static fn (string $method): array => array_map(
+            static fn (\ReflectionParameter $p): string => $p->getName(),
+            (new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, $method))->getParameters()
+        );
+
+        $this->assertSame(
+            ['profileId', 'tenantId', 'permission', 'resourceType', 'resourceId'],
+            $signature('hasPermission')
+        );
+        $this->assertSame(
+            ['profileId', 'tenantId', 'role', 'resourceType', 'resourceId'],
+            $signature('hasRole')
+        );
+        $this->assertSame(
+            ['profileId', 'tenantId', 'resourceType', 'resourceId'],
+            $signature('effectivePermissions')
+        );
+
+        // Additive only: a plugin written against SDK 1.21 must keep compiling
+        // and keep receiving the tenant-wide answer.
+        $hasRole = new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, 'hasRole');
+        $this->assertTrue(
+            $hasRole->getParameters()[3]->isOptional() && $hasRole->getParameters()[4]->isOptional(),
+            'The role resource arguments must be optional so three-argument callers are unaffected.'
+        );
+    }
+
+    /**
+     * SDK 1.24: the lifecycle WRITE contract, and the read-only guarantee it
+     * deliberately does not touch.
+     *
+     * `DataTypeGuard` is documented as read-only — "every method answers a
+     * question; none trashes, retires or deletes anything" — and that sentence
+     * is what makes it safe to hand out. Adding mutators to it would falsify the
+     * one property it rests on, so the write surface is a SECOND contract. Both
+     * halves are pinned here: the new one has exactly the four mutating verbs,
+     * and the old one still has exactly its four questions.
+     */
+    public function testTheLifecycleWriteContractLivesInTheSdkAndTheGuardStaysReadOnly(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\DataType\DataTypeLifecycle::class));
+        $this->assertTrue(interface_exists(\Whity\Sdk\DataType\LifecycleOutcome::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\DataType\DataTypeLifecycle::class))->getMethods()
+        );
+        sort($methods);
+        $this->assertSame(['delete', 'restore', 'retire', 'trash'], $methods);
+
+        $readOnly = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\DataType\DataTypeGuard::class))->getMethods()
+        );
+        sort($readOnly);
+        $this->assertSame(
+            ['blockingReferences', 'canDelete', 'isReferenceable', 'stateOf'],
+            $readOnly,
+            'DataTypeGuard must stay read-only: its whole guarantee is that holding it confers no '
+            . 'authority a plugin does not already have.'
+        );
+    }
+
+    /**
+     * The ACTOR is required on every write, and the outcome carries the same
+     * refusal vocabulary the HTTP layer publishes.
+     *
+     * An optional actor would be a trap: the profile is the SUBJECT of the
+     * permission check, so an omitted one could only fail closed (a parameter
+     * that always fails) or run ungated (the bypass this contract exists to
+     * remove).
+     */
+    public function testEveryWriteTakesARequiredActorAndAnswersInTheHttpVocabulary(): void
+    {
+        foreach (['trash', 'restore', 'retire', 'delete'] as $action) {
+            $method = new \ReflectionMethod(\Whity\Sdk\DataType\DataTypeLifecycle::class, $action);
+
+            $this->assertSame(
+                ['dataType', 'tenantId', 'id', 'actorProfileId'],
+                array_map(
+                    static fn (\ReflectionParameter $p): string => $p->getName(),
+                    $method->getParameters()
+                ),
+                "{$action}() must take the acting profile explicitly."
+            );
+            $this->assertFalse(
+                $method->getParameters()[3]->isOptional(),
+                "{$action}()'s actor must be REQUIRED — it is what the permission check runs against."
+            );
+            $this->assertSame(
+                \Whity\Sdk\DataType\LifecycleOutcome::class,
+                (string) $method->getReturnType()
+            );
+        }
+
+        $outcome = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\DataType\LifecycleOutcome::class))->getMethods()
+        );
+        sort($outcome);
+        $this->assertSame(
+            ['blockers', 'httpStatus', 'isOk', 'message', 'reason', 'state', 'toArray'],
+            $outcome,
+            'The outcome publishes the same {reason, message} vocabulary — plus blockers and the '
+            . 'status — so a plugin calling in-process and a client calling over HTTP branch on ONE '
+            . 'contract.'
+        );
     }
 
     /**
@@ -290,6 +473,32 @@ final class SdkPackageContractTest extends TestCase
         );
         $this->assertSame('degraded', \Whity\Sdk\Health\ProbeResult::degraded('slow')->status);
         $this->assertSame('down', \Whity\Sdk\Health\ProbeResult::down('gone')->status);
+    }
+
+    /**
+     * SDK 1.21 (#713 item 1): the settings contribution point. It must live in
+     * the SDK — not in core — so an out-of-repo plugin, which depends on
+     * whity/plugin-sdk alone, can declare its configuration keys without
+     * referencing a single host type. The declaration is plain arrays for
+     * exactly that reason: the host owns SettingDefinition, the plugin owns
+     * nothing but data.
+     */
+    public function testSettingsContributionPointLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\Settings\PluginSettingsInterface::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\Settings\PluginSettingsInterface::class))->getMethods()
+        );
+        $this->assertSame(['getSettings'], $methods);
+        $this->assertSame(
+            'array',
+            (string) (new \ReflectionMethod(
+                \Whity\Sdk\Settings\PluginSettingsInterface::class,
+                'getSettings'
+            ))->getReturnType()
+        );
     }
 
     public function testPluginMcpInterface_existsWithGetMcpPromptsMethod(): void
@@ -355,6 +564,172 @@ final class SdkPackageContractTest extends TestCase
             class_exists(\Whity\Sdk\Testing\TenantIsolationConformanceTestCase::class),
             'The shared base conformance test case must live in the SDK'
         );
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Testing\RealEnginePdo::class),
+            'The real-engine PDO harness must live in the SDK: a plugin can only '
+            . 'run its conformance/data-layer tests against the engine it actually '
+            . 'ships against if the harness ships with the contract it depends on'
+        );
+    }
+
+    /**
+     * The engine a plugin's real-engine tests run against must be an ENVIRONMENT
+     * decision, not a code one.
+     *
+     * A plugin that has to override `makePdo()` to reach Postgres will not do
+     * it, and its whole suite stays on SQLite — where an INTEGER-vs-VARCHAR
+     * comparison silently passes and then 500s in production. So the base case's
+     * default must itself honour PHPUNIT_PG_DSN: setting one variable moves the
+     * suite onto the real dialect with no subclass edit anywhere.
+     */
+    public function testConformanceCaseDefaultsToPostgresWhenADsnIsConfigured(): void
+    {
+        $source = (string) file_get_contents(
+            self::SDK_DIR . '/src/Testing/TenantIsolationConformanceTestCase.php'
+        );
+        $this->assertStringContainsString(
+            'RealEnginePdo::make()',
+            $source,
+            'makePdo() must delegate to the shared harness rather than hard-coding SQLite'
+        );
+
+        $harness = (string) file_get_contents(self::SDK_DIR . '/src/Testing/RealEnginePdo.php');
+        foreach (['PHPUNIT_PG_DSN', 'PHPUNIT_PG_USER', 'PHPUNIT_PG_PASSWORD'] as $var) {
+            $this->assertStringContainsString(
+                $var,
+                $harness,
+                "The harness must honour {$var} — the same variable name whity-core's "
+                . 'own real-engine suites use, so one environment drives both'
+            );
+        }
+
+        // Absent a DSN the harness must stay on SQLite: the fast local loop is
+        // what keeps the dual-engine habit affordable. Asserted with the variable
+        // explicitly cleared, because this very suite may itself be running under
+        // a DSN.
+        $saved = $_ENV['PHPUNIT_PG_DSN'] ?? null;
+        unset($_ENV['PHPUNIT_PG_DSN']);
+        $savedProcess = getenv('PHPUNIT_PG_DSN');
+        putenv('PHPUNIT_PG_DSN');
+
+        try {
+            $this->assertFalse(
+                \Whity\Sdk\Testing\RealEnginePdo::isPostgres(),
+                'With no PHPUNIT_PG_DSN set, the harness must fall back to SQLite'
+            );
+            $this->assertSame(
+                'sqlite',
+                \Whity\Sdk\Testing\RealEnginePdo::make()->getAttribute(\PDO::ATTR_DRIVER_NAME)
+            );
+        } finally {
+            if ($saved !== null) {
+                $_ENV['PHPUNIT_PG_DSN'] = $saved;
+            }
+            if (is_string($savedProcess)) {
+                putenv('PHPUNIT_PG_DSN=' . $savedProcess);
+            }
+        }
+    }
+
+    /**
+     * SDK 1.23: the portable schema predicates. These have to live in the SDK
+     * rather than in core, because the code that needs them — a plugin's
+     * migration — depends on the SDK and nothing else.
+     */
+    public function testSchemaPredicatesLiveInTheSdk(): void
+    {
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Schema\SchemaInspector::class),
+            'The portable schema inspector must live in the SDK'
+        );
+        $this->assertTrue(
+            trait_exists(\Whity\Sdk\Schema\MigrationSchema::class),
+            'The migration schema trait must live in the SDK'
+        );
+
+        // A trait rather than a base class: MigrationInterface is an interface
+        // precisely so a plugin keeps its one inheritance slot.
+        $this->assertTrue(
+            (new \ReflectionClass(\Whity\Sdk\Schema\MigrationSchema::class))->isTrait()
+        );
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\Schema\MigrationSchema::class))->getMethods()
+        );
+        sort($methods);
+        $this->assertSame(
+            [
+                'addColumnIfMissing',
+                'columnExists',
+                'dropColumnIfExists',
+                'indexExists',
+                'tableColumns',
+                'tableExists',
+            ],
+            $methods
+        );
+    }
+
+    /**
+     * SDK 1.26: the undeclared-reference linter. It belongs in the SDK for the
+     * same reason the tenant conformance kit does — an out-of-repo plugin has
+     * to be able to run it in its own CI with nothing but `whity/plugin-sdk`.
+     */
+    public function testUndeclaredReferenceLinterLivesInTheSdk(): void
+    {
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Schema\UndeclaredReferenceLinter::class),
+            'The undeclared-reference linter must live in the SDK'
+        );
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Schema\ReferenceDeclarations::class),
+            'The declared-reference set must live in the SDK'
+        );
+
+        // Both halves of the reference graph are read. `blocks_delete` and
+        // `cascade_delete` are opposite answers to what happens to a record's
+        // children, but identical answers to "does core know this edge exists?"
+        // — and an edge in neither list is the bug.
+        $source = (string) file_get_contents(self::SDK_DIR . '/src/Schema/ReferenceDeclarations.php');
+        $this->assertStringContainsString("'blocks_delete'", $source);
+        $this->assertStringContainsString("'cascade_delete'", $source);
+
+        // The escape hatch demands a reason. A tag that silences a finding
+        // without recording why is a muted alarm, which is how a linter stops
+        // being worth running.
+        $this->assertSame(
+            '@reference-lint-ignore',
+            \Whity\Sdk\Schema\UndeclaredReferenceLinter::IGNORE_TAG
+        );
+    }
+
+    /**
+     * SDK 1.24: the portable write shapes. `Upsert` is pure SQL construction
+     * and belongs in the SDK; `SequenceAllocator` is an INTERFACE here because
+     * the storage behind it is the host's, and a plugin must be able to name
+     * the contract without depending on core.
+     */
+    public function testPortableWriteShapesLiveInTheSdk(): void
+    {
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Sql\Upsert::class),
+            'The portable upsert builder must live in the SDK'
+        );
+        $this->assertTrue(
+            interface_exists(\Whity\Sdk\Sql\SequenceAllocator::class),
+            'The sequence-allocation contract must live in the SDK — a plugin references '
+            . 'the interface, and the host registers its own implementation.'
+        );
+
+        // The tenant id is a REQUIRED, separately typed parameter. If it were
+        // ever folded into the $values array the unscoped conflict target would
+        // become reachable by omission, which is the whole failure this guards.
+        $tenantScoped = new \ReflectionMethod(\Whity\Sdk\Sql\Upsert::class, 'tenantScoped');
+        $parameters = $tenantScoped->getParameters();
+        $this->assertSame('tenantId', $parameters[2]->getName());
+        $this->assertSame('int', (string) $parameters[2]->getType());
+        $this->assertFalse($parameters[2]->isOptional(), 'The tenant id must not be omittable.');
     }
 
     /**

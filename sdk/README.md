@@ -6,7 +6,7 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications without dragging a host
 framework along.
 
-## Contract surface (v1.4.0)
+## Contract surface (v1.22.0)
 
 | Type | Since | Purpose |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ framework along.
 | `Whity\Sdk\Http\Response` | 1.0 | The response shape handlers return; `Response::json()` / `Response::error()` factories. |
 | `Whity\Sdk\Hooks\Events` | 1.0 | Catalogue of hook event names (`user.creating`, `tenant.deleted`, `worker.request.start`, …). |
 | `Whity\Sdk\Hooks\HookVetoException` | 1.15 | The only Throwable that crosses the host's per-plugin error boundary. Throw it from `*.deleting` / `*.deleted` to REFUSE a deletion (or report failed cleanup): the host rolls the delete back — those hooks run inside the DELETE's transaction — and answers `409 Conflict` with your `reason()`. Every other exception stays isolated. |
-| `Whity\Sdk\Rbac\PermissionResolver` | 1.16 | READ-ONLY access to the host's authoritative permission resolution, resolved from the service container (`\Whity\app(PermissionResolver::class)`). Ask it for an authorization decision INSIDE a handler instead of re-deriving one in SQL: it is backed by the same delegation-aware resolver the host's RBAC middleware enforces with (active-membership gating, OU-ancestor inheritance, role hierarchy, live delegations, catalogue validation), so plugin and platform can never disagree about the same caller. Grants no authority — three question methods, no cache control, no database handle. |
+| `Whity\Sdk\Rbac\PermissionResolver` | 1.16 (resource scope: 1.17, roles 1.22) | READ-ONLY access to the host's authoritative permission resolution, resolved from the service container (`\Whity\app(PermissionResolver::class)`). Ask it for an authorization decision INSIDE a handler instead of re-deriving one in SQL: it is backed by the same delegation-aware resolver the host's RBAC middleware enforces with (active-membership gating, OU-ancestor inheritance, role hierarchy, live delegations, catalogue validation), so plugin and platform can never disagree about the same caller. All three methods take an optional `$resourceType`/`$resourceId` pair that narrows the question to ONE record — `hasPermission()`/`effectivePermissions()` since 1.17, `hasRole()` since 1.22 — so per-record authority needs no private grant table. Pass both or neither; a record grant only ever WIDENS the tenant-wide answer and never substitutes for tenant membership. Grants no authority — three question methods, no cache control, no database handle. |
 | `Whity\Sdk\Sdk` | 1.1 | SDK identity: `Sdk::VERSION`, what hosts evaluate plugin SDK-constraints against. |
 | `Whity\Sdk\PluginRequirementsInterface` | 1.1 (core constraint: 1.4) | OPTIONAL declaration of a required SDK constraint, a host CORE-version constraint (`getCoreConstraint()`, since 1.4), and inter-plugin dependencies (composer constraint syntax). Unsatisfied plugins are quarantined (`PluginState::Failed` + reason); satisfied ones load in topological dependency order. |
 | `Whity\Sdk\PluginFrontendInterface` | 1.2 | OPTIONAL declaration of the admin-UI screens a plugin contributes (frontend feature descriptors). UI metadata only — descriptors grant nothing; the host validates, permission-filters, and serves them via `GET /api/frontend/features`. |
@@ -24,6 +24,7 @@ framework along.
 | `Whity\Sdk\Tenant\TenantPredicateScanner` | 1.3 | The tokenizer-based static scanner that flags any `SELECT`/`UPDATE`/`DELETE` on a tenant-owned table missing a `tenant_id` predicate (honours `@tenant-guard-ignore:` + the global allowlist). |
 | `Whity\Sdk\Tenant\MigrationTenantColumnLinter` | 1.3 | Lints a plugin's `CREATE TABLE` migrations: every tenant table must declare a `tenant_id` column (or be a declared global / transitively-scoped exception). |
 | `Whity\Sdk\Testing\TenantIsolationConformanceTestCase` | 1.3 | The shared PHPUnit base case a plugin extends to PROVE its tenant isolation: wires the linter + scanner + a RealEngine schema check. Requires `phpunit/phpunit` (dev-only `suggest`). |
+| `Whity\Sdk\Settings\PluginSettingsInterface` | 1.21 | OPTIONAL declaration of the CONFIGURATION KEYS a plugin owns — key => type (`string`/`bool`/`int`/`enum`), default, constraints, options, localized label, description. The host stores them in ITS OWN `app_settings` / `tenant_settings` tables and resolves them through ITS OWN chain (per-tenant override ?? global default ?? declared default), so a plugin stops rebuilding the settings layer as a private table with no declared keys and no validation. Keys are namespaced under the plugin name the loader supplies (`acme:sync_mode`), so two plugins cannot collide and none can shadow a core key; a declaration whose own `default` fails its own rules is refused at load. Publication on the host's settings screens is an explicit `admin => true` opt-in (those screens are gated on CORE settings permissions, not the plugin's). NOT for credentials: a secret-shaped declaration is refused, since settings are readable TEXT served to anyone holding `settings:read`. |
 
 ## Versioning policy
 
@@ -170,14 +171,59 @@ The case enforces three checks (each a separate test):
 2. **Handler-scoping scanner** — every tenant-table query in your source binds
    a `tenant_id` predicate, honouring `// @tenant-guard-ignore: <reason>` for
    sanctioned exceptions (e.g. a system-tenant "sees all" branch).
-3. **RealEngine** — your migrations are applied to a real SQL engine (in-memory
-   SQLite by default; override `makePdo()` to point at Postgres in CI) and each
-   declared tenant table is asserted to physically carry `tenant_id`.
+3. **RealEngine** — your migrations are applied to a real SQL engine and each
+   declared tenant table is asserted to physically carry `tenant_id`. Which
+   engine is an **environment** decision, not a code one — see below.
 
 You can also run the linter / scanner directly (no PHPUnit) in a CI script —
 see `scripts/ci-plugin-tenant-conformance.php` in whity-core for the pattern.
 PHPUnit is a **dev-only** requirement (`suggest`); the runtime SDK still
 depends on nothing but PHP.
+
+### Running your tests against real PostgreSQL
+
+Your tests run SQLite. Your users run PostgreSQL. A whole class of defect lives
+in that gap and cannot be found by adding assertions:
+
+- `GROUP_CONCAT(x SEPARATOR ',')` parses on SQLite; PostgreSQL has no
+  `GROUP_CONCAT` at all (`string_agg`).
+- `WHERE varchar_col = 42` matches on SQLite; PostgreSQL refuses with
+  `operator does not exist: character varying = integer`. Nothing about the
+  statement is malformed — it is the engine's type semantics that differ, so no
+  wrapper or query builder can catch it. Only running it on PostgreSQL can.
+
+`Whity\Sdk\Testing\RealEnginePdo` is the harness. Set `PHPUNIT_PG_DSN` and the
+same suite runs against real PostgreSQL; leave it unset for the fast local loop:
+
+```bash
+docker run -d --name plugin_pg -p 5432:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=plugin_test postgres:15-alpine
+
+vendor/bin/phpunit                                     # SQLite
+PHPUNIT_PG_DSN="pgsql:host=127.0.0.1;port=5432;dbname=plugin_test" \
+PHPUNIT_PG_USER=postgres PHPUNIT_PG_PASSWORD=postgres \
+  vendor/bin/phpunit                                   # real PostgreSQL
+```
+
+`TenantIsolationConformanceTestCase::makePdo()` already delegates to it, so a
+plugin extending the base case needs **no code change** — the variable is the
+whole switch. Use it directly in your own data-layer tests too:
+
+```php
+use Whity\Sdk\Testing\RealEnginePdo;
+
+$pdo = RealEnginePdo::make();
+foreach ($this->migrations() as $migration) {
+    $migration->up($pdo);
+}
+```
+
+Each call gets its own auto-dropped schema in the target database, so parallel
+runs never collide. Keep BOTH jobs in CI: the SQLite one for speed, the
+PostgreSQL one for truth. Run the dual-engine job against a deliberately broken
+query once (drop a `CAST`) to confirm it can actually fail — see
+[Testing Against PostgreSQL](../docs/wiki/Testing-Against-PostgreSQL.md) for the
+full trap catalogue and a copy-paste CI workflow.
 
 ## Minimal plugin
 

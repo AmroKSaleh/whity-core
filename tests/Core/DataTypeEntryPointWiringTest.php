@@ -75,7 +75,7 @@ final class DataTypeEntryPointWiringTest extends TestCase
         $source = $this->read(__DIR__ . '/../../public/index.php');
 
         self::assertMatchesRegularExpression(
-            '/new PluginLoader\((?:[^;]*?)\$tableOwnershipRegistry,\s*\$dataTypeRegistry\s*\)/s',
+            '/new PluginLoader\((?:[^;]*?)\$tableOwnershipRegistry,\s*\$dataTypeRegistry\b/s',
             $source,
             'The loader is what STAMPS ownership from $plugin->getName(); a registry that never '
             . 'reaches it is a registry no plugin can ever register with.'
@@ -95,6 +95,34 @@ final class DataTypeEntryPointWiringTest extends TestCase
         );
     }
 
+    public function testHttpEntryPointRegistersTheSdkWriteContract(): void
+    {
+        $source = $this->read(__DIR__ . '/../../public/index.php');
+
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Sdk\\\\DataType\\\\DataTypeLifecycle::class/',
+            $source,
+            'Core told adopters to route their lifecycle WRITES through core and published only a '
+            . 'read contract, so they duck-typed DataTypeLifecycleService — a core internal with no '
+            . 'compatibility promise. Without this registration that is still their only option.'
+        );
+    }
+
+    public function testHttpEntryPointRegistersTheRestoreStateMemory(): void
+    {
+        $source = $this->read(__DIR__ . '/../../public/index.php');
+
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Core\\\\DataType\\\\LifecycleStateMemory::class/',
+            $source,
+            'A plugin that hard-deletes a record OUTSIDE core has to clear its remembered restore '
+            . 'state, and the container refuses to build the class itself (it takes a PDO). '
+            . 'Unregistered, the only remaining option is a hand-written DELETE against a '
+            . 'core-owned table — and the row left behind when nobody does it carries no foreign '
+            . 'key, so a re-used key inherits a dead record\'s state.'
+        );
+    }
+
     public function testHttpEntryPointExposesTheGeneratedLifecycleRoutes(): void
     {
         $source = $this->read(__DIR__ . '/../../public/index.php');
@@ -106,10 +134,42 @@ final class DataTypeEntryPointWiringTest extends TestCase
                 "'/api/data-types/{type}/{id}/trash'",
                 "'/api/data-types/{type}/{id}/restore'",
                 "'/api/data-types/{type}/{id}/retire'",
+                "'/api/data-types/{type}/bulk'",
             ] as $fragment
         ) {
             self::assertStringContainsString($fragment, $source, "Missing route registration: {$fragment}");
         }
+    }
+
+    /**
+     * The batch path must stay UNAMBIGUOUS against the single-record ones.
+     *
+     * {@see \Whity\Core\Router::match()} returns the FIRST registered pattern
+     * that matches, so a bulk path shaped `{type}/bulk/<action>` would also parse
+     * as `{type}/{id}/<action>` with `id = "bulk"` — and which handler ran would
+     * then depend on registration order, while a string-keyed type could never
+     * address a record whose key really is `bulk`. Three segments and a POST
+     * cannot collide with anything registered: the single-record transitions are
+     * four-segment POSTs and the `{type}/{id}` routes are GET and DELETE.
+     *
+     * Pinned because the failure would be silent — the wrong handler answering a
+     * well-formed request, not an error.
+     */
+    public function testTheBulkRouteCannotBeParsedAsASingleRecordTransition(): void
+    {
+        $source = $this->read(__DIR__ . '/../../public/index.php');
+
+        self::assertMatchesRegularExpression(
+            "/'POST',\s*'\/api\/data-types\/\{type\}\/bulk'/",
+            $source,
+            'The batch route must be a three-segment POST, with the action in the body.'
+        );
+        self::assertStringNotContainsString(
+            '/api/data-types/{type}/bulk/',
+            $source,
+            'A bulk path with a fourth segment would also match {type}/{id}/<action>, making the '
+            . 'surface depend on registration order and reserving "bulk" as an unaddressable id.'
+        );
     }
 
     // ==================== CLI ====================
@@ -140,7 +200,7 @@ final class DataTypeEntryPointWiringTest extends TestCase
         $source = $this->read(__DIR__ . '/../../src/Cli/Commands/BaseCommand.php');
 
         self::assertMatchesRegularExpression(
-            '/new PluginLoader\((?:[^;]*?)\$tableOwnershipRegistry,\s*\$dataTypeRegistry\s*\)/s',
+            '/new PluginLoader\((?:[^;]*?)\$tableOwnershipRegistry,\s*\$dataTypeRegistry\b/s',
             $source,
             'Same omission as #724: constructing the registries without passing them to the loader '
             . 'leaves the CLI with an empty catalogue while HTTP has a full one.'
@@ -156,6 +216,81 @@ final class DataTypeEntryPointWiringTest extends TestCase
             $source,
             'A plugin reached through a CLI command must resolve the same guard contract.'
         );
+    }
+
+    public function testCliEntryPointRegistersTheSdkWriteContractToo(): void
+    {
+        $source = $this->read(__DIR__ . '/../../src/Cli/Commands/BaseCommand.php');
+
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Sdk\\\\DataType\\\\DataTypeLifecycle::class/',
+            $source,
+            'Registered over HTTP only, a plugin trashing a record in-process would work in a '
+            . 'request and throw inside a whity-cli command — and a command is exactly where a bulk '
+            . 'sweep runs. The divergence bug class #717, #724 and #727 already paid for.'
+        );
+    }
+
+    /**
+     * The endpoint and the SDK write contract must be handed the SAME gate.
+     *
+     * This is the property that makes "an in-process call cannot skip a check
+     * the endpoint enforces" true by construction. If the host built one gate for
+     * the container and a second for the handler, the two would be identical on
+     * the day they were written and free to drift on every day after — and the
+     * drift direction that matters is silent: a plugin holding more authority
+     * than the endpoint grants.
+     */
+    public function testTheHttpHandlerIsBuiltOverTheSameGateTheContractPublishes(): void
+    {
+        $source = $this->read(__DIR__ . '/../../public/index.php');
+
+        self::assertMatchesRegularExpression(
+            '/\$gatedDataTypeLifecycle\s*=\s*new\s+\\\\?Whity\\\\Core\\\\DataType\\\\GatedDataTypeLifecycle\(/',
+            $source
+        );
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Sdk\\\\DataType\\\\DataTypeLifecycle::class,\s*\$gatedDataTypeLifecycle\s*\)/',
+            $source,
+            'The container must publish the gate the file built…'
+        );
+        self::assertMatchesRegularExpression(
+            '/new \\\\?Whity\\\\Api\\\\DataTypesApiHandler\((?:[^;]*?)\$gatedDataTypeLifecycle/s',
+            $source,
+            '…and the generated endpoints must gate themselves with that same object.'
+        );
+    }
+
+    public function testCliEntryPointRegistersTheRestoreStateMemoryToo(): void
+    {
+        $source = $this->read(__DIR__ . '/../../src/Cli/Commands/BaseCommand.php');
+
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Core\\\\DataType\\\\LifecycleStateMemory::class/',
+            $source,
+            'Registered in one entry point only, "clear the memory" would work over HTTP and throw '
+            . 'under the CLI — the divergence bug class #717 and #724 already paid for.'
+        );
+    }
+
+    /**
+     * Both entry points must register the memory the lifecycle service actually
+     * uses, not a second instance built beside it.
+     *
+     * Two handles over one connection would behave identically today, so this
+     * is not about behaviour — it is about there being no second object for a
+     * later change (a cache, a batched write, a per-request buffer) to make
+     * diverge. The accessor makes "which instance?" a question with one answer.
+     */
+    public function testBothEntryPointsRegisterTheServicesOwnMemoryInstance(): void
+    {
+        foreach (['/../../public/index.php', '/../../src/Cli/Commands/BaseCommand.php'] as $path) {
+            self::assertMatchesRegularExpression(
+                '/LifecycleStateMemory::class,\s*\$dataTypeLifecycle->stateMemory\(\)/',
+                $this->read(__DIR__ . $path),
+                "{$path} must register the lifecycle service's OWN memory."
+            );
+        }
     }
 
     private function read(string $path): string

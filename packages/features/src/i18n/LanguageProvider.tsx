@@ -5,9 +5,30 @@
  *
  * Wraps the application and manages:
  * - Current language selection
- * - Available languages
- * - Translation caching
- * - Language persistence (localStorage + API)
+ * - Available languages, each carrying its own writing DIRECTION
+ * - Translation caching, fetched per domain on demand
+ * - Language persistence (profile via API, localStorage for signed-out visitors)
+ *
+ * DIRECTION IS DERIVED, NOT CHOSEN. `direction` is read off the resolved
+ * language record (`languages.direction`), so switching to Arabic flips the
+ * interface to right-to-left and switching back flips it to left-to-right. A
+ * third right-to-left language needs a row, not a release — nothing here tests
+ * a language code. See lib/direction-context.tsx in the app for the consumer
+ * that puts it on <html dir>.
+ *
+ * DOMAINS ARE LAZY. There is no list of domains in this file. A screen calling
+ * `useTranslation('auth')` registers 'auth' through `ensureDomain`, and the
+ * provider fetches that bundle once per language. Extraction can therefore fan
+ * out screen by screen without anyone editing this provider.
+ *
+ * i18n CAN BE SWITCHED OFF ENTIRELY (`i18n.enabled`, served on the public
+ * languages payload). With the flag off this provider resolves `defaultLanguage`
+ * for everyone — the stored profile preference and the locally remembered code
+ * are both left ALONE but not consulted — pins `direction` to 'ltr', and reports
+ * `i18nEnabled: false` so the switcher disappears. Translations keep loading and
+ * `t()` keeps returning real text; what goes away is the CHOICE, not the
+ * machinery. Because nothing is cleared, switching the flag back on restores
+ * every user's language exactly.
  *
  * Usage:
  *   <LanguageProvider>
@@ -19,11 +40,11 @@
  *   const t = useTranslation('common')
  */
 
-import { createContext, useCallback, useEffect, useMemo, useState, ReactNode } from 'react'
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, ReactNode } from 'react'
 
-import type { Language, LanguageContextValue, CachedTranslations } from './types'
+import type { Language, LanguageContextValue, CachedTranslations, Direction } from './types'
 import {
-  fetchAvailableLanguages,
+  fetchLanguageCatalogue,
   fetchLanguageSettings,
   updateLanguagePreference,
   fetchTranslations,
@@ -32,6 +53,8 @@ import {
   getCachedTranslations,
   setCachedTranslations,
   clearLanguageCache,
+  getRememberedLanguage,
+  setRememberedLanguage,
 } from './localStorage'
 
 export const LanguageContext = createContext<LanguageContextValue | undefined>(undefined)
@@ -39,34 +62,78 @@ export const LanguageContext = createContext<LanguageContextValue | undefined>(u
 export interface LanguageProviderProps {
   children: ReactNode
   defaultLanguage?: string
+  /**
+   * An opaque handle for WHO is signed in (a profile id, or null when nobody
+   * is). Changing it re-resolves the language from the new identity's profile.
+   *
+   * Without this the provider would resolve once on mount and never again:
+   * signing in is a CLIENT-SIDE navigation, so a user whose profile says
+   * Arabic would keep the anonymous English interface until they happened to
+   * reload — which makes "the preference follows you across devices" true only
+   * on the second page load. The provider deliberately takes a handle rather
+   * than reading an auth context, so non-Next consumers (Tauri, Flutter shells)
+   * can supply their own notion of identity.
+   */
+  identityKey?: string | number | null
 }
+
+/** The direction assumed before any language has resolved. */
+const FALLBACK_DIRECTION: Direction = 'ltr'
 
 export function LanguageProvider({
   children,
   defaultLanguage = 'en',
+  identityKey = null,
 }: LanguageProviderProps) {
   const [currentLanguage, setCurrentLanguage] = useState<string | null>(null)
   const [availableLanguages, setAvailableLanguages] = useState<Language[]>([])
   const [translations, setTranslations] = useState<CachedTranslations>({})
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
+  // Starts NULL — not false: "not known yet" and "switched off" want opposite
+  // treatment (see LanguageContextValue.i18nEnabled). No language affordance is
+  // drawn until the instance says it offers one, and no "i18n is off" notice is
+  // shown until it says it is.
+  const [i18nEnabled, setI18nEnabled] = useState<boolean | null>(null)
+  // Domains some mounted component has asked for. Sorted+joined into the
+  // effect's dependency so re-running is driven by the SET's contents, not by
+  // the identity of a new array on every render.
+  const [requestedDomains, setRequestedDomains] = useState<string[]>([])
 
-  // Initialize on mount: fetch languages and user's language preference
+  // Resolve the language on mount, and again whenever the signed-in identity
+  // changes (sign-in, sign-out, account switch) — see `identityKey`.
   useEffect(() => {
     const initialize = async () => {
       try {
         setIsLoading(true)
         setError(null)
 
-        // Fetch available languages
-        const languages = await fetchAvailableLanguages()
+        // The catalogue AND the instance's i18n flag arrive together, on the
+        // one call that needs no session.
+        const { languages, i18nEnabled: enabled } = await fetchLanguageCatalogue()
         setAvailableLanguages(languages)
+        setI18nEnabled(enabled)
 
-        // Try to fetch user's language preference (requires auth)
+        // i18n OFF: everyone gets the default language, whatever their profile
+        // or their browser remembers. Neither is read — and, just as
+        // importantly, neither is CLEARED: disabling a feature flag must never
+        // be a data migration, so turning it back on restores each user's
+        // language exactly as they left it. The preference fetch is skipped
+        // outright rather than fetched-then-ignored.
+        if (!enabled) {
+          setCurrentLanguage(defaultLanguage)
+          setIsLoading(false)
+          return
+        }
+
+        // Resolution order: the signed-in user's PROFILE preference, then the
+        // code remembered locally for a signed-out visitor (so the public
+        // screens are not stuck in English), then the app default.
         const settings = await fetchLanguageSettings()
-        let languageCode = settings?.language_code || defaultLanguage
+        let languageCode = settings?.language_code || getRememberedLanguage() || defaultLanguage
 
-        // Validate that the language is in the available list
+        // Validate that the language is in the available list — a code that has
+        // since been disabled or deleted must not resurrect itself from storage.
         if (languageCode && !languages.find((l) => l.code === languageCode)) {
           languageCode = defaultLanguage
         }
@@ -84,38 +151,78 @@ export function LanguageProvider({
     }
 
     initialize()
-  }, [defaultLanguage])
+  }, [defaultLanguage, identityKey])
 
-  // Fetch translations for current language when it changes
+  // Remember the resolved language for the next signed-out visit, and reflect
+  // it onto <html lang> for screen readers, hyphenation and font selection.
+  // (Direction is applied by DirectionProvider, which reads `direction` below.)
   useEffect(() => {
     if (!currentLanguage) {
       return
     }
+    // With i18n off, the resolved language is the app default rather than
+    // anyone's choice — writing it to storage would OVERWRITE the code this
+    // browser remembered while the feature was on, quietly destroying the very
+    // preference the flag promises to preserve. <html lang> is still set: the
+    // document really is in that language.
+    if (i18nEnabled === true) {
+      setRememberedLanguage(currentLanguage)
+    }
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = currentLanguage
+    }
+  }, [currentLanguage, i18nEnabled])
+
+  // Register a domain a component needs. Idempotent: calling it for an
+  // already-known domain returns the same state array, so React bails out.
+  const ensureDomain = useCallback((domain: string) => {
+    if (!domain) {
+      return
+    }
+    setRequestedDomains((prev) => (prev.includes(domain) ? prev : [...prev, domain]))
+  }, [])
+
+  // Which (language, domain) pairs have already been fetched this session, so a
+  // re-render or a newly-registered domain does not refetch the others.
+  const loadedRef = useRef<Set<string>>(new Set())
+  const domainKey = [...requestedDomains].sort().join(',')
+
+  // Fetch the bundles for every requested domain in the current language.
+  useEffect(() => {
+    if (!currentLanguage || requestedDomains.length === 0) {
+      return
+    }
+
+    let cancelled = false
 
     const loadTranslations = async () => {
       try {
-        const domains = ['common', 'email', 'errors'] // Add more domains as needed
+        const fresh: CachedTranslations = {}
 
-        const newTranslations: CachedTranslations = {}
+        for (const domain of requestedDomains) {
+          const pair = `${currentLanguage}:${domain}`
+          if (loadedRef.current.has(pair)) {
+            continue
+          }
+          loadedRef.current.add(pair)
 
-        for (const domain of domains) {
-          // Try to get from cache first
+          // localStorage first (24h TTL), network second.
           const cached = getCachedTranslations(currentLanguage, domain)
           if (cached) {
-            newTranslations[domain] = cached
+            fresh[domain] = cached
             continue
           }
 
-          // Fetch from API
           const fetched = await fetchTranslations(currentLanguage, domain)
           if (Object.keys(fetched).length > 0) {
-            newTranslations[domain] = fetched
-            // Cache the translations
+            fresh[domain] = fetched
             setCachedTranslations(currentLanguage, domain, fetched)
           }
         }
 
-        setTranslations(newTranslations)
+        if (!cancelled && Object.keys(fresh).length > 0) {
+          setTranslations((prev) => ({ ...prev, ...fresh }))
+        }
       } catch (err) {
         console.warn('Translations unavailable; falling back to keys:', err)
         setError(err instanceof Error ? err : new Error('Failed to load translations'))
@@ -123,13 +230,32 @@ export function LanguageProvider({
     }
 
     loadTranslations()
-  }, [currentLanguage])
 
-  // Handle language change: update both locally and on the server
+    return () => {
+      cancelled = true
+    }
+    // `domainKey` stands in for requestedDomains' CONTENTS (see above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentLanguage, domainKey])
+
+  // Handle language change: update both locally and on the server.
   const setLanguage = useCallback(
     async (code: string) => {
       try {
         setError(null)
+
+        // i18n off: there is no language to change to. Refused HERE as well as
+        // by the server (PATCH /api/v1/settings/language answers 503) so a
+        // stray caller gets an immediate, honest error instead of a request
+        // that looks like it worked. Nothing stored is touched.
+        //
+        // Explicitly `=== false`, not falsy: a call made before the catalogue
+        // has answered is not a disabled instance, and falls through to the
+        // "Invalid language code" arm below — which is the truth, since no
+        // language is known yet.
+        if (i18nEnabled === false) {
+          throw new Error('Language selection is disabled on this instance')
+        }
 
         // Validate language
         const lang = availableLanguages.find((l) => l.code === code)
@@ -137,18 +263,33 @@ export function LanguageProvider({
           throw new Error(`Invalid language code: ${code}`)
         }
 
-        // Update on server (which updates the database)
-        const updated = await updateLanguagePreference(code)
-        if (updated !== code) {
+        // Persist to the profile — that is what makes the choice, and so the
+        // direction, follow the user across devices. A SIGNED-OUT caller (the
+        // sign-in screen mounts this provider too) has no profile: the switch
+        // still applies, remembered locally only. A genuine server failure
+        // still throws, so a 500 never masquerades as a saved preference.
+        const outcome = await updateLanguagePreference(code)
+        if (outcome.status === 'failed') {
+          throw new Error('Failed to update language preference on server')
+        }
+        if (outcome.status === 'saved' && outcome.languageCode !== code) {
           throw new Error('Failed to update language preference on server')
         }
 
-        // Clear cache for old language and set new one
+        // Drop the old language's bundles so a stale cache cannot outlive it,
+        // and forget which pairs were loaded for it.
         if (currentLanguage) {
           clearLanguageCache(currentLanguage)
+          for (const pair of [...loadedRef.current]) {
+            if (pair.startsWith(`${currentLanguage}:`)) {
+              loadedRef.current.delete(pair)
+            }
+          }
         }
+        setTranslations({})
 
-        // Update local state (which triggers translation fetch)
+        // Update local state (which triggers the translation fetch, and the
+        // direction change with it).
         setCurrentLanguage(code)
       } catch (err) {
         console.error('Failed to change language:', err)
@@ -156,7 +297,7 @@ export function LanguageProvider({
         throw err
       }
     },
-    [availableLanguages, currentLanguage]
+    [availableLanguages, currentLanguage, i18nEnabled]
   )
 
   // Helper to get a translation
@@ -176,17 +317,43 @@ export function LanguageProvider({
     [currentLanguage, translations]
   )
 
+  // Direction comes off the RECORD, not off the code. An unknown or
+  // not-yet-resolved language reads left-to-right rather than guessing.
+  //
+  // With i18n off it is pinned left-to-right outright, rather than read off the
+  // default language's record: a deployment that has switched the feature off
+  // has been promised a left-to-right product, and must not end up mirrored
+  // because someone once set the default language's `direction` to 'rtl'.
+  const direction: Direction =
+    i18nEnabled === true
+      ? availableLanguages.find((l) => l.code === currentLanguage)?.direction ?? FALLBACK_DIRECTION
+      : FALLBACK_DIRECTION
+
   const value = useMemo<LanguageContextValue>(
     () => ({
       currentLanguage,
       availableLanguages,
+      direction,
+      i18nEnabled,
       translations,
       isLoading,
       error,
       setLanguage,
       getTranslation,
+      ensureDomain,
     }),
-    [currentLanguage, availableLanguages, translations, isLoading, error, setLanguage, getTranslation]
+    [
+      currentLanguage,
+      availableLanguages,
+      direction,
+      i18nEnabled,
+      translations,
+      isLoading,
+      error,
+      setLanguage,
+      getTranslation,
+      ensureDomain,
+    ]
   )
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>

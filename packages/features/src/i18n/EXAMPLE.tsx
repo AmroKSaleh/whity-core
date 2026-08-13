@@ -2,7 +2,9 @@
  * Example: Using the i18n Hooks
  *
  * This file demonstrates how to use the i18n system in a real application.
- * It shows the two main hooks (useTranslation and useCurrentLanguage) in action.
+ *
+ * For a REAL converted screen, read web/app/login/page.tsx — the reference
+ * conversion, and the shape every other screen should copy.
  */
 
 import { ReactNode } from 'react'
@@ -10,24 +12,47 @@ import {
   LanguageProvider,
   useTranslation,
   useCurrentLanguage,
+  useLanguageDirection,
   LanguageSwitcher,
 } from './index'
 
 /**
  * Example 1: Using useTranslation to translate strings
+ *
+ * ALWAYS pass the English source string as the fallback. It is what renders
+ * before the bundle arrives, what renders if a key was never seeded, and what
+ * a reviewer reads in the diff.
  */
 function TranslationExample() {
-  // Get a translator function for the 'common' domain
+  // Asking for a domain is what LOADS it — there is no list to register in.
+  // Core domains are bare; a plugin's are namespaced ('acme:catalog').
   const t = useTranslation('common')
 
   return (
     <section>
       <h2>{t('page.title', 'Default Title')}</h2>
       <p>{t('page.description', 'Default description')}</p>
-      <button>{t('button.save')}</button>
-      <button>{t('button.cancel')}</button>
+      {/* Whole sentence, one hole — never `t('greeting') + name`, whose word
+          order is English-only. */}
+      <p>{t('page.greeting', 'Welcome back, {name}', { name: 'Sam' })}</p>
+      <button>{t('button.save', 'Save')}</button>
+      <button>{t('button.cancel', 'Cancel')}</button>
     </section>
   )
+}
+
+/**
+ * Example 1b: Reading the interface direction
+ *
+ * Direction comes from the chosen LANGUAGE's record, so this never needs
+ * touching when a new right-to-left language is added. Prefer logical CSS
+ * (ms/me, ps/pe, start/end) over reading `dir` at all; read it only when the
+ * decision genuinely lives in JS.
+ */
+function DirectionExample() {
+  const dir = useLanguageDirection()
+
+  return <p>The interface is currently {dir === 'rtl' ? 'right-to-left' : 'left-to-right'}.</p>
 }
 
 /**
@@ -151,6 +176,7 @@ function Content() {
   return (
     <div>
       <TranslationExample />
+      <DirectionExample />
       <MultiDomainExample />
       <BilingualExample />
     </div>

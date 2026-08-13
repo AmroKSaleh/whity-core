@@ -25,17 +25,43 @@ on:
 # A newer push to the same ref obsoletes the in-flight run; never let two full
 # suites race (this is what burned a duplicate ~13-min run when a fix commit
 # landed on a PR before the prior run finished). Mirrors e2e.yml.
+#
+# The group is workflow-wide, so it keeps covering every job below — including
+# the shard matrices and the `coverage` fan-in — as one cancellable unit.
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
+# ---------------------------------------------------------------------------
+# Job graph (WC-ci-wallclock)
+#
+#   changes ──┬─ test (SQLite shard 1..4, coverage) ─── coverage (merge + floor)
+#             ├─ static-analysis
+#             ├─ postgres-migrations
+#             ├─ postgres-integration (shard 1..5)
+#             ├─ postgres-dialect (shard 1..2)
+#             ├─ i18n-catalogue
+#             ├─ web
+#             └─ render-service
+#
+# Everything here used to live in two serial jobs. Measured on run 31404403319
+# (2026-08-10) the two of them pinned the whole workflow at ~32 min, and inside
+# them ONE step dominated each: the PostgreSQL job spent 30m18s of its 31m30s in
+# `--testsuite Integration`, and the SQLite job spent 16m46s of its 17m09s in the
+# coverage-instrumented PHPUnit run. Peeling the *other* steps off those two jobs
+# is therefore worth ~45 s combined — real, but noise. The wall clock only moves
+# when the two long test runs themselves are split across runners, which is what
+# the two shard matrices below do. Nothing is skipped or narrowed: every test,
+# guard and check that ran before still runs, on the same triggers.
+# ---------------------------------------------------------------------------
+
 jobs:
   # Detect which side of the codebase changed so single-sided PRs skip the jobs
   # they can't affect: a backend-only PR skips the ~2-min `web` job, and a
-  # frontend-only PR skips the ~10-13-min real-Postgres job. The typed-client
-  # drift gate lives in `web` and depends only on public/openapi.json (the
-  # generated contract), so `web` runs whenever that file changes — a src/**
-  # change that alters the API necessarily regenerates it (the `test` job's
+  # frontend-only PR skips the real-Postgres jobs. The typed-client drift gate
+  # lives in `web` and depends only on public/openapi.json (the generated
+  # contract), so `web` runs whenever that file changes — a src/** change that
+  # alters the API necessarily regenerates it (the `static-analysis` job's
   # OpenAPI drift check enforces that), so the drift gate is never skipped.
   # Workflow-file edits run everything. If detection can't run (e.g. a push with
   # no fetchable base), the filter fails open and the jobs run.
@@ -46,6 +72,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       render_service: ${{ steps.filter.outputs.render_service }}
+      i18n: ${{ steps.filter.outputs.i18n }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -91,12 +118,46 @@ jobs:
               - 'packages/ui/src/documents/**'
               - 'packages/ui/src/math-text.tsx'
               - '.github/workflows/automated-tests.yml'
+            # The English catalogue is derived from the t() calls in the
+            # frontend, but the guard that checks it is PHP. It therefore
+            # deliberately does NOT ride on either existing filter: `backend`
+            # would skip it on the frontend-only PRs that produce almost all of
+            # the drift, and `frontend` runs a Node job with no PHP. Its own
+            # filter is the only way it fires on every change that can move the
+            # catalogue.
+            i18n:
+              - 'web/**'
+              - 'packages/**'
+              - 'database/i18n/**'
+              - 'src/Core/i18n/**'
+              - 'src/Cli/Commands/I18nCommand.php'
+              - 'scripts/ci-i18n-catalog-drift.php'
+              - '.github/workflows/automated-tests.yml'
 
+  # The whole PHPUnit suite (the `default` testsuite = every *Test.php under
+  # tests/) on SQLite, with pcov instrumentation — split across runners because
+  # a single coverage-instrumented pass measured 16m46s and pinned half the
+  # workflow.
+  #
+  # Sharding is by FILE, round-robin over the same deterministic sorted listing
+  # in every shard, so the union of the shards is exactly the file set PHPUnit's
+  # own `<directory>tests</directory>` iterator would walk — a newly added test
+  # file lands in exactly one shard automatically and can never fall through the
+  # gaps (which a hand-maintained per-shard directory list would allow).
   test:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    name: Unit, static analysis & plugin smoke (SQLite)
+    # Keep the `/4` here in step with the matrix below; the shard arithmetic
+    # itself reads `strategy.job-total`, so only this label is manual.
+    name: Tests shard ${{ matrix.shard }}/4 (SQLite, coverage)
     runs-on: ubuntu-latest
+
+    strategy:
+      # One shard's failure must not cancel the others: a red run should report
+      # every failing test, not just the first shard to trip.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout code
@@ -123,14 +184,100 @@ jobs:
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
-      # Fail the build on a known security advisory in a locked dependency
-      # (WC-232ec317). Cheap (~seconds) and turns a supply-chain regression into
-      # a pre-merge gate rather than a production surprise.
-      - name: Composer security audit
-        run: composer audit --no-interaction --abandoned=report
+      # `--coverage-php` writes php-code-coverage's own serialised object, which
+      # the `coverage` job merges with the library's `CodeCoverage::merge()` —
+      # the exact union of executed lines, not an approximation reconstructed
+      # from per-shard Clover XML. Measured ~0.6 M (line, test) pairs across the
+      # whole suite, so a shard's .cov is tens of MB: cheap to hand between jobs.
+      - name: Run PHPUnit with coverage (shard ${{ matrix.shard }})
+        run: |
+          mapfile -t all < <(find tests -type f -name '*Test.php' | LC_ALL=C sort)
+          total=${#all[@]}
+          if [ "$total" -eq 0 ]; then
+            echo "::error::no test files matched tests/**/*Test.php — refusing to run an empty shard"
+            exit 1
+          fi
 
-      - name: Run PHPUnit with coverage
-        run: vendor/bin/phpunit --coverage-clover coverage.xml --coverage-text
+          shards=${{ strategy.job-total }}
+          index=$(( ${{ matrix.shard }} - 1 ))
+          files=()
+          for i in "${!all[@]}"; do
+            if [ $(( i % shards )) -eq "$index" ]; then
+              files+=("${all[$i]}")
+            fi
+          done
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::shard ${{ matrix.shard }}/${shards} selected 0 of ${total} test files"
+            exit 1
+          fi
+
+          echo "Shard ${{ matrix.shard }}/${shards}: ${#files[@]} of ${total} test files"
+          vendor/bin/phpunit \
+            --coverage-php "coverage-shards/shard-${{ matrix.shard }}.cov" \
+            "${files[@]}"
+
+      # `always()`: PHPUnit writes the coverage report even when tests fail, and
+      # a partial report is still useful when diagnosing a red run.
+      - name: Upload shard coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: coverage-shards/shard-${{ matrix.shard }}.cov
+          retention-days: 1
+          if-no-files-found: ignore
+
+  # The coverage floor is a PROJECT-WIDE aggregate, so it can only be judged
+  # once every shard's data is back. This job is the gate that used to be the
+  # `Enforce coverage floor` step of the old single `test` job — it is not
+  # optional, not PR-skippable, and it fails the run exactly as before.
+  coverage:
+    name: Coverage merge & floor (SQLite)
+    needs: [changes, test]
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # This job instruments nothing — it deserialises the shards' coverage
+      # objects and renders Clover. pcov is requested anyway because those
+      # objects were serialised by a pcov-driven run and carry a driver
+      # instance; installing the extension costs seconds and removes any
+      # question of unserialising into an environment the object came from.
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_sqlite
+          coverage: pcov
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      # php-code-coverage (a phpunit dependency) does the merging and the Clover
+      # rendering, so vendor/ is required here.
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Download shard coverage data
+        uses: actions/download-artifact@v7
+        with:
+          pattern: coverage-shard-*
+          merge-multiple: true
+          path: coverage-shards
+
+      # Merging holds every shard's (line, test) attribution in memory at once;
+      # the suite's ~0.6 M pairs fit comfortably, but don't make the ceiling the
+      # thing that fails the build.
+      - name: Merge shard coverage into one Clover report
+        run: php -d memory_limit=-1 scripts/ci-merge-coverage.php coverage.xml coverage-shards
 
       # Enforce minimum line-coverage floor defined in scripts/coverage-check.php.
       # The floor value and instructions for updating it live in that file.
@@ -144,6 +291,45 @@ jobs:
           name: coverage-report
           path: coverage.xml
           retention-days: 30
+
+  # Static analysis and the codebase-scanning guards need the source tree, not a
+  # test run — they were sitting behind ~17 min of PHPUnit purely because they
+  # shared a job with it. Split out, PHPStan and the tenant-isolation guards now
+  # report inside the first minute of a run.
+  static-analysis:
+    name: Static analysis, guards & plugin smoke
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # Same extension set as the test shards: the OpenAPI generator and the
+      # plugin/guard scripts boot the app's CLI, which expects a PDO driver.
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_sqlite
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # Fail the build on a known security advisory in a locked dependency
+      # (WC-232ec317). Cheap (~seconds) and turns a supply-chain regression into
+      # a pre-merge gate rather than a production surprise.
+      - name: Composer security audit
+        run: composer audit --no-interaction --abandoned=report
 
       # The committed public/openapi.json must match a fresh generation from
       # the live PHP router — API changes that skip `generate:openapi` would
@@ -189,22 +375,67 @@ jobs:
       - name: Plugin tenant-isolation conformance (HelloWorld)
         run: php scripts/ci-plugin-tenant-conformance.php
 
-  postgres-integration:
-    name: Migrations + Integration + Security on real PostgreSQL
+      # Undeclared-reference guard: fail CI on a relationship core CANNOT SEE —
+      # an `*_id` column pointing at a real table that carries NEITHER a foreign
+      # key NOR a `blocks_delete`/`cascade_delete` declaration. With no foreign
+      # keys between plugin tables (the convention here) nothing stops a delete
+      # orphaning a record's children, and an undeclared edge is precisely the
+      # case where core neither refuses the delete nor cleans up after it.
+      # It deliberately does NOT flag "an *_id column with no foreign key" —
+      # that would fire on the intended design of nearly every plugin table.
+      - name: Undeclared-reference guard (in-tree plugins)
+        run: php scripts/ci-undeclared-reference-guard.php
+
+  # The English translation catalogue must stay a faithful projection of the
+  # t() calls that produce it. A converted screen whose keys were never
+  # extracted degrades silently and looks successful: the fallback renders, the
+  # key never reaches the translations table, and a translator finishes the
+  # language with that string still in English.
+  #
+  # Its own job, and not a step in `static-analysis`, because the input it reads
+  # is the FRONTEND and the guard is PHP — see the `i18n` path filter above.
+  i18n-catalogue:
+    name: i18n catalogue drift
+    needs: changes
+    if: needs.changes.outputs.i18n == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring
+          coverage: none
+
+      # Same key as static-analysis, so this job normally restores rather than
+      # resolves — the guard needs the autoloader and nothing else.
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: i18n catalogue drift guard
+        run: php scripts/ci-i18n-catalog-drift.php
+
+  # Migrations / seed / idempotency and the Security suite against a real
+  # PostgreSQL engine. Measured 3 s of migrate+seed+re-migrate and 33 s of
+  # Security — the whole job is well under two minutes, so it no longer has any
+  # business sitting in front of a 30-minute Integration run.
+  postgres-migrations:
+    name: Migrations, idempotency & Security suite (PostgreSQL)
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
 
-    # A real PostgreSQL service so migrations/seed and the PHPUnit Integration
-    # and Security suites run against the actual engine.  This catches
-    # Postgres-specific bugs the SQLite test suite cannot — e.g. reserved-word
-    # identifiers (WC-65: `symmetric`), rowCount() after SELECT, type coercion
-    # differences — which only surface on a real PG engine.
-    #
-    # SchemaFromMigrations::make() detects PHPUNIT_PG_DSN and creates a fresh
-    # per-test Postgres schema (namespace), runs the production migrations inside
-    # it, and drops the schema at process exit, so the main whity_core database
-    # is left intact after the suite.
     services:
       postgres:
         image: postgres:15-alpine
@@ -270,20 +501,8 @@ jobs:
       - name: Re-run migrations (idempotency on PostgreSQL)
         run: php public/index.php migrate run
 
-      # Run the Integration and Security PHPUnit suites against the live
-      # PostgreSQL service.  SchemaFromMigrations::make() detects PHPUNIT_PG_DSN
-      # and provisions a fresh, per-test-class Postgres schema for full isolation.
       # JWT_SECRET and ENCRYPTION_KEY must match the .env written above so that
       # any test that bootstraps the app via public/index.php sees the same values.
-      - name: Run Integration suite on real PostgreSQL
-        env:
-          PHPUNIT_PG_DSN: "pgsql:host=localhost;port=5432;dbname=whity_core"
-          PHPUNIT_PG_USER: whity
-          PHPUNIT_PG_PASSWORD: whity_dev
-          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
-          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
-        run: vendor/bin/phpunit --testsuite Integration
-
       - name: Run Security suite on real PostgreSQL
         env:
           PHPUNIT_PG_DSN: "pgsql:host=localhost;port=5432;dbname=whity_core"
@@ -292,6 +511,285 @@ jobs:
           JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
           ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
         run: vendor/bin/phpunit --testsuite Security
+
+  postgres-integration:
+    # Keep the `/5` here in step with the matrix below; the shard arithmetic
+    # itself reads `strategy.job-total`, so only this label is manual.
+    name: Integration shard ${{ matrix.shard }}/5 (PostgreSQL)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+
+    # A real PostgreSQL service so the PHPUnit Integration suite runs against
+    # the actual engine.  This catches Postgres-specific bugs the SQLite test
+    # suite cannot — e.g. reserved-word identifiers (WC-65: `symmetric`),
+    # rowCount() after SELECT, type coercion differences — which only surface on
+    # a real PG engine.
+    #
+    # SchemaFromMigrations::make() detects PHPUNIT_PG_DSN and creates a fresh
+    # per-test Postgres schema (namespace), runs the production migrations inside
+    # it, and drops the schema at process exit, so the main whity_core database
+    # is left intact after the suite. That per-class schema build is what makes
+    # this suite slow (30m18s for 102 classes) and also what makes it shardable:
+    # every shard gets its OWN postgres service, so no two shards can see each
+    # other's schemas.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: whity
+          POSTGRES_PASSWORD: whity_dev
+          POSTGRES_DB: whity_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U whity -d whity_core"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Write .env for the CLI bootstrap
+        run: |
+          cat > .env <<'EOF'
+          APP_ENV=development
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_NAME=whity_core
+          DB_USER=whity
+          DB_PASSWORD=whity_dev
+          JWT_SECRET=ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY=ci_encryption_key_min_32_chars_bbbbbbbb
+          INITIAL_ADMIN_PASSWORD=admin123
+          INITIAL_USER_PASSWORD=user123
+          INITIAL_SYSTEM_ADMIN_PASSWORD=systemadmin123
+          INITIAL_SUPERUSER_PASSWORD=superuser123
+          EOF
+
+      # Each shard provisions the shared whity_core database the same way the
+      # unsharded job did (~3 s total); tests that reach for the seeded baseline
+      # rather than their own SchemaFromMigrations schema still find it.
+      - name: Run migrations on real PostgreSQL
+        run: php public/index.php migrate run
+
+      - name: Seed on real PostgreSQL
+        run: php public/index.php seed
+
+      # Sharded by file, round-robin over the same deterministic sorted listing
+      # in every shard, so the union is exactly the file set the
+      # `<testsuite name="Integration"><directory>tests/Integration</directory>`
+      # iterator walks — a new Integration test lands in exactly one shard with
+      # no workflow edit and can never fall between shards.
+      - name: Run Integration suite on real PostgreSQL (shard ${{ matrix.shard }})
+        env:
+          PHPUNIT_PG_DSN: "pgsql:host=localhost;port=5432;dbname=whity_core"
+          PHPUNIT_PG_USER: whity
+          PHPUNIT_PG_PASSWORD: whity_dev
+          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
+        run: |
+          mapfile -t all < <(find tests/Integration -type f -name '*Test.php' | LC_ALL=C sort)
+          total=${#all[@]}
+          if [ "$total" -eq 0 ]; then
+            echo "::error::no test files matched tests/Integration/**/*Test.php — refusing to run an empty shard"
+            exit 1
+          fi
+
+          shards=${{ strategy.job-total }}
+          index=$(( ${{ matrix.shard }} - 1 ))
+          files=()
+          for i in "${!all[@]}"; do
+            if [ $(( i % shards )) -eq "$index" ]; then
+              files+=("${all[$i]}")
+            fi
+          done
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::shard ${{ matrix.shard }}/${shards} selected 0 of ${total} Integration test files"
+            exit 1
+          fi
+
+          echo "Shard ${{ matrix.shard }}/${shards}: ${#files[@]} of ${total} Integration test files"
+          vendor/bin/phpunit "${files[@]}"
+
+  # ---------------------------------------------------------------------------
+  # The dialect gate: run the real-engine tests that live OUTSIDE tests/Integration
+  # and tests/Security against real PostgreSQL as well as SQLite.
+  #
+  # Why this job exists
+  # -------------------
+  # Tests run SQLite, production runs PostgreSQL, and a whole class of defect is
+  # invisible in that gap. Two that an adopter hit in one week:
+  #
+  #   * `GROUP_CONCAT(x SEPARATOR ',')` — valid SQLite, a syntax error on
+  #     PostgreSQL (`string_agg`). Reached production; the endpoint 500'd.
+  #   * removing a `CAST(id AS TEXT)` from a comparison — every test stayed green,
+  #     because SQLite happily compares INTEGER to VARCHAR. PostgreSQL refuses:
+  #     `operator does not exist: character varying = integer`.
+  #
+  # The second is the one that matters for design: NO helper library or query
+  # builder can catch it, because nothing about the statement is malformed — it
+  # is the engine's type-comparison semantics that differ. Only executing it on
+  # the real engine finds it. Hence a job, not a lint.
+  #
+  # What it selects, and why by grep
+  # --------------------------------
+  # Every test file that builds a real engine (SchemaFromMigrations, or
+  # RelationsSchema which delegates to it) and is not already covered by the
+  # postgres-integration / postgres-migrations jobs above. Selecting by CONTENT
+  # rather than by a hand-listed directory set means a new real-engine test is
+  # picked up the day it is written — the failure mode of a curated list is that
+  # it silently stops covering what people add, which is exactly the gap this job
+  # exists to close. Files that never touch SQL are deliberately NOT re-run: the
+  # cost of this job should track the SQL surface, not the suite size.
+  #
+  # What made it affordable
+  # -----------------------
+  # Re-running ~90 migrations per test is what previously priced real-Postgres
+  # coverage out (30m18s for the 102 Integration classes; the #735 veto tests were
+  # left SQLite-only for the same reason). SchemaFromMigrations now builds ONE
+  # migration-fingerprinted template database per Postgres server and hands each
+  # test a `CREATE DATABASE … TEMPLATE` copy — measured 58.9 s → 0.54 s per
+  # engine. The template is keyed on the content of database/migrations, so it
+  # rebuilds itself the moment a migration changes and is shared by every process
+  # on the runner.
+  # ---------------------------------------------------------------------------
+  postgres-dialect:
+    # Keep the `/2` here in step with the matrix below; the shard arithmetic
+    # itself reads `strategy.job-total`, so only this label is manual.
+    name: Dialect shard ${{ matrix.shard }}/2 (real-engine suites on PostgreSQL)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    # Its own Postgres service per shard, like postgres-integration: the template
+    # database and the throwaway clones are per-server state, so two shards
+    # sharing one server would contend on the same advisory lock for no gain.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: whity
+          POSTGRES_PASSWORD: whity_dev
+          POSTGRES_DB: whity_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U whity -d whity_core"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # No `migrate run` / `seed` here, unlike postgres-integration: these tests
+      # provision their own engine through SchemaFromMigrations and never read the
+      # shared whity_core schema. The database exists only to host the template
+      # and its clones.
+      - name: Run the real-engine suites on real PostgreSQL (shard ${{ matrix.shard }})
+        env:
+          PHPUNIT_PG_DSN: "pgsql:host=localhost;port=5432;dbname=whity_core"
+          PHPUNIT_PG_USER: whity
+          PHPUNIT_PG_PASSWORD: whity_dev
+          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
+        run: |
+          mapfile -t all < <(
+            grep -rlE 'SchemaFromMigrations|RelationsSchema' tests --include='*Test.php' \
+              | grep -v '^tests/Integration/' \
+              | grep -v '^tests/Security/' \
+              | LC_ALL=C sort
+          )
+          total=${#all[@]}
+          # A refactor that renames the schema helper would otherwise turn this
+          # gate into a silent no-op that still reports green.
+          if [ "$total" -lt 40 ]; then
+            echo "::error::selected only ${total} real-engine test files (expected 40+) — the selection is broken, not the suite"
+            exit 1
+          fi
+
+          shards=${{ strategy.job-total }}
+          index=$(( ${{ matrix.shard }} - 1 ))
+          files=()
+          for i in "${!all[@]}"; do
+            if [ $(( i % shards )) -eq "$index" ]; then
+              files+=("${all[$i]}")
+            fi
+          done
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::shard ${{ matrix.shard }}/${shards} selected 0 of ${total} real-engine test files"
+            exit 1
+          fi
+
+          echo "Shard ${{ matrix.shard }}/${shards}: ${#files[@]} of ${total} real-engine test files"
+          vendor/bin/phpunit --no-coverage "${files[@]}"
+
+      # The whole job is worthless if the template cache quietly fell back to the
+      # per-test migration run: the suite would still be green, just 100x slower,
+      # and the next person would conclude dual-engine coverage is unaffordable.
+      # SchemaFromMigrations logs that fallback to stderr; fail loudly instead.
+      - name: Assert the template cache was actually used
+        if: always()
+        env:
+          PGPASSWORD: whity_dev
+        run: |
+          templates=$(psql -h localhost -U whity -d whity_core -tAc \
+            "SELECT count(*) FROM pg_database WHERE datname LIKE 'whity_phpunit_tpl_%'")
+          echo "cached template databases on the server: ${templates}"
+          if [ "${templates}" -lt 1 ]; then
+            echo "::error::no template database was built — SchemaFromMigrations fell back to re-running every migration per test (see the stderr notice above for the reason)"
+            exit 1
+          fi
 
   # NOTE: Infection mutation testing moved OFF the per-PR path to a 6-hourly
   # scheduled run — see .github/workflows/mutation-testing.yml (WC-232ec317).

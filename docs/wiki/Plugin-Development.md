@@ -287,6 +287,22 @@ public function archive(Request $request, array $params = []): Response
 `hasRole()` and `effectivePermissions()` are also available;
 `effectivePermissions()` is exactly the set `hasPermission()` returns `true` for,
 so filtering a result set in one pass can never disagree with a per-row check.
+
+All three take an optional `$resourceType` / `$resourceId` pair, so the question
+can be narrowed to **one record** instead of the whole tenant — `hasPermission()`
+and `effectivePermissions()` since SDK 1.17, `hasRole()` since 1.22:
+
+```php
+if (!$rbac->hasRole($profileId, $tenantId, 'approver', 'hello:document', $docId)) {
+    return Response::error('Insufficient permissions', 403);
+}
+```
+
+Pass both or neither (a half-specified resource is not a resource, and collapses
+to the tenant-wide answer), declare the type via `PluginResourceTypesInterface`,
+and note that a record grant only ever **widens** authority — it is never a
+substitute for tenant membership. Per-record role holding therefore needs no
+parallel grant table of your own, and no change to core's `memberships`.
 The contract is read-only — no cache invalidation, no database handle — and it
 grants no authority your plugin does not already have. `\Whity\app()` throws a
 `RuntimeException` if the host never registered a resolver, so an unwired host
@@ -492,6 +508,155 @@ final class CreateHelloGreetingsTable implements MigrationInterface
 
 Keep statements idempotent (`IF NOT EXISTS` / `IF EXISTS`) so the migration is
 safe to re-run, and always scope tenant data with a `tenant_id` column.
+
+### Adding a column later — don't hand-write the driver branch
+
+`CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS` parse on both
+PostgreSQL and SQLite. `ALTER TABLE … ADD COLUMN IF NOT EXISTS` does **not** —
+it is a PostgreSQL extension SQLite rejects. So the first time you add a column
+to a table you already shipped, the idempotency rule above stops being free and
+you need an existence check, which is dialect-specific.
+
+Do not write that check. Use the SDK's
+[`Whity\Sdk\Schema\MigrationSchema`](../../sdk/src/Schema/MigrationSchema.php)
+trait (SDK 1.23):
+
+```php
+use Whity\Sdk\MigrationInterface;
+use Whity\Sdk\Schema\MigrationSchema;
+
+final class AddArchivedAtToAcmeItems implements MigrationInterface
+{
+    use MigrationSchema;
+
+    public function up(\PDO $pdo): void
+    {
+        $this->addColumnIfMissing($pdo, 'acme_items', 'archived_at', 'TIMESTAMP NULL');
+    }
+
+    public function down(\PDO $pdo): void
+    {
+        $this->dropColumnIfExists($pdo, 'acme_items', 'archived_at');
+    }
+}
+```
+
+`addColumnIfMissing()` / `dropColumnIfExists()` state the shape you want and
+leave no branch at the call site. The predicates behind them are available too,
+with the same signatures the hand-written versions usually have, so adopting the
+trait is deleting a private method and adding a `use` line:
+
+| Method | Answers |
+| --- | --- |
+| `tableExists($pdo, $table)` | Is there a base table of this name? (Views are not tables.) |
+| `columnExists($pdo, $table, $column)` | Does the table have this column? (`false` if the table is absent.) |
+| `indexExists($pdo, $index)` | Is there an index of this name? |
+| `tableColumns($pdo, $table)` | The table's columns, lowercased, in declaration order. |
+| `addColumnIfMissing($pdo, $table, $column, $definition)` | Adds it if absent; returns whether it added. |
+| `dropColumnIfExists($pdo, $table, $column)` | Drops it if present; returns whether it dropped. |
+
+Not writing this yourself buys more than the keystrokes. The usual hand-written
+PostgreSQL query filters on `table_name` alone, with no schema predicate, so it
+answers for a same-named table in **any** schema; and `information_schema` is
+privilege-filtered, so a table your role cannot see reads as absent and the
+migration tries to create it again. The SDK version reads `pg_catalog` and
+confines every lookup to the connection's own search path. Both engines answer
+case-insensitively, so your constants' casing cannot change the answer per
+engine.
+
+If you are not inside a migration instance — a repair command, a test — call
+[`Whity\Sdk\Schema\SchemaInspector`](../../sdk/src/Schema/SchemaInspector.php)
+statically; the trait is a thin forward to it. Identifiers are validated
+(`[A-Za-z_][A-Za-z0-9_]*`, ≤ 63 chars) because they cannot be bound as
+parameters; `$definition` is raw DDL you author and is never a place for a
+runtime value. An unsupported driver is refused loudly rather than guessed at.
+
+---
+
+## Step 5b — Writes: upserts and numbering
+
+### Upserts — let the tenant key be added for you
+
+`INSERT … ON CONFLICT … DO UPDATE … RETURNING` is the statement plugins write
+most, and the one with the most expensive way to get it slightly wrong. Writing
+`ON CONFLICT (client_uuid)` where you meant `ON CONFLICT (tenant_id,
+client_uuid)` stops the upsert being a per-tenant operation: another tenant's
+insert finds **your** row, takes the `DO UPDATE` branch, and overwrites it. The
+unique index will not object if it does not lead with `tenant_id`, and the
+tenant-predicate scanner will not either — the statement *does* mention
+`tenant_id`, in the value list.
+
+[`Whity\Sdk\Sql\Upsert`](../../sdk/src/Sql/Upsert.php) (SDK 1.24) takes the
+tenant id as its own required argument, writes it into the inserted columns
+**and** prepends it to the conflict target, so the unscoped form cannot be
+expressed:
+
+```php
+use Whity\Sdk\Sql\Upsert;
+
+$row = Upsert::tenantScoped(
+    $pdo,
+    'acme_items',
+    $tenantId,
+    ['client_uuid' => $uuid, 'name' => $name, 'status' => 'active'],
+    ['client_uuid'],       // tenant_id is prepended for you
+    ['name', 'status'],    // what a conflict overwrites; null = everything above
+    ['id', 'version']      // RETURNING; ['*'] by default, [] to omit
+);
+```
+
+- An **empty** update list means `DO NOTHING`. When the conflict then fires,
+  both engines return **no row**, so `null` means "already there" — not
+  "failed". Read that twice; it is the trap.
+- For a table with no tenant column (a declared-global counter or catalogue),
+  use `Upsert::unscoped()`. The name is the declaration, and unlike an omission
+  a reviewer can grep for it.
+- Nothing is hidden: `Upsert::buildSql()` returns the exact statement, so you can
+  log it, assert on it, or paste it into `psql`.
+- Your unique index must actually lead with the tenant column, or the engine
+  will refuse the conflict target. That is the schema telling you the truth.
+
+### Numbering — don't build a counter, ask for a number
+
+Do **not** write this:
+
+```php
+$current = /* SELECT value FROM my_counters WHERE name = 'invoice' */;
+/* UPDATE my_counters SET value = :next … */
+return $current + 1;
+```
+
+Two clients read `3`. Two clients write `4`. Two documents whose entire purpose
+is to be uniquely numbered come out numbered the same, and nothing errors.
+
+The host allocates numbers for you, so there is no table to migrate and no SQL
+to get wrong. Resolve
+[`Whity\Sdk\Sql\SequenceAllocator`](../../sdk/src/Sql/SequenceAllocator.php)
+from the container:
+
+```php
+$sequences = \Whity\app(\Whity\Sdk\Sql\SequenceAllocator::class);
+
+$number = $sequences->next($tenantId, 'invoice');          // 1, then 2, then 3 …
+$block  = $sequences->nextBlock($tenantId, 'import', 50);  // ['first' => 4, 'last' => 53]
+$now    = $sequences->peek($tenantId, 'invoice');          // read without allocating
+$cursor = $sequences->nextPlatformWide('acme:change_seq'); // one series for the whole instance
+```
+
+Counters are keyed per tenant **and** per name, and are created on first use.
+Name them with your plugin's prefix (`acme:invoice`) if a collision with another
+plugin's `invoice` would matter to you.
+
+**Guaranteed:** no two successful calls for the same `(tenant, name)` ever
+return the same number, under any concurrency, on PostgreSQL and on SQLite.
+
+**Not guaranteed:** gaplessness. Allocation joins your transaction, so a
+rollback releases the number — and a concurrent caller that already took the
+next one leaves a hole. Unique, monotonic, may skip. If you need a legally
+gapless series, that is a domain problem solved with a compensating record, not
+an allocation problem.
+
+`peek() + 1` is not a way to get the next number. That is the bug again.
 
 ---
 
@@ -855,7 +1020,14 @@ guidance see [MCP-Server.md](./MCP-Server.md).
 - [ ] Permissions use `resource:action` colon notation.
 - [ ] Hooks subscribe only to events the core actually dispatches
       (e.g. `user.creating`) and return the payload.
-- [ ] Migrations are idempotent and tenant-scoped.
+- [ ] Migrations are idempotent and tenant-scoped. Adding a column to a table
+      you already shipped uses `MigrationSchema::addColumnIfMissing()`, not a
+      hand-written driver branch (Step 5).
+- [ ] Every reference is either enforced by a `FOREIGN KEY` or declared in the
+      owning data type's `blocks_delete` / `cascade_delete` —
+      `php scripts/ci-undeclared-reference-guard.php path/to/YourPlugin` is
+      clean. (This does **not** ask you to add foreign keys; it asks you not to
+      have relationships core cannot see.)
 - [ ] A test under `tests/` exercises the plugin; full suite + PHPStan are green.
 - [ ] (Optional) Frontend feature descriptors validate: own permission, own
       registered GET `basePath`, matching route permission (Step 8).

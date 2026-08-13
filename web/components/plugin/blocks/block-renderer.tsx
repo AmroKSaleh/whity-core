@@ -124,6 +124,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@amroksaleh/ui/tabs';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * WC-227: the web renderer for `screen: 'blocks'` plugin features.
@@ -144,6 +145,17 @@ import {
  *     throws.
  *   - A `button` navigates only when its `href` is an internal path (starts
  *     with `/`); any other href renders an inert, non-navigating control.
+ *
+ * i18n (domain `plugin`): ONLY the renderer's own chrome is keyed — loading,
+ * error, empty and retry affordances, the refresh/sort/filter controls, the
+ * repeatable-row controls, and the dialog Cancel/Confirm buttons. Everything
+ * the block tree carries is plugin DATA and is rendered verbatim, never keyed
+ * and never enumerated: every `label`, `title`, `description`, `text`,
+ * `value`, `hint`, column header, option label, list item, table cell,
+ * `placeholder`, `emptyText`, `confirm` copy and row-action label. Where a
+ * plugin prop is absent and the renderer substitutes its OWN default
+ * ("Select {label}", "No data available.", "Item"), that default is ours and
+ * is keyed.
  */
 
 const tablerIcons = TablerIcons as unknown as Record<string, Icon | undefined>;
@@ -271,9 +283,12 @@ function isValidSubmitSpec(value: unknown): value is { method: 'POST' | 'PUT'; e
 
 /** The quiet, non-throwing placeholder for any block we cannot render. */
 function UnsupportedBlock({ type }: { type: string }) {
+  // `type` is a DSL type identifier, never translated — it travels through the
+  // sentence as a placeholder so the sentence stays one unit.
+  const t = useTranslation('plugin');
   return (
     <p className="text-xs text-muted-foreground italic" data-slot="block-unsupported">
-      Unsupported block: {type}
+      {t('blocks.unsupported', 'Unsupported block: {type}', { type })}
     </p>
   );
 }
@@ -667,6 +682,7 @@ function useEffectiveSource(baseSource: string, params?: SourceParam[]): string 
 // WC-532 A7: the master selector — a dropdown fed from an owned collection
 // whose selection is published into the shared master-detail context.
 function SelectorRenderer({ block }: { block: SelectorBlock }) {
+  const t = useTranslation('plugin');
   const md = useMasterDetail();
   const state = usePluginData<Array<Record<string, unknown>>>(
     block.source,
@@ -691,13 +707,15 @@ function SelectorRenderer({ block }: { block: SelectorBlock }) {
       <label className="text-sm font-medium">{block.label}</label>
       {state.status === 'error' ? (
         <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground" data-slot="selector-error">
-          <span>Failed to load options.</span>
-          <Button type="button" variant="outline" size="sm" onClick={state.retry}>Retry</Button>
+          <span>{t('blocks.options.loadError', 'Failed to load options.')}</span>
+          <Button type="button" variant="outline" size="sm" onClick={state.retry}>{t('blocks.retry', 'Retry')}</Button>
         </div>
       ) : (
         <Select value={current} onValueChange={(v) => md?.setSelection(block.name, v)} disabled={state.status === 'loading'}>
           <SelectTrigger aria-label={block.label} data-slot="selector-trigger">
-            <SelectValue placeholder={state.status === 'loading' ? 'Loading…' : (block.placeholder ?? `Select ${block.label}`)} />
+            {/* `block.placeholder` is the plugin's own copy — only our
+                substitute for it is keyed. */}
+            <SelectValue placeholder={state.status === 'loading' ? t('blocks.loading', 'Loading…') : (block.placeholder ?? t('blocks.select.placeholder', 'Select {label}', { label: block.label }))} />
           </SelectTrigger>
           <SelectContent>
             {options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
@@ -744,6 +762,7 @@ function RowActionButton({
   onMutated?: () => void;
 }) {
   const { addToast } = useToast();
+  const t = useTranslation('plugin');
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
 
@@ -753,14 +772,16 @@ function RowActionButton({
       setBusy(false);
       setOpen(false);
       if (result.ok) {
-        addToast('Completed successfully', 'success');
+        addToast(t('action.toast.completed', 'Completed successfully'), 'success');
         onMutated?.();
       } else {
-        addToast(result.error ?? 'Request failed', 'error');
+        // `result.error` is the server's own message — never keyed.
+        addToast(result.error ?? t('action.toast.requestFailed', 'Request failed'), 'error');
       }
     });
-  }, [action, row, addToast, onMutated]);
+  }, [action, row, addToast, onMutated, t]);
 
+  // `action.label` and `action.confirm` are the plugin's copy — verbatim.
   if (typeof action.confirm === 'string' && action.confirm !== '') {
     return (
       <AlertDialog open={open} onOpenChange={setOpen}>
@@ -773,7 +794,7 @@ function RowActionButton({
             <AlertDialogDescription>{action.confirm}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('blocks.dialog.cancel', 'Cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={(e) => { e.preventDefault(); run(); }}>{action.label}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -841,6 +862,7 @@ function InteractiveDataTable({
  */
 function DataTableRenderer({ block }: { block: DataTableBlock }) {
   type Rows = Record<string, unknown>[];
+  const t = useTranslation('plugin');
   const source = useEffectiveSource(block.source, block.params);
   const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
@@ -863,14 +885,14 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
         className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
         data-slot="block-data-error"
       >
-        <span>Failed to load data.</span>
+        <span>{t('blocks.data.loadError', 'Failed to load data.')}</span>
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={state.retry}
         >
-          Retry
+          {t('blocks.retry', 'Retry')}
         </Button>
       </div>
     );
@@ -882,12 +904,13 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
         className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
         data-slot="block-data-empty"
       >
-        <span>{block.emptyText ?? 'No data available.'}</span>
+        {/* The plugin's own `emptyText` wins; only our default is keyed. */}
+        <span>{block.emptyText ?? t('blocks.data.empty', 'No data available.')}</span>
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Refresh"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
           onClick={state.refresh}
         >
           <IconRefresh className="size-3.5" aria-hidden />
@@ -910,7 +933,7 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Refresh"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
           onClick={state.refresh}
         >
           <IconRefresh className="size-3.5" aria-hidden />
@@ -933,6 +956,7 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
  */
 function DataStatRenderer({ block }: { block: DataStatBlock }) {
   type Metric = Record<string, unknown>;
+  const t = useTranslation('plugin');
   const source = useEffectiveSource(block.source, block.params);
   const state = usePluginData<Metric>(source, (body) => {
     if (typeof body !== 'object' || body === null) return null;
@@ -955,14 +979,14 @@ function DataStatRenderer({ block }: { block: DataStatBlock }) {
         className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
         data-slot="block-data-error"
       >
-        <span>Failed to load data.</span>
+        <span>{t('blocks.data.loadError', 'Failed to load data.')}</span>
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={state.retry}
         >
-          Retry
+          {t('blocks.retry', 'Retry')}
         </Button>
       </div>
     );
@@ -974,12 +998,13 @@ function DataStatRenderer({ block }: { block: DataStatBlock }) {
         className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
         data-slot="block-data-empty"
       >
-        <span>{block.emptyText ?? 'No data available.'}</span>
+        {/* The plugin's own `emptyText` wins; only our default is keyed. */}
+        <span>{block.emptyText ?? t('blocks.data.empty', 'No data available.')}</span>
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Refresh"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
           onClick={state.refresh}
         >
           <IconRefresh className="size-3.5" aria-hidden />
@@ -1002,7 +1027,7 @@ function DataStatRenderer({ block }: { block: DataStatBlock }) {
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Refresh"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
           onClick={state.refresh}
         >
           <IconRefresh className="size-3.5" aria-hidden />
@@ -1040,6 +1065,7 @@ function InteractiveList({
   filterable?: boolean;
   pageSize?: number;
 }) {
+  const t = useTranslation('plugin');
   const [filterText, setFilterText] = React.useState('');
   const [sortDir, setSortDir] = React.useState<'asc' | 'desc' | null>(null);
   const [page, setPage] = React.useState(1);
@@ -1085,8 +1111,8 @@ function InteractiveList({
                   setFilterText(e.target.value);
                   setPage(1);
                 }}
-                placeholder="Filter items"
-                aria-label="Filter items"
+                placeholder={t('blocks.list.filter', 'Filter items')}
+                aria-label={t('blocks.list.filter', 'Filter items')}
                 className="h-8 ps-7 text-xs"
               />
             </div>
@@ -1098,7 +1124,7 @@ function InteractiveList({
               ) : (
                 <IconChevronUp className="size-3.5" aria-hidden />
               )}
-              Sort
+              {t('blocks.list.sort', 'Sort')}
             </Button>
           )}
         </div>
@@ -1122,6 +1148,7 @@ function InteractiveList({
  */
 function DataListRenderer({ block }: { block: DataListBlock }) {
   type Rows = Record<string, unknown>[];
+  const t = useTranslation('plugin');
   const source = useEffectiveSource(block.source, block.params);
   const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
@@ -1144,14 +1171,14 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
         className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
         data-slot="block-data-error"
       >
-        <span>Failed to load data.</span>
+        <span>{t('blocks.data.loadError', 'Failed to load data.')}</span>
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={state.retry}
         >
-          Retry
+          {t('blocks.retry', 'Retry')}
         </Button>
       </div>
     );
@@ -1163,12 +1190,13 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
         className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
         data-slot="block-data-empty"
       >
-        <span>{block.emptyText ?? 'No data available.'}</span>
+        {/* The plugin's own `emptyText` wins; only our default is keyed. */}
+        <span>{block.emptyText ?? t('blocks.data.empty', 'No data available.')}</span>
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Refresh"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
           onClick={state.refresh}
         >
           <IconRefresh className="size-3.5" aria-hidden />
@@ -1187,7 +1215,7 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Refresh"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
           onClick={state.refresh}
         >
           <IconRefresh className="size-3.5" aria-hidden />
@@ -1217,6 +1245,7 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
  */
 function ChartRenderer({ block }: { block: ChartBlock }) {
   type Rows = Record<string, unknown>[];
+  const t = useTranslation('plugin');
   const source = useEffectiveSource(block.source, block.params);
   const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
@@ -1237,9 +1266,9 @@ function ChartRenderer({ block }: { block: ChartBlock }) {
         className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
         data-slot="block-data-error"
       >
-        <span>Failed to load data.</span>
+        <span>{t('blocks.data.loadError', 'Failed to load data.')}</span>
         <Button type="button" variant="outline" size="sm" onClick={state.retry}>
-          Retry
+          {t('blocks.retry', 'Retry')}
         </Button>
       </div>
     );
@@ -1251,12 +1280,13 @@ function ChartRenderer({ block }: { block: ChartBlock }) {
         className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
         data-slot="block-data-empty"
       >
-        <span>{block.emptyText ?? 'No data available.'}</span>
+        {/* The plugin's own `emptyText` wins; only our default is keyed. */}
+        <span>{block.emptyText ?? t('blocks.data.empty', 'No data available.')}</span>
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Refresh"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
           onClick={state.refresh}
         >
           <IconRefresh className="size-3.5" aria-hidden />
@@ -1286,7 +1316,7 @@ function ChartRenderer({ block }: { block: ChartBlock }) {
           type="button"
           variant="ghost"
           size="icon-sm"
-          aria-label="Refresh"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
           onClick={state.refresh}
         >
           <IconRefresh className="size-3.5" aria-hidden />
@@ -1325,6 +1355,8 @@ function FormRenderer({ block }: { block: FormBlock }) {
 // unchanged (their names resolve against the row, not the outer form). The
 // user can add / remove / reorder rows within [min, max].
 function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
+  // Before the early return: a hook may not run conditionally.
+  const t = useTranslation('plugin');
   const ctx = useFormBlockContext();
   if (ctx === null) return <UnsupportedBlock type="fieldArray" />;
 
@@ -1332,7 +1364,10 @@ function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
   const rows: FieldArrayValue = Array.isArray(raw) ? raw : [];
   const min = typeof block.min === 'number' && block.min > 0 ? block.min : 0;
   const max = typeof block.max === 'number' && block.max > 0 ? block.max : Infinity;
-  const itemLabel = block.itemLabel ?? 'Item';
+  // The plugin's own noun for a row wins; only our default is keyed. Every
+  // control below therefore takes it as a {item} placeholder rather than
+  // splicing it onto a translated fragment.
+  const itemLabel = block.itemLabel ?? t('blocks.fieldArray.itemLabel', 'Item');
 
   const write = (next: FieldArrayValue) => ctx.setValue(block.name, next);
   const add = () => { if (rows.length < max) write([...rows, {}]); };
@@ -1372,15 +1407,18 @@ function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
         return (
           <div key={i} className="space-y-2 rounded-md border border-border p-3" data-slot="field-array-row">
             <div className="flex items-center justify-between gap-2">
+              {/* Not keyed: the visible text is the plugin's noun followed by
+                  the row number — there is no English prose here to translate,
+                  only the (already translated) itemLabel and a numeral. */}
               <span className="text-xs font-medium text-muted-foreground">{itemLabel} {i + 1}</span>
               <div className="flex gap-1">
-                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Move ${itemLabel} ${i + 1} up`} disabled={i === 0} onClick={() => move(i, -1)}>
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={t('blocks.fieldArray.moveUp', 'Move {item} {index} up', { item: itemLabel, index: i + 1 })} disabled={i === 0} onClick={() => move(i, -1)}>
                   <IconChevronUp className="size-3.5" aria-hidden />
                 </Button>
-                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Move ${itemLabel} ${i + 1} down`} disabled={i === rows.length - 1} onClick={() => move(i, 1)}>
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={t('blocks.fieldArray.moveDown', 'Move {item} {index} down', { item: itemLabel, index: i + 1 })} disabled={i === rows.length - 1} onClick={() => move(i, 1)}>
                   <IconChevronDown className="size-3.5" aria-hidden />
                 </Button>
-                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${itemLabel} ${i + 1}`} disabled={rows.length <= min} onClick={() => remove(i)}>
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={t('blocks.fieldArray.remove', 'Remove {item} {index}', { item: itemLabel, index: i + 1 })} disabled={rows.length <= min} onClick={() => remove(i)}>
                   <IconTrash className="size-3.5" aria-hidden />
                 </Button>
               </div>
@@ -1393,7 +1431,7 @@ function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
       })}
 
       <Button type="button" variant="outline" size="sm" disabled={rows.length >= max} onClick={add}>
-        <IconPlus className="me-1 size-4" aria-hidden />Add {itemLabel.toLowerCase()}
+        <IconPlus className="me-1 size-4" aria-hidden />{t('blocks.fieldArray.add', 'Add {item}', { item: itemLabel.toLowerCase() })}
       </Button>
     </div>
   );
@@ -1430,6 +1468,8 @@ function TextAreaRenderer({ block }: { block: TextAreaBlock }) {
 // WC-532 A5: a Markdown-aware textarea that submits Markdown source and shows
 // a live preview (rendered via the same XSS-safe renderer as the markdown block).
 function RichTextInputRenderer({ block }: { block: RichTextInputBlock }) {
+  // Before the early return: a hook may not run conditionally.
+  const t = useTranslation('plugin');
   const ctx = useFormBlockContext();
   if (ctx === null) return <UnsupportedBlock type="richTextInput" />;
   const inputId = `block-input-${block.name}`;
@@ -1441,7 +1481,7 @@ function RichTextInputRenderer({ block }: { block: RichTextInputBlock }) {
       <Textarea id={inputId} value={strValue} rows={block.rows ?? 6} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
       {strValue.trim() !== '' && (
         <div className="rounded-md border border-border bg-muted/30 p-3" data-slot="richtext-preview">
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Preview</p>
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('blocks.richTextInput.preview', 'Preview')}</p>
           {renderMarkdown(strValue)}
         </div>
       )}
@@ -1464,6 +1504,8 @@ function NumberInputRenderer({ block }: { block: NumberInputBlock }) {
 }
 
 function SelectRenderer({ block }: { block: SelectBlock }) {
+  // Before the early return: a hook may not run conditionally.
+  const t = useTranslation('plugin');
   const ctx = useFormBlockContext();
   if (ctx === null) return <UnsupportedBlock type="select" />;
   const value = ctx.values[block.name];
@@ -1476,7 +1518,7 @@ function SelectRenderer({ block }: { block: SelectBlock }) {
       </label>
       {ctx.errors[block.name] !== undefined && <p className="text-xs text-destructive" role="alert">{ctx.errors[block.name]}</p>}
       <Select value={strValue} onValueChange={(v) => ctx.setValue(block.name, v)}>
-        <SelectTrigger aria-label={block.label}><SelectValue placeholder={`Select ${block.label}`} /></SelectTrigger>
+        <SelectTrigger aria-label={block.label}><SelectValue placeholder={t('blocks.select.placeholder', 'Select {label}', { label: block.label })} /></SelectTrigger>
         <SelectContent>
           {block.options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
         </SelectContent>
@@ -1600,6 +1642,7 @@ function ReferenceSelectRenderer({ block }: { block: ReferenceSelectBlock }) {
 }
 
 function ReferenceSelectField({ block, ctx }: { block: ReferenceSelectBlock; ctx: FormBlockContextValue }) {
+  const t = useTranslation('plugin');
   const state = usePluginData<Array<Record<string, unknown>>>(
     block.source,
     (body) => (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null)
@@ -1626,13 +1669,15 @@ function ReferenceSelectField({ block, ctx }: { block: ReferenceSelectBlock; ctx
       <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
       {state.status === 'error' ? (
         <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground" data-slot="reference-select-error">
-          <span>Failed to load options.</span>
-          <Button type="button" variant="outline" size="sm" onClick={state.retry}>Retry</Button>
+          <span>{t('blocks.options.loadError', 'Failed to load options.')}</span>
+          <Button type="button" variant="outline" size="sm" onClick={state.retry}>{t('blocks.retry', 'Retry')}</Button>
         </div>
       ) : (
         <Select value={strValue} onValueChange={(v) => ctx.setValue(block.name, v)} disabled={state.status === 'loading'}>
           <SelectTrigger aria-label={block.label} data-slot="reference-select-trigger">
-            <SelectValue placeholder={state.status === 'loading' ? 'Loading…' : (block.placeholder ?? `Select ${block.label}`)} />
+            {/* `block.placeholder` is the plugin's own copy — only our
+                substitute for it is keyed. */}
+            <SelectValue placeholder={state.status === 'loading' ? t('blocks.loading', 'Loading…') : (block.placeholder ?? t('blocks.select.placeholder', 'Select {label}', { label: block.label }))} />
           </SelectTrigger>
           <SelectContent>
             {options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
@@ -1652,10 +1697,13 @@ const INTERACTIVE_BUTTON_VARIANT: Record<NonNullable<SubmitButtonBlock["variant"
 };
 
 function SubmitButtonRenderer({ block }: { block: SubmitButtonBlock }) {
+  // Before the early return: a hook may not run conditionally.
+  const t = useTranslation('plugin');
   const ctx = useFormBlockContext();
   if (ctx === null) return <UnsupportedBlock type="submitButton" />;
   const variant = block.variant ? INTERACTIVE_BUTTON_VARIANT[block.variant] : "default";
-  const label = ctx.isSubmitting ? "Working…" : block.label;
+  // The idle label is the plugin's; only the busy state is ours.
+  const label = ctx.isSubmitting ? t('action.submit.pending', 'Working…') : block.label;
   if (isNonEmptyString(block.requiredPermission)) {
     return (
       <PermissionButton permission={block.requiredPermission} variant={variant} disabled={ctx.isSubmitting} onClick={() => ctx.submit()}>
@@ -1672,6 +1720,7 @@ function SubmitButtonRenderer({ block }: { block: SubmitButtonBlock }) {
 
 function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
   const { addToast } = useToast();
+  const t = useTranslation('plugin');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [serverIssues, setServerIssues] = React.useState<ActionIssue[] | null>(null);
   const variant = block.variant ? INTERACTIVE_BUTTON_VARIANT[block.variant] : "default";
@@ -1682,17 +1731,24 @@ function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
     void submitPluginAction(block.action.endpoint, block.action.method, {}).then((result) => {
       setIsSubmitting(false);
       if (result.ok) {
-        addToast("Completed successfully", "success");
+        addToast(t('action.toast.completed', 'Completed successfully'), "success");
       } else if (result.issues && result.issues.length > 0) {
         setServerIssues(result.issues);
-        addToast(`${result.issues.length} issue(s) — see the report below`, "error");
+        addToast(
+          t('action.issues.summary', '{count} issue(s) — see the report below', {
+            count: result.issues.length,
+          }),
+          "error"
+        );
       } else {
-        addToast(result.error ?? "Request failed", "error");
+        // `result.error` is the server's own message — never keyed.
+        addToast(result.error ?? t('action.toast.requestFailed', 'Request failed'), "error");
       }
     });
-  }, [block.action, addToast]);
+  }, [block.action, addToast, t]);
 
-  const triggerLabel = isSubmitting ? "Working…" : block.label;
+  // The idle label is the plugin's; only the busy state is ours.
+  const triggerLabel = isSubmitting ? t('action.submit.pending', 'Working…') : block.label;
 
   const renderTrigger = (onClick?: () => void) => {
     if (isNonEmptyString(block.requiredPermission)) {
@@ -1720,8 +1776,10 @@ function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
               <AlertDialogDescription>{block.confirm}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => handleAction()}>Confirm</AlertDialogAction>
+              <AlertDialogCancel>{t('blocks.dialog.cancel', 'Cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => handleAction()}>
+                {t('blocks.dialog.confirm', 'Confirm')}
+              </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

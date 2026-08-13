@@ -196,6 +196,23 @@ final class SettingsRegistry
     public const DOCUMENTS_RENDER_MAX_PAGES = 'documents.render_max_pages';
     public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
 
+    // Bulk data-type lifecycle batch ceiling (WC-746). The largest number of ids
+    // `POST /api/data-types/{type}/bulk` accepts in one request. An unbounded id
+    // list is a denial-of-service with a polite name: every id costs a
+    // transaction, a hook dispatch and an audit row, and the request holds a
+    // worker for all of them.
+    //
+    // Tenant-overridable rather than global-only, for the same reason the render
+    // ceilings above are: an operator running one tenant with a 40,000-row trash
+    // and another with forty should be able to raise one without raising both.
+    // Resolution is the standard tenant override -> global default -> registry
+    // default, so a deployment that never touches it still has a bound.
+    //
+    // Exceeding it is a clean 422 refusal naming the limit, never a silent
+    // truncation: a client that asked to clear 900 records and was quietly given
+    // 500 has no way to notice the other 400 are still there.
+    public const DATA_TYPES_BULK_MAX_IDS = 'data_types.bulk_max_ids';
+
     /**
      * Error tracking (WC-error-tracking). Operator-only, deployment-wide: one
      * process serves every tenant, and a boot/queue/cron failure belongs to no
@@ -211,6 +228,34 @@ final class SettingsRegistry
     public const ERROR_TRACKING_ENVIRONMENT = 'error_tracking.environment';
     public const ERROR_TRACKING_NOTIFY_ADMINS = 'error_tracking.notify_admins';
     public const ERROR_TRACKING_RETENTION_DAYS = 'error_tracking.retention_days';
+
+    /**
+     * Interface internationalisation MASTER switch (WC-i18n-feature-flag).
+     *
+     * When 'false', the product presents itself as a single-language,
+     * left-to-right English application: every user resolves to the default
+     * language whatever their profile says, `<html dir>` is 'ltr', and the
+     * end-user language switcher is not rendered at all — the whole point being
+     * that a deployment which is not ready to ship a second language shows no
+     * affordance suggesting it could.
+     *
+     * GLOBAL-ONLY. The catalogue it governs (`languages`) has no `tenant_id`
+     * column, the sign-in screen is pre-tenant, and direction is applied to the
+     * document element — a per-tenant value would be inert and misleading.
+     *
+     * Default 'true' (ENABLED), and deliberately so: i18n already shipped, so an
+     * upgrade must not silently switch a live feature off underneath a
+     * deployment already using it. Turning it off is an operator's runtime
+     * decision (one setting), not a code default — same reasoning that made
+     * PLUGINS_STORE_ENABLED default 'true'.
+     *
+     * DISABLING IS NEVER A DATA MIGRATION. `profiles.language_code` keeps its
+     * stored value and translation rows keep theirs; the flag only changes what
+     * is RESOLVED and what is OFFERED. Re-enabling restores every user's
+     * previous language exactly, which is what makes the switch safe to flip
+     * while investigating a problem.
+     */
+    public const I18N_ENABLED = 'i18n.enabled';
 
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
@@ -279,6 +324,11 @@ final class SettingsRegistry
         // render LIMITS below are deliberately NOT in this list (they ARE
         // meaningfully tenant-overridable).
         self::DOCUMENTS_RENDER_ENABLED,
+        // Languages are a PLATFORM catalogue (no tenant_id column) and the
+        // sign-in screen resolves a language before any tenant is known, so
+        // "does this instance offer more than one language" is an instance
+        // question, not a tenant one.
+        self::I18N_ENABLED,
     ];
 
     /**
@@ -306,6 +356,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_PASSWORD_RESET,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
+        self::I18N_ENABLED,
     ];
 
     /**
@@ -338,6 +389,12 @@ final class SettingsRegistry
      * `REGISTRATION_APPROVAL_REQUIRED` above. `MAIL_EVENT_PASSWORD_RESET` is
      * deliberately EXCLUDED, same reasoning as the other `mail.events.*` keys.
      *
+     * WC-i18n-feature-flag added `I18N_ENABLED`: whether this instance presents
+     * itself as multilingual at all is exactly the kind of whole-instance
+     * capability an operator switches on the Feature Flags tab, and it is the
+     * only one here whose OFF state is also visible to end users (the language
+     * switcher disappears with it).
+     *
      * @var list<string>
      */
     private const FEATURE_FLAG_KEYS = [
@@ -351,6 +408,7 @@ final class SettingsRegistry
         self::SSO_ENABLED,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
+        self::I18N_ENABLED,
     ];
 
     /**
@@ -457,11 +515,20 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
+        // 500 ids per bulk lifecycle request. Chosen to cover the motivating
+        // screens — "empty the trash", "retire this selection" — in a single
+        // call, while still bounding the work one request can commission. Each
+        // id is its own transaction, so this is a ceiling on duration and lock
+        // churn, not on a single long-held lock.
+        self::DATA_TYPES_BULK_MAX_IDS => '500',
         self::ERROR_TRACKING_ENABLED => 'false',
         self::ERROR_TRACKING_PROVIDER => 'internal',
         self::ERROR_TRACKING_ENVIRONMENT => '',
         self::ERROR_TRACKING_NOTIFY_ADMINS => 'true',
         self::ERROR_TRACKING_RETENTION_DAYS => '90',
+        // ENABLED by default: i18n already shipped, and an upgrade must not
+        // switch a live feature off underneath a deployment using it.
+        self::I18N_ENABLED => 'true',
     ];
 
     /**
@@ -737,6 +804,21 @@ final class SettingsRegistry
             self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
             self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
+            self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
+            // Error tracking. These five were declared with defaults, types,
+            // enum options and a global-only marking, but never given a
+            // validate() arm — so every one of them fell through to `default`
+            // below and the admin Error-tracking tab's PATCH was refused as
+            // "Unknown setting key" for keys the registry plainly knows.
+            // Found by the catalogue pin added with #713 item 1.
+            self::ERROR_TRACKING_ENABLED,
+            self::ERROR_TRACKING_NOTIFY_ADMINS => self::validateBoolean($value, $key),
+            self::ERROR_TRACKING_PROVIDER => self::validateEnum($key, $value),
+            // Free-form deployment label ('production', 'staging'); empty leaves
+            // it unset, exactly like the other optional string settings above.
+            self::ERROR_TRACKING_ENVIRONMENT => null,
+            self::ERROR_TRACKING_RETENTION_DAYS => self::validateRetentionDays($value),
+            self::I18N_ENABLED => self::validateBoolean($value, self::I18N_ENABLED),
             default => "Unknown setting key: {$key}",
         };
     }
@@ -777,6 +859,31 @@ final class SettingsRegistry
         $port = (int) $value;
         if ($port < 1 || $port > 65535) {
             return 'mail.smtp.port must be between 1 and 65535.';
+        }
+
+        return null;
+    }
+
+    /**
+     * How long captured error groups are retained: a whole number of days, at
+     * least 1, capped at 3650 (10 years) — the same sanity ceiling
+     * {@see validateGraceDays()} applies.
+     *
+     * At least 1 rather than 0: zero would mean the pruner deletes every group
+     * on its next pass, which is indistinguishable from error tracking being
+     * broken. An operator who wants that turns the feature off.
+     */
+    private static function validateRetentionDays(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'error_tracking.retention_days must be a whole number of days.';
+        }
+        $days = (int) $value;
+        if ($days < 1) {
+            return 'error_tracking.retention_days must be at least 1.';
+        }
+        if ($days > 3650) {
+            return 'error_tracking.retention_days must be 3650 or fewer.';
         }
 
         return null;
@@ -965,6 +1072,30 @@ final class SettingsRegistry
         }
         if ($pages > 1000000) {
             return 'documents.render_max_pages must be 1000000 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Max ids accepted in one bulk lifecycle request: a whole number, at least
+     * 1, capped at 10000 (a sanity ceiling on the ADMIN-set value itself).
+     *
+     * At least 1 rather than 0: zero would refuse every batch, which is
+     * indistinguishable from the endpoint being broken. An operator who wants
+     * that removes the permission the type declares for the action.
+     */
+    private static function validateBulkMaxIds(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'data_types.bulk_max_ids must be a whole number.';
+        }
+        $ids = (int) $value;
+        if ($ids < 1) {
+            return 'data_types.bulk_max_ids must be at least 1.';
+        }
+        if ($ids > 10000) {
+            return 'data_types.bulk_max_ids must be 10000 or fewer.';
         }
 
         return null;

@@ -380,6 +380,27 @@ $tableOwnershipRegistry->registerCoreTables();
 $dataTypeRegistry = new \Whity\Core\DataType\DataTypeRegistry($tableOwnershipRegistry, $hookManager);
 \Whity\register_service(\Whity\Core\DataType\DataTypeRegistry::class, $dataTypeRegistry); // @phpstan-ignore-line
 
+// 4c-quinquies. Plugin-declared SETTINGS catalogue (#713 item 1): the keys a
+// plugin contributes to core's OWN settings tables, so a plugin stops building a
+// private `tenant_settings` look-alike with no typing and no validation.
+//
+// Two objects, because there are two different things:
+//
+//  - PluginSettingsRegistry holds the MUTABLE half — the plugin contributions —
+//    as an instance rebuilt per boot from the plugins actually loaded. It is not
+//    a static, because a static is per FrankenPHP worker and a key missing from
+//    one worker's catalogue does not throw, it reads as "unknown setting" (the
+//    #701 / #727 hazard, landing in a layer that fails quietly).
+//  - SettingsCatalog is the UNION VIEW over it and core's static const
+//    catalogue. Core's ~330 static call sites keep resolving core-only and are
+//    untouched; only consumers that treat keys as data — the settings service
+//    and the settings API — see both halves.
+$pluginSettingsRegistry = new \Whity\Core\Settings\PluginSettingsRegistry($hookManager);
+\Whity\register_service(\Whity\Core\Settings\PluginSettingsRegistry::class, $pluginSettingsRegistry); // @phpstan-ignore-line
+
+$settingsCatalog = new \Whity\Core\Settings\SettingsCatalog($pluginSettingsRegistry);
+\Whity\register_service(\Whity\Core\Settings\SettingsCatalog::class, $settingsCatalog); // @phpstan-ignore-line
+
 // 4b-bis. Durable async queue (WC-queue): the producer-side QueueService is
 // registered so core services, hooks, and plugins enqueue work into the durable
 // `jobs` table instead of the old log-only Queue stub. The consumer side
@@ -809,7 +830,8 @@ $pluginLoader = new PluginLoader(
     $resourceTypeRegistry,
     $healthProbeRegistry,
     $tableOwnershipRegistry,
-    $dataTypeRegistry
+    $dataTypeRegistry,
+    $pluginSettingsRegistry
 );
 
 // 9b. Initialize deployment manager
@@ -838,8 +860,13 @@ $twoFactorPolicyResolver = new TwoFactorPolicyResolver($db, $logger);
 $globalSettingsRepository = new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo());
 $settingsService = new \Whity\Core\Settings\SettingsService(
     $globalSettingsRepository,
-    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
+    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo()),
+    // #713 item 1: resolve against the UNION of core's keys and the loaded
+    // plugins' declarations, so a plugin key lands in these same two tables and
+    // resolves through this same per-tenant ?? global ?? default chain.
+    $settingsCatalog
 );
+\Whity\register_service(\Whity\Core\Settings\SettingsService::class, $settingsService); // @phpstan-ignore-line
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle, $twoFactorPolicyResolver, $settingsService);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // WC-235: public self-service registration — provisions a new tenant + owner
@@ -1370,7 +1397,10 @@ try {
 
 // Registered versioned (bare paths) so the router prepends /v1 itself —
 // writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
-$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry, $languageRepository, $roleChecker);
+// $settingsService (constructed earlier, near the register handler) supplies the
+// `i18n.enabled` feature flag: with it off the handler reports the default
+// language for everyone and refuses preference writes. See its class docblock.
+$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry, $languageRepository, $roleChecker, $settingsService);
 $router->register('GET',   '/api/languages',         [$languagesHandler, 'list'],          null);
 $router->register('GET',   '/api/settings/language', [$languagesHandler, 'getLanguage'],   null);
 $router->register('PATCH', '/api/settings/language', [$languagesHandler, 'patchLanguage'], null);
@@ -1398,6 +1428,10 @@ $translationsHandler = new \Whity\Api\TranslationsApiHandler(
     $roleChecker,
     $languageRegistry
 );
+// Registered BEFORE the two-segment public bundle route so a literal path can
+// never be read as a {language_code} — the segment counts differ, but the
+// ordering makes that independent of how the matcher is implemented.
+$router->register('GET',    '/api/translations/coverage',   [$translationsHandler, 'coverage'],  null, null, CorePermissions::TRANSLATIONS_MANAGE);
 $router->register('GET',    '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
 $router->register('GET',    '/api/translations',            [$translationsHandler, 'adminList'], null, null, CorePermissions::TRANSLATIONS_MANAGE);
 $router->register('POST',   '/api/translations',            [$translationsHandler, 'create'],    null, null, CorePermissions::TRANSLATIONS_MANAGE);
@@ -1638,13 +1672,63 @@ $dataTypeLifecycle = new \Whity\Core\DataType\DataTypeLifecycleService(
 \Whity\register_service(\Whity\Core\DataType\DataTypeLifecycleService::class, $dataTypeLifecycle); // @phpstan-ignore-line
 \Whity\register_service(\Whity\Sdk\DataType\DataTypeGuard::class, $dataTypeLifecycle); // @phpstan-ignore-line
 
-$dataTypesHandler = new \Whity\Api\DataTypesApiHandler($dataTypeRegistry, $dataTypeLifecycle, $roleChecker);
+// The restore-state memory, registered so a plugin that hard-deletes a record
+// OUTSIDE core can clear its row. It is the service's OWN instance, not a second
+// one over the same connection. Without this registration the class existed and
+// was simply unreachable — the container refuses to build it (it takes a PDO) —
+// so an adopter's only remaining option was a hand-written DELETE against a
+// core-owned table. The row it leaves behind carries no foreign key and no
+// cascade, so for a client-supplied key a later record re-using that key
+// inherits a dead record's state and can be restored into a state it never held.
+\Whity\register_service(\Whity\Core\DataType\LifecycleStateMemory::class, $dataTypeLifecycle->stateMemory()); // @phpstan-ignore-line
+
+// The WRITE half of the plugin-facing lifecycle surface. `DataTypeGuard` above
+// is read-only by design and stays that way — it answers questions and changes
+// nothing — but core told adopters to route their writes through core and then
+// published only a read contract, so they duck-typed DataTypeLifecycleService, a
+// core internal. This registers the supported path.
+//
+// It is the SAME object the generated endpoints gate themselves with (passed to
+// the handler below), which is what makes "an in-process call cannot skip a check
+// the endpoint enforces" true by construction rather than by two implementations
+// written to agree.
+$gatedDataTypeLifecycle = new \Whity\Core\DataType\GatedDataTypeLifecycle(
+    $dataTypeRegistry,
+    $dataTypeLifecycle,
+    $roleChecker
+);
+\Whity\register_service(\Whity\Sdk\DataType\DataTypeLifecycle::class, $gatedDataTypeLifecycle); // @phpstan-ignore-line
+
+$dataTypesHandler = new \Whity\Api\DataTypesApiHandler(
+    $dataTypeRegistry,
+    $dataTypeLifecycle,
+    $gatedDataTypeLifecycle,
+    $settingsService
+);
+
+// The host-owned sequence allocator (migration 092). Registered under the SDK
+// INTERFACE, which is the name a plugin can reference without depending on
+// core; the concrete class is registered too so host code can ask for it by its
+// own type. Both entry points register it — a service wired in only one of them
+// is the divergence bug class #717 and #724 already paid for.
+$sequenceCounters = new \Whity\Database\SequenceCounters($db->getPdo());
+\Whity\register_service(\Whity\Sdk\Sql\SequenceAllocator::class, $sequenceCounters); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Database\SequenceCounters::class, $sequenceCounters); // @phpstan-ignore-line
+
 $router->register('GET',    '/api/data-types',                       [$dataTypesHandler, 'list']);
 $router->register('GET',    '/api/data-types/{type}/{id}',           [$dataTypesHandler, 'show']);
 $router->register('POST',   '/api/data-types/{type}/{id}/trash',     [$dataTypesHandler, 'trash']);
 $router->register('POST',   '/api/data-types/{type}/{id}/restore',   [$dataTypesHandler, 'restore']);
 $router->register('POST',   '/api/data-types/{type}/{id}/retire',    [$dataTypesHandler, 'retire']);
 $router->register('DELETE', '/api/data-types/{type}/{id}',           [$dataTypesHandler, 'delete']);
+// The batch surface (WC-746). THREE segments and a POST, which is what keeps it
+// unambiguous: the single-record transitions are four-segment POSTs, and the
+// three-segment `{type}/{id}` routes are GET and DELETE. Router::match() returns
+// the FIRST pattern that matches, so a bulk path that could also parse as
+// `{type}/{id}/<action>` would make the surface depend on registration order and
+// quietly reserve `bulk` as an id nobody could address. The action rides in the
+// body instead, beside the ids it applies to.
+$router->register('POST',   '/api/data-types/{type}/bulk',           [$dataTypesHandler, 'bulk']);
 
 // 13b-quater. Generic async-job submission + status API (WC-jobs-api). Wraps the
 // durable queue: POST enqueues an ALLOW-LISTED job for the caller's tenant (with

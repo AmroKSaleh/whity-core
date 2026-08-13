@@ -7,6 +7,10 @@
  * input and submit-button renderers. A `textInput` / `checkbox` / etc.
  * rendered outside a `FormProvider` receives `null` from `useFormBlockContext`
  * and degrades to `UnsupportedBlock`.
+ *
+ * i18n: the chrome this file authors goes through `t()` (domain `plugin`).
+ * Every `child.label`, the server's issue `message`/`column`, and a plugin's
+ * own validation copy are DATA and are rendered verbatim.
  */
 
 import * as React from 'react';
@@ -15,6 +19,7 @@ import { apiClient } from '@/lib/api-client';
 import { submitPluginAction, type ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { IconAlertTriangle } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /** Sentinel: when a sensitive field holds this value, it is omitted from the submit payload. */
 export const SENSITIVE_SENTINEL = '••••••';
@@ -71,6 +76,8 @@ export function FormScopeProvider({
  * form can surface server-side validation feedback inline.
  */
 export function IssuesReport({ issues }: { issues: ActionIssue[] }) {
+  // Before the early return: a hook may not run conditionally.
+  const t = useTranslation('plugin');
   if (issues.length === 0) {
     return null;
   }
@@ -81,13 +88,17 @@ export function IssuesReport({ issues }: { issues: ActionIssue[] }) {
     >
       <div className="flex items-center gap-2">
         <IconAlertTriangle size={16} className="text-destructive" aria-hidden />
-        <h3 className="font-heading text-sm font-medium">Validation report</h3>
+        <h3 className="font-heading text-sm font-medium">
+          {t('action.issues.title', 'Validation report')}
+        </h3>
       </div>
       <ul className="space-y-1.5">
         {issues.map((issue, index) => {
+          // `issue.column` and `issue.message` are the plugin's own report
+          // text — rendered verbatim. Only the "Item n" locator is ours.
           const where: string[] = [];
           if (typeof issue.item === 'number') {
-            where.push(`Item ${issue.item}`);
+            where.push(t('action.issues.item', 'Item {index}', { index: issue.item }));
           }
           if (typeof issue.column === 'string' && issue.column !== '') {
             where.push(issue.column);
@@ -101,7 +112,9 @@ export function IssuesReport({ issues }: { issues: ActionIssue[] }) {
               }`}
             >
               <span className="me-2 text-xs font-semibold uppercase tracking-wide">
-                {isError ? 'error' : 'warning'}
+                {isError
+                  ? t('action.issues.severity.error', 'error')
+                  : t('action.issues.severity.warning', 'warning')}
               </span>
               {where.length > 0 && (
                 <span className="font-medium text-muted-foreground">{where.join(' / ')}: </span>
@@ -229,6 +242,13 @@ export function FormProvider({
   children: React.ReactNode;
 }) {
   const { addToast } = useToast();
+  const t = useTranslation('plugin');
+
+  // Resolved at render, not inside the effect below: a STRING dependency is
+  // compared by value, so the load effect re-runs only if the text actually
+  // changes (a language switch) — never merely because `t` got a new identity
+  // when the bundle arrived, which would re-fetch and clobber user edits.
+  const loadErrorText = t('form.error.load', 'Failed to load settings');
 
   const [values, setValues] = React.useState<Record<string, FormValue>>(
     () => collectDefaults(block.children)
@@ -256,10 +276,10 @@ export function FormProvider({
         setIsLoading(false);
       })
       .catch(() => {
-        setLoadError('Failed to load settings');
+        setLoadError(loadErrorText);
         setIsLoading(false);
       });
-  }, [dataSourcePath, dataSourceMethod]);
+  }, [dataSourcePath, dataSourceMethod, loadErrorText]);
 
   const setValue = React.useCallback(
     (name: string, value: string | boolean) => {
@@ -293,7 +313,10 @@ export function FormProvider({
         const filled =
           typeof val === 'string' ? val.trim() !== '' : val !== undefined;
         if (!filled) {
-          newErrors[child.name] = `${child.label} is required`;
+          // `child.label` is plugin data; the sentence around it is ours.
+          newErrors[child.name] = t('form.error.required', '{label} is required', {
+            label: child.label,
+          });
         }
       } else if (child.type === 'bilingualText' && child.required === true) {
         // A required bilingual field is satisfied by at least one language
@@ -305,13 +328,20 @@ export function FormProvider({
           !Array.isArray(val) &&
           ((val.ar ?? '').trim() !== '' || (val.en ?? '').trim() !== '');
         if (!filled) {
-          newErrors[child.name] = `${child.label} is required`;
+          newErrors[child.name] = t('form.error.required', '{label} is required', {
+            label: child.label,
+          });
         }
       } else if (child.type === 'fieldArray' && typeof child.min === 'number' && child.min > 0) {
         // WC-532 A2: enforce the minimum row count.
         const val = values[child.name];
         const count = Array.isArray(val) ? val.length : 0;
         if (count < child.min) {
+          // NOT translated, deliberately: the message picks "entry"/"entries"
+          // from the count, and there is no plural machinery behind t(). A
+          // two-arm English branch does not survive a language with more than
+          // two plural categories (Arabic has six), and splitting the sentence
+          // to key the halves would be worse than leaving it in English.
           newErrors[child.name] = `${child.label} needs at least ${child.min} ${child.min === 1 ? 'entry' : 'entries'}`;
         }
       }
@@ -336,19 +366,22 @@ export function FormProvider({
       (result) => {
         setIsSubmitting(false);
         if (result.ok) {
-          addToast('Completed successfully', 'success');
+          addToast(t('action.toast.completed', 'Completed successfully'), 'success');
         } else if (result.issues && result.issues.length > 0) {
           setServerIssues(result.issues);
           addToast(
-            `${result.issues.length} issue(s) — see the report below`,
+            t('action.issues.summary', '{count} issue(s) — see the report below', {
+              count: result.issues.length,
+            }),
             'error'
           );
         } else {
-          addToast(result.error ?? 'Request failed', 'error');
+          // `result.error` is the server's own message — never keyed.
+          addToast(result.error ?? t('action.toast.requestFailed', 'Request failed'), 'error');
         }
       }
     );
-  }, [block, values, addToast]);
+  }, [block, values, addToast, t]);
 
   const contextValue: FormBlockContextValue = {
     values,

@@ -303,7 +303,7 @@ final class AuthHandlerTwoFactorPolicyRealEngineTest extends TestCase
 
         $this->pdo->prepare(
             "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (?, ?, 1, 1, datetime('now'))"
+             VALUES (?, ?, true, true, datetime('now'))"
         )->execute([$profileId, $email]);
 
         $roleStmt = $this->pdo->query("SELECT id FROM roles WHERE name = 'user'");

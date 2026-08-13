@@ -12,6 +12,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconDeviceFloppy } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -37,6 +38,7 @@ export default function SignupSettingsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canManage = hasPermission(SETTINGS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -53,21 +55,27 @@ export default function SignupSettingsPage() {
   // settings:manage within its own tenant, but must never manage platform-wide
   // defaults — so gate on BOTH the system tenant and the permission.
   if (!isSystemTenant || !canManage) {
+    // ONE translatable sentence with a {link} hole, split at render time so the
+    // General link stays a link without fragmenting the sentence for translators.
+    const [beforeLink, afterLink] = t(
+      'settings.signup.accessDenied',
+      'Sign-up governance can only be managed from the system tenant. Your tenant’s settings are on the {link} page.'
+    ).split('{link}');
+
     return (
       <AccessDenied
         description={
           <>
-            Sign-up governance can only be managed from the system tenant. Your tenant&rsquo;s
-            settings are on the{' '}
+            {beforeLink}
             <Link href="/admin/settings" className="font-medium underline">
-              General
-            </Link>{' '}
-            page.
+              {t('settings.signup.accessDenied.link', 'General')}
+            </Link>
+            {afterLink}
           </>
         }
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.signup.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -77,8 +85,11 @@ export default function SignupSettingsPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Sign-up"
-        description="Control whether and how new people can create accounts on this instance."
+        title={t('settings.signup.title', 'Sign-up')}
+        description={t(
+          'settings.signup.description',
+          'Control whether and how new people can create accounts on this instance.'
+        )}
       />
       <SettingsTabs active="signup" />
       <SignupSettingsForm addToast={addToast} />
@@ -87,10 +98,13 @@ export default function SignupSettingsPage() {
 }
 
 function SignupSettingsForm({ addToast }: { addToast: AddToast }) {
+  const t = useTranslation('admin');
   const { data, loading, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load sign-up settings'));
+      throw new Error(
+        errorMessage(getError, t('settings.signup.loadFailed', 'Failed to load sign-up settings'))
+      );
     }
     return body.data;
   }, []);
@@ -102,8 +116,8 @@ function SignupSettingsForm({ addToast }: { addToast: AddToast }) {
   const global = data?.global as SettingsMap | undefined;
   const registry = useMemo<RegistryEntry[]>(() => data?.registry ?? [], [data]);
   const sections = useMemo(
-    () => groupRegistry(registry).filter((s) => s.section.id === 'signup'),
-    [registry]
+    () => groupRegistry(registry, t).filter((s) => s.section.id === 'signup'),
+    [registry, t]
   );
   const dirty = Object.keys(draft).length > 0;
 
@@ -142,13 +156,20 @@ function SignupSettingsForm({ addToast }: { addToast: AddToast }) {
       });
       if (patchError) {
         setFieldErrors(fieldErrorsFrom(patchError));
-        throw new Error(errorMessage(patchError, 'Failed to save sign-up settings'));
+        throw new Error(
+          errorMessage(patchError, t('settings.signup.saveFailed', 'Failed to save sign-up settings'))
+        );
       }
-      addToast('Sign-up settings saved.', 'success');
+      addToast(t('settings.signup.saved', 'Sign-up settings saved.'), 'success');
       setDraft({});
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save sign-up settings', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('settings.signup.saveFailed', 'Failed to save sign-up settings'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -159,7 +180,7 @@ function SignupSettingsForm({ addToast }: { addToast: AddToast }) {
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Sign-up governance</h2>
+            <h2>{t('settings.signup.form.title', 'Sign-up governance')}</h2>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -210,7 +231,9 @@ function SignupSettingsForm({ addToast }: { addToast: AddToast }) {
           data-testid="signup-settings-save"
         >
           <IconDeviceFloppy className="w-4 h-4" />
-          {saving ? 'Saving…' : 'Save sign-up settings'}
+          {saving
+            ? t('settings.signup.saving', 'Saving…')
+            : t('settings.signup.save', 'Save sign-up settings')}
         </Button>
       </div>
     </div>

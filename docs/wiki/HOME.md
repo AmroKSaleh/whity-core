@@ -22,11 +22,13 @@ Welcome to the Whity Core documentation.
 - **[Family Relations](RELATIONS.md)** — Person-node graph, relationship types, the relations API + admin hub.
 - **[Document & Label Designer](Document-Designer.md)** — WYSIWYG designer for docs/labels: multi-page, variable-data batch (serials/CSV), N-up sheets, reusable blocks, starters, RTL; model, rendering, and the backend persistence/PDF contract.
 - **[Navigation Customization](Navigation-Customization.md)** — Design for a customizable sidebar: tenant default layout + per-user overrides gated by a tenant setting; server resolves RBAC ∩ tenant ∩ user.
+- **[Internationalization](Internationalization.md)** — Translation keys derived from the code that renders them: `t('key', 'English')` → extracted catalogue → seeded rows → the console where a translator closes the gap. Includes the CI drift gate and how dynamic keys are declared.
 - **[Feature Flags](Feature-Flags.md)** — The `SettingsRegistry`-based capability toggle mechanism: how a flag gates code, the generic admin page, the recipe for adding a new one, and the current inventory.
 
 ## Contributing
 
 - **[Development Workflow](Development-Workflow.md)** — How work is planned and shipped: the Instruction Set (IS) and the Tasker flow (`WC-XX` numbering, task lifecycle, parallel execution).
+- **[Testing Against PostgreSQL](Testing-Against-PostgreSQL.md)** — Closing the SQLite/PostgreSQL dialect gap: how to point core's and a plugin's suites at a real engine, and the catalogue of differences that pass silently on SQLite.
 - **[Package Releases](Package-Releases.md)** — How the publishable packages (`@amroksaleh/ui`, the PHP plugin SDK) are versioned and released: monorepo + independently-versioned packages, changesets, version-gated publish.
 - **[CONTRIBUTING.md](../../CONTRIBUTING.md)** — Dev setup, coding standards, testing, and the PR process.
 - **[Plugin Development](Plugin-Development.md)** — Build plugins against `PluginInterface`.

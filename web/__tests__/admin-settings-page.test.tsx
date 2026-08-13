@@ -254,6 +254,134 @@ describe('AdminSettingsPage — Platform defaults (WC-235 successor)', () => {
   });
 });
 
+describe('AdminSettingsPage — plugin-declared settings (#713 item 1)', () => {
+  // What the backend publishes for a plugin key: the same key/type/default a
+  // core descriptor carries, plus the presentation and attribution core cannot
+  // hardcode for a plugin it has never heard of. Only keys whose declaration
+  // opted in with `admin => true` are published at all.
+  const PLUGIN_REGISTRY = [
+    ...REGISTRY,
+    {
+      key: 'democatalog:sync_mode',
+      type: 'enum',
+      default: 'incremental',
+      options: ['off', 'incremental', 'full'],
+      source: 'DemoCatalog',
+      label: { en: 'Sync mode', ar: 'وضع المزامنة' },
+      description: 'Whether clients sync nothing, only changes, or the whole catalogue.',
+    },
+    {
+      key: 'democatalog:verbose',
+      type: 'bool',
+      default: 'false',
+      source: 'DemoCatalog',
+      label: { en: 'Verbose logging' },
+    },
+  ];
+
+  const PLUGIN_GLOBAL = {
+    ...GLOBAL,
+    'democatalog:sync_mode': 'incremental',
+    'democatalog:verbose': 'false',
+  };
+
+  function routeWithPluginKeys() {
+    routeGet(['site_name'], true, PLUGIN_REGISTRY, PLUGIN_GLOBAL);
+  }
+
+  it('groups plugin keys into their own section rather than scattering them through core sections', async () => {
+    setTenant(0);
+    grant('settings:read', 'settings:write', 'settings:manage');
+    routeWithPluginKeys();
+    render(<AdminSettingsPage />);
+
+    // An operator needs to see which switches arrived with a plugin, because
+    // removing the plugin removes them.
+    expect(await screen.findByTestId('settings-section-plugins')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-general')).toBeInTheDocument();
+    // Core's own fields stay where they were.
+    expect(screen.getByTestId('settings-section-general')).toContainElement(
+      screen.getByLabelText(/^site name$/i, { selector: '#platform-site_name' })
+    );
+  });
+
+  it('labels a plugin key from its DECLARATION, not from a humanised key', async () => {
+    setTenant(0);
+    grant('settings:read', 'settings:write', 'settings:manage');
+    routeWithPluginKeys();
+    render(<AdminSettingsPage />);
+
+    await screen.findByTestId('settings-section-plugins');
+    // Core has never heard of this key, so the label can only come from the
+    // plugin's own declaration.
+    expect(screen.getByLabelText(/^sync mode$/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/whether clients sync nothing, only changes, or the whole catalogue/i)
+    ).toBeInTheDocument();
+  });
+
+  it('attributes each plugin control to the plugin that declared it', async () => {
+    setTenant(0);
+    grant('settings:read', 'settings:write', 'settings:manage');
+    routeWithPluginKeys();
+    render(<AdminSettingsPage />);
+
+    await screen.findByTestId('settings-section-plugins');
+    // Both the text control and the bool control carry the badge — the bool
+    // branch renders its label separately and is easy to miss.
+    expect(screen.getByTestId('setting-source-democatalog:sync_mode')).toHaveTextContent('DemoCatalog');
+    expect(screen.getByTestId('setting-source-democatalog:verbose')).toHaveTextContent('DemoCatalog');
+    // Core keys carry no attribution badge — they are the platform itself.
+    expect(screen.queryByTestId('setting-source-site_name')).not.toBeInTheDocument();
+  });
+
+  it('renders a plugin enum as a fixed-choice control from its declared options', async () => {
+    setTenant(0);
+    grant('settings:read', 'settings:write', 'settings:manage');
+    routeWithPluginKeys();
+    render(<AdminSettingsPage />);
+
+    await screen.findByTestId('settings-section-plugins');
+    const control = screen.getByLabelText(/^sync mode$/i);
+    // A free-text box here would let an operator type a value the backend
+    // refuses; the declared options are what make it a selector.
+    expect(control.tagName.toLowerCase()).toBe('select');
+    // Option labels are humanised by the shared control (`Incremental`), while
+    // the VALUE stays exactly what the plugin declared — the backend validates
+    // the value, so it must survive the round trip untouched.
+    const values = Array.from(control.querySelectorAll('option')).map((o) => o.getAttribute('value'));
+    expect(values).toEqual(['off', 'incremental', 'full']);
+    expect(screen.getByRole('option', { name: 'Incremental' })).toBeInTheDocument();
+  });
+
+  it('PATCHes a changed plugin key under its namespaced key', async () => {
+    setTenant(0);
+    grant('settings:read', 'settings:write', 'settings:manage');
+    routeWithPluginKeys();
+    render(<AdminSettingsPage />);
+
+    await screen.findByTestId('settings-section-plugins');
+    fireEvent.change(screen.getByLabelText(/^sync mode$/i), { target: { value: 'full' } });
+    fireEvent.click(screen.getByRole('button', { name: /save platform defaults/i }));
+
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith(
+        '/api/v1/settings/global',
+        expect.objectContaining({ body: { settings: { 'democatalog:sync_mode': 'full' } } })
+      )
+    );
+  });
+
+  it('shows no plugin section when no plugin declared an admin-visible key', async () => {
+    setTenant(0);
+    grant('settings:read', 'settings:write', 'settings:manage');
+    render(<AdminSettingsPage />);
+
+    await screen.findByRole('heading', { name: /platform defaults/i });
+    expect(screen.queryByTestId('settings-section-plugins')).not.toBeInTheDocument();
+  });
+});
+
 describe('AdminSettingsPage — overridden vs inherited indicator', () => {
   it('marks overridden keys distinctly from inherited ones', async () => {
     grant('settings:read', 'settings:write');
@@ -576,6 +704,39 @@ describe('FeatureFlagsSettingsPage — registry-driven, isFlag-filtered form', (
       )
     );
     await waitFor(() => expect(addToast).toHaveBeenCalledWith(expect.any(String), 'success'));
+  });
+
+  /**
+   * The i18n master switch is a feature flag like any other — which is the
+   * point: turning the product's whole language surface off is one toggle on
+   * this page, not a deploy. Pinned here because the value it sends is the
+   * LITERAL 'false', not '0': a boolean setting that round-trips through the
+   * wrong literal reads back as unset and displays as ON while behaving as OFF.
+   */
+  it('offers the i18n master switch, ON by default, and switches it off as the literal false', async () => {
+    setTenant(0);
+    grant('settings:manage');
+    // Default 'true' — a shipped feature is never switched off by an upgrade.
+    const registry = [...REGISTRY, { key: 'i18n.enabled', type: 'bool', default: 'true', isFlag: true }];
+    const global = { ...GLOBAL, 'i18n.enabled': 'true' };
+    routeGet(['site_name'], true, registry, global);
+
+    render(<FeatureFlagsSettingsPage />);
+
+    const toggle = await screen.findByTestId('setting-switch-i18n.enabled');
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('Multiple languages')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByRole('button', { name: /save feature flags/i }));
+
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith(
+        '/api/v1/settings/global',
+        expect.objectContaining({ body: { settings: { 'i18n.enabled': 'false' } } })
+      )
+    );
   });
 
   it('shows an empty state and a disabled Save when no keys are flagged', async () => {

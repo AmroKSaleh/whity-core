@@ -8,16 +8,81 @@
  * - GET /api/v1/translations/{language_code}/{domain} — fetch translations
  */
 
-import type { Language, LanguageSettings, TranslationMap } from './types'
+import type {
+  Direction,
+  Language,
+  LanguageCatalogue,
+  LanguageSettings,
+  TranslationMap,
+} from './types'
 
 /**
- * Fetch the list of available languages from the API.
+ * Whether an instance whose payload predates the `i18n.enabled` flag — or one
+ * whose languages endpoint could not be reached — is treated as having i18n on.
+ *
+ * TRUE, matching the setting's own default: the feature shipped before the flag
+ * did, so "the field is missing" means "an older host", not "switched off". A
+ * transient network failure must not silently strip a working deployment's
+ * language switcher; the flag turns i18n off when an OPERATOR says so.
+ */
+const I18N_ENABLED_WHEN_UNSTATED = true
+
+/** Read the flag off a payload, tolerating a host that does not send it. */
+function toI18nEnabled(raw: unknown): boolean {
+  return typeof raw === 'boolean' ? raw : I18N_ENABLED_WHEN_UNSTATED
+}
+
+/**
+ * Coerce a server-supplied language record into the client shape.
+ *
+ * `direction` is read defensively: a payload from a host that predates the
+ * `languages.direction` column reads left-to-right rather than producing an
+ * `undefined` that would reach the `dir` attribute.
+ */
+function toLanguage(raw: unknown): Language | null {
+  if (typeof raw !== 'object' || raw === null) {
+    return null
+  }
+  const record = raw as Record<string, unknown>
+  if (typeof record.code !== 'string' || typeof record.name !== 'string') {
+    return null
+  }
+  const direction: Direction = record.direction === 'rtl' ? 'rtl' : 'ltr'
+  return { code: record.code, name: record.name, direction }
+}
+
+function toLanguages(raw: unknown): Language[] {
+  return Array.isArray(raw) ? raw.map(toLanguage).filter((l): l is Language => l !== null) : []
+}
+
+/**
+ * The outcome of persisting a language preference.
+ *
+ * Deliberately three-valued rather than `string | null`: a SIGNED-OUT caller
+ * (the sign-in screen mounts this provider too) has no profile to write to, and
+ * that is a normal outcome the switcher must keep working through — whereas a
+ * real server failure must still surface. Collapsing the two would make a 500
+ * look like a successful change.
+ */
+export type LanguagePreferenceUpdate =
+  | { status: 'saved'; languageCode: string | null }
+  | { status: 'anonymous' }
+  | { status: 'failed' }
+
+/**
+ * Fetch the language catalogue — and whether this instance offers a CHOICE of
+ * language at all.
  *
  * GET /api/v1/languages (public endpoint, no auth required)
  *
- * @returns Resolved list of available languages, or empty array on error
+ * This is the first call the provider makes, before any session exists, which
+ * is why the `i18n.enabled` flag rides along on it: the sign-in screen has to
+ * know whether to offer a switcher, and it has no other source of instance
+ * settings.
+ *
+ * @returns The available languages and the flag, or an empty catalogue on error
  */
-export async function fetchAvailableLanguages(): Promise<Language[]> {
+export async function fetchLanguageCatalogue(): Promise<LanguageCatalogue> {
   try {
     const response = await fetch('/api/v1/languages', {
       method: 'GET',
@@ -30,14 +95,14 @@ export async function fetchAvailableLanguages(): Promise<Language[]> {
 
     if (!response.ok) {
       console.warn(`Language list unavailable (${response.status}); using the default language`)
-      return []
+      return { languages: [], i18nEnabled: I18N_ENABLED_WHEN_UNSTATED }
     }
 
     const data = await response.json()
-    return data.languages || []
+    return { languages: toLanguages(data.languages), i18nEnabled: toI18nEnabled(data.i18n_enabled) }
   } catch (error) {
     console.warn('Language list unavailable; using the default language', error)
-    return []
+    return { languages: [], i18nEnabled: I18N_ENABLED_WHEN_UNSTATED }
   }
 }
 
@@ -75,7 +140,11 @@ export async function fetchLanguageSettings(): Promise<LanguageSettings | null> 
       return null
     }
 
-    return response.json()
+    const data = await response.json()
+    return {
+      language_code: typeof data.language_code === 'string' ? data.language_code : null,
+      available_languages: toLanguages(data.available_languages),
+    }
   } catch (error) {
     console.warn('Language preference unavailable; using the default language', error)
     return null
@@ -87,10 +156,17 @@ export async function fetchLanguageSettings(): Promise<LanguageSettings | null> 
  *
  * PATCH /api/v1/settings/language (authenticated)
  *
+ * A 401/403 is reported as `anonymous`, not as a failure: the provider mounts
+ * on the public screens too, where there is no profile to write to and the
+ * choice is kept locally instead. EnforceTenantIsolation answers an
+ * unauthenticated caller with 403 (no tenant to resolve), hence both codes.
+ *
  * @param languageCode New language code (e.g., 'ar', 'en') or null to reset to default
- * @returns Updated language code on success, or null on error
+ * @returns The outcome — see {@link LanguagePreferenceUpdate}
  */
-export async function updateLanguagePreference(languageCode: string | null): Promise<string | null> {
+export async function updateLanguagePreference(
+  languageCode: string | null
+): Promise<LanguagePreferenceUpdate> {
   try {
     const response = await fetch('/api/v1/settings/language', {
       method: 'PATCH',
@@ -102,16 +178,23 @@ export async function updateLanguagePreference(languageCode: string | null): Pro
       body: JSON.stringify({ language_code: languageCode }),
     })
 
+    if (response.status === 401 || response.status === 403) {
+      return { status: 'anonymous' }
+    }
+
     if (!response.ok) {
       console.error('Failed to update language preference:', response.status, response.statusText)
-      return null
+      return { status: 'failed' }
     }
 
     const data = await response.json()
-    return data.language_code || null
+    return {
+      status: 'saved',
+      languageCode: typeof data.language_code === 'string' ? data.language_code : null,
+    }
   } catch (error) {
     console.error('Error updating language preference:', error)
-    return null
+    return { status: 'failed' }
   }
 }
 

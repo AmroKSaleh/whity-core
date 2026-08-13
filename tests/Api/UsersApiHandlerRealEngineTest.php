@@ -299,7 +299,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(
             'new@example.com',
-            (string) $this->pdo->query('SELECT email FROM profile_emails WHERE profile_id = 13 AND is_primary = 1')->fetchColumn(),
+            (string) $this->pdo->query('SELECT email FROM profile_emails WHERE profile_id = 13 AND is_primary = true')->fetchColumn(),
             'The new email must be written to the profile primary email.'
         );
     }

@@ -155,6 +155,28 @@ abstract class BaseCommand
         $dataTypeRegistry = new \Whity\Core\DataType\DataTypeRegistry($tableOwnershipRegistry, $hookManager);
         \Whity\register_service(\Whity\Core\DataType\DataTypeRegistry::class, $dataTypeRegistry);
 
+        // Plugin-declared SETTINGS (#713 item 1), registered as services exactly
+        // as public/index.php does. The divergence this guards against is the
+        // quietest one yet: without the catalogue here, a key a plugin declared
+        // would exist over HTTP and simply not exist under the CLI, so a command
+        // reading it would resolve the registry DEFAULT while the web host
+        // resolved the operator's configured value — two different answers to
+        // the same question, neither of which throws.
+        $pluginSettingsRegistry = new \Whity\Core\Settings\PluginSettingsRegistry($hookManager);
+        \Whity\register_service(\Whity\Core\Settings\PluginSettingsRegistry::class, $pluginSettingsRegistry);
+
+        $settingsCatalog = new \Whity\Core\Settings\SettingsCatalog($pluginSettingsRegistry);
+        \Whity\register_service(\Whity\Core\Settings\SettingsCatalog::class, $settingsCatalog);
+
+        \Whity\register_service(
+            \Whity\Core\Settings\SettingsService::class,
+            new \Whity\Core\Settings\SettingsService(
+                new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo()),
+                new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo()),
+                $settingsCatalog
+            )
+        );
+
         $dataTypeLifecycle = new \Whity\Core\DataType\DataTypeLifecycleService(
             $db->getPdo(),
             $dataTypeRegistry,
@@ -162,6 +184,37 @@ abstract class BaseCommand
         );
         \Whity\register_service(\Whity\Core\DataType\DataTypeLifecycleService::class, $dataTypeLifecycle);
         \Whity\register_service(\Whity\Sdk\DataType\DataTypeGuard::class, $dataTypeLifecycle);
+        // Same registration as public/index.php, for the same reason the two
+        // above are mirrored here: a plugin reached through a CLI command must be
+        // able to clear a record's remembered restore state after hard-deleting
+        // it outside core. Registered in one entry point only, "clear the memory"
+        // would work over HTTP and throw under the CLI — the divergence bug class
+        // this file has already paid for in #717 and #724.
+        \Whity\register_service(\Whity\Core\DataType\LifecycleStateMemory::class, $dataTypeLifecycle->stateMemory());
+
+        // The WRITE contract, registered here for the same reason every service
+        // above is: an entry-point divergence is this file's recurring bug class
+        // (#717, #724, #727). Registered over HTTP only, a plugin trashing a
+        // record through \Whity\app(DataTypeLifecycle::class) would work in a
+        // request and throw inside a `whity-cli` command — and the command is
+        // exactly where a bulk sweep (empty-trash, bulk retire) runs.
+        \Whity\register_service(
+            \Whity\Sdk\DataType\DataTypeLifecycle::class,
+            new \Whity\Core\DataType\GatedDataTypeLifecycle(
+                $dataTypeRegistry,
+                $dataTypeLifecycle,
+                $roleChecker
+            )
+        );
+
+        // The host-owned sequence allocator (migration 092), mirrored here for
+        // the same reason as everything above it: a plugin reached through a CLI
+        // command — a queue worker running a numbering job, an import — must be
+        // able to allocate a number. Registered in one entry point only, document
+        // numbering would work over HTTP and throw under `queue:work`.
+        $sequenceCounters = new \Whity\Database\SequenceCounters($db->getPdo());
+        \Whity\register_service(\Whity\Sdk\Sql\SequenceAllocator::class, $sequenceCounters);
+        \Whity\register_service(\Whity\Database\SequenceCounters::class, $sequenceCounters);
 
         $baseDir = dirname(__DIR__, 3);
         // The registries are passed HERE, not just constructed above: this loader
@@ -179,7 +232,8 @@ abstract class BaseCommand
             $resourceTypeRegistry,
             $healthProbeRegistry,
             $tableOwnershipRegistry,
-            $dataTypeRegistry
+            $dataTypeRegistry,
+            $pluginSettingsRegistry
         );
         $pluginLoader->load();
 

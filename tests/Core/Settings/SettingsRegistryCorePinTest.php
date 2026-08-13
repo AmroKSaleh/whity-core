@@ -1,0 +1,391 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Core\Settings;
+
+use PHPUnit\Framework\TestCase;
+use Whity\Core\Settings\PluginSettingsRegistry;
+use Whity\Core\Settings\SettingsCatalog;
+use Whity\Core\Settings\SettingsRegistry;
+
+/**
+ * The regression net for opening the settings registry to plugins (#713 item 1).
+ *
+ * {@see SettingsRegistry} has roughly 330 static call sites across three dozen
+ * files, and almost none of them are in this repo's settings tests — they are in
+ * {@see \Whity\Core\Mail\MailerFactory}, {@see \Whity\Storage\StorageDriverFactory},
+ * the registration handler, the payment wall. A change to the catalogue that
+ * silently dropped or retyped a key would surface as a mail transport that
+ * stopped resolving or a signup flow that opened itself, far from anything
+ * obviously about settings.
+ *
+ * So this file pins the catalogue itself: the exact key set, the exact defaults,
+ * and a sample of validation outcomes chosen for the ones that would hurt. It is
+ * deliberately literal rather than derived — a test that recomputed the
+ * expectation from the same constant would pass no matter what the constant
+ * said.
+ *
+ * A legitimate new core key updates this file. That is the point: the diff makes
+ * the addition visible, rather than letting it merge as an invisible one-line
+ * change to a private const.
+ */
+final class SettingsRegistryCorePinTest extends TestCase
+{
+    /**
+     * The complete core catalogue, in declared order.
+     *
+     * Order matters and is pinned with it: {@see SettingsRegistry::keys()} is
+     * what the settings service iterates and what the admin screen renders.
+     *
+     * @return list<string>
+     */
+    private static function expectedKeys(): array
+    {
+        return [
+            'site_name',
+            'timezone',
+            'locale',
+            'support_email',
+            'branding_logo_wide',
+            'branding_logo_square',
+            'branding_favicon',
+            'mcp.enabled',
+            'auth.self_registration_enabled',
+            'auth.registration_approval_required',
+            'auth.self_password_reset_enabled',
+            'auth.password_reset_approval_required',
+            'auth.self_2fa_recovery_enabled',
+            'auth.sso_enabled',
+            'auth.desktop_login_max_hours',
+            'storage.driver',
+            'storage.s3.endpoint',
+            'storage.s3.region',
+            'storage.s3.bucket',
+            'storage.s3.access_key',
+            'storage.s3.path_style',
+            'storage.s3.public_base_url',
+            'mail.transport',
+            'mail.smtp.host',
+            'mail.smtp.port',
+            'mail.smtp.encryption',
+            'mail.smtp.username',
+            'mail.from_address',
+            'mail.from_name',
+            'mail.events.welcome_enabled',
+            'mail.events.approval_enabled',
+            'mail.events.invitation_enabled',
+            'mail.events.verification_enabled',
+            'mail.events.deletion_enabled',
+            'mail.events.password_reset_enabled',
+            'mail.brand_color',
+            'mail.footer_text',
+            'billing.enforcement_default',
+            'billing.grace_days',
+            'plugins.store_allowed_hosts',
+            'plugins.store_enabled',
+            'documents.render_enabled',
+            'documents.render_max_rows',
+            'documents.render_max_pages',
+            'documents.render_max_template_bytes',
+            'data_types.bulk_max_ids',
+            'error_tracking.enabled',
+            'error_tracking.provider',
+            'error_tracking.environment',
+            'error_tracking.notify_admins',
+            'error_tracking.retention_days',
+            'i18n.enabled',
+        ];
+    }
+
+    public function testTheCoreKeySetIsExactlyWhatItWas(): void
+    {
+        self::assertSame(self::expectedKeys(), SettingsRegistry::keys());
+    }
+
+    /**
+     * Not one core key carries a colon, which is what makes a plugin collision
+     * structurally impossible rather than merely checked: every canonical plugin
+     * key carries exactly one.
+     */
+    public function testNoCoreKeyUsesTheNamespaceSeparator(): void
+    {
+        foreach (SettingsRegistry::keys() as $key) {
+            self::assertStringNotContainsString(
+                PluginSettingsRegistry::NAMESPACE_SEPARATOR,
+                $key,
+                "Core key {$key} now carries the plugin namespace separator; a plugin could shadow it"
+            );
+        }
+    }
+
+    /**
+     * Every core key fits the column its values are stored in, so the length
+     * ceiling plugin keys are held to is the same one core already satisfies.
+     */
+    public function testEveryCoreKeyFitsTheSettingsColumn(): void
+    {
+        foreach (SettingsRegistry::keys() as $key) {
+            self::assertLessThanOrEqual(PluginSettingsRegistry::MAX_KEY_LENGTH, strlen($key), $key);
+        }
+    }
+
+    /**
+     * The defaults, pinned literally. Several of these are SECURITY postures —
+     * signup closed, blocking off, no trusted plugin store, render tier
+     * disabled — and a flipped default would open an instance without anyone
+     * editing a setting.
+     *
+     * @return array<string, string>
+     */
+    private static function expectedDefaults(): array
+    {
+        return [
+            'site_name' => 'Whity',
+            'timezone' => 'UTC',
+            'locale' => 'en',
+            'support_email' => '',
+            'branding_logo_wide' => '',
+            'branding_logo_square' => '',
+            'branding_favicon' => '',
+            'mcp.enabled' => 'false',
+            'auth.self_registration_enabled' => 'false',
+            'auth.registration_approval_required' => 'true',
+            'auth.self_password_reset_enabled' => 'true',
+            'auth.password_reset_approval_required' => 'false',
+            'auth.self_2fa_recovery_enabled' => 'true',
+            'auth.sso_enabled' => 'true',
+            'auth.desktop_login_max_hours' => '72',
+            'storage.driver' => 'local',
+            'storage.s3.endpoint' => '',
+            'storage.s3.region' => '',
+            'storage.s3.bucket' => '',
+            'storage.s3.access_key' => '',
+            'storage.s3.path_style' => 'true',
+            'storage.s3.public_base_url' => '',
+            'mail.transport' => 'none',
+            'mail.smtp.host' => '',
+            'mail.smtp.port' => '587',
+            'mail.smtp.encryption' => 'tls',
+            'mail.smtp.username' => '',
+            'mail.from_address' => '',
+            'mail.from_name' => '',
+            'mail.events.welcome_enabled' => 'true',
+            'mail.events.approval_enabled' => 'true',
+            'mail.events.invitation_enabled' => 'true',
+            'mail.events.verification_enabled' => 'true',
+            'mail.events.deletion_enabled' => 'true',
+            'mail.events.password_reset_enabled' => 'true',
+            'mail.brand_color' => '#2B6CD2',
+            'mail.footer_text' => '',
+            'billing.enforcement_default' => 'warn',
+            'billing.grace_days' => '7',
+            'plugins.store_allowed_hosts' => '',
+            'plugins.store_enabled' => 'true',
+            'documents.render_enabled' => 'false',
+            'documents.render_max_rows' => '500',
+            'documents.render_max_pages' => '2000',
+            'documents.render_max_template_bytes' => '2000000',
+            'data_types.bulk_max_ids' => '500',
+            'error_tracking.enabled' => 'false',
+            'error_tracking.provider' => 'internal',
+            'error_tracking.environment' => '',
+            'error_tracking.notify_admins' => 'true',
+            'error_tracking.retention_days' => '90',
+            // ENABLED, unlike the other opt-in capability flags above: i18n
+            // shipped before its flag did, so defaulting it off would switch a
+            // live feature off on every existing deployment at upgrade time.
+            'i18n.enabled' => 'true',
+        ];
+    }
+
+    public function testEveryCoreDefaultIsExactlyWhatItWas(): void
+    {
+        self::assertSame(self::expectedDefaults(), SettingsRegistry::defaults());
+
+        // …and through the per-key accessor, which is what most call sites use.
+        foreach (self::expectedDefaults() as $key => $expected) {
+            self::assertSame($expected, SettingsRegistry::defaultFor($key), $key);
+        }
+    }
+
+    /**
+     * A sample of validation outcomes, chosen for the keys where a loosened rule
+     * would matter: a TTL that could be extended past the credential ceiling, a
+     * boolean that started accepting `'1'`, an enum that started accepting an
+     * unhandled mode, a port outside the legal range.
+     *
+     * @return list<array{0: string, 1: string, 2: bool}>
+     */
+    public static function validationSamples(): array
+    {
+        return [
+            ['site_name', 'Acme', true],
+            ['site_name', '   ', false],
+            ['site_name', str_repeat('a', 121), false],
+            ['timezone', 'Asia/Riyadh', true],
+            ['timezone', 'Mars/Olympus', false],
+            ['locale', 'en-US', true],
+            ['locale', 'english', false],
+            ['support_email', '', true],
+            ['support_email', 'not-an-email', false],
+            ['mcp.enabled', 'true', true],
+            ['mcp.enabled', '1', false],
+            ['auth.self_registration_enabled', 'false', true],
+            ['auth.self_registration_enabled', 'yes', false],
+            ['auth.desktop_login_max_hours', '2160', true],
+            ['auth.desktop_login_max_hours', '2161', false],
+            ['auth.desktop_login_max_hours', '0', false],
+            ['storage.driver', 's3', true],
+            ['storage.driver', 'ftp', false],
+            ['mail.transport', 'smtp', true],
+            ['mail.transport', 'sendmail', false],
+            ['mail.smtp.port', '587', true],
+            ['mail.smtp.port', '65536', false],
+            ['mail.brand_color', '#2B6CD2', true],
+            ['mail.brand_color', '2B6CD2', false],
+            ['billing.enforcement_default', 'block_all', true],
+            ['billing.enforcement_default', 'block', false],
+            ['billing.grace_days', '0', true],
+            ['billing.grace_days', '3651', false],
+            // These five had no validate() arm at all until #713 item 1 — they
+            // fell through to "Unknown setting key" and the admin Error-tracking
+            // tab could not save a single field.
+            ['error_tracking.provider', 'sentry', true],
+            ['error_tracking.provider', 'rollbar', false],
+            ['error_tracking.enabled', 'true', true],
+            ['error_tracking.enabled', 'on', false],
+            ['error_tracking.notify_admins', 'false', true],
+            ['error_tracking.environment', 'production', true],
+            ['error_tracking.environment', '', true],
+            ['error_tracking.retention_days', '90', true],
+            ['error_tracking.retention_days', '0', false],
+            ['error_tracking.retention_days', '3651', false],
+            ['error_tracking.retention_days', 'forever', false],
+            ['documents.render_max_template_bytes', '1024', true],
+            ['documents.render_max_template_bytes', '1023', false],
+            // The bulk lifecycle batch ceiling. `0` is rejected rather than
+            // clamped: a zero ceiling refuses every batch, which is
+            // indistinguishable from the endpoint being broken.
+            ['data_types.bulk_max_ids', '1', true],
+            ['data_types.bulk_max_ids', '10000', true],
+            ['data_types.bulk_max_ids', '0', false],
+            ['data_types.bulk_max_ids', '10001', false],
+            ['data_types.bulk_max_ids', 'lots', false],
+            // The i18n master switch stores the LITERAL 'true'/'false'. A key
+            // that quietly began accepting '1' would read back as unset and
+            // display as ON while the product behaved as OFF.
+            ['i18n.enabled', 'true', true],
+            ['i18n.enabled', 'false', true],
+            ['i18n.enabled', '1', false],
+            ['i18n.enabled', 'off', false],
+            ['branding_favicon', 'anything', false],
+            ['not_a_setting_at_all', 'x', false],
+        ];
+    }
+
+    /**
+     * @dataProvider validationSamples
+     */
+    public function testCoreValidationOutcomesAreUnchanged(string $key, string $value, bool $valid): void
+    {
+        $reason = SettingsRegistry::validate($key, $value);
+
+        if ($valid) {
+            self::assertNull($reason, "{$key} should accept '{$value}'");
+        } else {
+            self::assertIsString($reason, "{$key} should reject '{$value}'");
+        }
+    }
+
+    /**
+     * The same sample, through the UNION with a plugin loaded. This is the
+     * assertion that actually protects the 330 call sites: whatever a plugin
+     * declares, a core key's answer does not move.
+     *
+     * @dataProvider validationSamples
+     */
+    public function testCoreValidationOutcomesSurviveAPluginContribution(string $key, string $value, bool $valid): void
+    {
+        $plugins = new PluginSettingsRegistry();
+        $plugins->register('Acme', [
+            'site_name' => ['type' => 'string', 'default' => 'hijacked', 'admin' => true],
+            'timezone' => ['type' => 'string', 'default' => 'hijacked', 'admin' => true],
+        ]);
+        $catalog = new SettingsCatalog($plugins);
+
+        $reason = $catalog->validate($key, $value);
+
+        if ($valid) {
+            self::assertNull($reason, "{$key} should still accept '{$value}'");
+        } else {
+            self::assertIsString($reason, "{$key} should still reject '{$value}'");
+        }
+        self::assertSame(SettingsRegistry::validate($key, $value), $reason);
+    }
+
+    public function testNormalisationIsUnchanged(): void
+    {
+        self::assertSame('Acme', SettingsRegistry::normalize('site_name', '  Acme  '));
+        self::assertSame('  x  ', SettingsRegistry::normalize('mail.footer_text', '  x  '));
+        self::assertSame('  x  ', SettingsRegistry::normalize('unknown_key', '  x  '));
+    }
+
+    public function testGlobalOnlyFeatureFlagAndAssetPartitionsAreUnchanged(): void
+    {
+        // Governance keys stay operator-level: a per-tenant override would be
+        // inert and misleading.
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_registration_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('mail.transport'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('documents.render_enabled'));
+        self::assertFalse(SettingsRegistry::isGlobalOnly('site_name'));
+        // The render LIMITS are deliberately tenant-overridable while the master
+        // switch is not.
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.render_max_rows'));
+
+        // Languages are a PLATFORM catalogue with no tenant_id column, and the
+        // sign-in screen resolves one before any tenant is known.
+        self::assertTrue(SettingsRegistry::isGlobalOnly('i18n.enabled'));
+
+        self::assertTrue(SettingsRegistry::isFeatureFlag('mcp.enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.welcome_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('storage.s3.path_style'));
+        // Marked isFlag so it appears on the admin Feature Flags tab, which
+        // filters on that field alone rather than a hardcoded key list.
+        self::assertTrue(SettingsRegistry::isFeatureFlag('i18n.enabled'));
+
+        self::assertSame('asset', SettingsRegistry::kindFor('branding_favicon'));
+        self::assertSame('text', SettingsRegistry::kindFor('site_name'));
+        self::assertSame(['site_name', 'timezone', 'locale', 'support_email'], array_slice(SettingsRegistry::textKeys(), 0, 4));
+        self::assertNotContains('branding_favicon', SettingsRegistry::textKeys());
+    }
+
+    public function testDescriptorShapeIsUnchanged(): void
+    {
+        $byKey = [];
+        foreach (SettingsRegistry::describe() as $entry) {
+            $byKey[$entry['key']] = $entry;
+        }
+
+        self::assertSame(
+            ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
+            $byKey['site_name'] ?? null
+        );
+        self::assertSame(
+            ['key' => 'mail.transport', 'type' => 'enum', 'default' => 'none', 'options' => ['none', 'log', 'smtp']],
+            $byKey['mail.transport'] ?? null
+        );
+        self::assertSame(
+            ['key' => 'mcp.enabled', 'type' => 'bool', 'default' => 'false', 'isFlag' => true],
+            $byKey['mcp.enabled'] ?? null
+        );
+        // The i18n master switch, exactly as the Feature Flags tab receives it:
+        // a bool flag whose published DEFAULT is 'true'. This is the descriptor
+        // an upgrading deployment reads before it has stored any value, so the
+        // literal here is what keeps a shipped feature switched on.
+        self::assertSame(
+            ['key' => 'i18n.enabled', 'type' => 'bool', 'default' => 'true', 'isFlag' => true],
+            $byKey['i18n.enabled'] ?? null
+        );
+    }
+}

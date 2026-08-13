@@ -535,6 +535,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-types/{type}/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Perform one lifecycle action over many records, skipping and reporting refusals rather than aborting the batch */
+        post: operations["post_api_v1_data_types_type_bulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/data-types/{type}/{id}": {
         parameters: {
             query?: never;
@@ -2391,6 +2408,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/translations/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Translation coverage per language and domain (admin) */
+        get: operations["get_api_v1_translations_coverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/translations/{id}": {
         parameters: {
             query?: never;
@@ -2605,6 +2639,7 @@ export interface components {
             };
             lifecycle: components["schemas"]["DataTypeLifecycle"];
             blocks_delete: components["schemas"]["DataTypeReference"][];
+            cascade_delete: components["schemas"]["DataTypeComposition"][];
             actions: ("read" | "trash" | "restore" | "retire" | "delete")[];
             permissions?: {
                 [key: string]: string;
@@ -2614,6 +2649,43 @@ export interface components {
             table: string;
             label: string;
             count: number;
+        };
+        DataTypeBulkCounts: {
+            requested: number;
+            unique: number;
+            ok: number;
+            refused: number;
+        };
+        DataTypeBulkRequest: {
+            /** @enum {string} */
+            action: "trash" | "restore" | "retire" | "delete";
+            /** @description Record keys. Duplicates are collapsed; the ceiling is the `data_types.bulk_max_ids` setting and exceeding it is refused, never truncated. */
+            ids: (string | number)[];
+        };
+        DataTypeBulkResponse: {
+            data: {
+                key: string;
+                /** @enum {string} */
+                action: "trash" | "restore" | "retire" | "delete";
+                counts: components["schemas"]["DataTypeBulkCounts"];
+                results: components["schemas"]["DataTypeBulkResult"][];
+            };
+        };
+        DataTypeBulkResult: {
+            id: string;
+            status: number;
+            /** @enum {string} */
+            outcome: "ok" | "not_found" | "blocked" | "refused" | "unsupported" | "forbidden";
+            state: string | null;
+            reason: string | null;
+            message: string;
+            blockers: components["schemas"]["DataTypeBlocker"][];
+            required?: string;
+        };
+        DataTypeComposition: {
+            table: string;
+            column: string;
+            label: string;
         };
         DataTypeLifecycle: {
             declared: boolean;
@@ -2637,6 +2709,7 @@ export interface components {
                 restorable: boolean;
                 deletable: boolean;
                 blockers: components["schemas"]["DataTypeBlocker"][];
+                cascade: components["schemas"]["DataTypeBlocker"][];
                 refusals: components["schemas"]["DataTypeRefusals"];
             };
         };
@@ -2650,7 +2723,7 @@ export interface components {
         };
         DataTypeRefusal: {
             /** @enum {string} */
-            reason: "still_referenced" | "trash_before_deleting" | "retired_records_are_permanent" | "retired_records_cannot_be_trashed" | "retirement_is_permanent" | "restore_before_retiring" | "nothing_to_restore" | "trash_not_offered" | "restore_not_offered" | "retire_not_offered" | "delete_not_offered";
+            reason: "still_referenced" | "composition_still_referenced" | "composition_is_permanent" | "cascade_would_nest" | "trash_before_deleting" | "retired_records_are_permanent" | "retired_records_cannot_be_trashed" | "retirement_is_permanent" | "restore_before_retiring" | "nothing_to_restore" | "trash_not_offered" | "restore_not_offered" | "retire_not_offered" | "delete_not_offered";
             message: string;
         };
         DataTypeRefusals: {
@@ -3040,6 +3113,8 @@ export interface components {
             id: number;
             code: string;
             name: string;
+            /** @enum {string} */
+            direction: "ltr" | "rtl";
             enabled: boolean;
             created_at: string;
             updated_at: string;
@@ -3047,6 +3122,8 @@ export interface components {
         LanguageCreateRequest: {
             code: string;
             name: string;
+            /** @enum {string} */
+            direction?: "ltr" | "rtl";
             enabled?: boolean;
         };
         LanguageDataResponse: {
@@ -3057,6 +3134,8 @@ export interface components {
         };
         LanguageUpdateRequest: {
             name?: string;
+            /** @enum {string} */
+            direction?: "ltr" | "rtl";
             enabled?: boolean;
         };
         Login2faRequiredResponse: {
@@ -3884,10 +3963,18 @@ export interface components {
             key: string;
             system_default: components["schemas"]["TranslationRowRef"] | null;
             tenant_override: components["schemas"]["TranslationRowRef"] | null;
+            source_text: string | null;
+            translated: boolean;
         };
         TranslationBundleResponse: {
             translations: {
                 [key: string]: string;
+            };
+        };
+        TranslationCoverageResponse: {
+            data: {
+                source_language_code: string;
+                languages: components["schemas"]["TranslationLanguageCoverage"][];
             };
         };
         TranslationCreateRequest: {
@@ -3898,6 +3985,20 @@ export interface components {
         };
         TranslationDataResponse: {
             data: components["schemas"]["Translation"];
+        };
+        TranslationDomainCoverage: {
+            domain: string;
+            total: number;
+            translated: number;
+            missing: number;
+        };
+        TranslationLanguageCoverage: {
+            language_code: string;
+            name: string;
+            total: number;
+            translated: number;
+            missing: number;
+            domains: components["schemas"]["TranslationDomainCoverage"][];
         };
         TranslationRowRef: {
             id: number;
@@ -6418,6 +6519,96 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_data_types_type_bulk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The namespaced data-type key, e.g. `democatalog:item` */
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataTypeBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-record outcomes. The batch ran; individual records may have refused, including all of them */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataTypeBulkResponse"];
+                };
+            };
+            /** @description Unknown `action`, or `ids` is not a non-empty array of record ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unknown data type, or no such record in the caller's tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This data type does not offer that action */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description More ids than the `data_types.bulk_max_ids` ceiling allows for this tenant */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10216,7 +10407,10 @@ export interface operations {
                         languages: {
                             code: string;
                             name: string;
+                            /** @enum {string} */
+                            direction: "ltr" | "rtl";
                         }[];
+                        i18n_enabled: boolean;
                     };
                 };
             };
@@ -16085,7 +16279,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The user's language preference and available languages */
+            /** @description The user's EFFECTIVE language preference (null while i18n is disabled, whatever the profile stores) and the available languages */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16096,7 +16290,10 @@ export interface operations {
                         available_languages: {
                             code: string;
                             name: string;
+                            /** @enum {string} */
+                            direction: "ltr" | "rtl";
                         }[];
+                        i18n_enabled: boolean;
                     };
                 };
             };
@@ -16229,6 +16426,15 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Language selection is disabled on this instance (i18n.enabled is off) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -18383,6 +18589,8 @@ export interface operations {
                 language_code?: string;
                 /** @description The translation domain (required) */
                 domain?: string;
+                /** @description Set to 1 to list only keys this language has no text for */
+                untranslated?: string;
             };
             header?: never;
             path?: never;
@@ -18533,6 +18741,71 @@ export interface operations {
             };
             /** @description Validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_translations_coverage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-language, per-domain coverage counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationCoverageResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
