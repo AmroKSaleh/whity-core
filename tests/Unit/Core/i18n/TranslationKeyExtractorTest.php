@@ -523,6 +523,174 @@ final class TranslationKeyExtractorTest extends TestCase
     }
 
     /**
+     * A sentence that renders content inside itself is still ONE catalogue key.
+     * `useRichTranslation` exists precisely so it does not have to be split into
+     * fragments, and it is only worth having if the extractor sees it — an
+     * unscanned rich call would leave the sentence out of the catalogue and out
+     * of the drift guard, which is the invisibility the whole pipeline exists to
+     * prevent.
+     */
+    public function testRichTranslationCallIsCataloguedLikeAPlainOne(): void
+    {
+        $source = <<<'TSX'
+        const rt = useRichTranslation('auth');
+
+        export function Pending({ email }: { email: string }) {
+          return rt(
+            'register.pending.body',
+            'We sent a link to <0>{email}</0>. Open it to confirm.',
+            { email },
+            [<span className="font-medium" />]
+          );
+        }
+        TSX;
+
+        $scan = $this->scan($source);
+
+        self::assertSame([], $scan['problems']);
+        self::assertSame(
+            [[
+                'domain' => 'auth',
+                'key' => 'register.pending.body',
+                'text' => 'We sent a link to <0>{email}</0>. Open it to confirm.',
+                'file' => self::FILE,
+                'line' => 4,
+            ]],
+            $scan['entries']
+        );
+    }
+
+    /**
+     * The rich hook inherits every rule the plain one has — it is the same call
+     * shape on the same code path, and this pins that it was not given a laxer
+     * one by accident.
+     */
+    public function testRichTranslationWithNoEnglishTextIsReported(): void
+    {
+        $source = <<<'TSX'
+        const rt = useRichTranslation('auth');
+
+        export function Pending() {
+          return rt('register.pending.body');
+        }
+        TSX;
+
+        $scan = $this->scan($source);
+
+        self::assertSame(['missing-source-text'], self::codes($scan['problems']));
+        self::assertSame([], $scan['entries']);
+    }
+
+    /** Both hooks in one file, each binding writing into its own domain. */
+    public function testPlainAndRichBindingsCoexistInOneFile(): void
+    {
+        $source = <<<'TSX'
+        const t = useTranslation('auth');
+        const rt = useRichTranslation('common');
+
+        export function Screen() {
+          return [t('login.submit', 'Sign in'), rt('legal.terms', 'See <0>terms</0>.')];
+        }
+        TSX;
+
+        $scan = $this->scan($source);
+
+        self::assertSame([], $scan['problems']);
+        self::assertSame(
+            [
+                ['auth', 'login.submit'],
+                ['common', 'legal.terms'],
+            ],
+            array_map(
+                static fn (array $entry): array => [$entry['domain'], $entry['key']],
+                $scan['entries']
+            )
+        );
+    }
+
+    /**
+     * A whole-paragraph source string does not fit on one line and gets split
+     * with `+`. That is still one compile-time constant and must reach the
+     * catalogue whole — refusing it would report `missing-source-text` for a
+     * string plainly visible in the source, and the only way to satisfy the
+     * scanner would be a 200-column line.
+     */
+    public function testAdjacentStringLiteralsAreFoldedIntoOneSourceString(): void
+    {
+        $source = <<<'TSX'
+        const t = useTranslation('auth');
+
+        export function Notice() {
+          return t(
+            'register.pending.body',
+            'We sent a link to <0>{email}</0>. ' +
+              'Open it to confirm, then sign in.'
+          );
+        }
+        TSX;
+
+        $scan = $this->scan($source);
+
+        self::assertSame([], $scan['problems']);
+        self::assertSame(
+            'We sent a link to <0>{email}</0>. Open it to confirm, then sign in.',
+            $scan['entries'][0]['text']
+        );
+    }
+
+    /**
+     * Folding must not become a way to smuggle a computed value into the
+     * catalogue: one non-literal operand makes the whole expression unreadable,
+     * and reporting it is what puts the problem in front of the author instead
+     * of seeding half a sentence a translator would have to guess at.
+     */
+    public function testConcatenationWithAComputedOperandIsStillRefused(): void
+    {
+        $source = <<<'TSX'
+        const t = useTranslation('auth');
+
+        export function Notice({ name }: { name: string }) {
+          return t('greeting.hello', 'Hello ' + name + ', welcome back.');
+        }
+        TSX;
+
+        $scan = $this->scan($source);
+
+        self::assertSame(['missing-source-text'], self::codes($scan['problems']));
+        self::assertSame([], $scan['entries']);
+    }
+
+    /** A computed KEY assembled by concatenation stays unreadable too. */
+    public function testConcatenatedKeyWithAComputedOperandIsStillDynamic(): void
+    {
+        $source = <<<'TSX'
+        const t = useTranslation('auth');
+
+        export function Row({ state }: { state: string }) {
+          return t('status.' + state, 'Unknown');
+        }
+        TSX;
+
+        $scan = $this->scan($source);
+
+        self::assertSame(['undeclared-dynamic-key'], self::codes($scan['problems']));
+        self::assertSame([], $scan['entries']);
+    }
+
+    /** A computed domain is reported against the hook the author actually wrote. */
+    public function testComputedDomainOnTheRichHookNamesThatHook(): void
+    {
+        $source = <<<'TSX'
+        const rt = useRichTranslation(domainFromProps);
+        TSX;
+
+        $scan = $this->scan($source);
+
+        self::assertSame(['dynamic-domain'], self::codes($scan['problems']));
+        self::assertStringContainsString('useRichTranslation()', $scan['problems'][0]['message']);
+    }
+
+    /**
      * Regression: the domain shape is decided in exactly one place
      * ({@see \Whity\Core\i18n\TranslationDomain}); the extractor must ask there
      * rather than catalogue a domain no read path could ever fetch back.
