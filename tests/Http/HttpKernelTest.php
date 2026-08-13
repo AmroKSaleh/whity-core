@@ -511,6 +511,43 @@ class HttpKernelTest extends TestCase
     }
 
     /**
+     * The public translation BUNDLE is reachable without a session — a visitor
+     * has to be able to read the sign-in screen in their own language before
+     * they have one. But it is public as a SHAPE, not as a prefix.
+     *
+     * It was a prefix (`/api/v1/translations/`), which quietly made every route
+     * beneath it public too — and the first admin route added under it,
+     * `/translations/coverage`, inherited that without anyone choosing it. It
+     * failed closed rather than open (the handler needs a tenant context the
+     * skipped middleware never set), which is exactly why it would have been
+     * easy to "fix" by loosening something else. This pins both halves.
+     */
+    public function testTranslationBundleIsPublicButNothingElseUnderItIs(): void
+    {
+        $jwtParser = $this->createMock(JwtParser::class);
+        $jwtParser->method('parse')->willReturn(null);
+        $tenantMiddleware = new EnforceTenantIsolation($jwtParser);
+
+        $reached = [];
+        $handler = static function (Request $req) use (&$reached): Response {
+            $reached[] = $req->getPath();
+            return Response::json(['data' => ['ok' => true]], 200);
+        };
+        $this->router->register('GET', '/api/v1/translations/{language_code}/{domain}', $handler);
+        $this->router->register('GET', '/api/v1/translations/coverage', $handler);
+
+        $kernel = new HttpKernel($this->router, $this->rbacMiddleware);
+        $kernel->use($tenantMiddleware);
+
+        $bundle = $kernel->handle(new Request('GET', '/api/v1/translations/ar/auth'));
+        $coverage = $kernel->handle(new Request('GET', '/api/v1/translations/coverage'));
+
+        $this->assertSame(200, $bundle->getStatusCode(), 'the pre-login bundle must stay reachable anonymously');
+        $this->assertSame(['/api/v1/translations/ar/auth'], $reached);
+        $this->assertSame(401, $coverage->getStatusCode(), 'an admin route under the same path must NOT inherit public access');
+    }
+
+    /**
      * Test memory limit is not exceeded when limit is set high
      */
     public function testMemoryLimitNotExceeded(): void

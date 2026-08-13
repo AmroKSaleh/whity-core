@@ -17645,6 +17645,15 @@
                         "schema": {
                             "type": "string"
                         }
+                    },
+                    {
+                        "name": "untranslated",
+                        "in": "query",
+                        "required": false,
+                        "description": "Set to 1 to list only keys this language has no text for",
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {
@@ -17814,6 +17823,82 @@
                     },
                     "422": {
                         "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/translations/coverage": {
+            "get": {
+                "operationId": "get_api_v1_translations_coverage",
+                "summary": "Translation coverage per language and domain (admin)",
+                "tags": [
+                    "languages"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Per-language, per-domain coverage counts",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TranslationCoverageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -24225,12 +24310,21 @@
                                 "$ref": "#/components/schemas/TranslationRowRef"
                             }
                         ]
+                    },
+                    "source_text": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "translated": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
                     "key",
                     "system_default",
-                    "tenant_override"
+                    "tenant_override",
+                    "source_text",
+                    "translated"
                 ]
             },
             "TranslationBundleResponse": {
@@ -24245,6 +24339,32 @@
                 },
                 "required": [
                     "translations"
+                ]
+            },
+            "TranslationCoverageResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "source_language_code": {
+                                "type": "string"
+                            },
+                            "languages": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/TranslationLanguageCoverage"
+                                }
+                            }
+                        },
+                        "required": [
+                            "source_language_code",
+                            "languages"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "TranslationCreateRequest": {
@@ -24279,6 +24399,63 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "TranslationDomainCoverage": {
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "translated": {
+                        "type": "integer"
+                    },
+                    "missing": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "domain",
+                    "total",
+                    "translated",
+                    "missing"
+                ]
+            },
+            "TranslationLanguageCoverage": {
+                "type": "object",
+                "properties": {
+                    "language_code": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "translated": {
+                        "type": "integer"
+                    },
+                    "missing": {
+                        "type": "integer"
+                    },
+                    "domains": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TranslationDomainCoverage"
+                        }
+                    }
+                },
+                "required": [
+                    "language_code",
+                    "name",
+                    "total",
+                    "translated",
+                    "missing",
+                    "domains"
                 ]
             },
             "TranslationRowRef": {

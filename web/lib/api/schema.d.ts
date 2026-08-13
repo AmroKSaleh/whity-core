@@ -2408,6 +2408,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/translations/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Translation coverage per language and domain (admin) */
+        get: operations["get_api_v1_translations_coverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/translations/{id}": {
         parameters: {
             query?: never;
@@ -3946,10 +3963,18 @@ export interface components {
             key: string;
             system_default: components["schemas"]["TranslationRowRef"] | null;
             tenant_override: components["schemas"]["TranslationRowRef"] | null;
+            source_text: string | null;
+            translated: boolean;
         };
         TranslationBundleResponse: {
             translations: {
                 [key: string]: string;
+            };
+        };
+        TranslationCoverageResponse: {
+            data: {
+                source_language_code: string;
+                languages: components["schemas"]["TranslationLanguageCoverage"][];
             };
         };
         TranslationCreateRequest: {
@@ -3960,6 +3985,20 @@ export interface components {
         };
         TranslationDataResponse: {
             data: components["schemas"]["Translation"];
+        };
+        TranslationDomainCoverage: {
+            domain: string;
+            total: number;
+            translated: number;
+            missing: number;
+        };
+        TranslationLanguageCoverage: {
+            language_code: string;
+            name: string;
+            total: number;
+            translated: number;
+            missing: number;
+            domains: components["schemas"]["TranslationDomainCoverage"][];
         };
         TranslationRowRef: {
             id: number;
@@ -18539,6 +18578,8 @@ export interface operations {
                 language_code?: string;
                 /** @description The translation domain (required) */
                 domain?: string;
+                /** @description Set to 1 to list only keys this language has no text for */
+                untranslated?: string;
             };
             header?: never;
             path?: never;
@@ -18689,6 +18730,71 @@ export interface operations {
             };
             /** @description Validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_translations_coverage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-language, per-domain coverage counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranslationCoverageResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };

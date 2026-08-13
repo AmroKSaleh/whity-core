@@ -474,13 +474,29 @@ direction automatically.
 
 ## Contributing
 
-When converting a screen (see `web/app/login/page.tsx` — the reference conversion):
+Reference conversions: `web/app/login/page.tsx` (the first) and
+`web/app/(protected)/admin/translations/*` (done end to end through the
+tooling). The full playbook is `docs/wiki/Internationalization.md`.
 
 1. Pick the domain by the rule above; keys name the screen, not the words
 2. Pass the English source string as the `t()` fallback at every call site, so
-   the screen reads normally in a diff and renders before the bundle arrives
+   the screen reads normally in a diff and renders before the bundle arrives.
+   **That fallback IS the English catalogue** — it is extracted from the source,
+   so there is no parallel file to keep in sync, and a missing one fails CI
 3. Keep sentences whole with `{placeholders}` — never concatenate fragments,
    whose order differs between languages
-4. Seed every key in EVERY enabled language via a migration (see
-   `database/migrations/091_seed_auth_translations.php`)
-5. Test with multiple languages before shipping
+4. Declare any key a scanner cannot read (`t(entry.key)`) with an `@i18n-keys
+   <domain>` block, or record why it cannot be enumerated with
+   `// @i18n-dynamic-ignore: <reason>`. A reason is mandatory
+5. Regenerate and seed:
+   ```bash
+   php bin/whity-cli i18n:extract   # source → database/i18n/<domain>.json (commit it)
+   php bin/whity-cli i18n:sync      # → the translations table, English only
+   ```
+   Do NOT write other languages by hand and do not machine-translate: a row
+   containing English but labelled Arabic is indistinguishable from a finished
+   translation. Missing rows are how `/admin/translations` reports the gap.
+   (Migration 091 seeded `ar` for the sign-in screen when the whole scope was
+   one screen; that route is closed — a numbered migration per converted area
+   collides on the next number the moment two people convert two areas.)
+6. Test with multiple languages before shipping

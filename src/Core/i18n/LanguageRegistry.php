@@ -30,6 +30,22 @@ final class LanguageRegistry implements HostWiredService
     private const SYSTEM_TENANT_ID = 0;
 
     /**
+     * The language every other one falls back to, and the only one derivable
+     * from source.
+     *
+     * Not a preference — a consequence of how a screen is written. The second
+     * argument of `t('login.submit', 'Sign in')` IS the English text, so English
+     * is the language the catalogue can be extracted from
+     * ({@see TranslationKeyExtractor}) and the language
+     * `whity-cli i18n:sync` seeds. Every other language is human work.
+     *
+     * Named here rather than spelled 'en' in five places, so the coverage
+     * report, the seeding command and this fallback chain can never disagree
+     * about which language is the source.
+     */
+    public const SOURCE_LANGUAGE = 'en';
+
+    /**
      * In-memory translation cache, keyed by language code, domain, and key.
      * Structure: [language_code][domain][key] = translation_string
      *
@@ -60,7 +76,7 @@ final class LanguageRegistry implements HostWiredService
     /**
      * The current language code for this request.
      */
-    private string $currentLanguageCode = 'en';
+    private string $currentLanguageCode = self::SOURCE_LANGUAGE;
 
     public function __construct(
         private readonly LanguageRepositoryInterface $languageRepository,
@@ -168,15 +184,16 @@ final class LanguageRegistry implements HostWiredService
             $this->boot();
         }
 
-        // If language is not in cache, fall back to English.
+        // If language is not in cache, fall back to the source language.
         if (!isset($this->translations[$languageCode])) {
-            $languageCode = 'en';
+            $languageCode = self::SOURCE_LANGUAGE;
         }
 
-        // If domain is not in cache, fall back to English if not already.
+        // If domain is not in cache, fall back to the source language if not already.
         if (!isset($this->translations[$languageCode][$domain])) {
-            if ($languageCode !== 'en' && isset($this->translations['en'][$domain])) {
-                $languageCode = 'en';
+            if ($languageCode !== self::SOURCE_LANGUAGE
+                && isset($this->translations[self::SOURCE_LANGUAGE][$domain])) {
+                $languageCode = self::SOURCE_LANGUAGE;
             } else {
                 return $key;
             }

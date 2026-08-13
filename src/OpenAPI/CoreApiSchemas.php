@@ -1590,12 +1590,23 @@ final class CoreApiSchemas
                     ],
                 ],
             ],
+            self::permissionRoute('GET', '/api/translations/coverage', 'translations:manage', [
+                'summary' => 'Translation coverage per language and domain (admin)',
+                'description' => 'What still needs translating. Missing keys have no rows, so a plain '
+                    . 'listing can only ever show work already done; this reports the gap between each '
+                    . 'language and the source language, per domain.',
+                'tags' => ['languages'],
+                'responses' => [
+                    200 => self::jsonResponse('Per-language, per-domain coverage counts', 'TranslationCoverageResponse'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/translations', 'translations:manage', [
                 'summary' => 'List raw translation rows for a language + domain (admin)',
                 'tags' => ['languages'],
                 'parameters' => [
                     self::queryParam('language_code', 'string', 'The language code (required)'),
                     self::queryParam('domain', 'string', 'The translation domain (required)'),
+                    self::queryParam('untranslated', 'string', 'Set to 1 to list only keys this language has no text for'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('System-default and tenant-override rows, per key', 'TranslationAdminListResponse'),
@@ -2329,12 +2340,37 @@ final class CoreApiSchemas
                 'id' => self::int(),
                 'translation' => self::str(),
             ], ['id', 'translation']),
+            // `source_text` is the English this key is translated FROM, and is
+            // why a key with no row in the requested language still appears:
+            // listing only what exists would show a translator an empty table
+            // and call the language finished.
             'TranslationAdminRow' => self::object([
                 'key' => self::str(),
                 'system_default' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('TranslationRowRef')]],
                 'tenant_override' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('TranslationRowRef')]],
-            ], ['key', 'system_default', 'tenant_override']),
+                'source_text' => self::str(true),
+                'translated' => self::bool(),
+            ], ['key', 'system_default', 'tenant_override', 'source_text', 'translated']),
             'TranslationAdminListResponse' => self::listEnvelope('TranslationAdminRow'),
+            // GET /api/v1/translations/coverage: the gap, per language and domain.
+            'TranslationDomainCoverage' => self::object([
+                'domain' => self::str(),
+                'total' => self::int(),
+                'translated' => self::int(),
+                'missing' => self::int(),
+            ], ['domain', 'total', 'translated', 'missing']),
+            'TranslationLanguageCoverage' => self::object([
+                'language_code' => self::str(),
+                'name' => self::str(),
+                'total' => self::int(),
+                'translated' => self::int(),
+                'missing' => self::int(),
+                'domains' => ['type' => 'array', 'items' => SchemaBuilder::ref('TranslationDomainCoverage')],
+            ], ['language_code', 'name', 'total', 'translated', 'missing', 'domains']),
+            'TranslationCoverageResponse' => self::dataEnvelope(self::object([
+                'source_language_code' => self::str(),
+                'languages' => ['type' => 'array', 'items' => SchemaBuilder::ref('TranslationLanguageCoverage')],
+            ], ['source_language_code', 'languages'])),
             // GET /api/v1/translations/{language_code}/{domain} (public bundle):
             // an open-ended key => translated-string map (the resolved fallback
             // chain), not a fixed shape.
