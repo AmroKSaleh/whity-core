@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateTenantModal } from './create-modal';
 import { EditTenantModal } from './edit-modal';
 import { DeleteTenantModal } from './delete-modal';
@@ -32,6 +33,7 @@ export default function TenantsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
+  const t = useTranslation('admin');
   const canCreate = hasPermission(TENANTS_WRITE);
   const canEdit = hasPermission(TENANTS_WRITE);
   const canDelete = hasPermission(TENANTS_DELETE);
@@ -50,7 +52,7 @@ export default function TenantsPage() {
   const { data, loading: isLoading, error, refetch: fetchTenants } = useFetch(async () => {
     const response = await apiClient('/api/v1/tenants?per_page=100');
     if (!response.ok) {
-      throw new Error('Failed to fetch tenants');
+      throw new Error(t('tenants.error.load', 'Failed to fetch tenants'));
     }
     const data = await response.json();
     return (data.data ?? []) as Tenant[];
@@ -75,10 +77,20 @@ export default function TenantsPage() {
   };
 
   const columns: DataTableColumn<Tenant>[] = [
-    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'slug', header: 'Slug', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'userCount', header: 'User Count', enableSorting: true },
-    { accessorKey: 'createdAt', header: 'Created At', enableSorting: true },
+    {
+      accessorKey: 'name',
+      header: t('tenants.table.name', 'Name'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    {
+      accessorKey: 'slug',
+      header: t('tenants.table.slug', 'Slug'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    { accessorKey: 'userCount', header: t('tenants.table.userCount', 'User Count'), enableSorting: true },
+    { accessorKey: 'createdAt', header: t('tenants.table.createdAt', 'Created At'), enableSorting: true },
   ];
 
   const rowActions = (tenant: Tenant) => {
@@ -93,7 +105,7 @@ export default function TenantsPage() {
         <DropdownMenuContent align="end">
           {canEdit && (
             <DropdownMenuItem onClick={() => handleEditClick(tenant)}>
-              Edit
+              {t('tenants.actions.edit', 'Edit')}
             </DropdownMenuItem>
           )}
           {canDelete && (
@@ -101,7 +113,7 @@ export default function TenantsPage() {
               onClick={() => handleDeleteClick(tenant)}
               className="text-destructive focus:text-destructive"
             >
-              Delete
+              {t('tenants.actions.delete', 'Delete')}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -112,8 +124,8 @@ export default function TenantsPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Tenants"
-        description="Manage tenants in your system"
+        title={t('tenants.title', 'Tenants')}
+        description={t('tenants.description', 'Manage tenants in your system')}
         action={
           canCreate ? (
             <Button
@@ -121,7 +133,7 @@ export default function TenantsPage() {
               className="gap-2"
             >
               <IconPlus size={18} />
-              Create Tenant
+              {t('tenants.createButton', 'Create Tenant')}
             </Button>
           ) : undefined
         }
@@ -134,7 +146,7 @@ export default function TenantsPage() {
         rowActions={rowActions}
         isLoading={isLoading}
         enableGlobalFilter
-        globalFilterPlaceholder="Search tenants…"
+        globalFilterPlaceholder={t('tenants.searchPlaceholder', 'Search tenants…')}
         pagination={{ pageSize: 10 }}
       />
 
