@@ -16,6 +16,7 @@ import { Badge } from '@amroksaleh/ui/badge';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconAlertTriangle, IconBug, IconDeviceFloppy, IconInbox } from '@tabler/icons-react';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -76,6 +77,7 @@ export default function ErrorTrackingSettingsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: capsLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canManage = hasPermission(SETTINGS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -91,15 +93,14 @@ export default function ErrorTrackingSettingsPage() {
   if (!isSystemTenant || !canManage) {
     return (
       <AccessDenied
-        description={
-          <>
-            Error tracking is an instance-wide setting managed by the system tenant with
-            the <code>settings:manage</code> permission.
-          </>
-        }
+        description={t(
+          'settings.errorTracking.accessDenied',
+          'Error tracking is an instance-wide setting managed by the system tenant with the {permission} permission.',
+          { permission: SETTINGS_MANAGE }
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.errorTracking.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -114,10 +115,14 @@ function ErrorTrackingSettingsForm({
 }: {
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
+  const t = useTranslation('admin');
+
   const { data, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load settings'));
+      throw new Error(
+        errorMessage(getError, t('settings.errorTracking.loadFailed', 'Failed to load settings'))
+      );
     }
     return body.data;
   }, []);
@@ -164,6 +169,10 @@ function ErrorTrackingSettingsForm({
   const provider = valueOf(ET_KEYS.provider);
   const dirty = Object.keys(draft).length > 0;
   const hasDsn = status?.has_dsn ?? false;
+  const [internalNoteBeforeLink, internalNoteAfterLink] = t(
+    'settings.errorTracking.note.internal',
+    'Errors are grouped by fingerprint and stored on this instance — no third party involved. Review them in the {link}.'
+  ).split('{link}');
 
   // Sentry can't send anywhere without a DSN — surface that before the operator
   // saves a config that silently drops every event.
@@ -197,14 +206,21 @@ function ErrorTrackingSettingsForm({
       const { error: patchError } = await api.PATCH('/api/v1/settings/global', { body: { settings } });
       if (patchError) {
         setFieldErrors(fieldErrorsFrom(patchError));
-        throw new Error(errorMessage(patchError, 'Failed to save error-tracking settings'));
+        throw new Error(
+          errorMessage(
+            patchError,
+            t('settings.errorTracking.save.failed', 'Failed to save error-tracking settings')
+          )
+        );
       }
-      addToast('Error-tracking settings saved.', 'success');
+      addToast(t('settings.errorTracking.save.success', 'Error-tracking settings saved.'), 'success');
       setDraft({});
       refetch();
     } catch (err) {
       addToast(
-        err instanceof Error ? err.message : 'Failed to save error-tracking settings',
+        err instanceof Error
+          ? err.message
+          : t('settings.errorTracking.save.failed', 'Failed to save error-tracking settings'),
         'error'
       );
     } finally {
@@ -222,10 +238,18 @@ function ErrorTrackingSettingsForm({
         body: JSON.stringify({ dsn: dsnInput.trim() === '' ? null : dsnInput.trim() }),
       });
       if (!res.ok && res.status !== 204) {
-        addToast(await readError(res, 'Could not save the DSN'), 'error');
+        addToast(
+          await readError(res, t('settings.errorTracking.dsn.saveFailed', 'Could not save the DSN'), t),
+          'error'
+        );
         return;
       }
-      addToast(dsnInput.trim() === '' ? 'DSN cleared.' : 'DSN saved.', 'success');
+      addToast(
+        dsnInput.trim() === ''
+          ? t('settings.errorTracking.dsn.cleared', 'DSN cleared.')
+          : t('settings.errorTracking.dsn.saved', 'DSN saved.'),
+        'success'
+      );
       setDsnInput('');
       refetchStatus();
     } finally {
@@ -236,8 +260,11 @@ function ErrorTrackingSettingsForm({
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Error tracking"
-        description="Where this instance's unhandled errors go. Managed by the system tenant."
+        title={t('settings.errorTracking.title', 'Error tracking')}
+        description={t(
+          'settings.errorTracking.description',
+          "Where this instance's unhandled errors go. Managed by the system tenant."
+        )}
       />
       <SettingsTabs active="error-tracking" />
 
@@ -250,10 +277,13 @@ function ErrorTrackingSettingsForm({
             </span>
             <div>
               <CardTitle className="text-lg font-bold font-heading">
-                <h2>Collection</h2>
+                <h2>{t('settings.errorTracking.collection.title', 'Collection')}</h2>
               </CardTitle>
               <CardDescription className="text-sm">
-                Whether errors are recorded, and where they are sent.
+                {t(
+                  'settings.errorTracking.collection.description',
+                  'Whether errors are recorded, and where they are sent.'
+                )}
               </CardDescription>
             </div>
           </div>
@@ -265,27 +295,31 @@ function ErrorTrackingSettingsForm({
           {enabled && provider === 'internal' && (
             <Alert variant="info" data-testid="error-tracking-provider-note">
               <AlertDescription className="flex flex-wrap items-center gap-1">
-                Errors are grouped by fingerprint and stored on this instance — no third
-                party involved. Review them in the
+                {/* ONE translatable sentence with a {link} hole, split at render
+                    time: a translator sees the whole sentence and can put the
+                    link wherever the target language needs it. */}
+                {internalNoteBeforeLink}
                 <Link href="/admin/errors" className="font-medium underline underline-offset-2">
-                  error inbox
+                  {t('settings.errorTracking.note.internalLink', 'error inbox')}
                 </Link>
-                .
+                {internalNoteAfterLink}
               </AlertDescription>
             </Alert>
           )}
           {enabled && provider === 'sentry' && (
             <Alert variant="info" data-testid="error-tracking-provider-note">
               <AlertDescription>
-                Events are sent over the Sentry protocol — hosted Sentry, or a self-hosted
-                GlitchTip/Bugsink. Set the DSN below.
+                {t(
+                  'settings.errorTracking.note.sentry',
+                  'Events are sent over the Sentry protocol — hosted Sentry, or a self-hosted GlitchTip/Bugsink. Set the DSN below.'
+                )}
               </AlertDescription>
             </Alert>
           )}
           {!enabled && (
             <Alert variant="info" data-testid="error-tracking-provider-note">
               <AlertDescription>
-                Error tracking is off — nothing is recorded or sent.
+                {t('settings.errorTracking.note.off', 'Error tracking is off — nothing is recorded or sent.')}
               </AlertDescription>
             </Alert>
           )}
@@ -297,32 +331,43 @@ function ErrorTrackingSettingsForm({
         <Card className="border border-border bg-card shadow-sm" data-testid="error-tracking-dsn-card">
           <CardHeader>
             <CardTitle className="text-lg font-bold font-heading">
-              <h2>Sentry DSN</h2>
+              <h2>{t('settings.errorTracking.dsn.title', 'Sentry DSN')}</h2>
             </CardTitle>
             <CardDescription className="text-sm">
-              The endpoint events are sent to. Treated as a credential.
+              {t(
+                'settings.errorTracking.dsn.description',
+                'The endpoint events are sent to. Treated as a credential.'
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-1.5" data-testid="error-tracking-dsn-field">
               <div className="flex items-center justify-between gap-2">
                 <label htmlFor="error-tracking-dsn" className="text-sm font-medium text-foreground">
-                  DSN
+                  {t('settings.errorTracking.dsn.label', 'DSN')}
                 </label>
                 <Badge
                   data-testid="error-tracking-dsn-status"
                   variant={hasDsn ? 'secondary' : 'outline'}
                   className="text-[10px]"
                 >
-                  {hasDsn ? 'DSN is set' : 'Not set'}
+                  {hasDsn
+                    ? t('settings.errorTracking.dsn.statusSet', 'DSN is set')
+                    : t('settings.errorTracking.dsn.statusUnset', 'Not set')}
                 </Badge>
               </div>
               <div className="flex items-center gap-2">
+                {/* The empty-state hint is a DSN URL mask, identical in every
+                    language, so only the "already stored" hint is translated. */}
                 <Input
                   id="error-tracking-dsn"
                   type="password"
                   autoComplete="off"
-                  placeholder={hasDsn ? '•••••••• (unchanged)' : 'https://…@…ingest.sentry.io/…'}
+                  placeholder={
+                    hasDsn
+                      ? t('settings.errorTracking.dsn.placeholderSet', '•••••••• (unchanged)')
+                      : 'https://…@…ingest.sentry.io/…'
+                  }
                   value={dsnInput}
                   disabled={savingDsn}
                   onChange={(e) => setDsnInput(e.target.value)}
@@ -333,11 +378,16 @@ function ErrorTrackingSettingsForm({
                   disabled={savingDsn}
                   data-testid="error-tracking-save-dsn"
                 >
-                  {savingDsn ? 'Saving…' : 'Save DSN'}
+                  {savingDsn
+                    ? t('settings.errorTracking.dsn.saving', 'Saving…')
+                    : t('settings.errorTracking.dsn.save', 'Save DSN')}
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Stored encrypted; never shown again. Leave blank and save to clear it.
+                {t(
+                  'settings.errorTracking.dsn.help',
+                  'Stored encrypted; never shown again. Leave blank and save to clear it.'
+                )}
               </p>
             </div>
 
@@ -345,8 +395,10 @@ function ErrorTrackingSettingsForm({
               <Alert variant="warning" data-testid="error-tracking-dsn-warning">
                 <IconAlertTriangle className="w-4 h-4" />
                 <AlertDescription>
-                  No DSN is stored, so nothing is being sent. Errors are dropped until you
-                  set one.
+                  {t(
+                    'settings.errorTracking.dsn.warning',
+                    'No DSN is stored, so nothing is being sent. Errors are dropped until you set one.'
+                  )}
                 </AlertDescription>
               </Alert>
             )}
@@ -363,16 +415,19 @@ function ErrorTrackingSettingsForm({
             </span>
             <div>
               <CardTitle className="text-lg font-bold font-heading">
-                <h2>Alerts and retention</h2>
+                <h2>{t('settings.errorTracking.alerts.title', 'Alerts and retention')}</h2>
               </CardTitle>
               <CardDescription className="text-sm">
-                Who hears about new errors, and how long they are kept.
+                {t(
+                  'settings.errorTracking.alerts.description',
+                  'Who hears about new errors, and how long they are kept.'
+                )}
               </CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Help text for each of these lives in FIELD_META, rendered by the control. */}
+          {/* Help text for each of these lives in fieldMeta(), rendered by the control. */}
           {control(ET_KEYS.notifyAdmins, !enabled)}
           {control(ET_KEYS.environment, !enabled)}
           {control(ET_KEYS.retentionDays, !enabled)}
@@ -387,7 +442,9 @@ function ErrorTrackingSettingsForm({
           data-testid="error-tracking-save"
         >
           <IconDeviceFloppy className="w-4 h-4" />
-          {saving ? 'Saving…' : 'Save error-tracking settings'}
+          {saving
+            ? t('settings.errorTracking.save.saving', 'Saving…')
+            : t('settings.errorTracking.save.action', 'Save error-tracking settings')}
         </Button>
       </div>
     </div>
@@ -395,9 +452,12 @@ function ErrorTrackingSettingsForm({
 }
 
 /** Read the `{ error }` envelope from a failed response; friendly 404 fallback. */
-async function readError(res: Response, fallback: string): Promise<string> {
+async function readError(res: Response, fallback: string, t: TranslateFn): Promise<string> {
   if (res.status === 404) {
-    return 'Error tracking is not available on this server yet.';
+    return t(
+      'settings.errorTracking.unavailable',
+      'Error tracking is not available on this server yet.'
+    );
   }
   try {
     const body: unknown = await res.json();

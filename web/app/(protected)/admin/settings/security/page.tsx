@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@amroksaleh/ui/select';
 import { IconPlus, IconShieldLock, IconTrash } from '@tabler/icons-react';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import { SECURITY_MANAGE, errorMessage, type AddToast } from '../settings-shared';
 import type { components } from '@/lib/api/schema';
@@ -42,6 +43,7 @@ type ScopeChoice = 'tenant' | 'ou' | 'user';
 export default function SecurityPolicySettingsPage() {
   const { addToast } = useToast();
   const { hasPermission, loading: capsLoading } = useCapabilities();
+  const t = useTranslation('admin');
   // Bumped whenever a policy is created/deleted so the enrollment-status
   // table (a sibling section with its own independent fetch) re-queries
   // instead of showing a stale "no one in scope" snapshot from before the
@@ -61,15 +63,14 @@ export default function SecurityPolicySettingsPage() {
   if (!canManage) {
     return (
       <AccessDenied
-        description={
-          <>
-            You need the <code>security:manage</code> permission to configure admin-enforced
-            2FA policies.
-          </>
-        }
+        description={t(
+          'settings.security.accessDenied',
+          'You need the {permission} permission to configure admin-enforced 2FA policies.',
+          { permission: SECURITY_MANAGE }
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.security.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -79,8 +80,11 @@ export default function SecurityPolicySettingsPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Security"
-        description="Require two-factor authentication tenant-wide, for an organizational unit, or for a specific person."
+        title={t('settings.security.title', 'Security')}
+        description={t(
+          'settings.security.description',
+          'Require two-factor authentication tenant-wide, for an organizational unit, or for a specific person.'
+        )}
       />
       <SettingsTabs active="security" />
       <TwoFactorPoliciesSection addToast={addToast} onPoliciesChanged={() => setStatusRefreshKey((k) => k + 1)} />
@@ -89,16 +93,27 @@ export default function SecurityPolicySettingsPage() {
   );
 }
 
-function scopeLabel(policy: TwoFactorPolicy, ous: OuOption[], users: UserOption[]): string {
+function scopeLabel(
+  policy: TwoFactorPolicy,
+  ous: OuOption[],
+  users: UserOption[],
+  t: TranslateFn
+): string {
   if (policy.scope_type === 'tenant') {
-    return 'Everyone in this tenant';
+    return t('settings.security.scope.tenant', 'Everyone in this tenant');
   }
   if (policy.scope_type === 'ou') {
     const ou = ous.find((o) => o.id === policy.scope_id);
-    return ou ? `${ou.name} (and its sub-units)` : `Organizational unit #${policy.scope_id}`;
+    return ou
+      ? t('settings.security.scope.ou', '{name} (and its sub-units)', { name: ou.name })
+      : t('settings.security.scope.ouFallback', 'Organizational unit #{id}', {
+          id: String(policy.scope_id),
+        });
   }
   const user = users.find((u) => u.id === policy.scope_id);
-  return user ? user.email : `User #${policy.scope_id}`;
+  return user
+    ? user.email
+    : t('settings.security.scope.userFallback', 'User #{id}', { id: String(policy.scope_id) });
 }
 
 function TwoFactorPoliciesSection({
@@ -108,6 +123,7 @@ function TwoFactorPoliciesSection({
   addToast: AddToast;
   onPoliciesChanged: () => void;
 }) {
+  const t = useTranslation('admin');
   const [adding, setAdding] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<number | null>(null);
 
@@ -118,7 +134,9 @@ function TwoFactorPoliciesSection({
   } = useFetch<TwoFactorPolicy[]>(async () => {
     const { data: body, error } = await api.GET('/api/v1/2fa-policies');
     if (body === undefined) {
-      throw new Error(errorMessage(error, 'Failed to load 2FA policies'));
+      throw new Error(
+        errorMessage(error, t('settings.security.policies.loadError', 'Failed to load 2FA policies'))
+      );
     }
     return body.data;
   }, []);
@@ -138,10 +156,13 @@ function TwoFactorPoliciesSection({
       params: { path: { id } },
     });
     if (error !== undefined || !response.ok) {
-      addToast(errorMessage(error, 'Failed to delete policy'), 'error');
+      addToast(
+        errorMessage(error, t('settings.security.policies.deleteError', 'Failed to delete policy')),
+        'error'
+      );
       return;
     }
-    addToast('2FA policy removed.', 'success');
+    addToast(t('settings.security.policies.removed', '2FA policy removed.'), 'success');
     setPendingDelete(null);
     refetchPolicies();
     onPoliciesChanged();
@@ -152,18 +173,19 @@ function TwoFactorPoliciesSection({
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>2FA policies</h2>
+            <h2>{t('settings.security.policies.title', '2FA policies')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
-            A profile in scope of any policy below must enroll in 2FA. During the grace
-            period, login still succeeds with a reminder; once it elapses, login is refused
-            until the person enrolls.
+            {t(
+              'settings.security.policies.description',
+              'A profile in scope of any policy below must enroll in 2FA. During the grace period, login still succeeds with a reminder; once it elapses, login is refused until the person enrolls.'
+            )}
           </CardDescription>
         </div>
         {!adding && (
           <Button className="gap-2 shrink-0" data-testid="add-two-factor-policy" onClick={() => setAdding(true)}>
             <IconPlus className="w-4 h-4" />
-            Add policy
+            {t('settings.security.policies.add', 'Add policy')}
           </Button>
         )}
       </CardHeader>
@@ -198,8 +220,10 @@ function TwoFactorPoliciesSection({
           <div className="flex flex-col items-center gap-2 py-8 text-center">
             <IconShieldLock className="w-8 h-8 text-muted-foreground" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">
-              No 2FA policies configured. 2FA enrollment stays fully self-service until you add
-              one.
+              {t(
+                'settings.security.policies.empty',
+                'No 2FA policies configured. 2FA enrollment stays fully self-service until you add one.'
+              )}
             </p>
           </div>
         ) : (
@@ -213,7 +237,7 @@ function TwoFactorPoliciesSection({
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium text-foreground">
-                      {scopeLabel(policy, ous ?? [], users ?? [])}
+                      {scopeLabel(policy, ous ?? [], users ?? [], t)}
                     </span>
                     <Badge variant="secondary" className="text-[10px] uppercase">
                       {policy.scope_type}
@@ -221,24 +245,33 @@ function TwoFactorPoliciesSection({
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {policy.grace_period_days === 0
-                      ? 'No grace period — enforced immediately.'
-                      : `${policy.grace_period_days}-day grace period from the policy's creation.`}
+                      ? t(
+                          'settings.security.policies.gracePeriod.none',
+                          'No grace period — enforced immediately.'
+                        )
+                      : t(
+                          'settings.security.policies.gracePeriod.days',
+                          "{days}-day grace period from the policy's creation.",
+                          { days: policy.grace_period_days }
+                        )}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {pendingDelete === policy.id ? (
                     <>
-                      <span className="text-xs text-muted-foreground">Remove?</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t('settings.security.policies.confirmRemove', 'Remove?')}
+                      </span>
                       <Button
                         variant="destructive"
                         size="sm"
                         data-testid={`confirm-delete-policy-${policy.id}`}
                         onClick={() => void handleDelete(policy.id)}
                       >
-                        Yes, remove
+                        {t('settings.security.policies.confirmYes', 'Yes, remove')}
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => setPendingDelete(null)}>
-                        Cancel
+                        {t('settings.security.policies.confirmCancel', 'Cancel')}
                       </Button>
                     </>
                   ) : (
@@ -250,7 +283,7 @@ function TwoFactorPoliciesSection({
                       onClick={() => setPendingDelete(policy.id)}
                     >
                       <IconTrash className="w-3.5 h-3.5" />
-                      Remove
+                      {t('settings.security.policies.remove', 'Remove')}
                     </Button>
                   )}
                 </div>
@@ -276,6 +309,7 @@ function PolicyFormCard({
   onSaved: () => void;
   addToast: AddToast;
 }) {
+  const t = useTranslation('admin');
   const [scopeType, setScopeType] = useState<ScopeChoice>('tenant');
   const [scopeId, setScopeId] = useState<string>('');
   const [gracePeriodDays, setGracePeriodDays] = useState('0');
@@ -284,14 +318,22 @@ function PolicyFormCard({
   const submit = async () => {
     if (scopeType !== 'tenant' && scopeId === '') {
       addToast(
-        scopeType === 'ou' ? 'Select an organizational unit.' : 'Select a user.',
+        scopeType === 'ou'
+          ? t('settings.security.form.error.selectOu', 'Select an organizational unit.')
+          : t('settings.security.form.error.selectUser', 'Select a user.'),
         'error'
       );
       return;
     }
     const grace = Number.parseInt(gracePeriodDays, 10);
     if (!Number.isFinite(grace) || grace < 0) {
-      addToast('Grace period must be a non-negative number of days.', 'error');
+      addToast(
+        t(
+          'settings.security.form.error.gracePeriod',
+          'Grace period must be a non-negative number of days.'
+        ),
+        'error'
+      );
       return;
     }
 
@@ -305,12 +347,19 @@ function PolicyFormCard({
         },
       });
       if (error !== undefined || !response.ok) {
-        throw new Error(errorMessage(error, 'Failed to create policy'));
+        throw new Error(
+          errorMessage(error, t('settings.security.form.createError', 'Failed to create policy'))
+        );
       }
-      addToast('2FA policy created.', 'success');
+      addToast(t('settings.security.form.created', '2FA policy created.'), 'success');
       onSaved();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to create policy', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('settings.security.form.createError', 'Failed to create policy'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -320,7 +369,9 @@ function PolicyFormCard({
     <div className="space-y-4 rounded-lg border border-primary/30 bg-card p-4" data-testid="two-factor-policy-form">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground">Applies to</label>
+          <label className="text-sm font-medium text-foreground">
+            {t('settings.security.form.scopeType.label', 'Applies to')}
+          </label>
           <Select
             value={scopeType}
             onValueChange={(value) => {
@@ -332,15 +383,23 @@ function PolicyFormCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="tenant">Everyone in this tenant</SelectItem>
-              <SelectItem value="ou">An organizational unit</SelectItem>
-              <SelectItem value="user">A specific person</SelectItem>
+              <SelectItem value="tenant">
+                {t('settings.security.form.scopeType.tenant', 'Everyone in this tenant')}
+              </SelectItem>
+              <SelectItem value="ou">
+                {t('settings.security.form.scopeType.ou', 'An organizational unit')}
+              </SelectItem>
+              <SelectItem value="user">
+                {t('settings.security.form.scopeType.user', 'A specific person')}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground">Grace period (days)</label>
+          <label className="text-sm font-medium text-foreground">
+            {t('settings.security.form.gracePeriod.label', 'Grace period (days)')}
+          </label>
           <Input
             type="number"
             min={0}
@@ -354,10 +413,17 @@ function PolicyFormCard({
 
       {scopeType === 'ou' && (
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground">Organizational unit</label>
+          <label className="text-sm font-medium text-foreground">
+            {t('settings.security.form.ou.label', 'Organizational unit')}
+          </label>
           <Select value={scopeId} onValueChange={setScopeId}>
             <SelectTrigger data-testid="policy-scope-ou">
-              <SelectValue placeholder="Select an organizational unit" />
+              <SelectValue
+                placeholder={t(
+                  'settings.security.form.ou.placeholder',
+                  'Select an organizational unit'
+                )}
+              />
             </SelectTrigger>
             <SelectContent>
               {ous.map((ou) => (
@@ -372,10 +438,12 @@ function PolicyFormCard({
 
       {scopeType === 'user' && (
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground">Person</label>
+          <label className="text-sm font-medium text-foreground">
+            {t('settings.security.form.user.label', 'Person')}
+          </label>
           <Select value={scopeId} onValueChange={setScopeId}>
             <SelectTrigger data-testid="policy-scope-user">
-              <SelectValue placeholder="Select a user" />
+              <SelectValue placeholder={t('settings.security.form.user.placeholder', 'Select a user')} />
             </SelectTrigger>
             <SelectContent>
               {users.map((user) => (
@@ -390,10 +458,12 @@ function PolicyFormCard({
 
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="ghost" onClick={onCancel} disabled={saving}>
-          Cancel
+          {t('settings.security.form.cancel', 'Cancel')}
         </Button>
         <Button onClick={() => void submit()} disabled={saving} data-testid="save-two-factor-policy">
-          {saving ? 'Saving…' : 'Add policy'}
+          {saving
+            ? t('settings.security.form.saving', 'Saving…')
+            : t('settings.security.form.submit', 'Add policy')}
         </Button>
       </div>
     </div>
@@ -408,28 +478,41 @@ function formatDeadline(epochSeconds: number | null): string {
 }
 
 function EnrollmentStatusSection({ refreshKey }: { refreshKey: number }) {
+  const t = useTranslation('admin');
   const { data, error } = useFetch<StatusEntry[]>(async () => {
     const { data: body, error: statusError } = await api.GET('/api/v1/2fa-policies/status');
     if (body === undefined) {
-      throw new Error(errorMessage(statusError, 'Failed to load enrollment status'));
+      throw new Error(
+        errorMessage(
+          statusError,
+          t('settings.security.status.loadError', 'Failed to load enrollment status')
+        )
+      );
     }
     return body.data;
   }, [refreshKey]);
 
   const columns: DataTableColumn<StatusEntry>[] = [
-    { id: 'email', accessorKey: 'email', header: 'Person', enableSorting: true },
+    {
+      id: 'email',
+      accessorKey: 'email',
+      header: t('settings.security.status.column.person', 'Person'),
+      enableSorting: true,
+    },
     {
       id: 'enrolled',
-      header: '2FA status',
+      header: t('settings.security.status.column.enrolled', '2FA status'),
       cell: (row) => (
         <Badge variant={row.enrolled ? 'default' : 'destructive'} className="text-[10px]">
-          {row.enrolled ? 'Enrolled' : 'Not enrolled'}
+          {row.enrolled
+            ? t('settings.security.status.enrolled', 'Enrolled')
+            : t('settings.security.status.notEnrolled', 'Not enrolled')}
         </Badge>
       ),
     },
     {
       id: 'enforcement_deadline',
-      header: 'Enforcement deadline',
+      header: t('settings.security.status.column.deadline', 'Enforcement deadline'),
       cell: (row) => (
         <span className="text-sm text-muted-foreground">
           {row.enrolled ? '—' : formatDeadline(row.enforcement_deadline)}
@@ -442,10 +525,13 @@ function EnrollmentStatusSection({ refreshKey }: { refreshKey: number }) {
     <Card className="border border-border bg-card shadow-sm" data-testid="two-factor-status-card">
       <CardHeader>
         <CardTitle className="text-lg font-bold font-heading">
-          <h2>Enrollment status</h2>
+          <h2>{t('settings.security.status.title', 'Enrollment status')}</h2>
         </CardTitle>
         <CardDescription className="text-sm">
-          Everyone any policy above covers, and whether they have enrolled in 2FA yet.
+          {t(
+            'settings.security.status.description',
+            'Everyone any policy above covers, and whether they have enrolled in 2FA yet.'
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -460,11 +546,14 @@ function EnrollmentStatusSection({ refreshKey }: { refreshKey: number }) {
           getRowId={(row) => String(row.profile_id)}
           isLoading={data === null && !error}
           enableGlobalFilter
-          globalFilterPlaceholder="Search by email…"
+          globalFilterPlaceholder={t('settings.security.status.searchPlaceholder', 'Search by email…')}
           pagination={{ pageSize: 10 }}
           emptyState={{
-            title: 'No one in scope yet',
-            description: 'Add a policy above to bring people into scope.',
+            title: t('settings.security.status.empty.title', 'No one in scope yet'),
+            description: t(
+              'settings.security.status.empty.description',
+              'Add a policy above to bring people into scope.'
+            ),
           }}
         />
       </CardContent>

@@ -29,6 +29,7 @@ import {
   type RegistryEntry,
   type SettingsMap,
 } from '../(protected)/admin/settings/settings-shared';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * First-run onboarding wizard (WC-2b9d4f6a, WC-onboarding-full-setup).
@@ -648,6 +649,10 @@ function ReviewStep({
   changedKeys: string[];
   valueForKey: (key: string) => string;
 }) {
+  // The registry field labels are translated (they are shared with the Settings
+  // console); this screen's own copy has not been extracted yet.
+  const t = useTranslation('admin');
+
   if (changedKeys.length === 0) {
     return (
       <p className="text-sm text-muted-foreground" data-testid="onboarding-review-empty">
@@ -663,7 +668,7 @@ function ReviewStep({
         const value = valueForKey(key);
         return (
           <div key={key} className="flex items-center justify-between gap-4 py-2.5">
-            <dt className="text-sm font-medium text-foreground">{fieldMetaFor(key).label}</dt>
+            <dt className="text-sm font-medium text-foreground">{fieldMetaFor(key, t).label}</dt>
             <dd className="text-sm text-muted-foreground">{formatReviewValue(value)}</dd>
           </div>
         );

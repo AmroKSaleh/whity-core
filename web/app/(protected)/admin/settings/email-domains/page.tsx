@@ -20,6 +20,7 @@ import {
   IconTrash,
   IconWorld,
 } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 
 const NATIVE_SELECT_CLASS =
@@ -78,6 +79,7 @@ async function readError(res: Response, fallback: string): Promise<string> {
 export default function EmailDomainsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
+  const t = useTranslation('admin');
   const isAdmin = user?.role === 'admin';
 
   const [addingOpen, setAddingOpen] = useState(false);
@@ -90,7 +92,9 @@ export default function EmailDomainsPage() {
   } = useFetch<EmailDomain[]>(async () => {
     const res = await apiClient('/api/v1/email-domains');
     if (!res.ok) {
-      throw new Error(await readError(res, 'Failed to load email domains'));
+      throw new Error(
+        await readError(res, t('settings.emailDomains.loadFailed', 'Failed to load email domains'))
+      );
     }
     const body: unknown = await res.json();
     return body && typeof body === 'object' && Array.isArray((body as { data?: unknown }).data)
@@ -112,10 +116,14 @@ export default function EmailDomainsPage() {
   if (!isAdmin) {
     return (
       <AccessDenied
-        description={<>You need the tenant <code>admin</code> role to manage email-domain policies.</>}
+        description={t(
+          'settings.emailDomains.accessDenied',
+          'You need the tenant {role} role to manage email-domain policies.',
+          { role: 'admin' }
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.emailDomains.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -132,23 +140,26 @@ export default function EmailDomainsPage() {
       addToast(
         body && typeof body === 'object' && 'error' in body
           ? String((body as { error: unknown }).error)
-          : 'Domain ownership not verified yet.',
+          : t('settings.emailDomains.verify.notYet', 'Domain ownership not verified yet.'),
         'error'
       );
       refetch();
       return;
     }
-    addToast('Domain ownership verified.', 'success');
+    addToast(t('settings.emailDomains.verify.success', 'Domain ownership verified.'), 'success');
     refetch();
   };
 
   const handleDelete = async (id: number) => {
     const res = await apiClient(`/api/v1/email-domains/${id}`, { method: 'DELETE' });
     if (!res.ok && res.status !== 204) {
-      addToast(await readError(res, 'Failed to remove domain'), 'error');
+      addToast(
+        await readError(res, t('settings.emailDomains.delete.failed', 'Failed to remove domain')),
+        'error'
+      );
       return;
     }
-    addToast('Domain registration removed.', 'success');
+    addToast(t('settings.emailDomains.delete.success', 'Domain registration removed.'), 'success');
     setPendingDelete(null);
     refetch();
   };
@@ -156,13 +167,16 @@ export default function EmailDomainsPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Email domains"
-        description="Manage which email domains automatically provision memberships into your workspace."
+        title={t('settings.emailDomains.title', 'Email domains')}
+        description={t(
+          'settings.emailDomains.description',
+          'Manage which email domains automatically provision memberships into your workspace.'
+        )}
         action={
           !addingOpen ? (
             <Button className="gap-2" data-testid="email-domains-add" onClick={() => setAddingOpen(true)}>
               <IconPlus className="w-4 h-4" />
-              Add domain
+              {t('settings.emailDomains.add', 'Add domain')}
             </Button>
           ) : undefined
         }
@@ -194,8 +208,10 @@ export default function EmailDomainsPage() {
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
             <IconWorld className="w-8 h-8 text-muted-foreground" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">
-              No email domains registered yet. Add one so members with a verified address on that
-              domain can automatically join your workspace.
+              {t(
+                'settings.emailDomains.empty',
+                'No email domains registered yet. Add one so members with a verified address on that domain can automatically join your workspace.'
+              )}
             </p>
           </CardContent>
         </Card>
@@ -212,36 +228,53 @@ export default function EmailDomainsPage() {
                       variant={d.is_verified ? 'default' : 'outline'}
                       className="text-[10px]"
                     >
-                      {d.is_verified ? 'Verified' : 'Pending verification'}
+                      {d.is_verified
+                        ? t('settings.emailDomains.status.verified', 'Verified')
+                        : t('settings.emailDomains.status.pending', 'Pending verification')}
                     </Badge>
                     <Badge variant="secondary" className="text-[10px]">
-                      {d.auto_provision ? 'Auto-provision on' : 'Auto-provision off'}
+                      {d.auto_provision
+                        ? t('settings.emailDomains.autoProvision.on', 'Auto-provision on')
+                        : t('settings.emailDomains.autoProvision.off', 'Auto-provision off')}
                     </Badge>
                   </div>
                   {!d.is_verified && d.verification && (
                     <div className="space-y-1.5 rounded-md border border-border bg-muted/20 p-3">
                       <p className="text-xs text-muted-foreground">
-                        Publish this TXT record, then verify:
+                        {t(
+                          'settings.emailDomains.challenge.instructions',
+                          'Publish this TXT record, then verify:'
+                        )}
                       </p>
-                      <ChallengeRow label="Name" value={d.verification.record_name} addToast={addToast} />
-                      <ChallengeRow label="Value" value={d.verification.record_value} addToast={addToast} />
+                      <ChallengeRow
+                        label={t('settings.emailDomains.challenge.name', 'Name')}
+                        value={d.verification.record_name}
+                        addToast={addToast}
+                      />
+                      <ChallengeRow
+                        label={t('settings.emailDomains.challenge.value', 'Value')}
+                        value={d.verification.record_value}
+                        addToast={addToast}
+                      />
                     </div>
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {pendingDelete === d.id ? (
                     <>
-                      <span className="text-xs text-muted-foreground">Delete?</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t('settings.emailDomains.delete.confirm', 'Delete?')}
+                      </span>
                       <Button
                         variant="destructive"
                         size="sm"
                         data-testid={`email-domain-confirm-delete-${d.id}`}
                         onClick={() => void handleDelete(d.id)}
                       >
-                        Yes, delete
+                        {t('settings.emailDomains.delete.confirmYes', 'Yes, delete')}
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => setPendingDelete(null)}>
-                        Cancel
+                        {t('settings.emailDomains.delete.confirmCancel', 'Cancel')}
                       </Button>
                     </>
                   ) : (
@@ -255,7 +288,7 @@ export default function EmailDomainsPage() {
                           onClick={() => void handleVerify(d)}
                         >
                           <IconCircleCheck className="w-3.5 h-3.5" />
-                          Verify
+                          {t('settings.emailDomains.verify.action', 'Verify')}
                         </Button>
                       )}
                       <Button
@@ -266,7 +299,7 @@ export default function EmailDomainsPage() {
                         onClick={() => setPendingDelete(d.id)}
                       >
                         <IconTrash className="w-3.5 h-3.5" />
-                        Delete
+                        {t('settings.emailDomains.delete.action', 'Delete')}
                       </Button>
                     </>
                   )}
@@ -301,6 +334,8 @@ function ChallengeRow({
   value: string;
   addToast: (m: string, t: 'success' | 'error' | 'info' | 'warning') => void;
 }) {
+  const t = useTranslation('admin');
+
   return (
     <div className="flex items-center gap-2">
       <span className="w-12 shrink-0 text-xs font-medium text-foreground">{label}</span>
@@ -311,11 +346,15 @@ function ChallengeRow({
         type="button"
         variant="ghost"
         size="icon-xs"
-        aria-label={`Copy ${label}`}
+        aria-label={t('settings.emailDomains.challenge.copy', 'Copy {label}', { label })}
         onClick={() => {
           void navigator.clipboard?.writeText(value).then(
-            () => addToast('Copied.', 'success'),
-            () => addToast('Could not copy to clipboard.', 'error')
+            () => addToast(t('settings.emailDomains.challenge.copied', 'Copied.'), 'success'),
+            () =>
+              addToast(
+                t('settings.emailDomains.challenge.copyFailed', 'Could not copy to clipboard.'),
+                'error'
+              )
           );
         }}
       >
@@ -336,6 +375,7 @@ function AddDomainCard({
   onSaved: () => void;
   addToast: (m: string, t: 'success' | 'error' | 'info' | 'warning') => void;
 }) {
+  const t = useTranslation('admin');
   const [domain, setDomain] = useState('');
   const [defaultRoleId, setDefaultRoleId] = useState<number | ''>(roles[0]?.id ?? '');
   const [autoProvision, setAutoProvision] = useState(true);
@@ -343,11 +383,11 @@ function AddDomainCard({
 
   const submit = async () => {
     if (domain.trim() === '') {
-      addToast('A domain is required.', 'error');
+      addToast(t('settings.emailDomains.form.domainRequired', 'A domain is required.'), 'error');
       return;
     }
     if (defaultRoleId === '') {
-      addToast('A default role is required.', 'error');
+      addToast(t('settings.emailDomains.form.roleRequired', 'A default role is required.'), 'error');
       return;
     }
 
@@ -363,10 +403,19 @@ function AddDomainCard({
         }),
       });
       if (!res.ok) {
-        addToast(await readError(res, 'Failed to register domain'), 'error');
+        addToast(
+          await readError(res, t('settings.emailDomains.form.saveFailed', 'Failed to register domain')),
+          'error'
+        );
         return;
       }
-      addToast('Domain registered — publish the TXT record to verify it.', 'success');
+      addToast(
+        t(
+          'settings.emailDomains.form.saved',
+          'Domain registered — publish the TXT record to verify it.'
+        ),
+        'success'
+      );
       onSaved();
     } finally {
       setSaving(false);
@@ -377,18 +426,23 @@ function AddDomainCard({
     <Card className="border border-primary/30 bg-card shadow-sm" data-testid="email-domain-form">
       <CardHeader>
         <CardTitle className="text-lg font-bold font-heading">
-          <h2>Add email domain</h2>
+          <h2>{t('settings.emailDomains.form.title', 'Add email domain')}</h2>
         </CardTitle>
         <CardDescription className="text-sm">
-          Members who verify an email on this domain can automatically join your workspace once
-          you&rsquo;ve proven you control it.
+          {t(
+            'settings.emailDomains.form.description',
+            'Members who verify an email on this domain can automatically join your workspace once you’ve proven you control it.'
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="space-y-1.5">
           <label htmlFor="domain-input" className="text-sm font-medium text-foreground">
-            Domain
+            {t('settings.emailDomains.form.domain', 'Domain')}
           </label>
+          {/* `example.com` is the reserved documentation domain, not prose — a
+              translated local part would show a hostname that is not a valid
+              example. Left literal, as the sign-in screen left its masks. */}
           <Input
             id="domain-input"
             placeholder="example.com"
@@ -400,7 +454,7 @@ function AddDomainCard({
 
         <div className="space-y-1.5">
           <label htmlFor="domain-default-role" className="text-sm font-medium text-foreground">
-            Default role
+            {t('settings.emailDomains.form.defaultRole', 'Default role')}
           </label>
           <select
             id="domain-default-role"
@@ -409,7 +463,9 @@ function AddDomainCard({
             disabled={saving}
             onChange={(e) => setDefaultRoleId(Number(e.target.value))}
           >
-            {roles.length === 0 && <option value="">No roles available</option>}
+            {roles.length === 0 && (
+              <option value="">{t('settings.emailDomains.form.noRoles', 'No roles available')}</option>
+            )}
             {roles.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
@@ -417,18 +473,23 @@ function AddDomainCard({
             ))}
           </select>
           <p className="text-xs text-muted-foreground">
-            Role assigned when a new member auto-joins via this domain.
+            {t(
+              'settings.emailDomains.form.defaultRoleHelp',
+              'Role assigned when a new member auto-joins via this domain.'
+            )}
           </p>
         </div>
 
         <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-muted/20 p-4">
           <div className="space-y-0.5">
             <label htmlFor="domain-auto-provision" className="text-sm font-medium text-foreground">
-              Auto-provision
+              {t('settings.emailDomains.form.autoProvision', 'Auto-provision')}
             </label>
             <p className="text-xs text-muted-foreground">
-              When on, a verified email on this domain automatically joins this workspace. When off,
-              ownership is still tracked but nobody auto-joins.
+              {t(
+                'settings.emailDomains.form.autoProvisionHelp',
+                'When on, a verified email on this domain automatically joins this workspace. When off, ownership is still tracked but nobody auto-joins.'
+              )}
             </p>
           </div>
           <Switch
@@ -442,10 +503,12 @@ function AddDomainCard({
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={onCancel} disabled={saving}>
-            Cancel
+            {t('settings.emailDomains.form.cancel', 'Cancel')}
           </Button>
           <Button onClick={() => void submit()} disabled={saving} data-testid="email-domain-save">
-            {saving ? 'Saving…' : 'Add domain'}
+            {saving
+              ? t('settings.emailDomains.form.saving', 'Saving…')
+              : t('settings.emailDomains.form.submit', 'Add domain')}
           </Button>
         </div>
       </CardContent>

@@ -12,6 +12,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconDeviceFloppy } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -34,6 +35,7 @@ export default function StorageSettingsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canManage = hasPermission(SETTINGS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -47,21 +49,27 @@ export default function StorageSettingsPage() {
   }
 
   if (!isSystemTenant || !canManage) {
+    // ONE translatable sentence with a {link} hole, split at render time so the
+    // General link stays a link without fragmenting the sentence for translators.
+    const [beforeLink, afterLink] = t(
+      'settings.storage.accessDenied',
+      'Storage configuration can only be managed from the system tenant. Your tenant’s settings are on the {link} page.'
+    ).split('{link}');
+
     return (
       <AccessDenied
         description={
           <>
-            Storage configuration can only be managed from the system tenant. Your tenant&rsquo;s
-            settings are on the{' '}
+            {beforeLink}
             <Link href="/admin/settings" className="font-medium underline">
-              General
-            </Link>{' '}
-            page.
+              {t('settings.storage.accessDenied.link', 'General')}
+            </Link>
+            {afterLink}
           </>
         }
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('settings.storage.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -71,8 +79,11 @@ export default function StorageSettingsPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Storage"
-        description="Where uploaded files and assets are kept for this instance."
+        title={t('settings.storage.title', 'Storage')}
+        description={t(
+          'settings.storage.description',
+          'Where uploaded files and assets are kept for this instance.'
+        )}
       />
       <SettingsTabs active="storage" />
       <StorageSettingsForm addToast={addToast} />
@@ -81,10 +92,13 @@ export default function StorageSettingsPage() {
 }
 
 function StorageSettingsForm({ addToast }: { addToast: AddToast }) {
+  const t = useTranslation('admin');
   const { data, loading, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load storage settings'));
+      throw new Error(
+        errorMessage(getError, t('settings.storage.loadFailed', 'Failed to load storage settings'))
+      );
     }
     return body.data;
   }, []);
@@ -96,8 +110,8 @@ function StorageSettingsForm({ addToast }: { addToast: AddToast }) {
   const global = data?.global as SettingsMap | undefined;
   const registry = useMemo<RegistryEntry[]>(() => data?.registry ?? [], [data]);
   const sections = useMemo(
-    () => groupRegistry(registry).filter((s) => s.section.id === 'storage'),
-    [registry]
+    () => groupRegistry(registry, t).filter((s) => s.section.id === 'storage'),
+    [registry, t]
   );
   const dirty = Object.keys(draft).length > 0;
 
@@ -136,13 +150,20 @@ function StorageSettingsForm({ addToast }: { addToast: AddToast }) {
       });
       if (patchError) {
         setFieldErrors(fieldErrorsFrom(patchError));
-        throw new Error(errorMessage(patchError, 'Failed to save storage settings'));
+        throw new Error(
+          errorMessage(patchError, t('settings.storage.saveFailed', 'Failed to save storage settings'))
+        );
       }
-      addToast('Storage settings saved.', 'success');
+      addToast(t('settings.storage.saved', 'Storage settings saved.'), 'success');
       setDraft({});
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save storage settings', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('settings.storage.saveFailed', 'Failed to save storage settings'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -153,7 +174,7 @@ function StorageSettingsForm({ addToast }: { addToast: AddToast }) {
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Storage</h2>
+            <h2>{t('settings.storage.form.title', 'Storage')}</h2>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -204,7 +225,9 @@ function StorageSettingsForm({ addToast }: { addToast: AddToast }) {
           data-testid="storage-settings-save"
         >
           <IconDeviceFloppy className="w-4 h-4" />
-          {saving ? 'Saving…' : 'Save storage settings'}
+          {saving
+            ? t('settings.storage.saving', 'Saving…')
+            : t('settings.storage.save', 'Save storage settings')}
         </Button>
       </div>
     </div>
