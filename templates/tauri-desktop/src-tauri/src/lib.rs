@@ -2,6 +2,7 @@ mod auth;
 mod commands;
 mod config;
 mod db;
+mod php_host;
 mod sync;
 
 use db::Db;
@@ -12,6 +13,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let cfg = config::Config::from_env();
             let connection = db::open(app.handle())?;
@@ -23,6 +25,13 @@ pub fn run() {
             let sync_conn = db::open_sync_connection(app.handle())?;
             let sync_handle = sync::scheduler::spawn(app.handle().clone(), cfg, sync_conn)?;
             app.manage(sync_handle);
+
+            // Bundled PHP plugin host: a native bridge (Rust -> hardware) plus
+            // the FrankenPHP sidecar serving real whity plugins offline
+            // (see php_host/).
+            let php_host = php_host::init(app.handle().clone())?;
+            app.manage(php_host);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -43,7 +52,16 @@ pub fn run() {
             commands::sync::list_conflicts,
             commands::sync::resolve_conflict,
             commands::printer::print_text,
+            commands::php_host::php_request,
+            commands::php_host::php_host_status,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(php_host) = app_handle.try_state::<php_host::PhpHostHandle>() {
+                    php_host.shutdown();
+                }
+            }
+        });
 }

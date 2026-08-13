@@ -1,0 +1,25 @@
+{
+  "name": "whity/offline-php-host",
+  "description": "Offline PHP plugin host bundled into the Tauri desktop app template. Not published; a Composer manifest for documentation and a future real vendor/ build step. This proof of concept's public/worker.php uses a hand-rolled PSR-4 autoloader instead (whity/plugin-sdk has zero runtime dependencies), so `composer install` is not required to run it.",
+  "type": "project",
+  "repositories": [
+    {
+      "type": "path",
+      "url": "sdk",
+      "options": {
+        "symlink": false
+      }
+    }
+  ],
+  "require": {
+    "php": ">=8.4",
+    "ext-pdo_sqlite": "*",
+    "ext-sqlite3": "*",
+    "whity/plugin-sdk": "^1.20"
+  },
+  "autoload": {
+    "psr-4": {
+      "Whity\\": "src/"
+    }
+  }
+}

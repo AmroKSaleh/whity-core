@@ -24,9 +24,10 @@ use printers::common::base::job::PrinterJobOptions;
 use printers::get_default_printer;
 
 /// Print `text` to the OS default printer. Returns the printer's name on
-/// success, so the frontend can show what it printed to.
-#[tauri::command]
-pub fn print_text(text: String) -> Result<String, String> {
+/// success. Shared by the direct `print_text` Tauri command (below) and the
+/// native-bridge HTTP endpoint (`php_host::native_bridge`) that the bundled
+/// PHP plugin host calls into — one implementation, two callers.
+pub fn print_text_impl(text: &str) -> Result<String, String> {
     let printer = get_default_printer().ok_or_else(|| "No default printer configured".to_string())?;
 
     // `Converter` (a field of PrinterJobOptions) is a private type of the
@@ -43,4 +44,11 @@ pub fn print_text(text: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to print: {e:?}"))?;
 
     Ok(printer.name)
+}
+
+/// Print `text` to the OS default printer. Returns the printer's name on
+/// success, so the frontend can show what it printed to.
+#[tauri::command]
+pub fn print_text(text: String) -> Result<String, String> {
+    print_text_impl(&text)
 }

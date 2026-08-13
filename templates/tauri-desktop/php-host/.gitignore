@@ -1,0 +1,4 @@
+/var/*.sqlite
+/var/*.sqlite-journal
+/var/*.sqlite-wal
+/var/*.sqlite-shm
