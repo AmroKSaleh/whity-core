@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { TagInput, type TagOption } from '@amroksaleh/ui/tag-input';
 import { Button } from '@amroksaleh/ui/button';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { TAGS_MANAGE } from '@/lib/capabilities';
@@ -40,6 +41,7 @@ export interface TagPickerProps {
  */
 export function TagPicker({ entityType, entityId, className }: TagPickerProps) {
   const { apiClient } = useAuth();
+  const t = useTranslation('common');
   const { hasPermission } = useCapabilities();
   const canManage = hasPermission(TAGS_MANAGE);
 
@@ -72,8 +74,9 @@ export function TagPicker({ entityType, entityId, className }: TagPickerProps) {
         const tagsBody: unknown = await tagsRes.json();
         const currentBody: unknown = await currentRes.json();
         if (cancelled) return;
-        setOptions(extractRows(tagsBody).map((t) => ({ value: String(t.id), label: t.name })));
-        setSelected(extractRows(currentBody).map((t) => String(t.id)));
+        // Named `tag`, not `t`: `t` is the translate function in this scope.
+        setOptions(extractRows(tagsBody).map((tag) => ({ value: String(tag.id), label: tag.name })));
+        setSelected(extractRows(currentBody).map((tag) => String(tag.id)));
         setStatus('ready');
       } catch {
         if (!cancelled) setStatus('error');
@@ -129,7 +132,9 @@ export function TagPicker({ entityType, entityId, className }: TagPickerProps) {
   if (status === 'loading') {
     return (
       <div className={className} data-slot="tag-picker-loading">
-        <span className="text-xs text-muted-foreground">Loading tags…</span>
+        <span className="text-xs text-muted-foreground">
+          {t('tagPicker.loading', 'Loading tags…')}
+        </span>
       </div>
     );
   }
@@ -140,9 +145,9 @@ export function TagPicker({ entityType, entityId, className }: TagPickerProps) {
         className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground"
         data-slot="tag-picker-error"
       >
-        <span>Failed to load tags.</span>
+        <span>{t('tagPicker.error', 'Failed to load tags.')}</span>
         <Button type="button" variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)}>
-          Retry
+          {t('tagPicker.retry', 'Retry')}
         </Button>
       </div>
     );
@@ -155,7 +160,7 @@ export function TagPicker({ entityType, entityId, className }: TagPickerProps) {
       onChange={(next) => void handleChange(next)}
       disabled={!canManage || busy}
       className={className}
-      placeholder="Add a tag…"
+      placeholder={t('tagPicker.placeholder', 'Add a tag…')}
     />
   );
 }

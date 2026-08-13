@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { api } from '@/lib/api/client';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { SETTINGS_MANAGE, SYSTEM_TENANT_ID } from '@/app/(protected)/admin/settings/settings-shared';
 
 /**
@@ -24,6 +25,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const { isLoading, user } = useAuth();
   const { hasPermission, loading: capsLoading } = useCapabilities();
   const router = useRouter();
+  const t = useTranslation('common');
 
   const isAuthenticated = !!user;
 
@@ -71,7 +73,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <p className="text-lg">Loading...</p>
+        <p className="text-lg">{t('authGate.loading', 'Loading...')}</p>
       </div>
     );
   }

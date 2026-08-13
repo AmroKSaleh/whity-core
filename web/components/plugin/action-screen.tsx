@@ -14,6 +14,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import { IconAlertTriangle } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Generic "action" screen (WC-169 follow-up): renders the form declared by a
@@ -34,6 +35,11 @@ import { IconAlertTriangle } from '@tabler/icons-react';
  * `ActionIssue`, `extractIssues`, and `extractError` are now imported from
  * `@/lib/plugin-action-submit` (WC-235 DRY refactor); this component's
  * behavior including file-download is unchanged.
+ *
+ * i18n: only the CHROME this file authors goes through `t()` (domain
+ * `plugin`). Everything the descriptor supplies — `feature.label`, each
+ * `field.label`, `submitAction.submitLabel`, and the server's issue messages
+ * and column names — is plugin DATA and is rendered verbatim, never keyed.
  */
 
 function filenameFromDisposition(disposition: string | null, fallback: string): string {
@@ -57,6 +63,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 
 export function ActionScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
+  const t = useTranslation('plugin');
   const action = feature.action;
 
   const [texts, setTexts] = useState<Record<string, string>>({});
@@ -82,7 +89,11 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
           ? files[field.name] instanceof File
           : (texts[field.name] ?? '').trim() !== '';
       if (!filled) {
-        errors[field.name] = `${field.label} is required`;
+        // The field's NAME is plugin data; the sentence around it is ours, so
+        // it stays one translatable unit with a hole in it.
+        errors[field.name] = t('action.field.required', '{label} is required', {
+          label: field.label,
+        });
       }
     }
     return errors;
@@ -148,9 +159,12 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
         if (disposition !== null || !contentType.includes('application/json')) {
           const blob = await response.blob();
           downloadBlob(blob, filenameFromDisposition(disposition, `${feature.id}.out`));
-          addToast('Generated successfully — your download has started', 'success');
+          addToast(
+            t('action.toast.downloaded', 'Generated successfully — your download has started'),
+            'success'
+          );
         } else {
-          addToast('Completed successfully', 'success');
+          addToast(t('action.toast.completed', 'Completed successfully'), 'success');
         }
         return;
       }
@@ -159,26 +173,50 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
       const reportIssues = extractIssues(body);
       if (reportIssues !== null) {
         setIssues(reportIssues);
-        addToast(`${reportIssues.length} issue(s) — see the report below`, 'error');
+        addToast(
+          t('action.issues.summary', '{count} issue(s) — see the report below', {
+            count: reportIssues.length,
+          }),
+          'error'
+        );
         return;
       }
-      addToast(extractError(body) ?? `Request failed (HTTP ${response.status})`, 'error');
+      // extractError() is the SERVER's message — never keyed; only our
+      // generic fallback is.
+      addToast(
+        extractError(body) ??
+          t('action.error.http', 'Request failed (HTTP {status})', { status: response.status }),
+        'error'
+      );
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Request failed', 'error');
+      addToast(
+        error instanceof Error ? error.message : t('action.toast.requestFailed', 'Request failed'),
+        'error'
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const submitLabel = submitAction.submitLabel ?? 'Submit';
+  // The descriptor's own label wins; only OUR default is translated.
+  const submitLabel = submitAction.submitLabel ?? t('action.submit', 'Submit');
 
   return (
     <div className="space-y-8">
-      <AdminHeader title={feature.label} description={`Provided by the ${feature.plugin} plugin.`} />
+      {/* `feature.providedBy` is the SAME key EmbedScreen's header uses — one
+          key, one English string, translated once. */}
+      <AdminHeader
+        title={feature.label}
+        description={t('feature.providedBy', 'Provided by the {plugin} plugin.', {
+          plugin: feature.plugin,
+        })}
+      />
 
       <div className="max-w-2xl space-y-5 rounded-lg border border-border bg-card p-6">
         {submitAction.fields.length === 0 && (
-          <p className="text-sm text-muted-foreground">This action takes no input.</p>
+          <p className="text-sm text-muted-foreground">
+            {t('action.empty', 'This action takes no input.')}
+          </p>
         )}
 
         {submitAction.fields.map((field) => {
@@ -226,7 +264,7 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
         })}
 
         <Button onClick={() => void submit()} disabled={isSubmitting}>
-          {isSubmitting ? 'Working…' : submitLabel}
+          {isSubmitting ? t('action.submit.pending', 'Working…') : submitLabel}
         </Button>
       </div>
 
@@ -234,13 +272,17 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
         <div className="max-w-2xl space-y-2 rounded-lg border border-border bg-card p-6">
           <div className="flex items-center gap-2">
             <IconAlertTriangle size={18} className="text-destructive" />
-            <h2 className="font-heading text-sm font-medium">Validation report</h2>
+            <h2 className="font-heading text-sm font-medium">
+              {t('action.issues.title', 'Validation report')}
+            </h2>
           </div>
           <ul className="space-y-1.5">
             {issues.map((issue, index) => {
+              // `issue.column` and `issue.message` come from the plugin's own
+              // report — left verbatim. Only the "Item n" locator is ours.
               const where: string[] = [];
               if (typeof issue.item === 'number') {
-                where.push(`Item ${issue.item}`);
+                where.push(t('action.issues.item', 'Item {index}', { index: issue.item }));
               }
               if (typeof issue.column === 'string' && issue.column !== '') {
                 where.push(issue.column);
@@ -254,7 +296,9 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
                   }`}
                 >
                   <span className="me-2 text-xs font-semibold uppercase tracking-wide">
-                    {isError ? 'error' : 'warning'}
+                    {isError
+                      ? t('action.issues.severity.error', 'error')
+                      : t('action.issues.severity.warning', 'warning')}
                   </span>
                   {where.length > 0 && (
                     <span className="font-medium text-muted-foreground">{where.join(' / ')}: </span>

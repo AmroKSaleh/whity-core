@@ -6,6 +6,7 @@ import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Input } from '@amroksaleh/ui/input';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { IconMail, IconPlus } from '@tabler/icons-react';
 
 /**
@@ -31,6 +32,7 @@ interface ProfileEmail {
 export function EmailAddressesSettings() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('auth');
   const [emails, setEmails] = useState<ProfileEmail[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -79,14 +81,23 @@ export function EmailAddressesSettings() {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        addToast(body.error || `Failed to add email address (${res.status}).`, 'error');
+        addToast(
+          body.error ||
+            t('emails.add.errorWithStatus', 'Failed to add email address ({status}).', {
+              status: res.status,
+            }),
+          'error'
+        );
         return;
       }
-      addToast('Verification email sent — check your inbox.', 'success');
+      addToast(
+        t('emails.add.success', 'Verification email sent — check your inbox.'),
+        'success'
+      );
       setNewEmail('');
       await load();
     } catch {
-      addToast('Failed to add email address.', 'error');
+      addToast(t('emails.add.error', 'Failed to add email address.'), 'error');
     } finally {
       setAdding(false);
     }
@@ -98,12 +109,15 @@ export function EmailAddressesSettings() {
       const res = await apiClient(`/api/v1/me/emails/${item.id}/resend-verification`, { method: 'POST' });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        addToast(body.error || 'Failed to resend verification email.', 'error');
+        addToast(
+          body.error || t('emails.resend.error', 'Failed to resend verification email.'),
+          'error'
+        );
         return;
       }
-      addToast('Verification email sent.', 'success');
+      addToast(t('emails.resend.success', 'Verification email sent.'), 'success');
     } catch {
-      addToast('Failed to resend verification email.', 'error');
+      addToast(t('emails.resend.error', 'Failed to resend verification email.'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -115,13 +129,13 @@ export function EmailAddressesSettings() {
       const res = await apiClient(`/api/v1/me/emails/${item.id}/set-primary`, { method: 'POST' });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        addToast(body.error || 'Failed to set as primary.', 'error');
+        addToast(body.error || t('emails.setPrimary.error', 'Failed to set as primary.'), 'error');
         return;
       }
-      addToast('Primary email updated.', 'success');
+      addToast(t('emails.setPrimary.success', 'Primary email updated.'), 'success');
       await load();
     } catch {
-      addToast('Failed to set as primary.', 'error');
+      addToast(t('emails.setPrimary.error', 'Failed to set as primary.'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -133,13 +147,13 @@ export function EmailAddressesSettings() {
       const res = await apiClient(`/api/v1/me/emails/${item.id}`, { method: 'DELETE' });
       if (!res.ok && res.status !== 404) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        addToast(body.error || 'Failed to remove email address.', 'error');
+        addToast(body.error || t('emails.remove.error', 'Failed to remove email address.'), 'error');
         return;
       }
-      addToast('Email address removed.', 'success');
+      addToast(t('emails.remove.success', 'Email address removed.'), 'success');
       setEmails((prev) => prev.filter((e) => e.id !== item.id));
     } catch {
-      addToast('Failed to remove email address.', 'error');
+      addToast(t('emails.remove.error', 'Failed to remove email address.'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -153,9 +167,9 @@ export function EmailAddressesSettings() {
         </div>
       ) : loadError ? (
         <div className="text-sm text-destructive" data-testid="emails-load-error">
-          Failed to load your email addresses.{' '}
+          {t('emails.load.error', 'Failed to load your email addresses.')}{' '}
           <button type="button" onClick={() => void load()} className="underline font-medium">
-            Retry
+            {t('emails.load.retry', 'Retry')}
           </button>
         </div>
       ) : (
@@ -176,7 +190,7 @@ export function EmailAddressesSettings() {
                       {item.email}
                       {item.isPrimary && (
                         <Badge className="ms-2 align-middle" data-testid="email-primary-badge">
-                          Primary
+                          {t('emails.primaryBadge', 'Primary')}
                         </Badge>
                       )}
                       {!item.verified && (
@@ -185,7 +199,7 @@ export function EmailAddressesSettings() {
                           className="ms-2 align-middle"
                           data-testid={`email-unverified-badge-${item.id}`}
                         >
-                          Unverified
+                          {t('emails.unverifiedBadge', 'Unverified')}
                         </Badge>
                       )}
                     </p>
@@ -201,7 +215,7 @@ export function EmailAddressesSettings() {
                       onClick={() => void resendVerification(item)}
                       data-testid={`email-resend-${item.id}`}
                     >
-                      Resend verification
+                      {t('emails.resend', 'Resend verification')}
                     </Button>
                   )}
                   {item.verified && !item.isPrimary && (
@@ -213,7 +227,7 @@ export function EmailAddressesSettings() {
                       onClick={() => void setPrimary(item)}
                       data-testid={`email-set-primary-${item.id}`}
                     >
-                      Set as primary
+                      {t('emails.setPrimary', 'Set as primary')}
                     </Button>
                   )}
                   <Button
@@ -226,13 +240,19 @@ export function EmailAddressesSettings() {
                     title={
                       !canRemove
                         ? item.isPrimary
-                          ? 'Set a different address as primary before removing this one'
-                          : 'You must keep at least one email address'
+                          ? t(
+                              'emails.remove.blocked.primary',
+                              'Set a different address as primary before removing this one'
+                            )
+                          : t(
+                              'emails.remove.blocked.last',
+                              'You must keep at least one email address'
+                            )
                         : undefined
                     }
                     data-testid={`email-remove-${item.id}`}
                   >
-                    Remove
+                    {t('emails.remove', 'Remove')}
                   </Button>
                 </div>
               </li>
@@ -244,7 +264,7 @@ export function EmailAddressesSettings() {
       <form onSubmit={(e) => void handleAdd(e)} className="flex gap-2 pt-2">
         <Input
           type="email"
-          placeholder="Add another email address"
+          placeholder={t('emails.add.placeholder', 'Add another email address')}
           value={newEmail}
           onChange={(e) => setNewEmail(e.target.value)}
           disabled={adding}
@@ -253,7 +273,7 @@ export function EmailAddressesSettings() {
         />
         <Button type="submit" variant="outline" disabled={adding || newEmail.trim() === ''} className="gap-2" data-testid="email-add-submit">
           <IconPlus className="w-4 h-4" />
-          Add
+          {t('emails.add.submit', 'Add')}
         </Button>
       </form>
     </div>

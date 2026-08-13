@@ -10,6 +10,7 @@ import {
   IconGridDots,
   IconLayoutSidebarRightCollapse,
 } from '@tabler/icons-react';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 
 import { Palette } from './palette';
 import { Inspector, type InspectorTab } from './inspector';
@@ -33,14 +34,30 @@ import { Inspector, type InspectorTab } from './inspector';
 
 export type RailTab = 'layers' | InspectorTab;
 
-const TABS: ReadonlyArray<{ id: RailTab; label: string; icon: React.ReactNode }> = [
-  { id: 'layers', label: 'Layers', icon: <IconStack2 /> },
-  { id: 'element', label: 'Element', icon: <IconAdjustments /> },
-  { id: 'page', label: 'Page', icon: <IconFile /> },
-  { id: 'data', label: 'Data', icon: <IconDatabase /> },
-  { id: 'batch', label: 'Batch', icon: <IconListNumbers /> },
-  { id: 'sheet', label: 'Sheet', icon: <IconGridDots /> },
+const TABS: ReadonlyArray<{ id: RailTab; icon: React.ReactNode }> = [
+  { id: 'layers', icon: <IconStack2 /> },
+  { id: 'element', icon: <IconAdjustments /> },
+  { id: 'page', icon: <IconFile /> },
+  { id: 'data', icon: <IconDatabase /> },
+  { id: 'batch', icon: <IconListNumbers /> },
+  { id: 'sheet', icon: <IconGridDots /> },
 ];
+
+/**
+ * The tabs' names. The strip is icon-only, so this is the whole accessible name
+ * of each tab as well as the heading under the strip — which is why it is
+ * resolved through `t()` rather than sitting as English in the table above.
+ */
+function tabLabels(t: TranslateFn): Record<RailTab, string> {
+  return {
+    layers: t('sideRail.tab.layers', 'Layers'),
+    element: t('sideRail.tab.element', 'Element'),
+    page: t('sideRail.tab.page', 'Page'),
+    data: t('sideRail.tab.data', 'Data'),
+    batch: t('sideRail.tab.batch', 'Batch'),
+    sheet: t('sideRail.tab.sheet', 'Sheet'),
+  };
+}
 
 export function SideRail({
   tab,
@@ -57,7 +74,9 @@ export function SideRail({
   /** Props for every other tab; its own `tab` is supplied from `tab` here. */
   inspector: Omit<ComponentProps<typeof Inspector>, 'tab'>;
 }) {
-  const active = TABS.find((t) => t.id === tab) ?? TABS[0];
+  const t = useTranslation('documents');
+  const labels = tabLabels(t);
+  const active = TABS.find((entry) => entry.id === tab) ?? TABS[0];
 
   return (
     <aside
@@ -65,29 +84,29 @@ export function SideRail({
       className="flex min-h-0 w-72 flex-col border-s border-border bg-card"
     >
       <div className="flex items-center gap-0.5 border-b border-border px-1.5 py-1">
-        {TABS.map((t) => (
+        {TABS.map((entry) => (
           <button
-            key={t.id}
+            key={entry.id}
             type="button"
-            data-testid={`doc-tab-${t.id}`}
-            aria-label={t.label}
-            aria-current={tab === t.id}
-            title={t.label}
-            onClick={() => onTabChange(t.id)}
+            data-testid={`doc-tab-${entry.id}`}
+            aria-label={labels[entry.id]}
+            aria-current={tab === entry.id}
+            title={labels[entry.id]}
+            onClick={() => onTabChange(entry.id)}
             className={`flex size-7 items-center justify-center rounded-md outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-4 ${
-              tab === t.id
+              tab === entry.id
                 ? 'bg-accent text-accent-foreground'
                 : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'
             }`}
           >
-            {t.icon}
+            {entry.icon}
           </button>
         ))}
         <button
           type="button"
           data-testid="doc-rail-collapse"
-          aria-label="Hide side panel"
-          title="Hide side panel"
+          aria-label={t('sideRail.collapse', 'Hide side panel')}
+          title={t('sideRail.collapse', 'Hide side panel')}
           onClick={onCollapse}
           className="ms-auto flex size-7 items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-4"
         >
@@ -96,7 +115,7 @@ export function SideRail({
       </div>
 
       <h2 className="px-3 pt-2 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
-        {active.label}
+        {labels[active.id]}
       </h2>
 
       <div className="min-h-0 flex-1 overflow-hidden p-3">
