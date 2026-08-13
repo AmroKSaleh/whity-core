@@ -7,7 +7,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { MCP_TOKENS_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,

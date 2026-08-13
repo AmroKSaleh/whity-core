@@ -5,8 +5,8 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
-import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { Input } from '@/components/ui/input';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { IconRefresh } from '@tabler/icons-react';
 import type {
   AuditLogEntry,

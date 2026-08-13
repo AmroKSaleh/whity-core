@@ -7,9 +7,9 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { TAGS_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -24,7 +24,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@amroksaleh/ui/dialog';
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,

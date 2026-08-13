@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { ErrorState } from '@amroksaleh/ui/empty-state';

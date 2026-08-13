@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { TagInput, type TagOption } from '@amroksaleh/ui/tag-input';
+import { TagInput, type TagOption } from '@/components/ui/tag-input';
 import { Button } from '@amroksaleh/ui/button';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { useAuth } from '@/lib/auth-context';

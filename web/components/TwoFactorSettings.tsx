@@ -4,7 +4,7 @@ import React, { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@amroksaleh/ui/alert-dialog';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@amroksaleh/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { IconCheck } from '@tabler/icons-react';
 import QRCode from 'react-qr-code';

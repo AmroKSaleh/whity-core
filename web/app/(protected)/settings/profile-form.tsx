@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import {
   Form,
   FormField,

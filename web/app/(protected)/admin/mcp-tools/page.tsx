@@ -6,7 +6,7 @@ import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Badge } from '@amroksaleh/ui/badge';
-import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { IconLock, IconLockOpen } from '@tabler/icons-react';
 import type { McpTool } from './types';
 

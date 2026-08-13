@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from 'react';
 import { Toolbar as ToolbarPrimitive } from 'radix-ui';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@/components/ui/input';
 import { MenuBar } from '@amroksaleh/ui/menu-bar';
 import {
   Dialog,
@@ -11,7 +11,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@amroksaleh/ui/dialog';
+} from '@/components/ui/dialog';
 import {
   IconArrowLeft,
   IconComponents,

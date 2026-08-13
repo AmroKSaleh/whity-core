@@ -1,6 +1,13 @@
 'use client';
 
 import React from 'react';
+// DELIBERATELY the package, not '@/components/ui/data-table'. This file is a
+// PUBLISHED registry item (`admin-data-table` in registry.json): a downstream
+// consumer installs this exact source into their own project, where the app's
+// `@/components/ui` wrappers do not exist and the alias would not resolve. The
+// registry-contract test fails if this is changed, which is how it was caught.
+// The cost is that this component's own chrome stays English for us; it takes
+// its copy through props, so the caller supplies translations.
 import {
   DataTable as SharedDataTable,
   type DataTableColumn,
