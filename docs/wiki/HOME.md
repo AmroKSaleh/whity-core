@@ -17,6 +17,7 @@ Welcome to the Whity Core documentation.
 - **[Sign in with Google (SSO)](SSO-Google-Setup.md)** — End-to-end federated sign-in setup: Google OAuth client, provider config, trust tiers, first-login behaviour, troubleshooting.
 - **[Email (SMTP) Setup](Email-SMTP-Setup.md)** — Configure outbound email end to end: cPanel/SMTP credentials, the `mail.*` settings + write-only encrypted password, local Mailpit testing, troubleshooting.
 - **[Hook System](HOOK_SYSTEM.md)** — Plugin event/extension mechanism.
+- **[Offline PHP plugin host](../../templates/tauri-desktop/README.md#the-offline-php-plugin-host)** — the Tauri desktop template's bundled FrankenPHP process that runs real, unmodified whity plugins fully offline (discovery, hooks, RBAC), plus `Whity\Sdk\Testing\OfflinePluginHostConformanceTestCase` (see `sdk/README.md`) for proving your own plugin works there.
 - **[Plugin UI Blocks](Plugin-UI-Blocks.md)** — Server-driven UI: the platform-neutral block contract (display / data-bound / interactive) plugins declare and each platform renders.
 - **[Plugin Data Types](Plugin-Data-Types.md)** — `registerDataType`: a plugin declares its records' lifecycle (trashed ≠ retired) and reference graph as data; core owns the guard evaluation, the refusals, and the generated trash/restore/retire surface.
 - **[Family Relations](RELATIONS.md)** — Person-node graph, relationship types, the relations API + admin hub.

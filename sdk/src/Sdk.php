@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.26).
+ * SDK identity (v1.27).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -194,13 +194,33 @@ namespace Whity\Sdk;
  * all. The escape hatch mirrors `@tenant-guard-ignore`:
  * `-- @reference-lint-ignore: <reason>` on the column, with the REASON
  * required, because a decision nobody wrote down is indistinguishable from a
- * muted alarm).
+ * muted alarm) ->
+ * 1.27 ({@see \Whity\Sdk\Testing\OfflinePluginHostConformanceTestCase}, the
+ * offline-host conformance kit. {@see \Whity\Sdk\Testing\TenantIsolationConformanceTestCase}
+ * proves a plugin's queries stay tenant-scoped; it says nothing about whether
+ * the plugin actually BOOTS under a real offline PHP host with no server
+ * framework behind it — no JWT/memberships/OU hierarchy, a single fixed
+ * device role, and a deliberately narrow SQLite dialect shim (the shape the
+ * Tauri desktop template's bundled FrankenPHP host runs plugins under). Every
+ * real gap that shim surfaced (a migration using `SERIAL` that SQLite
+ * silently mis-parses, an un-seeded `admin` role that left existing grant
+ * migrations silently inert, a route requiring a permission its plugin never
+ * declared) was found only by manually exercising a running host and
+ * watching it fail. This kit catches that class of defect in a plugin
+ * author's own CI, with no FrankenPHP process required: migrations apply
+ * cleanly against the same dialect shim; declared permissions are
+ * well-formed and every route's `requiredPermission` is one of them; a role
+ * granted one permission holds exactly that one and nothing else; and every
+ * declared hook runs cleanly on a synthetic payload — a generic `Throwable`
+ * fails the test loudly, since the real host's per-plugin error boundary
+ * would otherwise swallow it silently and ship the bug invisibly. Additive;
+ * a plugin ignoring it is unaffected).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.26.0';
+    public const VERSION = '1.27.0';
 
     /**
      * Static identity only — never instantiated.

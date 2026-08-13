@@ -167,9 +167,26 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.26.0',
+            '1.27.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.26 adds the undeclared-reference linter (Schema\UndeclaredReferenceLinter '
+            'SDK 1.27 adds the offline-host conformance kit '
+            . '(Testing\OfflinePluginHostConformanceTestCase): the tenant-isolation kit '
+            . '(1.3) proves a plugin\'s queries stay tenant-scoped, but says nothing about '
+            . 'whether the plugin actually BOOTS under an offline PHP host with no server '
+            . 'framework behind it — no JWT/memberships/OU hierarchy, a single fixed device '
+            . 'role, a narrow SQLite dialect shim — the shape the Tauri desktop template\'s '
+            . 'bundled FrankenPHP host runs plugins under. Every real gap that host surfaced '
+            . '(a migration using SERIAL that SQLite silently mis-parses, an un-seeded admin '
+            . 'role that left existing grant migrations silently inert, a route requiring a '
+            . 'permission its plugin never declared) was found only by manually running the '
+            . 'host and watching it fail. The new base case catches that class of defect in a '
+            . 'plugin author\'s own CI instead: migrations apply cleanly on the same dialect '
+            . 'shim, declared permissions are well-formed and match every route\'s '
+            . 'requiredPermission, a role granted one permission holds exactly that one, and '
+            . 'every declared hook runs cleanly on a synthetic payload — a generic Throwable '
+            . 'fails the test loudly, since the real host\'s per-plugin error boundary would '
+            . 'otherwise swallow it silently and ship the bug invisibly; '
+            . 'SDK 1.26 adds the undeclared-reference linter (Schema\UndeclaredReferenceLinter '
             . 'and Schema\ReferenceDeclarations): it flags an *_id column that points at a '
             . 'table that really exists, carries NO foreign key, and appears in NEITHER '
             . 'blocks_delete NOR cascade_delete — a relationship core cannot see, which is '

@@ -6,7 +6,7 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications without dragging a host
 framework along.
 
-## Contract surface (v1.22.0)
+## Contract surface (v1.27.0)
 
 | Type | Since | Purpose |
 | --- | --- | --- |
@@ -24,6 +24,7 @@ framework along.
 | `Whity\Sdk\Tenant\TenantPredicateScanner` | 1.3 | The tokenizer-based static scanner that flags any `SELECT`/`UPDATE`/`DELETE` on a tenant-owned table missing a `tenant_id` predicate (honours `@tenant-guard-ignore:` + the global allowlist). |
 | `Whity\Sdk\Tenant\MigrationTenantColumnLinter` | 1.3 | Lints a plugin's `CREATE TABLE` migrations: every tenant table must declare a `tenant_id` column (or be a declared global / transitively-scoped exception). |
 | `Whity\Sdk\Testing\TenantIsolationConformanceTestCase` | 1.3 | The shared PHPUnit base case a plugin extends to PROVE its tenant isolation: wires the linter + scanner + a RealEngine schema check. Requires `phpunit/phpunit` (dev-only `suggest`). |
+| `Whity\Sdk\Testing\OfflinePluginHostConformanceTestCase` | 1.27 | The shared PHPUnit base case a plugin extends to PROVE it boots and behaves correctly under an OFFLINE PHP plugin host (no server framework — the shape the Tauri desktop template's bundled FrankenPHP runs plugins under): migrations apply cleanly on the same narrow SQLite dialect shim, declared permissions are well-formed and match every route's `requiredPermission`, a role granted one permission holds exactly that one, and every declared hook runs cleanly on a synthetic payload. Requires `phpunit/phpunit` (dev-only `suggest`), same as the tenant-isolation kit. |
 | `Whity\Sdk\Settings\PluginSettingsInterface` | 1.21 | OPTIONAL declaration of the CONFIGURATION KEYS a plugin owns — key => type (`string`/`bool`/`int`/`enum`), default, constraints, options, localized label, description. The host stores them in ITS OWN `app_settings` / `tenant_settings` tables and resolves them through ITS OWN chain (per-tenant override ?? global default ?? declared default), so a plugin stops rebuilding the settings layer as a private table with no declared keys and no validation. Keys are namespaced under the plugin name the loader supplies (`acme:sync_mode`), so two plugins cannot collide and none can shadow a core key; a declaration whose own `default` fails its own rules is refused at load. Publication on the host's settings screens is an explicit `admin => true` opt-in (those screens are gated on CORE settings permissions, not the plugin's). NOT for credentials: a secret-shaped declaration is refused, since settings are readable TEXT served to anyone holding `settings:read`. |
 
 ## Versioning policy
@@ -45,6 +46,11 @@ optional surface existing plugins can ignore —
   (`PluginRequirementsInterface::getCoreConstraint()`): a plugin built for a
   specific or newer host core can be quarantined cleanly at load, gated against
   the host's core version independently of the SDK gate.
+- **1.27** — offline-host conformance kit (`Whity\Sdk\Testing\OfflinePluginHostConformanceTestCase`):
+  the same idea as the 1.3 tenant-isolation kit, but proving a plugin actually
+  BOOTS under an offline PHP host with no server framework behind it — see
+  [Proving offline-host compatibility](#proving-offline-host-compatibility-127)
+  below.
 
 Breaking contract changes require a new major. A plugin declares the SDK range
 it supports via `getSdkConstraint()` (e.g. `'^1.1'`) and, optionally, the host
@@ -224,6 +230,60 @@ PostgreSQL one for truth. Run the dual-engine job against a deliberately broken
 query once (drop a `CAST`) to confirm it can actually fail — see
 [Testing Against PostgreSQL](../docs/wiki/Testing-Against-PostgreSQL.md) for the
 full trap catalogue and a copy-paste CI workflow.
+
+### Proving offline-host compatibility (1.27)
+
+`TenantIsolationConformanceTestCase` proves a DIFFERENT thing than the kit
+below: that your queries stay tenant-scoped. It says nothing about whether
+your plugin actually **boots** under a real offline PHP host that has no
+server framework behind it at all — the shape the Tauri desktop template's
+bundled FrankenPHP process runs plugins under (`templates/tauri-desktop/php-host/`
+in whity-core): no JWT/memberships/OU hierarchy, a single fixed device role,
+and a deliberately narrow SQLite dialect shim (only `SERIAL PRIMARY KEY` is
+rewritten; `JSONB`/`gen_random_uuid()`/`RETURNING`-in-DDL are not).
+
+Every real gap that host surfaced in practice — a migration using `SERIAL`
+that SQLite silently mis-parses (leaving every inserted `id` `NULL`), an
+un-seeded `admin` role that left existing grant migrations silently inert, a
+route requiring a permission its plugin never declared in `getPermissions()`
+— was found only by manually running the host and watching it fail. Extend
+the shared base case to catch that class of defect in your own CI instead,
+with no FrankenPHP process required:
+
+```php
+use Whity\Sdk\PluginInterface;
+use Whity\Sdk\Testing\OfflinePluginHostConformanceTestCase;
+use MyPlugin\MyPlugin;
+
+final class MyPluginOfflineHostConformanceTest extends OfflinePluginHostConformanceTestCase
+{
+    protected function pluginUnderTest(): PluginInterface
+    {
+        return new MyPlugin();
+    }
+}
+```
+
+That's the whole test file — the base case supplies four checks (each a
+separate test, run against an in-memory SQLite engine carrying only the
+offline host's bare RBAC skeleton tables):
+
+1. **Migrations apply cleanly** on the same narrow dialect shim the real host
+   uses — catches a Postgres-only construct the shim doesn't rewrite, or a
+   migration that assumes a table only a different plugin or core creates.
+2. **Declared permissions are well-formed** (`resource:action`) — a malformed
+   slug gets the WHOLE plugin quarantined by the offline host's loader, never
+   silently ignored.
+3. **Every route's `requiredPermission` is one of your declared permissions**,
+   and a role granted exactly one permission can exercise only that one — an
+   undeclared or typo'd permission slug is never grantable to anyone, offline
+   or in production.
+4. **Every declared hook runs cleanly on a synthetic empty payload.** A
+   generic `Throwable` FAILS this test loudly, even though the real host's
+   per-plugin error boundary would silently swallow it in production — the
+   whole point is catching the bug in your CI instead of shipping it
+   invisibly. `HookVetoException` is the one sanctioned exception and is not
+   a failure.
 
 ## Minimal plugin
 

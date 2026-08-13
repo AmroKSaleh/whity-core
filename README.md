@@ -55,7 +55,7 @@ See **[docs/wiki/Architecture.md](docs/wiki/Architecture.md)** for the full requ
 | Web client | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4, shadcn/Radix UI |
 | Design tokens | OKLCH → CSS / JSON / Dart (generated) |
 | 2FA | `spomky-labs/otphp` (TOTP) |
-| Mobile / Desktop | Flutter (Dart) — design tokens only (`flutter/whity_tokens`) · Tauri (Rust) — reference desktop template with offline-first sync, delivered (`templates/tauri-desktop`) |
+| Mobile / Desktop | Flutter (Dart) — design tokens only (`flutter/whity_tokens`) · Tauri (Rust) — reference desktop template with offline-first sync AND a bundled FrankenPHP host running real, unmodified whity plugins offline, delivered (`templates/tauri-desktop`) |
 
 ## Quick start
 
@@ -180,7 +180,7 @@ CI runs these same jobs plus Playwright E2E on every PR.
 
 Core platform — **delivered**: FrankenPHP runtime, plugin hot-loading + lifecycle, RBAC (registry, hierarchy, OU inheritance), multi-tenant isolation, feature flagging system, 2FA, design system, developer docs, an E2E test suite, the organizational-unit hierarchy visualizer (tree + graph views in the OU Management Hub), self-service user profile management, and the family-relations module (Persons/Relations graph — [ADR 0002](docs/adr/0002-family-relations-management.md)).
 
-Under consideration: a maintained first-party mobile client — Flutter currently ships only the design-tokens package (`flutter/whity_tokens`) for downstream apps to consume, not a Whity-authored mobile UI. Desktop is no longer planned as Electron: `templates/tauri-desktop` already delivers a working Tauri (Rust) reference app with offline-first sync. See [open issues](https://github.com/AmroKSaleh/whity-core/issues).
+Under consideration: a maintained first-party mobile client — Flutter currently ships only the design-tokens package (`flutter/whity_tokens`) for downstream apps to consume, not a Whity-authored mobile UI. Desktop is no longer planned as Electron: `templates/tauri-desktop` already delivers a working Tauri (Rust) reference app with offline-first sync, plus a bundled FrankenPHP host that runs real whity plugins offline (see the template's own README). See [open issues](https://github.com/AmroKSaleh/whity-core/issues).
 
 Embedding an n8n workflow engine was **deferred, not adopted** — [ADR 0008](docs/adr/0008-defer-n8n-external-automation-surface.md) reframes automation around MCP (any orchestrator that speaks MCP, including n8n, can already call every permission-gated API route).
 

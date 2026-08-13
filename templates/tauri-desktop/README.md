@@ -11,7 +11,7 @@ deliberately unused here and this template is not a mobile starting point —
 (`flutter/whity_tokens`) and re-implementing the same adapter interfaces in
 Dart. There is no React mobile client.
 
-It demonstrates, end to end, the two things every downstream desktop app
+It demonstrates, end to end, the three things every downstream desktop app
 needs:
 
 1. **The multi-client feature-extraction pattern** (see `packages/features`):
@@ -24,6 +24,11 @@ needs:
    (`src-tauri/src/commands/printer.rs`, backed by the `printers` crate) as a
    real, working example of the extension pattern: something a plain web app
    cannot do, added as one crate + one `#[tauri::command]`.
+3. **Running real whity plugins offline** (see [The offline PHP plugin
+   host](#the-offline-php-plugin-host) below): a bundled FrankenPHP process
+   runs **unmodified** whity plugin PHP code — the same plugin code the
+   server runs — inside the desktop app itself, with a Rust-side bridge so
+   plugin code can reach native hardware (printers today).
 
 ## Getting started
 
@@ -33,9 +38,11 @@ npm run tauri dev
 ```
 
 This opens a desktop window with a sidebar (Home / Demo Catalog / Printer
-demo). The Demo Catalog list/create/edit flow persists to a real SQLite file
-in your OS's per-app data directory (see `src-tauri/src/db.rs`) — close the
-app and reopen it, your data is still there.
+demo / PHP plugin host). The Demo Catalog list/create/edit flow persists to a
+real SQLite file in your OS's per-app data directory (see `src-tauri/src/db.rs`)
+— close the app and reopen it, your data is still there. The PHP plugin host
+screen exercises the offline FrankenPHP process described below, including a
+real native-print round trip through a whity plugin.
 
 ## Project layout
 
@@ -139,6 +146,81 @@ DemoCatalog sync API (version, idempotent create, soft-delete, changes feed).
 **Reusability.** The sync-metadata column set + the engine are the pattern to copy
 for your own entities — DemoCatalog is the worked example, exactly like the printer
 command is the worked native-crate example.
+
+## The offline PHP plugin host
+
+Real product features in whity live as **plugins** — PHP classes under
+`plugins/` implementing `Whity\Sdk\PluginInterface` — that normally only run
+inside whity-core's own server. This template bundles a **FrankenPHP**
+process (`templates/tauri-desktop/php-host/`) that runs real, **unmodified**
+plugin PHP code fully offline, so a plugin written once for the server also
+runs on desktop with zero changes — no server-side hand-porting required.
+
+```
+Rust (src-tauri/src/php_host/) ──spawns──▶ FrankenPHP ──serves──▶ php-host/
+   │                                                                 │
+   ├─ sidecar.rs      restart-on-crash supervisor, Windows Job Object│  discovers & loads
+   ├─ native_bridge.rs  loopback HTTP server, secret-checked         │  plugins/*, runs their
+   └─ proxy.rs        Rust → FrankenPHP HTTP client (php_request)    │  migrations, registers
+                                                                     │  their routes/hooks
+                              plugin code calls back into Rust ◀────┘  for native hardware
+```
+
+**Four real plugins ship today**, proving this works for arbitrary plugins,
+not just a hand-built demo: `DemoCatalog` and `HelloWorld` (vendored
+byte-for-byte from the main repo's `plugins/`), `UiKitShowcase` (same), and
+`PrintDemo` (new, ~40 lines — the one plugin that calls back into Rust to
+print, via `Whity\Native\NativeBridgeClient`).
+
+**The host is a real, generic loader, not a fixed two-plugin allowlist**:
+
+- **Discovery.** `php-host/plugins/` is scanned at boot and any class
+  implementing `PluginInterface` is picked up automatically — drop a new
+  plugin directory in and it loads with zero config (set `WHITY_PLUGINS` to
+  an explicit comma-separated FQCN list instead, if you want to pin exactly
+  what ships). A plugin declaring an incompatible `PluginRequirementsInterface`
+  constraint is quarantined (logged, skipped) rather than crashing the whole
+  host — check `GET /__whity/plugins` for the loaded/quarantined list.
+- **Hooks.** `getHooks()` subscriptions really fire, with the same
+  priority-ordered dispatch and per-plugin error boundary as the real server
+  (a generic exception is swallowed and logged; `HookVetoException` is the
+  one sanctioned exception that propagates).
+- **RBAC.** Every request is authorized against a real, single-device
+  `PermissionResolver` — not an implicit super-user. The default device role
+  (`admin`) is granted every permission any loaded plugin declares; set
+  `WHITY_DEVICE_ROLE` to a narrower seeded role to deliberately test your
+  plugin's 403 path offline.
+- **SQLite dialect shim** (`SqliteCompatPdo`): plugin migrations are written
+  for Postgres. The shim rewrites `SERIAL PRIMARY KEY` → `INTEGER PRIMARY KEY`
+  and adds a `NOW()` UDF — deliberately narrow; a plugin using `JSONB`,
+  `gen_random_uuid()`, or `RETURNING` in DDL needs a new rule added.
+
+**Writing a plugin that works here**: if it already follows the SDK contract
+(`whity/plugin-sdk`), it should just work. Prove it before you ship, without
+needing a running FrankenPHP process at all, by extending
+`Whity\Sdk\Testing\OfflinePluginHostConformanceTestCase` (see `sdk/README.md`)
+in your plugin's own test suite — it catches exactly the class of bug this
+template's own development surfaced (a migration using `SERIAL`, a route
+requiring a permission the plugin never declared, a hook that throws) before
+it ships, not after.
+
+**Setup**: `scripts/setup-php-runtime.ps1` (Windows — downloads the pinned,
+checksum-verified FrankenPHP release) / `scripts/setup-php-runtime-linux.sh`
+(Linux — compiles a curated static binary via Docker) fetch the FrankenPHP
+runtime into `src-tauri/resources/frankenphp/` before `npm run tauri dev`/`build`.
+Windows downloads a prebuilt binary; Linux compiles one with only the
+extensions this app needs (`pdo_sqlite`, `sqlite3`, `mbstring`) — see the
+scripts' own comments for the full per-platform story. macOS is not yet
+spiked (no Mac available in this environment).
+
+**Known gap — data doesn't yet round-trip.** The PHP host owns its own
+SQLite file (`whity-offline.sqlite`), completely separate from the Rust sync
+engine's `whity-desktop.sqlite` described above. A row created through a
+plugin's offline routes today lives only in the PHP host's database — it does
+not reach the real server, unlike the Rust-hand-ported DemoCatalog sync flow.
+Reconciling the two is a real, harder, deliberately deferred follow-up (the
+two schemas are structurally different: one is a client-side sync queue, the
+other a server-schema clone).
 
 ## Adding your own native capability (the printer recipe)
 
