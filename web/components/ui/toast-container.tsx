@@ -44,13 +44,31 @@ function ToastIcon({ type }: { type: ToastType }) {
   }
 }
 
-export function ToastContainer() {
+/**
+ * Copy for the container's accessible names.
+ *
+ * Props with English defaults rather than a translation hook: this file is a
+ * PUBLISHED registry item, installed verbatim into a downstream consumer's
+ * project where `@amroksaleh/features` need not exist. A caller that passes
+ * nothing renders exactly as before.
+ */
+export interface ToastContainerProps {
+  /** Accessible name for the live region holding the toasts. */
+  regionLabel?: string;
+  /** Accessible name for a toast's dismiss button. */
+  dismissLabel?: string;
+}
+
+export function ToastContainer({
+  regionLabel = 'Notifications',
+  dismissLabel = 'Dismiss notification',
+}: ToastContainerProps = {}) {
   const { toasts, removeToast } = useToast();
 
   return (
     <div
       role="region"
-      aria-label="Notifications"
+      aria-label={regionLabel}
       className="fixed bottom-0 inset-e-0 z-[9999] flex flex-col gap-3 p-4 pointer-events-none"
     >
       {toasts.map((toast) => (
@@ -71,7 +89,7 @@ export function ToastContainer() {
           <button
             type="button"
             onClick={() => removeToast(toast.id)}
-            aria-label="Dismiss notification"
+            aria-label={dismissLabel}
             className="opacity-70 hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/50 rounded-sm"
           >
             <IconX className="size-4" aria-hidden="true" />

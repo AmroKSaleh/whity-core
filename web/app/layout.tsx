@@ -8,7 +8,7 @@ import { NavigationProvider } from "@/lib/navigation-context";
 import { DirectionProvider } from "@/lib/direction-context";
 import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
 import { CapabilitiesProvider } from "@/lib/capabilities-context";
-import { ToastContainer } from "@/components/ui/toast-container";
+import { ToastContainerMount } from "@/components/ui/toast-container-mount";
 import "@/lib/plugin-screens";
 import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
@@ -110,7 +110,7 @@ export default async function RootLayout({
                       <NavigationProvider>
                         <PluginFeaturesProvider>
                           {children}
-                          <ToastContainer />
+                          <ToastContainerMount />
                         </PluginFeaturesProvider>
                       </NavigationProvider>
                     </ToastProvider>

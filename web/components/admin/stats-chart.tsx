@@ -10,10 +10,25 @@ interface DataPoint {
 interface StatsChartProps {
   data: DataPoint[];
   label: string;
+  /**
+   * Tooltip text for one bar. A function, not a template, because the count
+   * and the term sit inside one phrase and languages order them differently —
+   * `{count} {label}` spliced together freezes English word order.
+   *
+   * A prop rather than a translation hook because this file is a PUBLISHED
+   * registry item: a downstream consumer installs it verbatim, where
+   * `@amroksaleh/features` need not exist.
+   */
+  tooltipLabel?: (count: number, label: string) => string;
   color?: string;
 }
 
-export function StatsChart({ data, label, color = 'currentColor' }: StatsChartProps) {
+export function StatsChart({
+  data,
+  label,
+  color = 'currentColor',
+  tooltipLabel = (count, term) => `${count} ${term}`,
+}: StatsChartProps) {
   const max = useMemo(() => Math.max(...data.map((d) => d.count), 5), [data]);
 
   if (data.length === 0) {
@@ -40,7 +55,7 @@ export function StatsChart({ data, label, color = 'currentColor' }: StatsChartPr
                 }}
               />
               <div className="absolute bottom-full mb-2 hidden group-hover:block bg-popover text-popover-foreground text-[10px] px-1.5 py-0.5 rounded border shadow-sm whitespace-nowrap z-10">
-                {d.count} {label}
+                {tooltipLabel(d.count, label)}
               </div>
             </div>
           );

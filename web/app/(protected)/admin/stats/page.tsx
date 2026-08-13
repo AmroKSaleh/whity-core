@@ -270,6 +270,9 @@ export default function AdminStats() {
                 ) : (
                   <StatsChart
                     data={stats?.growth.users ?? []}
+                    tooltipLabel={(count, term) =>
+                      t("stats.growth.tooltip", "{count} {term}", { count, term })
+                    }
                     label={t("stats.growth.users.label", "new users")}
                     color="var(--primary)"
                   />
@@ -281,6 +284,9 @@ export default function AdminStats() {
                 ) : (
                   <StatsChart
                     data={stats?.growth.tenants ?? []}
+                    tooltipLabel={(count, term) =>
+                      t("stats.growth.tooltip", "{count} {term}", { count, term })
+                    }
                     label={t("stats.growth.tenants.label", "new tenants")}
                     color="var(--chart-2)"
                   />
