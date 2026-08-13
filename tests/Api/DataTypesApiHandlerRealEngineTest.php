@@ -15,6 +15,9 @@ use Whity\Core\DataType\GatedDataTypeLifecycle;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
+use Whity\Core\Settings\GlobalSettingsRepository;
+use Whity\Core\Settings\SettingsService;
+use Whity\Core\Settings\TenantSettingsRepository;
 use Whity\Core\Tenant\TableOwnershipRegistry;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
@@ -587,7 +590,11 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         return new DataTypesApiHandler(
             $types,
             $service,
-            new GatedDataTypeLifecycle($types, $service, new RoleChecker($this->wrap($this->pdo), $registry))
+            new GatedDataTypeLifecycle($types, $service, new RoleChecker($this->wrap($this->pdo), $registry)),
+            new SettingsService(
+                new GlobalSettingsRepository($this->pdo),
+                new TenantSettingsRepository($this->pdo)
+            )
         );
     }
 

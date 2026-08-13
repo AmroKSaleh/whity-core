@@ -2865,6 +2865,126 @@
                 }
             }
         },
+        "/api/v1/data-types/{type}/bulk": {
+            "post": {
+                "operationId": "post_api_v1_data_types_type_bulk",
+                "summary": "Perform one lifecycle action over many records, skipping and reporting refusals rather than aborting the batch",
+                "tags": [
+                    "data-types"
+                ],
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The namespaced data-type key, e.g. `democatalog:item`"
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DataTypeBulkRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Per-record outcomes. The batch ran; individual records may have refused, including all of them",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DataTypeBulkResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown `action`, or `ids` is not a non-empty array of record ids",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown data type, or no such record in the caller's tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "This data type does not offer that action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "More ids than the `data_types.bulk_max_ids` ceiling allows for this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/data-types/{type}/{id}": {
             "delete": {
                 "operationId": "delete_api_v1_data_types_type_id",
@@ -19003,6 +19123,152 @@
                     "table",
                     "label",
                     "count"
+                ]
+            },
+            "DataTypeBulkCounts": {
+                "type": "object",
+                "properties": {
+                    "requested": {
+                        "type": "integer"
+                    },
+                    "unique": {
+                        "type": "integer"
+                    },
+                    "ok": {
+                        "type": "integer"
+                    },
+                    "refused": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "requested",
+                    "unique",
+                    "ok",
+                    "refused"
+                ]
+            },
+            "DataTypeBulkRequest": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "trash",
+                            "restore",
+                            "retire",
+                            "delete"
+                        ]
+                    },
+                    "ids": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "description": "Record keys. Duplicates are collapsed; the ceiling is the `data_types.bulk_max_ids` setting and exceeding it is refused, never truncated."
+                    }
+                },
+                "required": [
+                    "action",
+                    "ids"
+                ]
+            },
+            "DataTypeBulkResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "key": {
+                                "type": "string"
+                            },
+                            "action": {
+                                "type": "string",
+                                "enum": [
+                                    "trash",
+                                    "restore",
+                                    "retire",
+                                    "delete"
+                                ]
+                            },
+                            "counts": {
+                                "$ref": "#/components/schemas/DataTypeBulkCounts"
+                            },
+                            "results": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/DataTypeBulkResult"
+                                }
+                            }
+                        },
+                        "required": [
+                            "key",
+                            "action",
+                            "counts",
+                            "results"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DataTypeBulkResult": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "integer"
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "enum": [
+                            "ok",
+                            "not_found",
+                            "blocked",
+                            "refused",
+                            "unsupported",
+                            "forbidden"
+                        ]
+                    },
+                    "state": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "reason": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "blockers": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DataTypeBlocker"
+                        }
+                    },
+                    "required": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "status",
+                    "outcome",
+                    "state",
+                    "reason",
+                    "message",
+                    "blockers"
                 ]
             },
             "DataTypeComposition": {

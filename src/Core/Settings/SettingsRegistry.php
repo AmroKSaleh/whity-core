@@ -196,6 +196,23 @@ final class SettingsRegistry
     public const DOCUMENTS_RENDER_MAX_PAGES = 'documents.render_max_pages';
     public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
 
+    // Bulk data-type lifecycle batch ceiling (WC-746). The largest number of ids
+    // `POST /api/data-types/{type}/bulk` accepts in one request. An unbounded id
+    // list is a denial-of-service with a polite name: every id costs a
+    // transaction, a hook dispatch and an audit row, and the request holds a
+    // worker for all of them.
+    //
+    // Tenant-overridable rather than global-only, for the same reason the render
+    // ceilings above are: an operator running one tenant with a 40,000-row trash
+    // and another with forty should be able to raise one without raising both.
+    // Resolution is the standard tenant override -> global default -> registry
+    // default, so a deployment that never touches it still has a bound.
+    //
+    // Exceeding it is a clean 422 refusal naming the limit, never a silent
+    // truncation: a client that asked to clear 900 records and was quietly given
+    // 500 has no way to notice the other 400 are still there.
+    public const DATA_TYPES_BULK_MAX_IDS = 'data_types.bulk_max_ids';
+
     /**
      * Error tracking (WC-error-tracking). Operator-only, deployment-wide: one
      * process serves every tenant, and a boot/queue/cron failure belongs to no
@@ -457,6 +474,12 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
+        // 500 ids per bulk lifecycle request. Chosen to cover the motivating
+        // screens — "empty the trash", "retire this selection" — in a single
+        // call, while still bounding the work one request can commission. Each
+        // id is its own transaction, so this is a ceiling on duration and lock
+        // churn, not on a single long-held lock.
+        self::DATA_TYPES_BULK_MAX_IDS => '500',
         self::ERROR_TRACKING_ENABLED => 'false',
         self::ERROR_TRACKING_PROVIDER => 'internal',
         self::ERROR_TRACKING_ENVIRONMENT => '',
@@ -737,6 +760,7 @@ final class SettingsRegistry
             self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
             self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
+            self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
             // Error tracking. These five were declared with defaults, types,
             // enum options and a global-only marking, but never given a
             // validate() arm — so every one of them fell through to `default`
@@ -1003,6 +1027,30 @@ final class SettingsRegistry
         }
         if ($pages > 1000000) {
             return 'documents.render_max_pages must be 1000000 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Max ids accepted in one bulk lifecycle request: a whole number, at least
+     * 1, capped at 10000 (a sanity ceiling on the ADMIN-set value itself).
+     *
+     * At least 1 rather than 0: zero would refuse every batch, which is
+     * indistinguishable from the endpoint being broken. An operator who wants
+     * that removes the permission the type declares for the action.
+     */
+    private static function validateBulkMaxIds(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'data_types.bulk_max_ids must be a whole number.';
+        }
+        $ids = (int) $value;
+        if ($ids < 1) {
+            return 'data_types.bulk_max_ids must be at least 1.';
+        }
+        if ($ids > 10000) {
+            return 'data_types.bulk_max_ids must be 10000 or fewer.';
         }
 
         return null;
