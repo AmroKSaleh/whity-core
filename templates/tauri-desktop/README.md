@@ -109,8 +109,14 @@ The DemoCatalog pilot is wired end-to-end as an **offline-first, syncing** deskt
 app (WC-desktop-sync). Everything is local-first — every read and write hits local
 SQLite immediately, online or not — and a sync engine reconciles with the server.
 
-**Backend URL.** Set `WHITY_BACKEND_URL` (default `http://localhost:8000`) to point
-a build at dev / staging / a customer instance — the one knob, read in `config.rs`.
+**Backend URL.** `WHITY_BACKEND_URL` is the one knob for pointing a build at dev /
+staging / a customer instance. It resolves in two layers: `build.rs` bakes a
+compile-time default (build environment, else `.env` — copy `.env.example` —, else
+the pinned `https://whity.jameedium.org`), and the same variable in the process
+environment overrides it at runtime. The baked value is what matters for a shipped
+installer: it is launched from a shortcut, with no shell to read env vars from. For
+local work against the dev stack:
+`$env:WHITY_BACKEND_URL="http://localhost:8000"; npm run tauri dev`.
 
 **Auth — cached device login (`src-tauri/src/auth/`).** The app enrolls once
 (interactive login → `POST /api/v1/devices`) and stores the long-lived device
