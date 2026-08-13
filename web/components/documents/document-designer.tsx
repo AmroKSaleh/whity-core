@@ -37,6 +37,7 @@ import {
   type DocBlock,
 } from '@/lib/documents/blocks';
 import { useToast } from '@/lib/toast-context';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { Button } from '@amroksaleh/ui/button';
 import { PX_PER_MM } from '@/lib/documents/types';
 import {
@@ -60,15 +61,16 @@ const ZOOM_STEP = 0.25;
 
 /** Immutably replace the elements of one page within a template. */
 function withPageElements(
-  t: DocTemplate,
+  tpl: DocTemplate,
   idx: number,
   fn: (els: DocElement[]) => DocElement[]
 ): DocTemplate {
-  return { ...t, pages: t.pages.map((p, i) => (i === idx ? { ...p, elements: fn(p.elements) } : p)) };
+  return { ...tpl, pages: tpl.pages.map((p, i) => (i === idx ? { ...p, elements: fn(p.elements) } : p)) };
 }
 
 export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
   const { addToast } = useToast();
+  const t = useTranslation('documents');
   const modLabel = useModLabel();
   const [template, setTemplate] = useState<DocTemplate>(() => blankTemplate());
   const [currentPage, setCurrentPage] = useState(0);
@@ -140,9 +142,12 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
       const extras = STARTER_BLOCKS.filter((b) => !saved.some((s) => s.name === b.name));
       setBlocks([...saved, ...extras]);
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to load blocks.', 'error');
+      addToast(
+        error instanceof Error ? error.message : t('designer.blocks.loadFailed', 'Failed to load blocks.'),
+        'error'
+      );
     }
-  }, [addToast]);
+  }, [addToast, t]);
   useEffect(() => {
     void (async () => {
       await refreshBlocks();
@@ -190,10 +195,15 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
       try {
         setSaved(await listSaved());
       } catch (error) {
-        addToast(error instanceof Error ? error.message : 'Failed to load saved templates.', 'error');
+        addToast(
+          error instanceof Error
+            ? error.message
+            : t('designer.templates.loadFailed', 'Failed to load saved templates.'),
+          'error'
+        );
       }
     })();
-  }, [addToast]);
+  }, [addToast, t]);
 
   // Live state for the once-attached keyboard listener + history snapshots,
   // kept fresh by a per-render effect (so the stable listener/callbacks read
@@ -249,8 +259,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
   const appendClones = useCallback((srcs: DocElement[]) => {
     if (srcs.length === 0) return;
     const idx = kbRef.current.pageIndex;
-    setTemplate((t) => {
-      const els = t.pages[idx]?.elements ?? [];
+    setTemplate((tpl) => {
+      const els = tpl.pages[idx]?.elements ?? [];
       let maxZ = els.reduce((m, e) => Math.max(m, e.z), 0);
       const clones = srcs.map((src) => {
         maxZ += 1;
@@ -265,7 +275,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         } as DocElement;
       });
       setSelectedIds(clones.map((c) => c.id));
-      return withPageElements(t, idx, (e) => [...e, ...clones]);
+      return withPageElements(tpl, idx, (e) => [...e, ...clones]);
     });
   }, []);
 
@@ -290,7 +300,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     setHasClipboard(true);
     const ids = new Set(sel.map((e) => e.id));
     commit('cut');
-    setTemplate((t) => withPageElements(t, kbRef.current.pageIndex, (e) => e.filter((x) => !ids.has(x.id))));
+    setTemplate((tpl) => withPageElements(tpl, kbRef.current.pageIndex, (e) => e.filter((x) => !ids.has(x.id))));
     setSelectedIds([]);
   }, [commit, currentSelection]);
 
@@ -319,7 +329,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     if (movable.length === 0) return;
     const ids = new Set(movable.map((e) => e.id));
     commit('delete');
-    setTemplate((t) => withPageElements(t, idx, (els) => els.filter((e) => !ids.has(e.id))));
+    setTemplate((tpl) => withPageElements(tpl, idx, (els) => els.filter((e) => !ids.has(e.id))));
     setSelectedIds((prev) => prev.filter((id) => !ids.has(id)));
   }, [commit, currentSelection]);
 
@@ -413,8 +423,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
       if (d) {
         e.preventDefault();
         commit('nudge');
-        setTemplate((t) =>
-          withPageElements(t, idx, (e2) =>
+        setTemplate((tpl) =>
+          withPageElements(tpl, idx, (e2) =>
             e2.map((x) => (movableIds.has(x.id) ? { ...x, x: Math.max(0, x.x + d[0]), y: Math.max(0, x.y + d[1]) } : x))
           )
         );
@@ -449,14 +459,24 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     const built = rowsFromValues(serials, cfg.key, data);
     setBatchRows(built.length ? built : null);
     setBatchIndex(0);
-    addToast(built.length ? `Generated ${built.length} rows.` : 'No rows generated.', built.length ? 'success' : 'info');
+    addToast(
+      built.length
+        ? t('designer.batch.generated', 'Generated {count} rows.', { count: built.length })
+        : t('designer.batch.generatedNone', 'No rows generated.'),
+      built.length ? 'success' : 'info'
+    );
   };
 
   const loadBatchRecords = (records: Record<string, string>[]) => {
     const built = rowsFromRecords(records, data);
     setBatchRows(built.length ? built : null);
     setBatchIndex(0);
-    addToast(built.length ? `Loaded ${built.length} rows.` : 'No rows found.', built.length ? 'success' : 'info');
+    addToast(
+      built.length
+        ? t('designer.batch.loaded', 'Loaded {count} rows.', { count: built.length })
+        : t('designer.batch.loadedNone', 'No rows found.'),
+      built.length ? 'success' : 'info'
+    );
   };
 
   const clearBatch = () => {
@@ -467,8 +487,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
   const patchElement = (id: string, patch: Partial<DocElement>) => {
     // Label by field set so a continuous drag / same-field typing coalesces.
     commit(`patch:${Object.keys(patch).sort().join(',')}`);
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) =>
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) =>
         els.map((e) => (e.id === id ? ({ ...e, ...patch } as DocElement) : e))
       )
     );
@@ -476,10 +496,10 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
 
   const addElement = (type: ElementType) => {
     commit('add');
-    setTemplate((t) => {
-      const el = newElement(type, t.pages[pageIndex]?.elements ?? []);
+    setTemplate((tpl) => {
+      const el = newElement(type, tpl.pages[pageIndex]?.elements ?? []);
       setSelectedIds([el.id]);
-      return withPageElements(t, pageIndex, (els) => [...els, el]);
+      return withPageElements(tpl, pageIndex, (els) => [...els, el]);
     });
     // Inserting is "I made this, now let me configure it": show the new
     // element's properties instead of leaving the rail on Layers, where a fresh
@@ -491,7 +511,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
 
   const deleteElement = (id: string) => {
     commit('delete');
-    setTemplate((t) => withPageElements(t, pageIndex, (els) => els.filter((e) => e.id !== id)));
+    setTemplate((tpl) => withPageElements(tpl, pageIndex, (els) => els.filter((e) => e.id !== id)));
     setSelectedIds((prev) => prev.filter((x) => x !== id));
   };
 
@@ -499,8 +519,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
   const changeMany = (updates: Array<{ id: string; patch: Partial<DocElement> }>) => {
     commit('drag-group');
     const map = new Map(updates.map((u) => [u.id, u.patch]));
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) =>
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) =>
         els.map((e) => (map.has(e.id) ? ({ ...e, ...map.get(e.id) } as DocElement) : e))
       )
     );
@@ -524,8 +544,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
             bottom: Math.max(...sel.map((e) => e.y + e.h)),
           };
     commit('align');
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) =>
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) =>
         els.map((e) => {
           if (!ids.has(e.id) || e.locked) return e;
           const patch: Partial<DocElement> =
@@ -562,8 +582,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
       targets.set(e.id, axis === 'h' ? c - e.w / 2 : c - e.h / 2);
     });
     commit('distribute');
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) =>
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) =>
         els.map((e) =>
           targets.has(e.id)
             ? ({ ...e, ...(axis === 'h' ? { x: Math.max(0, targets.get(e.id)!) } : { y: Math.max(0, targets.get(e.id)!) }) } as DocElement)
@@ -575,8 +595,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
 
   const toggleLock = (id: string) => {
     commit('lock');
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) =>
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) =>
         els.map((e) => (e.id === id ? ({ ...e, locked: !e.locked } as DocElement) : e))
       )
     );
@@ -584,8 +604,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
 
   const toggleHidden = (id: string) => {
     commit('hide');
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) =>
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) =>
         els.map((e) => (e.id === id ? ({ ...e, hidden: !e.hidden } as DocElement) : e))
       )
     );
@@ -593,8 +613,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
 
   const reorder = (id: string, dir: 'up' | 'down') => {
     commit('reorder');
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) => {
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) => {
         const zs = els.map((e) => e.z);
         const target = dir === 'up' ? Math.max(...zs) + 1 : Math.min(...zs) - 1;
         return els.map((e) => (e.id === id ? { ...e, z: target } : e));
@@ -614,8 +634,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     const ids = new Set(selectedIds);
     if (ids.size === 0) return;
     commit(key);
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) =>
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) =>
         els.map((e) => (ids.has(e.id) ? ({ ...e, [key]: value } as DocElement) : e))
       )
     );
@@ -627,8 +647,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     const ids = new Set(selectedIds);
     if (ids.size === 0) return;
     commit('reorder');
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) => {
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) => {
         const moving = els.filter((e) => ids.has(e.id)).sort((a, b) => a.z - b.z);
         if (moving.length === 0) return els;
         const zs = els.map((e) => e.z);
@@ -668,15 +688,18 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     const sel = elements.filter((e) => selectedIds.includes(e.id));
     const block = makeBlockFromElements(`Block ${blocks.length + 1}`, sel);
     if (!block) {
-      addToast('Select one or more elements to save as a block.', 'info');
+      addToast(t('designer.block.selectFirst', 'Select one or more elements to save as a block.'), 'info');
       return;
     }
     try {
       await saveBlock(block);
       await refreshBlocks();
-      addToast(`Saved block “${block.name}”.`, 'success');
+      addToast(t('designer.block.saved', 'Saved block “{name}”.', { name: block.name }), 'success');
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to save block.', 'error');
+      addToast(
+        error instanceof Error ? error.message : t('designer.block.saveFailed', 'Failed to save block.'),
+        'error'
+      );
     }
   };
 
@@ -684,8 +707,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     const b = blocksMap[blockId];
     if (!b) return;
     commit('insert-block');
-    setTemplate((t) => {
-      const els = t.pages[pageIndex]?.elements ?? [];
+    setTemplate((tpl) => {
+      const els = tpl.pages[pageIndex]?.elements ?? [];
       const inst = {
         id: `blockInstance-${Date.now()}-${(pasteSeq.current += 1)}`,
         type: 'blockInstance' as const,
@@ -698,7 +721,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         z: els.reduce((m, e) => Math.max(m, e.z), 0) + 1,
       };
       setSelectedIds([inst.id]);
-      return withPageElements(t, pageIndex, (e) => [...e, inst]);
+      return withPageElements(tpl, pageIndex, (e) => [...e, inst]);
     });
   };
 
@@ -706,9 +729,12 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     try {
       await deleteBlock(id);
       await refreshBlocks();
-      addToast('Block deleted from your library.', 'info');
+      addToast(t('designer.block.deleted', 'Block deleted from your library.'), 'info');
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to delete block.', 'error');
+      addToast(
+        error instanceof Error ? error.message : t('designer.block.deleteFailed', 'Failed to delete block.'),
+        'error'
+      );
     }
   };
 
@@ -723,7 +749,12 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
       await saveBlock({ ...b, scope });
       await refreshBlocks();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to change the block’s visibility.', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('designer.block.scopeFailed', 'Failed to change the block’s visibility.'),
+        'error'
+      );
     }
   };
 
@@ -776,12 +807,15 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         try {
           await saveBlock({ ...rebuilt, id: editing.id, scope: currentScope });
           await refreshBlocks();
-          addToast(`Block “${editing.name}” updated.`, 'success');
+          addToast(t('designer.block.updated', 'Block “{name}” updated.', { name: editing.name }), 'success');
         } catch (error) {
-          addToast(error instanceof Error ? error.message : 'Failed to save block.', 'error');
+          addToast(
+            error instanceof Error ? error.message : t('designer.block.saveFailed', 'Failed to save block.'),
+            'error'
+          );
         }
       } else {
-        addToast('A block needs at least one element; discarded.', 'info');
+        addToast(t('designer.block.empty', 'A block needs at least one element; discarded.'), 'info');
       }
     }
     setTemplate(stash.template);
@@ -808,8 +842,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
       id: `${e.type}-${Date.now()}-${(pasteSeq.current += 1)}-${i}`,
       z: inst.z + i,
     }));
-    setTemplate((t) =>
-      withPageElements(t, pageIndex, (els) => [...els.filter((e) => e.id !== instId), ...resolved])
+    setTemplate((tpl) =>
+      withPageElements(tpl, pageIndex, (els) => [...els.filter((e) => e.id !== instId), ...resolved])
     );
     setSelectedIds(resolved.map((e) => e.id));
   };
@@ -818,9 +852,9 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
   const addPage = () => {
     commit('page-add');
     const at = pageIndex + 1;
-    setTemplate((t) => ({
-      ...t,
-      pages: [...t.pages.slice(0, at), { id: newPageId(), elements: [] }, ...t.pages.slice(at)],
+    setTemplate((tpl) => ({
+      ...tpl,
+      pages: [...tpl.pages.slice(0, at), { id: newPageId(), elements: [] }, ...tpl.pages.slice(at)],
     }));
     setSelectedIds([]);
     setCurrentPage(at);
@@ -829,12 +863,12 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
   const duplicatePage = () => {
     commit('page-duplicate');
     const at = pageIndex;
-    setTemplate((t) => {
-      const src = t.pages[at];
+    setTemplate((tpl) => {
+      const src = tpl.pages[at];
       const cloned = src.elements.map((el, i) => ({ ...el, id: `${el.type}-${Date.now()}-${i}` }) as DocElement);
       return {
-        ...t,
-        pages: [...t.pages.slice(0, at + 1), { id: newPageId(), elements: cloned }, ...t.pages.slice(at + 1)],
+        ...tpl,
+        pages: [...tpl.pages.slice(0, at + 1), { id: newPageId(), elements: cloned }, ...tpl.pages.slice(at + 1)],
       };
     });
     setSelectedIds([]);
@@ -845,7 +879,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     if (template.pages.length <= 1) return;
     commit('page-delete');
     const at = pageIndex;
-    setTemplate((t) => ({ ...t, pages: t.pages.filter((_, i) => i !== at) }));
+    setTemplate((tpl) => ({ ...tpl, pages: tpl.pages.filter((_, i) => i !== at) }));
     setSelectedIds([]);
     setCurrentPage(Math.max(0, at - 1));
   };
@@ -855,11 +889,11 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     const to = dir === 'left' ? at - 1 : at + 1;
     if (to < 0 || to >= template.pages.length) return;
     commit('page-move');
-    setTemplate((t) => {
-      const pages = [...t.pages];
+    setTemplate((tpl) => {
+      const pages = [...tpl.pages];
       const [p] = pages.splice(at, 1);
       pages.splice(to, 0, p);
-      return { ...t, pages };
+      return { ...tpl, pages };
     });
     setCurrentPage(to);
   };
@@ -870,7 +904,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
   };
 
   // Fold the runtime print settings into the template for save/export.
-  const withSettings = (t: DocTemplate): DocTemplate => ({ ...t, sheet, sequence });
+  const withSettings = (tpl: DocTemplate): DocTemplate => ({ ...tpl, sheet, sequence });
 
   const doSave = async () => {
     // Which document this save belongs to. If the editor moves on to a
@@ -886,9 +920,12 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         setCurrentId(id);
       }
       setSaved(await listSaved());
-      addToast('Template saved.', 'success');
+      addToast(t('designer.template.saved', 'Template saved.'), 'success');
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to save template.', 'error');
+      addToast(
+        error instanceof Error ? error.message : t('designer.template.saveFailed', 'Failed to save template.'),
+        'error'
+      );
     }
   };
 
@@ -907,7 +944,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     setBatchRows(null);
     setBatchIndex(0);
     resetHistory();
-    addToast(`Loaded “${entry.name}”.`, 'info');
+    addToast(t('designer.template.loaded', 'Loaded “{name}”.', { name: entry.name }), 'info');
   };
 
   const doDeleteSaved = async () => {
@@ -916,18 +953,23 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
       await deleteSaved(currentId);
       setSaved(await listSaved());
       setCurrentId(null);
-      addToast('Saved template deleted.', 'info');
+      addToast(t('designer.template.deleted', 'Saved template deleted.'), 'info');
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to delete template.', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('designer.template.deleteFailed', 'Failed to delete template.'),
+        'error'
+      );
     }
   };
 
   // Load a fresh document (blank or a starter), resetting all editor state.
-  const loadFreshTemplate = (t: DocTemplate) => {
+  const loadFreshTemplate = (tpl: DocTemplate) => {
     docEpoch.current += 1;
-    setTemplate(t);
-    setSheet(t.sheet ?? DEFAULT_SHEET);
-    setSequence(t.sequence ?? DEFAULT_SEQUENCE);
+    setTemplate(tpl);
+    setSheet(tpl.sheet ?? DEFAULT_SHEET);
+    setSequence(tpl.sequence ?? DEFAULT_SEQUENCE);
     setCurrentId(null);
     setCurrentPage(0);
     setSelectedIds([]);
@@ -942,14 +984,14 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
     const s = STARTER_TEMPLATES.find((x) => x.id === starterId);
     if (!s) return;
     loadFreshTemplate(s.make());
-    addToast(`Started from “${s.label}”.`, 'info');
+    addToast(t('designer.template.startedFrom', 'Started from “{name}”.', { name: s.label }), 'info');
   };
 
   const onImportFile = async (file: File) => {
     try {
       const parsed: unknown = JSON.parse(await file.text());
       if (!isDocTemplate(parsed)) {
-        addToast('That file is not a valid template.', 'error');
+        addToast(t('designer.import.invalid', 'That file is not a valid template.'), 'error');
         return;
       }
       const migrated = migrateTemplate(parsed);
@@ -963,9 +1005,9 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
       setBatchRows(null);
       setBatchIndex(0);
       resetHistory();
-      addToast('Template imported.', 'success');
+      addToast(t('designer.import.done', 'Template imported.'), 'success');
     } catch {
-      addToast('Could not read that file.', 'error');
+      addToast(t('designer.import.unreadable', 'Could not read that file.'), 'error');
     }
   };
 
@@ -1076,7 +1118,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         name={template.name}
         onNameChange={(name) => {
           commit('name');
-          setTemplate((t) => ({ ...t, name }));
+          setTemplate((tpl) => ({ ...tpl, name }));
         }}
         zoom={zoom}
         blockEdit={blockEdit}
@@ -1153,11 +1195,11 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
               onChangeSelected: (patch) => selectedId && patchElement(selectedId, patch),
               onChangePage: (patch: Partial<PageSpec>) => {
                 commit('page');
-                setTemplate((t) => ({ ...t, page: { ...t.page, ...patch } }));
+                setTemplate((tpl) => ({ ...tpl, page: { ...tpl.page, ...patch } }));
               },
               onChangePlaceholders: (list: Placeholder[]) => {
                 commit('data');
-                setTemplate((t) => ({ ...t, placeholders: list }));
+                setTemplate((tpl) => ({ ...tpl, placeholders: list }));
               },
               onGenerateBatch: generateBatch,
               onLoadBatchRecords: loadBatchRecords,
@@ -1174,8 +1216,8 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
             <button
               type="button"
               data-testid="doc-rail-expand"
-              aria-label="Show side panel"
-              title="Show side panel"
+              aria-label={t('designer.rail.show', 'Show side panel')}
+              title={t('designer.rail.show', 'Show side panel')}
               onClick={() => setRailOpen(true)}
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-4"
             >
@@ -1196,7 +1238,9 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
             fragment, so adding or deleting "pages" there is meaningless. */}
         {!blockEdit && (
           <>
-        <span className="me-1 text-xs font-medium text-muted-foreground">Pages</span>
+        <span className="me-1 text-xs font-medium text-muted-foreground">
+          {t('designer.status.pages', 'Pages')}
+        </span>
         {template.pages.map((pg, i) => (
           <button
             key={pg.id}
@@ -1213,13 +1257,19 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
             {i + 1}
           </button>
         ))}
-        <Button variant="ghost" size="icon-sm" aria-label="Add page" data-testid="doc-add-page" onClick={addPage}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('designer.page.add', 'Add page')}
+          data-testid="doc-add-page"
+          onClick={addPage}
+        >
           <IconPlus className="h-4 w-4" />
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Duplicate page"
+          aria-label={t('designer.page.duplicate', 'Duplicate page')}
           data-testid="doc-duplicate-page"
           onClick={duplicatePage}
         >
@@ -1228,7 +1278,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Move page left"
+          aria-label={t('designer.page.moveLeft', 'Move page left')}
           disabled={pageIndex === 0}
           onClick={() => movePage('left')}
         >
@@ -1237,7 +1287,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Move page right"
+          aria-label={t('designer.page.moveRight', 'Move page right')}
           disabled={pageIndex >= template.pages.length - 1}
           onClick={() => movePage('right')}
         >
@@ -1246,7 +1296,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Delete page"
+          aria-label={t('designer.page.delete', 'Delete page')}
           data-testid="doc-delete-page"
           disabled={template.pages.length <= 1}
           onClick={deletePage}
@@ -1259,7 +1309,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
         <span className="ms-auto flex items-center gap-3 text-xs text-muted-foreground">
           {selectedIds.length > 0 && (
             <span className="font-medium text-primary" data-testid="doc-selection-count">
-              {selectedIds.length} selected
+              {t('designer.status.selected', '{count} selected', { count: selectedIds.length })}
             </span>
           )}
           {batchActive && (
@@ -1267,7 +1317,7 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Previous data row"
+                aria-label={t('designer.status.previousRow', 'Previous data row')}
                 data-testid="doc-status-batch-prev"
                 disabled={batchClampIndex <= 0}
                 onClick={() => setBatchIndex(batchClampIndex - 1)}
@@ -1275,12 +1325,15 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
                 <IconChevronLeft className="h-4 w-4" />
               </Button>
               <span className="tabular-nums">
-                Row {batchClampIndex + 1} / {rows.length}
+                {t('designer.status.row', 'Row {index} / {total}', {
+                  index: batchClampIndex + 1,
+                  total: rows.length,
+                })}
               </span>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Next data row"
+                aria-label={t('designer.status.nextRow', 'Next data row')}
                 data-testid="doc-status-batch-next"
                 disabled={batchClampIndex >= rows.length - 1}
                 onClick={() => setBatchIndex(batchClampIndex + 1)}
@@ -1290,7 +1343,12 @@ export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
             </span>
           )}
           <span className="tabular-nums">
-            {blockEdit ? 'Editing a reusable block' : `Page ${pageIndex + 1} of ${template.pages.length}`}
+            {blockEdit
+              ? t('designer.status.blockEdit', 'Editing a reusable block')
+              : t('designer.status.page', 'Page {index} of {total}', {
+                  index: pageIndex + 1,
+                  total: template.pages.length,
+                })}
           </span>
         </span>
       </footer>

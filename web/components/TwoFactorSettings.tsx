@@ -16,12 +16,78 @@ import {
   AlertDialogTitle,
 } from '@amroksaleh/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@amroksaleh/ui/dialog';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { IconCheck } from '@tabler/icons-react';
 import QRCode from 'react-qr-code';
 
 interface TwoFactorStatus {
   enabled: boolean;
   backup_codes_available: number;
+}
+
+/**
+ * A wizard failure is either text the BACKEND supplied — already a sentence,
+ * in whatever language it speaks — or one of OURS, recorded as a variant and
+ * translated at render time.
+ *
+ * Recording ours rather than resolving it immediately is what keeps the setup
+ * effect off `t`: `t`'s identity changes the moment the translation bundle
+ * arrives, so listing it as a dependency would re-run the effect and mint a
+ * SECOND TOTP secret under a QR code the user may already have scanned.
+ */
+type WizardError =
+  | { kind: 'none' }
+  | { kind: 'backend'; text: string }
+  | { kind: 'setup' }
+  | { kind: 'fetch' }
+  | { kind: 'codeRequired' }
+  | { kind: 'verify' };
+
+/** Resolve a {@link WizardError} to the sentence to show. */
+function wizardErrorText(t: TranslateFn, error: WizardError): string {
+  switch (error.kind) {
+    case 'none':
+      return '';
+    case 'backend':
+      return error.text;
+    case 'setup':
+      return t('twoFactorSetup.error.setup', 'Failed to setup 2FA');
+    case 'fetch':
+      return t('twoFactorSetup.error.fetch', 'Failed to fetch setup data');
+    case 'codeRequired':
+      return t('twoFactorSetup.error.codeRequired', 'Please enter the verification code');
+    case 'verify':
+      return t('twoFactorSetup.error.verify', 'Failed to verify code');
+  }
+}
+
+/**
+ * The same treatment for the settings panel, and for the same reason: its
+ * status fetch is a `useCallback` a mount effect depends on, so pulling `t`
+ * into it would re-run the fetch — and flash the loading spinner over an
+ * already-rendered panel — as soon as the translation bundle arrived.
+ */
+type SettingsError =
+  | { kind: 'none' }
+  | { kind: 'backend'; text: string }
+  | { kind: 'status' }
+  | { kind: 'disable' }
+  | { kind: 'regenerate' };
+
+/** Resolve a {@link SettingsError} to the sentence to show. */
+function settingsErrorText(t: TranslateFn, error: SettingsError): string {
+  switch (error.kind) {
+    case 'none':
+      return '';
+    case 'backend':
+      return error.text;
+    case 'status':
+      return t('twoFactorSettings.error.status', 'Failed to fetch 2FA status');
+    case 'disable':
+      return t('twoFactorSettings.error.disable', 'Failed to disable 2FA');
+    case 'regenerate':
+      return t('twoFactorSettings.error.regenerate', 'Failed to regenerate backup codes');
+  }
 }
 
 interface TwoFactorSetupWizardProps {
@@ -39,11 +105,12 @@ interface TwoFactorSetupWizardProps {
 
 export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete, onCancel, bearerToken }) => {
   const { apiClient } = useAuth();
+  const t = useTranslation('auth');
   const [step, setStep] = useState<'setup' | 'verify'>('setup');
   const [secret, setSecret] = useState<string>('');
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [code, setCode] = useState<string>('');
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<WizardError>({ kind: 'none' });
   const [loading, setLoading] = useState<boolean>(false);
 
   const doFetch = useCallback((path: string, init?: RequestInit) => {
@@ -69,7 +136,9 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          setError(errorData.message || 'Failed to setup 2FA');
+          setError(
+            errorData.message ? { kind: 'backend', text: errorData.message } : { kind: 'setup' }
+          );
           return;
         }
 
@@ -77,7 +146,7 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
         setSecret(data.secret);
         setQrCodeUrl(data.qrCodeUrl);
       } catch {
-        setError('Failed to fetch setup data');
+        setError({ kind: 'fetch' });
       }
     };
 
@@ -86,12 +155,12 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
 
   const handleVerify = async () => {
     if (!code.trim()) {
-      setError('Please enter the verification code');
+      setError({ kind: 'codeRequired' });
       return;
     }
 
     setLoading(true);
-    setError('');
+    setError({ kind: 'none' });
 
     try {
       const response = await doFetch('/api/v1/auth/2fa/confirm', {
@@ -104,7 +173,9 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        setError(errorData.message || 'Failed to verify code');
+        setError(
+          errorData.message ? { kind: 'backend', text: errorData.message } : { kind: 'verify' }
+        );
         setLoading(false);
         return;
       }
@@ -112,25 +183,31 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
       const data = await response.json();
       onComplete(data.backup_codes);
     } catch {
-      setError('Failed to verify code');
+      setError({ kind: 'verify' });
       setLoading(false);
     }
   };
+
+  const errorText = wizardErrorText(t, error);
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="w-[90vw] max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Enable Two-Factor Authentication</DialogTitle>
+          <DialogTitle>
+            {t('twoFactorSetup.title', 'Enable Two-Factor Authentication')}
+          </DialogTitle>
           <DialogDescription>
-            Secure your account with two-factor authentication
+            {t('twoFactorSetup.subtitle', 'Secure your account with two-factor authentication')}
           </DialogDescription>
         </DialogHeader>
 
         {step === 'setup' && (
           <div className="space-y-4">
             <div>
-              <p className="text-sm font-medium mb-2">Scan with your authenticator app:</p>
+              <p className="text-sm font-medium mb-2">
+                {t('twoFactorSetup.scan.label', 'Scan with your authenticator app:')}
+              </p>
               {qrCodeUrl && (
                 <div className="flex justify-center">
                   <QRCode
@@ -144,7 +221,7 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
             </div>
             <div>
               <p className="text-sm text-muted-foreground mb-2">
-                Can&apos;t scan? Enter this code manually:
+                {t('twoFactorSetup.manual.label', "Can't scan? Enter this code manually:")}
               </p>
               <div className="flex items-center gap-2">
                 <code
@@ -159,7 +236,7 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
                   }}
                   className="px-3 py-2 bg-primary hover:bg-primary/80 text-primary-foreground rounded text-sm whitespace-nowrap shrink-0"
                 >
-                  Copy
+                  {t('twoFactorSetup.copy', 'Copy')}
                 </button>
               </div>
             </div>
@@ -167,14 +244,14 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
               onClick={() => setStep('verify')}
               className="w-full"
             >
-              Next
+              {t('twoFactorSetup.next', 'Next')}
             </Button>
             <Button
               variant="outline"
               onClick={onCancel}
               className="w-full"
             >
-              Cancel
+              {t('twoFactorSetup.cancel', 'Cancel')}
             </Button>
           </div>
         )}
@@ -183,7 +260,10 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-2">
-                Enter the 6-digit code from your authenticator app:
+                {t(
+                  'twoFactorSetup.code.label',
+                  'Enter the 6-digit code from your authenticator app:'
+                )}
               </label>
               <Input
                 type="text"
@@ -194,20 +274,22 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
                 className="text-center text-2xl tracking-widest h-12"
               />
             </div>
-            {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+            {errorText && <Alert variant="destructive"><AlertDescription>{errorText}</AlertDescription></Alert>}
             <Button
               onClick={handleVerify}
               disabled={loading || code.length !== 6}
               className="w-full"
             >
-              {loading ? 'Verifying...' : 'Verify'}
+              {loading
+                ? t('twoFactorSetup.submit.pending', 'Verifying...')
+                : t('twoFactorSetup.submit', 'Verify')}
             </Button>
             <Button
               variant="outline"
               onClick={() => setStep('setup')}
               className="w-full"
             >
-              Back
+              {t('twoFactorSetup.back', 'Back')}
             </Button>
           </div>
         )}
@@ -218,11 +300,12 @@ export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onCo
 
 export const TwoFactorSettings: React.FC = () => {
   const { apiClient } = useAuth();
+  const t = useTranslation('auth');
   const [enabled, setEnabled] = useState<boolean>(false);
   const [backupCodesAvailable, setBackupCodesAvailable] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [showWizard, setShowWizard] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<SettingsError>({ kind: 'none' });
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [disableConfirmOpen, setDisableConfirmOpen] = useState<boolean>(false);
@@ -230,7 +313,7 @@ export const TwoFactorSettings: React.FC = () => {
 
   const fetchStatus = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setError({ kind: 'none' });
 
     try {
       const response = await apiClient('/api/v1/auth/2fa/status', {
@@ -239,7 +322,9 @@ export const TwoFactorSettings: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        setError(errorData.message || 'Failed to fetch 2FA status');
+        setError(
+          errorData.message ? { kind: 'backend', text: errorData.message } : { kind: 'status' }
+        );
         return;
       }
 
@@ -247,7 +332,7 @@ export const TwoFactorSettings: React.FC = () => {
       setEnabled(data.enabled);
       setBackupCodesAvailable(data.backup_codes_available);
     } catch {
-      setError('Failed to fetch 2FA status');
+      setError({ kind: 'status' });
     } finally {
       setLoading(false);
     }
@@ -256,7 +341,7 @@ export const TwoFactorSettings: React.FC = () => {
   const handleDisable = async () => {
     setDisableConfirmOpen(false);
     setActionLoading(true);
-    setError('');
+    setError({ kind: 'none' });
     setStatusMessage('');
 
     try {
@@ -266,16 +351,20 @@ export const TwoFactorSettings: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        setError(errorData.message || 'Failed to disable 2FA');
+        setError(
+          errorData.message ? { kind: 'backend', text: errorData.message } : { kind: 'disable' }
+        );
         setActionLoading(false);
         return;
       }
 
       setEnabled(false);
       setBackupCodesAvailable(0);
-      setStatusMessage('Two-factor authentication has been disabled.');
+      setStatusMessage(
+        t('twoFactorSettings.disable.success', 'Two-factor authentication has been disabled.')
+      );
     } catch {
-      setError('Failed to disable 2FA');
+      setError({ kind: 'disable' });
     } finally {
       setActionLoading(false);
     }
@@ -284,7 +373,7 @@ export const TwoFactorSettings: React.FC = () => {
   const handleRegenerateCodes = async () => {
     setRegenerateConfirmOpen(false);
     setActionLoading(true);
-    setError('');
+    setError({ kind: 'none' });
     setStatusMessage('');
 
     try {
@@ -294,7 +383,9 @@ export const TwoFactorSettings: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        setError(errorData.message || 'Failed to regenerate backup codes');
+        setError(
+          errorData.message ? { kind: 'backend', text: errorData.message } : { kind: 'regenerate' }
+        );
         setActionLoading(false);
         return;
       }
@@ -312,9 +403,11 @@ export const TwoFactorSettings: React.FC = () => {
       element.click();
 
       setBackupCodesAvailable(data.backup_codes.length);
-      setStatusMessage('Backup codes regenerated and downloaded.');
+      setStatusMessage(
+        t('twoFactorSettings.regenerate.success', 'Backup codes regenerated and downloaded.')
+      );
     } catch {
-      setError('Failed to regenerate backup codes');
+      setError({ kind: 'regenerate' });
     } finally {
       setActionLoading(false);
     }
@@ -344,6 +437,8 @@ export const TwoFactorSettings: React.FC = () => {
     })();
   }, [fetchStatus]);
 
+  const errorText = settingsErrorText(t, error);
+
   if (loading) {
     return (
       <div className="max-w-md mx-auto p-6">
@@ -361,9 +456,9 @@ export const TwoFactorSettings: React.FC = () => {
         {statusMessage}
       </div>
 
-      {error && (
+      {errorText && (
         <Alert variant="destructive" className="mb-4">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{errorText}</AlertDescription>
         </Alert>
       )}
 
@@ -372,24 +467,47 @@ export const TwoFactorSettings: React.FC = () => {
           {enabled ? (
             <>
               <IconCheck className="w-5 h-5 text-success" />
-              <span className="font-semibold text-success">Enabled</span>
+              <span className="font-semibold text-success">
+                {t('twoFactorSettings.status.enabled', 'Enabled')}
+              </span>
             </>
           ) : (
-            <span className="font-semibold text-foreground">Not Enabled</span>
+            <span className="font-semibold text-foreground">
+              {t('twoFactorSettings.status.notEnabled', 'Not Enabled')}
+            </span>
           )}
         </div>
         <p className="text-sm text-muted-foreground">
-          Two-Factor Authentication {enabled ? 'is' : 'is not'} currently enabled
+          {enabled
+            ? t(
+                'twoFactorSettings.status.description.enabled',
+                'Two-Factor Authentication is currently enabled'
+              )
+            : t(
+                'twoFactorSettings.status.description.disabled',
+                'Two-Factor Authentication is not currently enabled'
+              )}
         </p>
       </div>
 
       {enabled && (
         <div className="bg-card rounded-lg p-4 mb-4 border border-border">
+          {/*
+            NOT translated, deliberately: the count is wrapped in <strong> mid-
+            sentence, and `t()` returns a string — so keeping the emphasis would
+            mean handing a translator three fragments in English word order,
+            which is worse than leaving the sentence in English. It also has no
+            plural form ("You have 1 backup codes available"). Both need the
+            markup pulled out of the sentence first; tracked separately.
+          */}
           <p className="text-sm text-card-foreground">
             You have <strong>{backupCodesAvailable}</strong> backup codes available
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            Use these codes if you lose access to your authenticator app
+            {t(
+              'twoFactorSettings.backupCodes.hint',
+              'Use these codes if you lose access to your authenticator app'
+            )}
           </p>
         </div>
       )}
@@ -400,7 +518,7 @@ export const TwoFactorSettings: React.FC = () => {
             onClick={() => setShowWizard(true)}
             className="w-full"
           >
-            Enable 2FA
+            {t('twoFactorSettings.enable', 'Enable 2FA')}
           </Button>
         )}
 
@@ -412,7 +530,9 @@ export const TwoFactorSettings: React.FC = () => {
               disabled={actionLoading}
               className="w-full"
             >
-              {actionLoading ? 'Regenerating...' : 'Regenerate Backup Codes'}
+              {actionLoading
+                ? t('twoFactorSettings.regenerate.pending', 'Regenerating...')
+                : t('twoFactorSettings.regenerate', 'Regenerate Backup Codes')}
             </Button>
             <Button
               variant="destructive"
@@ -420,7 +540,9 @@ export const TwoFactorSettings: React.FC = () => {
               disabled={actionLoading}
               className="w-full"
             >
-              {actionLoading ? 'Disabling...' : 'Disable 2FA'}
+              {actionLoading
+                ? t('twoFactorSettings.disable.pending', 'Disabling...')
+                : t('twoFactorSettings.disable', 'Disable 2FA')}
             </Button>
           </>
         )}
@@ -430,18 +552,23 @@ export const TwoFactorSettings: React.FC = () => {
       <AlertDialog open={disableConfirmOpen} onOpenChange={setDisableConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Disable Two-Factor Authentication?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t('twoFactorSettings.disable.confirm.title', 'Disable Two-Factor Authentication?')}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              You will need to enable 2FA again to restore this protection. This cannot be undone immediately.
+              {t(
+                'twoFactorSettings.disable.confirm.body',
+                'You will need to enable 2FA again to restore this protection. This cannot be undone immediately.'
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('twoFactorSettings.confirm.cancel', 'Cancel')}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/80"
               onClick={handleDisable}
             >
-              Disable 2FA
+              {t('twoFactorSettings.disable', 'Disable 2FA')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -451,15 +578,20 @@ export const TwoFactorSettings: React.FC = () => {
       <AlertDialog open={regenerateConfirmOpen} onOpenChange={setRegenerateConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Regenerate Backup Codes?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t('twoFactorSettings.regenerate.confirm.title', 'Regenerate Backup Codes?')}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This will invalidate your current backup codes. Make sure to download the new ones.
+              {t(
+                'twoFactorSettings.regenerate.confirm.body',
+                'This will invalidate your current backup codes. Make sure to download the new ones.'
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('twoFactorSettings.confirm.cancel', 'Cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleRegenerateCodes}>
-              Regenerate Codes
+              {t('twoFactorSettings.regenerate.confirm.submit', 'Regenerate Codes')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -9,6 +9,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { ErrorState } from '@amroksaleh/ui/empty-state';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import {
   IconAlertTriangle,
   IconMessageCircle,
@@ -100,6 +101,7 @@ async function readErrorMessage(
  */
 export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
+  const t = useTranslation('plugin');
 
   const [greetings, setGreetings] = useState<Greeting[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -108,6 +110,12 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
 
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Resolved here and passed into the effect as a STRING rather than depending
+  // on `t` itself: `t`'s identity changes when the translation bundle arrives,
+  // and an identity-compared dependency would re-run the fetch on every load.
+  // A string dependency is compared by value, so the English case never re-runs.
+  const loadErrorMessage = t('hello.load.error', 'Failed to load greetings');
 
   useEffect(() => {
     // The fetcher lives inside the effect so no setState runs synchronously in
@@ -125,23 +133,20 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
         setIsForbidden(false);
 
         if (!response.ok) {
-          throw new Error(
-            await readErrorMessage(response, 'Failed to load greetings')
-          );
+          throw new Error(await readErrorMessage(response, loadErrorMessage));
         }
 
         const body: unknown = await response.json();
         setGreetings(toGreetings(body));
       } catch (error) {
-        const fallback = 'Failed to load greetings';
-        addToast(error instanceof Error ? error.message : fallback, 'error');
+        addToast(error instanceof Error ? error.message : loadErrorMessage, 'error');
       } finally {
         setIsLoading(false);
       }
     };
 
     void load();
-  }, [reloadKey, addToast]);
+  }, [reloadKey, addToast, loadErrorMessage]);
 
   const refetch = () => setReloadKey((key) => key + 1);
 
@@ -160,12 +165,15 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
       });
       if (!response.ok) {
         addToast(
-          await readErrorMessage(response, 'Failed to create greeting'),
+          await readErrorMessage(
+            response,
+            t('hello.create.error', 'Failed to create greeting')
+          ),
           'error'
         );
         return;
       }
-      addToast('Greeting created successfully', 'success');
+      addToast(t('hello.create.success', 'Greeting created successfully'), 'success');
       setMessage('');
       refetch();
     } finally {
@@ -173,9 +181,11 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
     }
   };
 
-  const description =
-    `Greetings provided by the ${feature.plugin} plugin. ` +
-    'This screen is a bespoke override demonstrating the custom-screen pattern.';
+  const description = t(
+    'hello.description',
+    'Greetings provided by the {plugin} plugin. This screen is a bespoke override demonstrating the custom-screen pattern.',
+    { plugin: feature.plugin }
+  );
 
   if (isForbidden) {
     return (
@@ -183,8 +193,12 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
         <AdminHeader title={feature.label} description={description} />
         <ErrorState
           icon={<IconShieldLock />}
-          title="Access denied"
-          description={`You need the ${feature.requiredPermission} permission to use this feature.`}
+          title={t('hello.accessDenied.title', 'Access denied')}
+          description={t(
+            'hello.accessDenied.description',
+            'You need the {permission} permission to use this feature.',
+            { permission: feature.requiredPermission }
+          )}
         />
       </div>
     );
@@ -204,8 +218,8 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
         <Input
           value={message}
           maxLength={255}
-          placeholder="Write a greeting..."
-          aria-label="Greeting message"
+          placeholder={t('hello.message.placeholder', 'Write a greeting...')}
+          aria-label={t('hello.message.label', 'Greeting message')}
           disabled={isSubmitting}
           onChange={(event) => setMessage(event.target.value)}
         />
@@ -215,7 +229,9 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
           disabled={isSubmitting || message.trim() === ''}
         >
           <IconPlus size={18} />
-          {isSubmitting ? 'Adding...' : 'Add greeting'}
+          {isSubmitting
+            ? t('hello.submit.pending', 'Adding...')
+            : t('hello.submit', 'Add greeting')}
         </Button>
       </form>
 
@@ -231,9 +247,11 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
             size={32}
             className="mx-auto mb-3 text-muted-foreground"
           />
-          <h2 className="font-heading text-sm font-medium">No greetings yet</h2>
+          <h2 className="font-heading text-sm font-medium">
+            {t('hello.empty.title', 'No greetings yet')}
+          </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Add the first greeting above to get started.
+            {t('hello.empty.description', 'Add the first greeting above to get started.')}
           </p>
         </div>
       ) : (
