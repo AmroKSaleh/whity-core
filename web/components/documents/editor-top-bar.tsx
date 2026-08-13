@@ -23,10 +23,11 @@ import {
   IconZoomOut,
 } from '@tabler/icons-react';
 
+import { useTranslation } from '@amroksaleh/features/i18n';
+
 import {
-  buildEditorMenus,
-  buildEditorToolbar,
   listEditorShortcuts,
+  useEditorChrome,
   type EditorCommandContext,
 } from './editor-commands';
 
@@ -62,8 +63,8 @@ export function EditorTopBar({
   /** e.g. "×10" when a variable-data batch is loaded. */
   batchLabel: string | null;
 }) {
-  const menus = buildEditorMenus(ctx);
-  const groups = buildEditorToolbar(ctx);
+  const t = useTranslation('documents');
+  const { menus, groups } = useEditorChrome(ctx);
 
   return (
     <header className="shrink-0 border-b border-border bg-card" data-testid="doc-top-bar">
@@ -71,22 +72,22 @@ export function EditorTopBar({
           the header), but the document still needs one top-level heading so
           screen-reader users can orient by heading rather than landing in an
           unnamed page. The visible identity is the template-name field below. */}
-      <h1 className="sr-only">Document &amp; Label Designer</h1>
+      <h1 className="sr-only">{t('topBar.heading', 'Document & Label Designer')}</h1>
 
       {/* ── title bar ── */}
       <div className="flex items-center gap-2 px-2 py-1.5">
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Close editor"
-          title="Close editor"
+          aria-label={t('topBar.close', 'Close editor')}
+          title={t('topBar.close', 'Close editor')}
           data-testid="doc-back"
           onClick={ctx.onCloseEditor}
         >
           <IconArrowLeft className="h-4 w-4 rtl:rotate-180" />
         </Button>
         <Input
-          aria-label="Template name"
+          aria-label={t('topBar.name', 'Template name')}
           data-testid="doc-name"
           value={name}
           onChange={(e) => onNameChange(e.target.value)}
@@ -94,14 +95,14 @@ export function EditorTopBar({
         />
         {ctx.currentSavedId === null && !blockEdit && (
           <span className="text-[0.625rem] text-muted-foreground" data-testid="doc-unsaved-hint">
-            Not saved yet
+            {t('topBar.unsaved', 'Not saved yet')}
           </span>
         )}
         {batchLabel && (
           <span
             className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
             data-testid="doc-batch-badge"
-            title="Print will render one copy per batch row"
+            title={t('topBar.batchBadge', 'Print will render one copy per batch row')}
           >
             {batchLabel}
           </span>
@@ -110,25 +111,25 @@ export function EditorTopBar({
         <span className="ms-auto flex items-center gap-1.5">
           <Button variant="outline" size="sm" className="gap-1" data-testid="doc-preview-toggle" onClick={ctx.onTogglePreview}>
             {ctx.preview ? <IconEyeOff className="h-3.5 w-3.5" /> : <IconEye className="h-3.5 w-3.5" />}
-            {ctx.preview ? 'Editing' : 'Preview'}
+            {ctx.preview ? t('topBar.editing', 'Editing') : t('topBar.preview', 'Preview')}
           </Button>
           <Button variant="outline" size="sm" className="gap-1" data-testid="doc-print" onClick={ctx.onPrint}>
-            <IconPrinter className="h-3.5 w-3.5" /> Print
+            <IconPrinter className="h-3.5 w-3.5" /> {t('topBar.print', 'Print')}
           </Button>
           <Button size="sm" className="gap-1" data-testid="doc-save" disabled={ctx.blockEditing} onClick={ctx.onSave}>
-            <IconDeviceFloppy className="h-3.5 w-3.5" /> Save
+            <IconDeviceFloppy className="h-3.5 w-3.5" /> {t('topBar.save', 'Save')}
           </Button>
         </span>
       </div>
 
       {/* ── menu bar ── */}
       <div className="flex items-center border-t border-border/60 px-1">
-        <MenuBar menus={menus} aria-label="Document editor menu" />
+        <MenuBar menus={menus} aria-label={t('topBar.menuBar', 'Document editor menu')} />
       </div>
 
       {/* ── icon toolbar + zoom ── */}
       <ToolbarPrimitive.Root
-        aria-label="Document editor toolbar"
+        aria-label={t('topBar.toolbar', 'Document editor toolbar')}
         data-testid="doc-toolbar"
         className="flex items-center gap-0.5 border-t border-border/60 px-2 py-1"
       >
@@ -140,7 +141,14 @@ export function EditorTopBar({
                 key={b.id}
                 aria-label={b.label}
                 aria-pressed={b.active}
-                title={b.shortcut ? `${b.label} (${b.shortcut})` : b.label}
+                title={
+                  b.shortcut
+                    ? t('topBar.buttonWithShortcut', '{label} ({shortcut})', {
+                        label: b.label,
+                        shortcut: b.shortcut,
+                      })
+                    : b.label
+                }
                 data-testid={`toolbar-${b.id}`}
                 disabled={b.disabled}
                 onClick={b.onSelect}
@@ -156,8 +164,8 @@ export function EditorTopBar({
 
         <span className="ms-auto flex items-center gap-0.5">
           <ToolbarPrimitive.Button
-            aria-label="Zoom out"
-            title="Zoom out"
+            aria-label={t('topBar.zoomOut', 'Zoom out')}
+            title={t('topBar.zoomOut', 'Zoom out')}
             data-testid="toolbar-zoom-out"
             onClick={() => ctx.onZoom('out')}
             className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-4"
@@ -166,7 +174,7 @@ export function EditorTopBar({
           </ToolbarPrimitive.Button>
           <button
             type="button"
-            title="Zoom to 100%"
+            title={t('topBar.zoomReset', 'Zoom to 100%')}
             data-testid="toolbar-zoom-reset"
             onClick={() => ctx.onZoom('reset')}
             className="w-12 rounded-md text-center text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -174,8 +182,8 @@ export function EditorTopBar({
             {Math.round(zoom * 100)}%
           </button>
           <ToolbarPrimitive.Button
-            aria-label="Zoom in"
-            title="Zoom in"
+            aria-label={t('topBar.zoomIn', 'Zoom in')}
+            title={t('topBar.zoomIn', 'Zoom in')}
             data-testid="toolbar-zoom-in"
             onClick={() => ctx.onZoom('in')}
             className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-4"
@@ -195,14 +203,18 @@ export function EditorTopBar({
         >
           <IconComponents className="h-4 w-4 text-primary" />
           <span className="text-xs font-medium text-primary">
-            Editing block: {blockEdit.name} — changes apply to every document using it
+            {t(
+              'topBar.blockEditBanner',
+              'Editing block: {name} — changes apply to every document using it',
+              { name: blockEdit.name }
+            )}
           </span>
           <span className="ms-auto flex items-center gap-2">
             <Button size="sm" variant="ghost" data-testid="doc-block-edit-cancel" onClick={() => onExitBlockEdit(false)}>
-              Cancel
+              {t('topBar.blockEditCancel', 'Cancel')}
             </Button>
             <Button size="sm" data-testid="doc-block-edit-done" onClick={() => onExitBlockEdit(true)}>
-              Done
+              {t('topBar.blockEditDone', 'Done')}
             </Button>
           </span>
         </div>
@@ -225,17 +237,22 @@ export function ShortcutsDialog({
   onOpenChange: (open: boolean) => void;
   modLabel: string;
 }) {
+  const t = useTranslation('documents');
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="doc-shortcuts-dialog">
         <DialogHeader>
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
+          <DialogTitle>{t('topBar.shortcuts.title', 'Keyboard shortcuts')}</DialogTitle>
           <DialogDescription>
-            Shortcuts are ignored while typing in a field, so text editing keeps its native behaviour.
+            {t(
+              'topBar.shortcuts.description',
+              'Shortcuts are ignored while typing in a field, so text editing keeps its native behaviour.'
+            )}
           </DialogDescription>
         </DialogHeader>
         <dl className="divide-y divide-border/60">
-          {listEditorShortcuts(modLabel).map((s) => (
+          {listEditorShortcuts(modLabel, t).map((s) => (
             <div key={s.id} className="flex items-center justify-between gap-4 py-1.5">
               <dt className="text-xs text-foreground">{s.label}</dt>
               <dd className="shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 text-[0.625rem] tracking-widest text-muted-foreground">
