@@ -24,16 +24,23 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { PermissionCheckbox } from './permission-checkbox';
 import type { Permission } from './types';
 
-const createRoleSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  description: z.string().min(1, 'Description is required'),
-  permissionIds: z.array(z.number()),
-});
+// Built from `t` rather than declared at module scope: a validation message is
+// user-facing text like any other, and a schema frozen at import time would
+// always speak English.
+const buildCreateRoleSchema = (t: TranslateFn) =>
+  z.object({
+    name: z.string().min(1, t('roles.create.validation.nameRequired', 'Name is required')),
+    description: z
+      .string()
+      .min(1, t('roles.create.validation.descriptionRequired', 'Description is required')),
+    permissionIds: z.array(z.number()),
+  });
 
-type CreateRoleFormData = z.infer<typeof createRoleSchema>;
+type CreateRoleFormData = z.infer<ReturnType<typeof buildCreateRoleSchema>>;
 
 interface CreateRoleModalProps {
   isOpen: boolean;
@@ -51,12 +58,15 @@ export function CreateRoleModal({
 }: CreateRoleModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
 
+  const schema = useMemo(() => buildCreateRoleSchema(t), [t]);
+
   const form = useForm<CreateRoleFormData>({
-    resolver: zodResolver(createRoleSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
       name: '',
       description: '',
@@ -70,19 +80,21 @@ export function CreateRoleModal({
       const response = await apiClient('/api/v1/permissions?per_page=100');
 
       if (!response.ok) {
-        throw new Error('Failed to fetch permissions');
+        throw new Error(t('roles.create.permissionsError', 'Failed to fetch permissions'));
       }
 
       const data = await response.json();
       setPermissions(data.data || []);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to fetch permissions';
+        error instanceof Error
+          ? error.message
+          : t('roles.create.permissionsError', 'Failed to fetch permissions');
       addToast(message, 'error');
     } finally {
       setIsLoadingPermissions(false);
     }
-  }, [apiClient, addToast]);
+  }, [apiClient, addToast, t]);
 
   useEffect(() => {
     if (isOpen && permissions.length === 0) {
@@ -118,16 +130,16 @@ export function CreateRoleModal({
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
-          errorData.message || 'Failed to create role'
+          errorData.message || t('roles.create.error', 'Failed to create role')
         );
       }
 
-      addToast('Role created successfully', 'success');
+      addToast(t('roles.create.success', 'Role created successfully'), 'success');
       form.reset();
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to create role';
+        error instanceof Error ? error.message : t('roles.create.error', 'Failed to create role');
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
@@ -142,9 +154,9 @@ export function CreateRoleModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Create New Role</DialogTitle>
+          <DialogTitle>{t('roles.create.title', 'Create New Role')}</DialogTitle>
           <DialogDescription>
-            Add a new role to your system with permissions.
+            {t('roles.create.subtitle', 'Add a new role to your system with permissions.')}
           </DialogDescription>
         </DialogHeader>
 
@@ -155,9 +167,12 @@ export function CreateRoleModal({
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Role Name</FormLabel>
+                  <FormLabel>{t('roles.create.name.label', 'Role Name')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Editor" {...field} />
+                    <Input
+                      placeholder={t('roles.create.name.placeholder', 'e.g., Editor')}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -169,9 +184,12 @@ export function CreateRoleModal({
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description</FormLabel>
+                  <FormLabel>{t('roles.create.description.label', 'Description')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="Role description" {...field} />
+                    <Input
+                      placeholder={t('roles.create.description.placeholder', 'Role description')}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -179,10 +197,10 @@ export function CreateRoleModal({
             />
 
             <div className="space-y-2">
-              <FormLabel>Permissions</FormLabel>
+              <FormLabel>{t('roles.create.permissions.label', 'Permissions')}</FormLabel>
               {isLoadingPermissions ? (
                 <div className="text-sm text-muted-foreground py-4 text-center">
-                  Loading permissions...
+                  {t('roles.create.permissions.loading', 'Loading permissions...')}
                 </div>
               ) : (
                 <PermissionCheckbox
@@ -199,10 +217,12 @@ export function CreateRoleModal({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
               >
-                Cancel
+                {t('roles.create.cancel', 'Cancel')}
               </Button>
               <Button type="submit" disabled={isSubmitting || isLoadingPermissions}>
-                {isSubmitting ? 'Creating...' : 'Create Role'}
+                {isSubmitting
+                  ? t('roles.create.submitting', 'Creating...')
+                  : t('roles.create.submit', 'Create Role')}
               </Button>
             </DialogFooter>
           </form>
