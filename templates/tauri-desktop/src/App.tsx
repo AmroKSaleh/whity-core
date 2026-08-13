@@ -17,6 +17,7 @@ import { HashLinkAdapter } from "./hash-link"
 import { useHashPath } from "./use-hash-path"
 import { demoCatalogAdapter } from "./demo-catalog-tauri-adapter"
 import { PrinterDemo } from "./printer-demo"
+import { PhpHostDemo } from "./php-host-demo"
 import { AppStateProvider, AuthGate, useAppState } from "./app-state-provider"
 import { appT } from "./sync-i18n"
 
@@ -112,6 +113,16 @@ function AppInner() {
       <>
         <PageHeader title="Printer demo" description="A worked example of a native-crate command." />
         <PrinterDemo />
+      </>
+    )
+  } else if (path === "/php-host-demo") {
+    body = (
+      <>
+        <PageHeader
+          title="PHP plugin host"
+          description="A bundled FrankenPHP process running real whity plugins offline, with a native bridge back into Rust."
+        />
+        <PhpHostDemo />
       </>
     )
   } else {
