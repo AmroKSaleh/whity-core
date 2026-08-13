@@ -22,6 +22,8 @@ export interface BreadcrumbProps extends Omit<React.ComponentProps<"nav">, "chil
   showHomeIcon?: boolean
   /** Custom separator node between items. Defaults to a subtle chevron. */
   separator?: React.ReactNode
+  /** Accessible name for the <nav>. Defaults to "Breadcrumb". */
+  navLabel?: string
 }
 
 function Breadcrumb({
@@ -30,12 +32,13 @@ function Breadcrumb({
   linkComponent,
   showHomeIcon = false,
   separator,
+  navLabel = "Breadcrumb",
   ...props
 }: BreadcrumbProps) {
   const Link = linkComponent ?? "a"
 
   return (
-    <nav data-slot="breadcrumb" aria-label="Breadcrumb" className={className} {...props}>
+    <nav data-slot="breadcrumb" aria-label={navLabel} className={className} {...props}>
       <ol className="flex flex-wrap items-center gap-1 text-xs/relaxed text-muted-foreground">
         {items.map((item, index) => {
           const isLast = index === items.length - 1

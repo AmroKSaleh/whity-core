@@ -51,6 +51,13 @@ export interface DatePickerProps {
    * Placeholder text when no date is selected. Defaults to "Select date...".
    */
   placeholder?: string
+  /** Accessible name for the clear button. */
+  clearLabel?: string
+  /** Accessible name for a tooltip trigger. Defaults to "More information". */
+  tooltipTriggerLabel?: string
+  /** Accessible names for the month navigation buttons. */
+  previousMonthLabel?: string
+  nextMonthLabel?: string
   /**
    * Disables the date picker control.
    */
@@ -108,6 +115,10 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
       helperText,
       errorText,
       placeholder = "Select date...",
+      clearLabel = "Clear date",
+      tooltipTriggerLabel = "More information",
+      previousMonthLabel = "Previous month",
+      nextMonthLabel = "Next month",
       disabled,
       clearable = true,
       className,
@@ -195,7 +206,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
                   role="button"
                   tabIndex={-1}
                   onClick={handleClear}
-                  aria-label="Clear date"
+                  aria-label={clearLabel}
                   className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <IconX className="size-3.5" aria-hidden="true" />
@@ -211,7 +222,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
             <button
               type="button"
               onClick={() => setViewDate(new Date(year, month - 1, 1))}
-              aria-label="Previous month"
+              aria-label={previousMonthLabel}
               className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             >
               <IconChevronLeft className="size-4" />
@@ -222,7 +233,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
             <button
               type="button"
               onClick={() => setViewDate(new Date(year, month + 1, 1))}
-              aria-label="Next month"
+              aria-label={nextMonthLabel}
               className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             >
               <IconChevronRight className="size-4" />
@@ -338,7 +349,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
                         <TooltipTrigger asChild>
                           <button
                             type="button"
-                            aria-label="More information"
+                            aria-label={tooltipTriggerLabel}
                             className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded p-0.5"
                           >
                             <IconInfoCircle className="size-3.5 shrink-0" aria-hidden="true" />
@@ -378,7 +389,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label="More information"
+                      aria-label={tooltipTriggerLabel}
                       className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded p-0.5"
                     >
                       <IconInfoCircle className="size-3.5 shrink-0" aria-hidden="true" />

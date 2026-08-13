@@ -60,10 +60,13 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  closeLabel = "Close",
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: SheetSide
   showCloseButton?: boolean
+  /** Accessible name for the close button (visually hidden). */
+  closeLabel?: string
 }) {
   const isDark = useIsDarkMode()
 
@@ -92,7 +95,7 @@ function SheetContent({
           <SheetPrimitive.Close data-slot="sheet-close" asChild>
             <Button variant="ghost" className="absolute top-3 end-3" size="icon-sm">
               <IconX />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{closeLabel}</span>
             </Button>
           </SheetPrimitive.Close>
         )}

@@ -89,6 +89,17 @@ export interface DataTableProps<TData> {
   /** Free-text search across every column's string value. Off by default. */
   enableGlobalFilter?: boolean
   globalFilterPlaceholder?: string
+  /** Header text for the row-actions column. Defaults to "Actions". */
+  rowActionsLabel?: string
+  /**
+   * Title shown when there are no rows and the caller passed no `emptyState`.
+   * `emptyState` still wins — this only replaces the built-in English default,
+   * so a caller translating just this string does not have to reconstruct the
+   * whole empty state.
+   */
+  emptyStateTitle?: string
+  /** Placeholder for the per-column filter inputs. Defaults to "Filter…". */
+  columnFilterPlaceholder?: string
   /** Show/hide-columns menu. Off by default. */
   enableColumnVisibility?: boolean
   /** Drag-resize column borders. Off by default. */
@@ -121,6 +132,9 @@ export function DataTable<TData>({
   errorState,
   enableGlobalFilter = false,
   globalFilterPlaceholder = "Search…",
+  rowActionsLabel = "Actions",
+  emptyStateTitle = "No data available",
+  columnFilterPlaceholder = "Filter…",
   enableColumnVisibility = false,
   enableColumnResizing = false,
   pagination,
@@ -169,7 +183,7 @@ export function DataTable<TData>({
     if (rowActions) {
       defs.push({
         id: "__row-actions",
-        header: "Actions",
+        header: rowActionsLabel,
         cell: (info) => rowActions(info.row.original),
         enableSorting: false,
         enableColumnFilter: false,
@@ -177,7 +191,7 @@ export function DataTable<TData>({
       })
     }
     return defs
-  }, [columns, rowActions])
+  }, [columns, rowActions, rowActionsLabel])
 
   const table = useReactTable({
     data,
@@ -242,7 +256,7 @@ export function DataTable<TData>({
                   {column.header}
                 </TableHead>
               ))}
-              {rowActions && <TableHead>Actions</TableHead>}
+              {rowActions && <TableHead>{rowActionsLabel}</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -313,7 +327,7 @@ export function DataTable<TData>({
       {errorState ? (
         <ErrorState {...errorState} />
       ) : rows.length === 0 ? (
-        <EmptyState title="No data available" {...emptyState} />
+        <EmptyState title={emptyStateTitle} {...emptyState} />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           <Table
@@ -371,7 +385,7 @@ export function DataTable<TData>({
                             onChange={(event) =>
                               header.column.setFilterValue(event.target.value)
                             }
-                            placeholder="Filter…"
+                            placeholder={columnFilterPlaceholder}
                             aria-label={`Filter ${label}`}
                             className="h-6 text-xs font-normal normal-case tracking-normal"
                           />

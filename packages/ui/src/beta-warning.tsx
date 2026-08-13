@@ -32,6 +32,8 @@ export interface BetaWarningProps extends Omit<React.ComponentProps<"div">, "tit
   action?: BetaWarningActionConfig | React.ReactNode
   /** Allow closing / dismissing the warning. */
   dismissible?: boolean
+  /** Accessible name for the dismiss button. Defaults to "Dismiss beta notice". */
+  dismissLabel?: string
   /** Callback fired when dismissed. */
   onDismiss?: () => void
 }
@@ -50,6 +52,7 @@ export function BetaWarning({
   variant = "card",
   action,
   dismissible = false,
+  dismissLabel = "Dismiss beta notice",
   onDismiss,
   ...props
 }: BetaWarningProps) {
@@ -104,7 +107,7 @@ export function BetaWarning({
           <button
             type="button"
             onClick={handleDismiss}
-            aria-label="Dismiss beta notice"
+            aria-label={dismissLabel}
             className="ms-auto flex items-center justify-center size-3.5 text-current opacity-70 hover:opacity-100 focus-visible:outline-none shrink-0"
           >
             <IconX className="size-3 shrink-0" />
@@ -175,7 +178,7 @@ export function BetaWarning({
           <button
             type="button"
             onClick={handleDismiss}
-            aria-label="Dismiss beta notice"
+            aria-label={dismissLabel}
             className="flex items-center justify-center size-5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/30 focus-visible:outline-none transition-colors shrink-0"
           >
             <IconX className="size-3.5 shrink-0" />

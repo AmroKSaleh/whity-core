@@ -25,6 +25,21 @@ export interface PaginationProps extends Omit<React.ComponentProps<"nav">, "onCh
   onPageChange: (page: number) => void
   /** Optional override for the "N entries" label (e.g. singular/plural, i18n). */
   entriesLabel?: (total: number) => string
+  /**
+   * Optional override for "page 2 of 7".
+   *
+   * A function, not a string, for the same reason `entriesLabel` is one: the
+   * numbers sit INSIDE the sentence, and word order around them differs
+   * between languages. A caller that could only supply "page" and "of"
+   * separately would be pinned to English order.
+   */
+  pageLabel?: (page: number, totalPages: number) => string
+  /** Accessible name for the surrounding <nav>. */
+  navLabel?: string
+  /** Accessible name for the previous-page button. */
+  previousLabel?: string
+  /** Accessible name for the next-page button. */
+  nextLabel?: string
 }
 
 function Pagination({
@@ -34,20 +49,25 @@ function Pagination({
   total,
   onPageChange,
   entriesLabel,
+  pageLabel,
+  navLabel = "Pagination",
+  previousLabel = "Previous page",
+  nextLabel = "Next page",
   ...props
 }: PaginationProps) {
   const totalPages = Math.max(1, Math.ceil(total / perPage))
   const label = entriesLabel ?? ((n: number) => (n === 1 ? "1 entry" : `${n} entries`))
+  const pages = pageLabel ?? ((current: number, last: number) => `page ${current} of ${last}`)
 
   return (
     <nav
       data-slot="pagination"
-      aria-label="Pagination"
+      aria-label={navLabel}
       className={cn("flex items-center justify-between", className)}
       {...props}
     >
       <p className="text-sm text-muted-foreground">
-        {label(total)} &middot; page {page} of {totalPages}
+        {label(total)} &middot; {pages(page, totalPages)}
       </p>
       <div className="flex gap-2">
         <Button
@@ -56,7 +76,7 @@ function Pagination({
           size="icon-sm"
           disabled={page <= 1}
           onClick={() => onPageChange(Math.max(1, page - 1))}
-          aria-label="Previous page"
+          aria-label={previousLabel}
         >
           <IconChevronLeft className="rtl:rotate-180" />
         </Button>
@@ -66,7 +86,7 @@ function Pagination({
           size="icon-sm"
           disabled={page >= totalPages}
           onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-          aria-label="Next page"
+          aria-label={nextLabel}
         >
           <IconChevronRight className="rtl:rotate-180" />
         </Button>

@@ -20,6 +20,8 @@ export interface SliderProps extends React.ComponentPropsWithoutRef<typeof Slide
    * Tooltip message displayed in an interactive info icon next to the label.
    */
   tooltip?: React.ReactNode
+  /** Accessible name for the tooltip's trigger button. Defaults to "More information". */
+  tooltipTriggerLabel?: string
   /**
    * Small informational note rendered below the slider.
    */
@@ -52,6 +54,7 @@ const Slider = React.forwardRef<
       label,
       required,
       tooltip,
+      tooltipTriggerLabel = "More information",
       helperText,
       errorText,
       showValueBadge = true,
@@ -263,7 +266,7 @@ const Slider = React.forwardRef<
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        aria-label="More information"
+                        aria-label={tooltipTriggerLabel}
                         className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded p-0.5"
                       >
                         <IconInfoCircle className="size-3.5 shrink-0" aria-hidden="true" />

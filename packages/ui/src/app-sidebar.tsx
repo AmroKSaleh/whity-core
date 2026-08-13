@@ -72,6 +72,14 @@ export interface AppSidebarProps {
   onMobileOpenChange?: (open: boolean) => void
   /** Custom link component (e.g. Next.js <Link>) — defaults to a plain <a>. */
   linkComponent?: React.ElementType
+  /** Accessible name for the navigation landmark. Defaults to "Main". */
+  navLabel?: string
+  /** Accessible name for the button that opens the mobile drawer. */
+  openNavLabel?: string
+  /** Accessible name for the button that closes the mobile drawer. */
+  closeNavLabel?: string
+  /** Text of the collapse toggle. Defaults to "Collapse". */
+  collapseLabel?: string
   className?: string
 }
 
@@ -86,6 +94,10 @@ export function AppSidebar({
   mobileOpen: mobileOpenProp,
   onMobileOpenChange,
   linkComponent,
+  navLabel = "Main",
+  openNavLabel = "Open navigation",
+  closeNavLabel = "Close navigation",
+  collapseLabel = "Collapse",
   className,
 }: AppSidebarProps) {
   const [collapsedState, setCollapsedState] = React.useState(false)
@@ -105,7 +117,7 @@ export function AppSidebar({
   const Link = linkComponent ?? "a"
 
   const nav = (
-    <nav aria-label="Main" className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
+    <nav aria-label={navLabel} className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
       {groups.map((group) => (
         <div key={group.id} className="space-y-1">
           {group.label && !collapsed && (
@@ -141,7 +153,7 @@ export function AppSidebar({
           itself is fixed off-canvas until toggled open. */}
       <button
         type="button"
-        aria-label="Open navigation"
+        aria-label={openNavLabel}
         onClick={() => setMobileOpen(true)}
         className="fixed start-3 top-3 z-40 flex size-8 items-center justify-center rounded-md border border-border bg-card outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:hidden"
       >
@@ -169,7 +181,7 @@ export function AppSidebar({
       >
         <button
           type="button"
-          aria-label="Close navigation"
+          aria-label={closeNavLabel}
           onClick={() => setMobileOpen(false)}
           className="absolute end-2 top-2.5 z-20 flex size-7 items-center justify-center rounded-md text-sidebar-foreground/70 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/30 md:hidden"
         >
@@ -201,7 +213,7 @@ export function AppSidebar({
           ) : (
             <>
               <IconChevronLeft className="size-3.5 rtl:rotate-180" />
-              <span>Collapse</span>
+              <span>{collapseLabel}</span>
             </>
           )}
         </button>

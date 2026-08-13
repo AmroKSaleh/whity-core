@@ -55,6 +55,26 @@ export interface InputProps extends React.ComponentProps<"input"> {
    * or a compact inline file picker ("compact").
    */
   fileVariant?: "dropzone" | "compact"
+  /** Accessible name for a tooltip trigger. Defaults to "More information". */
+  tooltipTriggerLabel?: string
+  /** Accessible name for the password reveal toggle, by state. */
+  showPasswordLabel?: string
+  hidePasswordLabel?: string
+  /** Accessible names for the number stepper buttons. */
+  decrementLabel?: string
+  incrementLabel?: string
+  /**
+   * Prompt inside the file dropzone. A NODE, not a string, because the
+   * default is one sentence with a link-styled span inside it ("Click to
+   * browse or drag and drop files"). Splitting that into two string props
+   * would hand a translator two fragments they cannot reorder, which is
+   * exactly what a whole-sentence key avoids — so the caller passes the
+   * finished node instead.
+   */
+  dropzonePrompt?: React.ReactNode
+  /** Hint under the dropzone prompt, by `multiple`. */
+  multipleFilesHint?: string
+  singleFileHint?: string
 }
 
 function formatBytes(bytes: number): string {
@@ -78,6 +98,14 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       showPasswordToggle = true,
       showNumberStepper = true,
       fileVariant = "dropzone",
+      tooltipTriggerLabel = "More information",
+      showPasswordLabel = "Show password",
+      hidePasswordLabel = "Hide password",
+      decrementLabel = "Decrease value",
+      incrementLabel = "Increase value",
+      dropzonePrompt,
+      multipleFilesHint = "Upload multiple files",
+      singleFileHint = "Upload single file",
       disabled,
       id,
       ...props
@@ -389,8 +417,8 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
               type="button"
               disabled={disabled}
               onClick={() => setShowPassword((prev) => !prev)}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-              title={showPassword ? "Hide password" : "Show password"}
+              aria-label={showPassword ? hidePasswordLabel : showPasswordLabel}
+              title={showPassword ? hidePasswordLabel : showPasswordLabel}
               className="absolute end-2.5 flex items-center justify-center size-3.5 text-muted-foreground hover:text-foreground focus-visible:outline-none rounded transition-colors disabled:pointer-events-none disabled:opacity-50 z-10"
             >
               {showPassword ? (
@@ -411,8 +439,8 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
               tabIndex={-1}
               disabled={disabled}
               onClick={() => handleStep(-1)}
-              aria-label="Decrease value"
-              title="Decrease value"
+              aria-label={decrementLabel}
+              title={decrementLabel}
               className="absolute start-2.5 flex items-center justify-center size-3.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 z-10"
             >
               <IconMinus className="size-3.5 shrink-0" aria-hidden="true" />
@@ -441,8 +469,8 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
               tabIndex={-1}
               disabled={disabled}
               onClick={() => handleStep(1)}
-              aria-label="Increase value"
-              title="Increase value"
+              aria-label={incrementLabel}
+              title={incrementLabel}
               className="absolute end-2.5 flex items-center justify-center size-3.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 z-10"
             >
               <IconPlus className="size-3.5 shrink-0" aria-hidden="true" />
@@ -502,10 +530,15 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
                 <IconCloudUpload className="size-5 shrink-0" aria-hidden="true" />
               </div>
               <p className="text-xs font-semibold text-foreground">
-                <span className="text-primary hover:underline">Click to browse</span> or drag and drop files
+                {dropzonePrompt ?? (
+                  <>
+                    <span className="text-primary hover:underline">Click to browse</span> or drag
+                    and drop files
+                  </>
+                )}
               </p>
               <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-                {props.multiple ? "Upload multiple files" : "Upload single file"}
+                {props.multiple ? multipleFilesHint : singleFileHint}
               </p>
             </div>
 
@@ -667,7 +700,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label="More information"
+                      aria-label={tooltipTriggerLabel}
                       className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded p-0.5"
                     >
                       <IconInfoCircle className="size-3.5 shrink-0" aria-hidden="true" />

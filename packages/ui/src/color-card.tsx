@@ -19,6 +19,13 @@ export interface ColorCardProps extends React.ComponentProps<"div"> {
   mainHex?: string // e.g. "#2563eb" or pastel "#93c5fd"
   mainShade?: number // Which shade number is the main brand color (tagged as MAIN)
   onColorSelect?: (shade: ColorShade) => void
+  /** Accessible name for the MAIN-shade marker. Defaults to "Main Brand Color". */
+  mainShadeLabel?: string
+  /**
+   * Tooltip for a swatch. A function, not a string: the shade name and hex
+   * sit inside the phrase and languages order them differently.
+   */
+  copyHint?: (name: string, hex: string) => string
 }
 
 // Default Whity Brand Design System Color Palette Presets (Including Neutral Greys)
@@ -168,6 +175,8 @@ export function ColorCard({
   mainHex = "#2563eb",
   mainShade = 600,
   onColorSelect,
+  mainShadeLabel = "Main Brand Color",
+  copyHint = (name: string, hex: string) => `Click to copy ${name} (${hex})`,
   ...props
 }: ColorCardProps) {
   const [copiedHex, setCopiedHex] = React.useState<string | null>(null)
@@ -216,12 +225,12 @@ export function ColorCard({
                 shade.isMain && "z-20"
               )}
               style={{ backgroundColor: shade.hex, color: shade.textColor }}
-              title={`Click to copy ${shade.name} (${shade.hex})`}
+              title={copyHint(shade.name, shade.hex)}
             >
               {/* MAIN Badge Resting on Top Edge with Card Background Cutout Border */}
               {shade.isMain && (
                 <span
-                  aria-label="Main Brand Color"
+                  aria-label={mainShadeLabel}
                   className="absolute -top-2.5 left-1/2 -translate-x-1/2 z-30 text-[7.5px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border-2 border-card shadow-2xs whitespace-nowrap leading-none select-none"
                   style={{
                     backgroundColor: shade.hex,

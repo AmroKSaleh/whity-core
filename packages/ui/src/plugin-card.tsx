@@ -187,6 +187,23 @@ export interface InstalledPluginCardProps extends React.ComponentProps<"div"> {
   onUpdate?: (plugin: PluginItem) => void
   onRollback?: (plugin: PluginItem, targetVersion: string) => void
   onConfigure?: (plugin: PluginItem) => void
+  /**
+   * Copy for the card's chrome. Each entry defaults to the English below, so
+   * an untranslated caller renders exactly as it does today.
+   *
+   * `updateAvailable` is a function because the version number sits inside
+   * the phrase and languages place it differently.
+   */
+  labels?: {
+    active?: string
+    inactive?: string
+    disabledBySystem?: string
+    updateAvailable?: (latestVersion?: string) => string
+    governanceNotice?: string
+    rollback?: string
+    versionHistory?: string
+    configure?: string
+  }
 }
 
 /**
@@ -200,8 +217,21 @@ export function InstalledPluginCard({
   onUpdate,
   onRollback,
   onConfigure,
+  labels,
   ...props
 }: InstalledPluginCardProps) {
+  const text = {
+    active: "Active",
+    inactive: "Inactive",
+    disabledBySystem: "Disabled by System",
+    updateAvailable: (latestVersion?: string) => `Update Available v${latestVersion}`,
+    governanceNotice:
+      "This plugin has been automatically disabled by system governance due to security or compatibility policy.",
+    rollback: "Rollback",
+    versionHistory: "Version History",
+    configure: "Configure plugin",
+    ...labels,
+  }
   const [detailsOpen, setDetailsOpen] = React.useState(false)
   const [rollbackTarget, setRollbackTarget] = React.useState<string | null>(null)
 
@@ -211,25 +241,25 @@ export function InstalledPluginCard({
     active: {
       cardVariant: "success" as const,
       borderStyle: "solid" as const,
-      badge: <Badge variant="success-solid">Active</Badge>,
+      badge: <Badge variant="success-solid">{text.active}</Badge>,
       disabled: false,
     },
     inactive: {
       cardVariant: "flat" as const,
       borderStyle: "solid" as const,
-      badge: <Badge variant="secondary">Inactive</Badge>,
+      badge: <Badge variant="secondary">{text.inactive}</Badge>,
       disabled: false,
     },
     disabled: {
       cardVariant: "destructive" as const,
       borderStyle: "dotted" as const,
-      badge: <Badge variant="destructive-solid">Disabled by System</Badge>,
+      badge: <Badge variant="destructive-solid">{text.disabledBySystem}</Badge>,
       disabled: true,
     },
     "update-available": {
       cardVariant: "info" as const,
       borderStyle: "solid" as const,
-      badge: <Badge variant="info-solid">Update Available v{plugin.latestVersion}</Badge>,
+      badge: <Badge variant="info-solid">{text.updateAvailable(plugin.latestVersion)}</Badge>,
       disabled: false,
     },
   }[state]
@@ -268,7 +298,7 @@ export function InstalledPluginCard({
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
             {state === "disabled"
-              ? "This plugin has been automatically disabled by system governance due to security or compatibility policy."
+              ? text.governanceNotice
               : plugin.description}
           </p>
 
@@ -281,11 +311,11 @@ export function InstalledPluginCard({
                 <DropdownMenuTrigger asChild>
                   <Button size="xs" variant="outline" className="ms-auto text-[11px] gap-1.5 h-6">
                     <IconHistory className="size-3" />
-                    <span>Rollback</span>
+                    <span>{text.rollback}</span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel className="text-xs">Version History</DropdownMenuLabel>
+                  <DropdownMenuLabel className="text-xs">{text.versionHistory}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {pastVersions.map((ver) => (
                     <DropdownMenuItem
@@ -363,7 +393,7 @@ export function InstalledPluginCard({
                 size="icon-xs"
                 variant="outline"
                 onClick={() => onConfigure(plugin)}
-                aria-label="Configure plugin"
+                aria-label={text.configure}
               >
                 <IconSettings />
               </Button>
@@ -566,6 +596,9 @@ interface PluginImageGalleryProps {
   pluginName: string
   category: string
   bannerGradient?: string
+  /** Accessible names for the gallery arrows. */
+  previousLabel?: string
+  nextLabel?: string
 }
 
 /**
@@ -583,6 +616,8 @@ function PluginImageGallery({
   pluginName,
   category,
   bannerGradient = "from-primary/20 via-muted to-muted/80",
+  previousLabel = "Previous screenshot",
+  nextLabel = "Next screenshot",
 }: PluginImageGalleryProps) {
   const [activeIndex, setActiveIndex] = React.useState(0)
 
@@ -658,7 +693,7 @@ function PluginImageGallery({
               type="button"
               onClick={() => setActiveIndex((prev) => (prev > 0 ? prev - 1 : items.length - 1))}
               className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-background/80 p-1.5 text-foreground backdrop-blur-xs opacity-0 transition-opacity group-hover/gallery:opacity-100 hover:bg-background shadow-xs"
-              aria-label="Previous screenshot"
+              aria-label={previousLabel}
             >
               <IconChevronLeft className="size-4" />
             </button>
@@ -667,7 +702,7 @@ function PluginImageGallery({
               type="button"
               onClick={() => setActiveIndex((prev) => (prev < items.length - 1 ? prev + 1 : 0))}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-background/80 p-1.5 text-foreground backdrop-blur-xs opacity-0 transition-opacity group-hover/gallery:opacity-100 hover:bg-background shadow-xs"
-              aria-label="Next screenshot"
+              aria-label={nextLabel}
             >
               <IconChevronRight className="size-4" />
             </button>
