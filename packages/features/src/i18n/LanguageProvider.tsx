@@ -90,11 +90,11 @@ export function LanguageProvider({
   const [translations, setTranslations] = useState<CachedTranslations>({})
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
-  // Starts FALSE: no language affordance until the instance has said it offers
-  // one. An instance with i18n off must never paint a switcher and then remove
-  // it — that flicker is exactly the confusion the flag exists to prevent. See
-  // LanguageContextValue.i18nEnabled.
-  const [i18nEnabled, setI18nEnabled] = useState(false)
+  // Starts NULL — not false: "not known yet" and "switched off" want opposite
+  // treatment (see LanguageContextValue.i18nEnabled). No language affordance is
+  // drawn until the instance says it offers one, and no "i18n is off" notice is
+  // shown until it says it is.
+  const [i18nEnabled, setI18nEnabled] = useState<boolean | null>(null)
   // Domains some mounted component has asked for. Sorted+joined into the
   // effect's dependency so re-running is driven by the SET's contents, not by
   // the identity of a new array on every render.
@@ -165,7 +165,7 @@ export function LanguageProvider({
     // browser remembered while the feature was on, quietly destroying the very
     // preference the flag promises to preserve. <html lang> is still set: the
     // document really is in that language.
-    if (i18nEnabled) {
+    if (i18nEnabled === true) {
       setRememberedLanguage(currentLanguage)
     }
     if (typeof document !== 'undefined') {
@@ -248,7 +248,12 @@ export function LanguageProvider({
         // by the server (PATCH /api/v1/settings/language answers 503) so a
         // stray caller gets an immediate, honest error instead of a request
         // that looks like it worked. Nothing stored is touched.
-        if (!i18nEnabled) {
+        //
+        // Explicitly `=== false`, not falsy: a call made before the catalogue
+        // has answered is not a disabled instance, and falls through to the
+        // "Invalid language code" arm below — which is the truth, since no
+        // language is known yet.
+        if (i18nEnabled === false) {
           throw new Error('Language selection is disabled on this instance')
         }
 
@@ -319,9 +324,10 @@ export function LanguageProvider({
   // default language's record: a deployment that has switched the feature off
   // has been promised a left-to-right product, and must not end up mirrored
   // because someone once set the default language's `direction` to 'rtl'.
-  const direction: Direction = i18nEnabled
-    ? availableLanguages.find((l) => l.code === currentLanguage)?.direction ?? FALLBACK_DIRECTION
-    : FALLBACK_DIRECTION
+  const direction: Direction =
+    i18nEnabled === true
+      ? availableLanguages.find((l) => l.code === currentLanguage)?.direction ?? FALLBACK_DIRECTION
+      : FALLBACK_DIRECTION
 
   const value = useMemo<LanguageContextValue>(
     () => ({

@@ -45,7 +45,7 @@ export { LanguageProvider, type LanguageProviderProps } from './LanguageProvider
 export { useTranslation, interpolate, type TranslateFn } from './useTranslation'
 export { useCurrentLanguage, type UseCurrentLanguageReturn } from './useCurrentLanguage'
 export { useLanguageDirection } from './useLanguageDirection'
-export { useI18nEnabled } from './useI18nEnabled'
+export { useI18nEnabled, useI18nAvailability, type I18nAvailability } from './useI18nEnabled'
 export { LanguageSwitcher, type LanguageSwitcherProps } from './LanguageSwitcher'
 export type {
   Direction,

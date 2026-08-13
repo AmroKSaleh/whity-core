@@ -9,6 +9,7 @@ import {
   LanguageSwitcher,
   useTranslation,
   useCurrentLanguage,
+  useI18nAvailability,
   useI18nEnabled,
   useLanguageDirection,
 } from '../index'
@@ -596,6 +597,40 @@ describe('i18n feature flag', () => {
     const { result } = renderHook(() => useI18nEnabled(), { wrapper })
 
     await waitFor(() => expect(result.current).toBe(true))
+  })
+
+  /**
+   * "Not answered yet" is NOT "off". The two want opposite treatment: a control
+   * stays hidden until something says it belongs (so a single-language
+   * deployment never flashes a switcher), while a notice ASSERTING the feature
+   * is off must wait for a real answer — otherwise every admin page load states
+   * something false for as long as the catalogue takes to arrive.
+   */
+  it('distinguishes "not answered yet" from "switched off"', async () => {
+    // A catalogue that never settles: the pre-answer state, held still.
+    mockApi.fetchLanguageCatalogue.mockReturnValue(new Promise(() => {}))
+
+    const { result } = renderHook(
+      () => ({ enabled: useI18nEnabled(), availability: useI18nAvailability() }),
+      { wrapper }
+    )
+
+    expect(result.current.availability).toBe('unknown')
+    expect(result.current.enabled).toBe(false) // control hidden meanwhile
+  })
+
+  it('resolves to "disabled" only once the instance has actually said so', async () => {
+    arrangeInstance(false)
+
+    const { result } = renderHook(() => useI18nAvailability(), { wrapper })
+
+    await waitFor(() => expect(result.current).toBe('disabled'))
+  })
+
+  it('reads "unknown" with no provider mounted, never "disabled"', () => {
+    const { result } = renderHook(() => useI18nAvailability())
+
+    expect(result.current).toBe('unknown')
   })
 
   /**

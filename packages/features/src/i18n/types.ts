@@ -54,7 +54,8 @@ export interface LanguageContextValue {
   /** The resolved language's direction; 'ltr' until a language resolves. */
   direction: Direction
   /**
-   * Whether this instance offers a choice of language (`i18n.enabled`).
+   * Whether this instance offers a choice of language (`i18n.enabled`), or
+   * `null` while the catalogue has not answered yet.
    *
    * FALSE means every user reads the default language left-to-right whatever
    * their profile stores, and NO language affordance is rendered anywhere.
@@ -62,13 +63,16 @@ export interface LanguageContextValue {
    * this is not a switch that breaks translated screens; it is a switch that
    * removes the CHOICE.
    *
-   * `false` until the catalogue has answered, deliberately: an instance with
-   * the feature OFF must never paint a switcher and then take it away, which
-   * is precisely the confusion the flag exists to remove. An instance with it
-   * ON reveals the switcher when the catalogue lands, the same moment the
-   * switcher would have had anything to show.
+   * THREE-VALUED on purpose. "Not known yet" is a different thing from "off",
+   * and the two want opposite treatment: an AFFORDANCE must stay hidden until
+   * we know one is offered (paint-then-retract is the confusion this flag
+   * exists to remove), while a NOTICE explaining that the feature is off must
+   * not be shown until we know it actually is — an admin screen that asserts
+   * the wrong thing for 200ms on every load is its own small lie. Read it
+   * through `useI18nEnabled` for the first case and `useI18nAvailability` for
+   * the second.
    */
-  i18nEnabled: boolean
+  i18nEnabled: boolean | null
   translations: CachedTranslations
   isLoading: boolean
   error: Error | null

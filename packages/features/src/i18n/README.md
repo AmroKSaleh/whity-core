@@ -353,6 +353,15 @@ const isI18nEnabled = useI18nEnabled()
 
 It does **not** gate translation: `useTranslation` returns real text either way.
 
+### `useI18nAvailability()`
+
+`'unknown' | 'enabled' | 'disabled'` — the same fact, three-valued, for the
+rarer caller that must tell "off" apart from "not answered yet". Use it for
+anything that ASSERTS the feature is off (the admin notices do), so the
+assertion is not rendered for a couple of hundred milliseconds on every load
+before the catalogue lands. For hiding a control, `useI18nEnabled()` is the
+right read: collapsing `unknown` into "hide it" is exactly what you want there.
+
 ### `<LanguageProvider>`
 
 Context provider that manages language state and translations.

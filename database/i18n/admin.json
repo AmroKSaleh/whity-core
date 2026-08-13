@@ -51,6 +51,7 @@
         "translations.filter.required": "Choose a language and enter a domain first.",
         "translations.filter.untranslatedOnly": "Only untranslated",
         "translations.goBack": "Go Back",
+        "translations.i18nDisabled": "Multiple languages are switched off for this instance, so everyone currently sees the default language. Translations edited here are saved and take effect as soon as an operator turns the feature on under Feature Flags.",
         "translations.label.override": "override",
         "translations.label.systemDefault": "system default",
         "translations.loading": "Loading…",

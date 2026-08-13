@@ -13,7 +13,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Switch } from '@amroksaleh/ui/switch';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
-import { useI18nEnabled } from '@amroksaleh/features/i18n';
+import { useI18nAvailability } from '@amroksaleh/features/i18n';
 import { IconPlus } from '@tabler/icons-react';
 import { CreateLanguageModal } from './create-modal';
 import { errorMessage } from './shared';
@@ -41,7 +41,9 @@ export default function LanguagesPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
-  const isI18nEnabled = useI18nEnabled();
+  // Three-valued: the notice below ASSERTS the feature is off, so it must wait
+  // for a real answer rather than treating "not loaded yet" as "off".
+  const i18n = useI18nAvailability();
 
   const canRead = hasPermission(LANGUAGES_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -200,7 +202,7 @@ export default function LanguagesPage() {
         }
       />
 
-      {!isI18nEnabled && (
+      {i18n === 'disabled' && (
         <Alert variant="info" data-testid="i18n-disabled-notice">
           <AlertDescription>
             Multiple languages are switched off for this instance, so everyone currently sees
