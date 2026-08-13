@@ -583,15 +583,30 @@ mod tests {
 #[cfg(test)]
 mod integration {
     //! End-to-end engine tests against a LIVE PR-A2 backend
-    //! (WHITY_BACKEND_URL, default http://localhost:8300, admin@example.com/admin123).
-    //! `#[ignore]` so plain `cargo test` skips them in CI; run explicitly with:
+    //! (admin@example.com/admin123). `#[ignore]` so plain `cargo test` skips
+    //! them in CI; run explicitly with:
     //!   $env:WHITY_BACKEND_URL="http://localhost:8300"; cargo test -- --ignored
+    //!
+    //! WHITY_BACKEND_URL is REQUIRED here, not defaulted: these tests enrol
+    //! devices and create/update/delete catalog rows, and the compiled-in
+    //! default is the hosted instance (see config.rs) — falling back to it
+    //! would write test data straight into production.
     use super::*;
     use crate::auth::api::{self, LoginOutcome};
     use crate::config::Config;
     use crate::db::migrations;
     use rusqlite::Connection;
     use uuid::Uuid;
+
+    /// The backend under test — named explicitly or not at all.
+    fn explicit_backend() -> Config {
+        assert!(
+            std::env::var("WHITY_BACKEND_URL").is_ok_and(|v| !v.trim().is_empty()),
+            "set WHITY_BACKEND_URL to a throwaway backend these tests may write to \
+             (e.g. http://localhost:8300); refusing to fall back to the compiled-in default"
+        );
+        Config::from_env()
+    }
 
     fn token(client: &Client, cfg: &Config) -> String {
         match api::login(client, cfg, "admin@example.com", "admin123").expect("login") {
@@ -620,9 +635,9 @@ mod integration {
     }
 
     #[test]
-    #[ignore = "requires a live PR-A2 backend (WHITY_BACKEND_URL, default :8300)"]
+    #[ignore = "requires a live PR-A2 backend (WHITY_BACKEND_URL must be set)"]
     fn pushes_pulls_and_detects_conflicts() {
-        let cfg = Config::from_env();
+        let cfg = explicit_backend();
         let client = api::build_client().unwrap();
         let tok = token(&client, &cfg);
         let api_base = cfg.api_base();
