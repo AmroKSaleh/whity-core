@@ -19,6 +19,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+
 type ComponentStatus = 'operational' | 'degraded' | 'down' | 'unknown';
 
 interface StatusComponent {
@@ -55,34 +57,56 @@ const TONE: Record<ComponentStatus, { dot: string; text: string }> = {
   unknown: { dot: 'bg-muted-foreground', text: 'text-muted-foreground' },
 };
 
-const HEADLINE: Record<ComponentStatus, string> = {
-  operational: 'All systems operational',
-  degraded: 'Some systems degraded',
-  down: 'Service disruption',
-  unknown: 'Status unavailable',
+/**
+ * The overall headline and the per-component label are both reached through a
+ * status lookup rather than as literals, which no static scanner can read — so
+ * both sets are declared here and the extractor takes the catalogue from this
+ * block. The English stays on the record as the runtime fallback.
+ *
+ * @i18n-keys status
+ *   headline.operational = All systems operational
+ *   headline.degraded = Some systems degraded
+ *   headline.down = Service disruption
+ *   headline.unknown = Status unavailable
+ *   label.operational = Operational
+ *   label.degraded = Degraded
+ *   label.down = Down
+ *   label.unknown = No recent data
+ */
+const HEADLINE: Record<ComponentStatus, { key: string; text: string }> = {
+  operational: { key: 'headline.operational', text: 'All systems operational' },
+  degraded: { key: 'headline.degraded', text: 'Some systems degraded' },
+  down: { key: 'headline.down', text: 'Service disruption' },
+  unknown: { key: 'headline.unknown', text: 'Status unavailable' },
 };
 
-const LABEL: Record<ComponentStatus, string> = {
-  operational: 'Operational',
-  degraded: 'Degraded',
-  down: 'Down',
+const LABEL: Record<ComponentStatus, { key: string; text: string }> = {
+  operational: { key: 'label.operational', text: 'Operational' },
+  degraded: { key: 'label.degraded', text: 'Degraded' },
+  down: { key: 'label.down', text: 'Down' },
   // "Unknown" is shown when samples have gone stale — silence is not health,
   // and saying so is more useful than freezing on the last good value.
-  unknown: 'No recent data',
+  unknown: { key: 'label.unknown', text: 'No recent data' },
 };
 
-function formatWhen(iso: string | null): string {
-  if (!iso) return 'never';
+/**
+ * Relative age, as one translatable unit per magnitude rather than a number
+ * glued to a suffix — the unit letter and the word order both move between
+ * languages, so `{n}` has to sit inside the string rather than in front of it.
+ */
+function formatWhen(t: TranslateFn, iso: string | null): string {
+  if (!iso) return t('when.never', 'never');
   const then = new Date(iso.replace(' ', 'T') + (iso.includes('Z') || iso.includes('+') ? '' : 'Z'));
-  if (Number.isNaN(then.getTime())) return 'unknown';
+  if (Number.isNaN(then.getTime())) return t('when.unknown', 'unknown');
   const seconds = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
-  if (seconds < 90) return `${seconds}s ago`;
-  if (seconds < 5400) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 172800) return `${Math.round(seconds / 3600)}h ago`;
-  return `${Math.round(seconds / 86400)}d ago`;
+  if (seconds < 90) return t('when.seconds', '{n}s ago', { n: seconds });
+  if (seconds < 5400) return t('when.minutes', '{n}m ago', { n: Math.round(seconds / 60) });
+  if (seconds < 172800) return t('when.hours', '{n}h ago', { n: Math.round(seconds / 3600) });
+  return t('when.days', '{n}d ago', { n: Math.round(seconds / 86400) });
 }
 
 export default function StatusPage() {
+  const t = useTranslation('status');
   const [data, setData] = useState<StatusPayload | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -125,7 +149,9 @@ export default function StatusPage() {
           <p className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
             Whity
           </p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Service status</h1>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+            {t('title', 'Service status')}
+          </h1>
         </header>
 
         <section
@@ -134,28 +160,33 @@ export default function StatusPage() {
         >
           <span className={`h-3 w-3 shrink-0 rounded-full ${tone.dot}`} aria-hidden />
           <div>
-            <p className={`font-medium ${tone.text}`}>{HEADLINE[overall]}</p>
+            <p className={`font-medium ${tone.text}`}>
+              {t(HEADLINE[overall].key, HEADLINE[overall].text)}
+            </p>
             {unreachable ? (
               <p className="text-sm text-muted-foreground">
-                The status service could not be reached from your browser.
+                {t(
+                  'unreachable',
+                  'The status service could not be reached from your browser.'
+                )}
               </p>
             ) : data ? (
               <p className="text-sm text-muted-foreground">
-                Updated {formatWhen(data.generated_at)}
+                {t('updated', 'Updated {when}', { when: formatWhen(t, data.generated_at) })}
               </p>
             ) : null}
           </div>
         </section>
 
         {loading && !data ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t('loading', 'Loading…')}</p>
         ) : null}
 
         {data ? (
           <>
             <section aria-labelledby="components-heading" className="mb-12">
               <h2 id="components-heading" className="sr-only">
-                Components
+                {t('components.heading', 'Components')}
               </h2>
               <ul className="divide-y divide-border rounded-xl border border-border">
                 {data.components.map((component) => (
@@ -163,7 +194,9 @@ export default function StatusPage() {
                     <div className="min-w-0">
                       <p className="truncate font-medium">{component.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        checked {formatWhen(component.checked_at)}
+                        {t('components.checked', 'checked {when}', {
+                          when: formatWhen(t, component.checked_at),
+                        })}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-3">
@@ -178,7 +211,7 @@ export default function StatusPage() {
                           aria-hidden
                         />
                         <span className={`text-sm ${TONE[component.status].text}`}>
-                          {LABEL[component.status]}
+                          {t(LABEL[component.status].key, LABEL[component.status].text)}
                         </span>
                       </span>
                     </div>
@@ -186,17 +219,21 @@ export default function StatusPage() {
                 ))}
               </ul>
               <p className="mt-3 text-xs text-muted-foreground">
-                Uptime over the last {data.window_days} days.
+                {t('components.uptimeWindow', 'Uptime over the last {days} days.', {
+                  days: data.window_days,
+                })}
               </p>
             </section>
 
             <section aria-labelledby="incidents-heading">
               <h2 id="incidents-heading" className="mb-4 text-lg font-semibold">
-                Recent incidents
+                {t('incidents.heading', 'Recent incidents')}
               </h2>
               {data.incidents.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No incidents recorded in the last {data.window_days} days.
+                  {t('incidents.none', 'No incidents recorded in the last {days} days.', {
+                    days: data.window_days,
+                  })}
                 </p>
               ) : (
                 <ul className="space-y-3">
@@ -213,8 +250,14 @@ export default function StatusPage() {
                           aria-hidden
                         />
                         <span className="font-medium capitalize">{incident.component}</span>
+                        {/* `incident.status` is the backend's own slug, shown
+                            verbatim today and left that way — it travels
+                            through the sentence as a placeholder. */}
                         <span className="text-sm text-muted-foreground">
-                          {incident.status} for {incident.minutes} min
+                          {t('incidents.duration', '{status} for {minutes} min', {
+                            status: incident.status,
+                            minutes: incident.minutes,
+                          })}
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -230,7 +273,10 @@ export default function StatusPage() {
 
         <footer className="mt-16 border-t border-border pt-6 text-xs text-muted-foreground">
           <p>
-            This page reports the health of this deployment. It refreshes automatically every minute.
+            {t(
+              'footer',
+              'This page reports the health of this deployment. It refreshes automatically every minute.'
+            )}
           </p>
         </footer>
       </div>

@@ -10,6 +10,7 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import {
   IconAlertCircle,
   IconArrowLeft,
@@ -29,7 +30,6 @@ import {
   type RegistryEntry,
   type SettingsMap,
 } from '../(protected)/admin/settings/settings-shared';
-import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * First-run onboarding wizard (WC-2b9d4f6a, WC-onboarding-full-setup).
@@ -71,28 +71,51 @@ import { useTranslation } from '@amroksaleh/features/i18n';
  * the caller can surface it — the saved global settings are the durable result;
  * this flips the operator-visible "seen" flag so the wizard is not shown again.
  */
-async function markInstanceConfigured(): Promise<void> {
+async function markInstanceConfigured(t: TranslateFn): Promise<void> {
   const { error } = await api.POST('/api/v1/instance/complete-setup', {});
   if (error) {
-    throw new Error(errorMessage(error, 'Could not finalize first-run setup'));
+    throw new Error(
+      errorMessage(error, t('error.finalize', 'Could not finalize first-run setup'))
+    );
   }
+}
+
+/** A piece of translatable copy held in a table: its key and its English. */
+interface Copy {
+  key: string;
+  text: string;
 }
 
 interface WizardStep {
   id: string;
-  title: string;
+  title: Copy;
   /** Registry keys rendered on this step, in order (empty for intro/review). */
   keys: readonly string[];
 }
 
+/**
+ * The step titles reach `t()` through this table rather than as literals, which
+ * no static scanner can read — so they are declared here and the extractor takes
+ * the catalogue from this block. The English stays on the record as the runtime
+ * fallback.
+ *
+ * @i18n-keys onboarding
+ *   step.welcome.title = Welcome
+ *   step.general.title = Instance basics
+ *   step.signup.title = Sign-up governance
+ *   step.signin.title = Sign-in & SSO
+ *   step.email.title = Email (SMTP)
+ *   step.storage.title = File storage
+ *   step.review.title = Review & finish
+ */
 const STEPS: readonly WizardStep[] = [
-  { id: 'welcome', title: 'Welcome', keys: [] },
-  { id: 'general', title: 'Instance basics', keys: ['site_name', 'support_email', 'timezone', 'locale'] },
-  { id: 'signup', title: 'Sign-up governance', keys: ['auth.self_registration_enabled', 'auth.registration_approval_required'] },
-  { id: 'signin', title: 'Sign-in & SSO', keys: ['auth.sso_enabled'] },
+  { id: 'welcome', title: { key: 'step.welcome.title', text: 'Welcome' }, keys: [] },
+  { id: 'general', title: { key: 'step.general.title', text: 'Instance basics' }, keys: ['site_name', 'support_email', 'timezone', 'locale'] },
+  { id: 'signup', title: { key: 'step.signup.title', text: 'Sign-up governance' }, keys: ['auth.self_registration_enabled', 'auth.registration_approval_required'] },
+  { id: 'signin', title: { key: 'step.signin.title', text: 'Sign-in & SSO' }, keys: ['auth.sso_enabled'] },
   {
     id: 'email',
-    title: 'Email (SMTP)',
+    title: { key: 'step.email.title', text: 'Email (SMTP)' },
     keys: [
       'mail.transport',
       'mail.smtp.host',
@@ -105,7 +128,7 @@ const STEPS: readonly WizardStep[] = [
   },
   {
     id: 'storage',
-    title: 'File storage',
+    title: { key: 'step.storage.title', text: 'File storage' },
     keys: [
       'storage.driver',
       'storage.s3.endpoint',
@@ -116,7 +139,7 @@ const STEPS: readonly WizardStep[] = [
       'storage.s3.public_base_url',
     ],
   },
-  { id: 'review', title: 'Review & finish', keys: [] },
+  { id: 'review', title: { key: 'step.review.title', text: 'Review & finish' }, keys: [] },
 ];
 
 /**
@@ -142,16 +165,16 @@ const CONDITIONAL_KEYS: Record<string, { gate: string; showWhen: (value: string)
 };
 
 interface GuideSection {
-  heading?: string;
-  lines: readonly string[];
+  heading?: Copy;
+  lines: readonly Copy[];
 }
 
 interface StepGuideContent {
   /** One-line teaser shown on the collapsed "Need help?" toggle. */
-  summary: string;
+  summary: Copy;
   sections: readonly GuideSection[];
   /** Optional deep-link to the admin page that owns the fuller flow. */
-  link?: { href: string; label: string };
+  link?: { href: string; label: Copy };
 }
 
 /**
@@ -159,84 +182,203 @@ interface StepGuideContent {
  * from docs/wiki (Email-SMTP-Setup, SSO-Google-Setup) so an operator can find the
  * information a field needs — where SMTP credentials live, the port↔encryption
  * pairing, S3 conventions — without leaving the wizard.
+ *
+ * Every line reaches `t()` through this table rather than as a literal, so the
+ * keys are declared below and the extractor takes the catalogue from the block.
+ * The `href` values are routes, not language, and stay out of it.
+ *
+ * @i18n-keys onboarding
+ *   guide.signup.summary = What open sign-up and approval mean for your instance.
+ *   guide.signup.publicSignup = Public sign-up lets anyone create an account from the sign-in screen. It is OFF by default — an operator-provisioned instance opens it deliberately.
+ *   guide.signup.approval = Require admin approval holds each new account as “pending” until an administrator approves it. Leave it on when sign-up is open so nobody gets access unreviewed.
+ *   guide.signin.summary = The SSO master switch; add individual providers on the SSO page.
+ *   guide.signin.masterSwitch = This is the instance-wide master switch for federated sign-in. When off, every configured identity provider is disabled.
+ *   guide.signin.providers = Individual providers (e.g. Google) are added on the SSO settings page: create an OAuth client in your provider, set the redirect URI it gives you, then paste the client ID/secret there.
+ *   guide.signin.link = Open SSO settings
+ *   guide.email.summary = How to connect an SMTP mailbox — and where to find the details.
+ *   guide.email.transport.heading = Transport
+ *   guide.email.transport.options = “None” disables email entirely. “Log” writes messages to the app log (handy while testing). “SMTP” sends real email through your mail provider.
+ *   guide.email.connection.heading = SMTP connection
+ *   guide.email.connection.host = Host — your provider’s SMTP server, e.g. mail.yourdomain.com (cPanel), smtp.gmail.com (Google), or email-smtp.<region>.amazonaws.com (Amazon SES).
+ *   guide.email.connection.port = Port + Encryption go together: 587 → TLS (STARTTLS) or 465 → SSL. Use a hostname the TLS certificate actually covers.
+ *   guide.email.connection.username = Username is usually the full email address of the mailbox you send from.
+ *   guide.email.connection.from = From address / name is what recipients see the mail come from.
+ *   guide.email.credentials.heading = Where to find your credentials
+ *   guide.email.credentials.cpanel = cPanel: Email Accounts → Connect Devices shows the host, ports and username.
+ *   guide.email.credentials.google = Google Workspace / Gmail: create an App Password (with 2-Step Verification on) and use it as the SMTP password.
+ *   guide.email.credentials.ses = Amazon SES: create SMTP credentials in the SES console (these are distinct from your AWS keys).
+ *   guide.email.password.heading = Password & test send
+ *   guide.email.password.body = The SMTP password is stored encrypted and set on the Email settings page, which also has a “send test email” button to verify the connection end-to-end.
+ *   guide.email.link = Open Email settings (password + test send)
+ *   guide.storage.summary = Keep files on local disk, or point at an S3-compatible object store.
+ *   guide.storage.driver.heading = Driver
+ *   guide.storage.driver.local = “local” stores uploaded files on the server’s disk — fine for a single-node deployment.
+ *   guide.storage.driver.s3 = For durability or multi-node, use an S3-compatible object store (AWS S3, MinIO, Cloudflare R2, Backblaze B2, …) by setting the driver to “s3”.
+ *   guide.storage.s3.heading = S3 settings
+ *   guide.storage.s3.endpoint = Endpoint — the object store’s base URL (e.g. https://s3.amazonaws.com, or your MinIO/R2 endpoint).
+ *   guide.storage.s3.region = Region / Bucket — as created in your provider’s console.
+ *   guide.storage.s3.accessKey = Access key — the public key ID. The matching SECRET key is supplied via the deployment environment and is never stored here.
+ *   guide.storage.s3.pathStyle = Path-style addressing — turn on for most self-hosted gateways (MinIO); AWS uses virtual-hosted style.
+ *   guide.storage.s3.publicBaseUrl = Public base URL — set only if assets are served from a different (CDN) host than the endpoint.
  */
 const STEP_GUIDES: Record<string, StepGuideContent> = {
   signup: {
-    summary: 'What open sign-up and approval mean for your instance.',
+    summary: {
+      key: 'guide.signup.summary',
+      text: 'What open sign-up and approval mean for your instance.',
+    },
     sections: [
       {
         lines: [
-          'Public sign-up lets anyone create an account from the sign-in screen. It is OFF by default — an operator-provisioned instance opens it deliberately.',
-          'Require admin approval holds each new account as “pending” until an administrator approves it. Leave it on when sign-up is open so nobody gets access unreviewed.',
+          {
+            key: 'guide.signup.publicSignup',
+            text: 'Public sign-up lets anyone create an account from the sign-in screen. It is OFF by default — an operator-provisioned instance opens it deliberately.',
+          },
+          {
+            key: 'guide.signup.approval',
+            text: 'Require admin approval holds each new account as “pending” until an administrator approves it. Leave it on when sign-up is open so nobody gets access unreviewed.',
+          },
         ],
       },
     ],
   },
   signin: {
-    summary: 'The SSO master switch; add individual providers on the SSO page.',
+    summary: {
+      key: 'guide.signin.summary',
+      text: 'The SSO master switch; add individual providers on the SSO page.',
+    },
     sections: [
       {
         lines: [
-          'This is the instance-wide master switch for federated sign-in. When off, every configured identity provider is disabled.',
-          'Individual providers (e.g. Google) are added on the SSO settings page: create an OAuth client in your provider, set the redirect URI it gives you, then paste the client ID/secret there.',
+          {
+            key: 'guide.signin.masterSwitch',
+            text: 'This is the instance-wide master switch for federated sign-in. When off, every configured identity provider is disabled.',
+          },
+          {
+            key: 'guide.signin.providers',
+            text: 'Individual providers (e.g. Google) are added on the SSO settings page: create an OAuth client in your provider, set the redirect URI it gives you, then paste the client ID/secret there.',
+          },
         ],
       },
     ],
-    link: { href: '/admin/settings/sso', label: 'Open SSO settings' },
+    link: {
+      href: '/admin/settings/sso',
+      label: { key: 'guide.signin.link', text: 'Open SSO settings' },
+    },
   },
   email: {
-    summary: 'How to connect an SMTP mailbox — and where to find the details.',
+    summary: {
+      key: 'guide.email.summary',
+      text: 'How to connect an SMTP mailbox — and where to find the details.',
+    },
     sections: [
       {
-        heading: 'Transport',
+        heading: { key: 'guide.email.transport.heading', text: 'Transport' },
         lines: [
-          '“None” disables email entirely. “Log” writes messages to the app log (handy while testing). “SMTP” sends real email through your mail provider.',
+          {
+            key: 'guide.email.transport.options',
+            text: '“None” disables email entirely. “Log” writes messages to the app log (handy while testing). “SMTP” sends real email through your mail provider.',
+          },
         ],
       },
       {
-        heading: 'SMTP connection',
+        heading: { key: 'guide.email.connection.heading', text: 'SMTP connection' },
         lines: [
-          'Host — your provider’s SMTP server, e.g. mail.yourdomain.com (cPanel), smtp.gmail.com (Google), or email-smtp.<region>.amazonaws.com (Amazon SES).',
-          'Port + Encryption go together: 587 → TLS (STARTTLS) or 465 → SSL. Use a hostname the TLS certificate actually covers.',
-          'Username is usually the full email address of the mailbox you send from.',
-          'From address / name is what recipients see the mail come from.',
+          {
+            key: 'guide.email.connection.host',
+            text: 'Host — your provider’s SMTP server, e.g. mail.yourdomain.com (cPanel), smtp.gmail.com (Google), or email-smtp.<region>.amazonaws.com (Amazon SES).',
+          },
+          {
+            key: 'guide.email.connection.port',
+            text: 'Port + Encryption go together: 587 → TLS (STARTTLS) or 465 → SSL. Use a hostname the TLS certificate actually covers.',
+          },
+          {
+            key: 'guide.email.connection.username',
+            text: 'Username is usually the full email address of the mailbox you send from.',
+          },
+          {
+            key: 'guide.email.connection.from',
+            text: 'From address / name is what recipients see the mail come from.',
+          },
         ],
       },
       {
-        heading: 'Where to find your credentials',
+        heading: { key: 'guide.email.credentials.heading', text: 'Where to find your credentials' },
         lines: [
-          'cPanel: Email Accounts → Connect Devices shows the host, ports and username.',
-          'Google Workspace / Gmail: create an App Password (with 2-Step Verification on) and use it as the SMTP password.',
-          'Amazon SES: create SMTP credentials in the SES console (these are distinct from your AWS keys).',
+          {
+            key: 'guide.email.credentials.cpanel',
+            text: 'cPanel: Email Accounts → Connect Devices shows the host, ports and username.',
+          },
+          {
+            key: 'guide.email.credentials.google',
+            text: 'Google Workspace / Gmail: create an App Password (with 2-Step Verification on) and use it as the SMTP password.',
+          },
+          {
+            key: 'guide.email.credentials.ses',
+            text: 'Amazon SES: create SMTP credentials in the SES console (these are distinct from your AWS keys).',
+          },
         ],
       },
       {
-        heading: 'Password & test send',
+        heading: { key: 'guide.email.password.heading', text: 'Password & test send' },
         lines: [
-          'The SMTP password is stored encrypted and set on the Email settings page, which also has a “send test email” button to verify the connection end-to-end.',
+          {
+            key: 'guide.email.password.body',
+            text: 'The SMTP password is stored encrypted and set on the Email settings page, which also has a “send test email” button to verify the connection end-to-end.',
+          },
         ],
       },
     ],
-    link: { href: '/admin/settings/email', label: 'Open Email settings (password + test send)' },
+    link: {
+      href: '/admin/settings/email',
+      label: {
+        key: 'guide.email.link',
+        text: 'Open Email settings (password + test send)',
+      },
+    },
   },
   storage: {
-    summary: 'Keep files on local disk, or point at an S3-compatible object store.',
+    summary: {
+      key: 'guide.storage.summary',
+      text: 'Keep files on local disk, or point at an S3-compatible object store.',
+    },
     sections: [
       {
-        heading: 'Driver',
+        heading: { key: 'guide.storage.driver.heading', text: 'Driver' },
         lines: [
-          '“local” stores uploaded files on the server’s disk — fine for a single-node deployment.',
-          'For durability or multi-node, use an S3-compatible object store (AWS S3, MinIO, Cloudflare R2, Backblaze B2, …) by setting the driver to “s3”.',
+          {
+            key: 'guide.storage.driver.local',
+            text: '“local” stores uploaded files on the server’s disk — fine for a single-node deployment.',
+          },
+          {
+            key: 'guide.storage.driver.s3',
+            text: 'For durability or multi-node, use an S3-compatible object store (AWS S3, MinIO, Cloudflare R2, Backblaze B2, …) by setting the driver to “s3”.',
+          },
         ],
       },
       {
-        heading: 'S3 settings',
+        heading: { key: 'guide.storage.s3.heading', text: 'S3 settings' },
         lines: [
-          'Endpoint — the object store’s base URL (e.g. https://s3.amazonaws.com, or your MinIO/R2 endpoint).',
-          'Region / Bucket — as created in your provider’s console.',
-          'Access key — the public key ID. The matching SECRET key is supplied via the deployment environment and is never stored here.',
-          'Path-style addressing — turn on for most self-hosted gateways (MinIO); AWS uses virtual-hosted style.',
-          'Public base URL — set only if assets are served from a different (CDN) host than the endpoint.',
+          {
+            key: 'guide.storage.s3.endpoint',
+            text: 'Endpoint — the object store’s base URL (e.g. https://s3.amazonaws.com, or your MinIO/R2 endpoint).',
+          },
+          {
+            key: 'guide.storage.s3.region',
+            text: 'Region / Bucket — as created in your provider’s console.',
+          },
+          {
+            key: 'guide.storage.s3.accessKey',
+            text: 'Access key — the public key ID. The matching SECRET key is supplied via the deployment environment and is never stored here.',
+          },
+          {
+            key: 'guide.storage.s3.pathStyle',
+            text: 'Path-style addressing — turn on for most self-hosted gateways (MinIO); AWS uses virtual-hosted style.',
+          },
+          {
+            key: 'guide.storage.s3.publicBaseUrl',
+            text: 'Public base URL — set only if assets are served from a different (CDN) host than the endpoint.',
+          },
         ],
       },
     ],
@@ -247,6 +389,7 @@ export default function OnboardingPage() {
   const router = useRouter();
   const { isLoading: authLoading, user } = useAuth();
   const { hasPermission, loading: capsLoading } = useCapabilities();
+  const t = useTranslation('onboarding');
 
   const canManage = hasPermission(SETTINGS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -283,13 +426,17 @@ export default function OnboardingPage() {
           <div className="mb-4 rounded-full bg-destructive/10 p-4 text-destructive">
             <IconAlertCircle size={40} />
           </div>
-          <h1 className="mb-2 text-xl font-bold">Setup is operator-only</h1>
+          <h1 className="mb-2 text-xl font-bold">
+            {t('denied.title', 'Setup is operator-only')}
+          </h1>
           <p className="mb-6 text-sm text-muted-foreground">
-            First-run setup configures instance-wide defaults, so it can only be run by an operator
-            of the system tenant. Sign in with the operator account to continue.
+            {t(
+              'denied.description',
+              'First-run setup configures instance-wide defaults, so it can only be run by an operator of the system tenant. Sign in with the operator account to continue.'
+            )}
           </p>
           <Button asChild variant="outline">
-            <Link href="/dashboard">Go to dashboard</Link>
+            <Link href="/dashboard">{t('denied.dashboard', 'Go to dashboard')}</Link>
           </Button>
         </div>
       </div>
@@ -302,14 +449,21 @@ export default function OnboardingPage() {
 function OnboardingWizard() {
   const router = useRouter();
   const { addToast } = useToast();
+  const t = useTranslation('onboarding');
+
+  // Resolved to a STRING before the fetch closure captures it, and listed as the
+  // dependency in that form. `t`'s identity changes the moment the bundle
+  // arrives, so depending on `t` itself would re-fetch on every load; a string
+  // compares by value, so the English case re-runs exactly never.
+  const loadErrorMessage = t('error.load', 'Failed to load instance settings');
 
   const { data, loading, error } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load instance settings'));
+      throw new Error(errorMessage(getError, loadErrorMessage));
     }
     return body.data;
-  }, []);
+  }, [loadErrorMessage]);
 
   const global = data?.global as SettingsMap | undefined;
   const registry = useMemo<RegistryEntry[]>(() => data?.registry ?? [], [data]);
@@ -385,11 +539,17 @@ function OnboardingWizard() {
     if (changedKeys.length === 0) {
       setSaving(true);
       try {
-        await markInstanceConfigured();
-        addToast('Setup complete. You can fine-tune everything in Settings.', 'success');
+        await markInstanceConfigured(t);
+        addToast(
+          t('finish.defaults', 'Setup complete. You can fine-tune everything in Settings.'),
+          'success'
+        );
         router.push('/admin/settings');
       } catch (err) {
-        addToast(err instanceof Error ? err.message : 'Could not finalize setup', 'error');
+        addToast(
+          err instanceof Error ? err.message : t('error.finish', 'Could not finalize setup'),
+          'error'
+        );
       } finally {
         setSaving(false);
       }
@@ -413,13 +573,18 @@ function OnboardingWizard() {
         // Jump back to the earliest step that owns a rejected field.
         const firstBadStep = activeSteps.findIndex((s) => s.keys.some((k) => k in errors));
         if (firstBadStep >= 0) setStepIndex(firstBadStep);
-        throw new Error(errorMessage(patchError, 'Could not save your settings'));
+        throw new Error(
+          errorMessage(patchError, t('error.save', 'Could not save your settings'))
+        );
       }
-      await markInstanceConfigured();
-      addToast('Setup complete. Your instance is ready.', 'success');
+      await markInstanceConfigured(t);
+      addToast(t('finish.saved', 'Setup complete. Your instance is ready.'), 'success');
       router.push('/admin/settings');
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Could not save your settings', 'error');
+      addToast(
+        err instanceof Error ? err.message : t('error.save', 'Could not save your settings'),
+        'error'
+      );
     } finally {
       setSaving(false);
     }
@@ -434,9 +599,14 @@ function OnboardingWizard() {
               <IconRocket className="h-5 w-5" />
             </span>
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Set up your instance</h1>
+              <h1 className="text-2xl font-bold text-foreground">
+                {t('title', 'Set up your instance')}
+              </h1>
               <p className="text-sm text-muted-foreground">
-                A few defaults to get started. You can change any of these later in Global Settings.
+                {t(
+                  'subtitle',
+                  'A few defaults to get started. You can change any of these later in Global Settings.'
+                )}
               </p>
             </div>
           </div>
@@ -446,9 +616,9 @@ function OnboardingWizard() {
         <Card className="border border-border bg-card shadow-sm">
           <CardHeader>
             <CardTitle className="text-lg font-bold font-heading">
-              <h2>{step.title}</h2>
+              <h2>{t(step.title.key, step.title.text)}</h2>
             </CardTitle>
-            <CardDescription className="text-sm">{stepDescription(step.id)}</CardDescription>
+            <CardDescription className="text-sm">{stepDescription(t, step.id)}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             {loading || !global ? (
@@ -498,7 +668,7 @@ function OnboardingWizard() {
             data-testid="onboarding-back"
           >
             <IconArrowLeft className="h-4 w-4" />
-            Back
+            {t('nav.back', 'Back')}
           </Button>
 
           {isReview ? (
@@ -509,7 +679,7 @@ function OnboardingWizard() {
               data-testid="onboarding-finish"
             >
               <IconCheck className="h-4 w-4" />
-              {saving ? 'Saving…' : 'Finish setup'}
+              {saving ? t('nav.finish.pending', 'Saving…') : t('nav.finish', 'Finish setup')}
             </Button>
           ) : (
             <Button
@@ -518,7 +688,7 @@ function OnboardingWizard() {
               className="gap-2"
               data-testid="onboarding-next"
             >
-              {isFirst ? 'Get started' : 'Continue'}
+              {isFirst ? t('nav.start', 'Get started') : t('nav.continue', 'Continue')}
               <IconArrowRight className="h-4 w-4" />
             </Button>
           )}
@@ -528,30 +698,50 @@ function OnboardingWizard() {
   );
 }
 
-function stepDescription(id: string): string {
+function stepDescription(t: TranslateFn, id: string): string {
   switch (id) {
     case 'welcome':
-      return 'Welcome — this short wizard configures the instance-wide defaults for your deployment.';
+      return t(
+        'step.welcome.description',
+        'Welcome — this short wizard configures the instance-wide defaults for your deployment.'
+      );
     case 'general':
-      return 'How your instance identifies itself to every tenant.';
+      return t(
+        'step.general.description',
+        'How your instance identifies itself to every tenant.'
+      );
     case 'signup':
-      return 'Decide whether people can register themselves, and whether new accounts need approval.';
+      return t(
+        'step.signup.description',
+        'Decide whether people can register themselves, and whether new accounts need approval.'
+      );
     case 'signin':
-      return 'Federated sign-in across the whole instance.';
+      return t('step.signin.description', 'Federated sign-in across the whole instance.');
     case 'email':
-      return 'Connect a mailbox so the instance can send verification, invitation and notification email.';
+      return t(
+        'step.email.description',
+        'Connect a mailbox so the instance can send verification, invitation and notification email.'
+      );
     case 'storage':
-      return 'Where uploaded files (documents, branding, exports) are kept.';
+      return t(
+        'step.storage.description',
+        'Where uploaded files (documents, branding, exports) are kept.'
+      );
     case 'review':
-      return 'Review the changes below, then finish. Everything remains editable in Global Settings.';
+      return t(
+        'step.review.description',
+        'Review the changes below, then finish. Everything remains editable in Global Settings.'
+      );
     default:
       return '';
   }
 }
 
 function Stepper({ steps, current }: { steps: readonly WizardStep[]; current: number }) {
+  const t = useTranslation('onboarding');
+
   return (
-    <ol className="flex items-center gap-2" aria-label="Setup progress">
+    <ol className="flex items-center gap-2" aria-label={t('stepper.label', 'Setup progress')}>
       {steps.map((step, i) => {
         const state = i < current ? 'done' : i === current ? 'active' : 'upcoming';
         return (
@@ -582,6 +772,8 @@ function Stepper({ steps, current }: { steps: readonly WizardStep[]; current: nu
  * operator never loses their place in the wizard.
  */
 function StepGuide({ content }: { content: StepGuideContent }) {
+  const t = useTranslation('onboarding');
+
   return (
     <details
       className="group rounded-lg border border-border bg-muted/30"
@@ -589,21 +781,32 @@ function StepGuide({ content }: { content: StepGuideContent }) {
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm">
         <IconHelpCircle className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+        {/* A label and a teaser, styled apart — two independent units, not one
+            sentence split in half. */}
         <span className="flex-1 font-medium text-foreground">
-          Need help? <span className="font-normal text-muted-foreground">{content.summary}</span>
+          {t('guide.toggle', 'Need help?')}{' '}
+          <span className="font-normal text-muted-foreground">
+            {t(content.summary.key, content.summary.text)}
+          </span>
         </span>
-        <span className="shrink-0 text-xs text-muted-foreground group-open:hidden">Show</span>
-        <span className="hidden shrink-0 text-xs text-muted-foreground group-open:inline">Hide</span>
+        <span className="shrink-0 text-xs text-muted-foreground group-open:hidden">
+          {t('guide.show', 'Show')}
+        </span>
+        <span className="hidden shrink-0 text-xs text-muted-foreground group-open:inline">
+          {t('guide.hide', 'Hide')}
+        </span>
       </summary>
       <div className="space-y-3 border-t border-border px-3 py-3 text-sm text-muted-foreground">
         {content.sections.map((section, i) => (
           <div key={i} className="space-y-1">
             {section.heading !== undefined && (
-              <p className="font-medium text-foreground">{section.heading}</p>
+              <p className="font-medium text-foreground">
+                {t(section.heading.key, section.heading.text)}
+              </p>
             )}
             <ul className="list-disc space-y-1 pl-5">
-              {section.lines.map((line, j) => (
-                <li key={j}>{line}</li>
+              {section.lines.map((line) => (
+                <li key={line.key}>{t(line.key, line.text)}</li>
               ))}
             </ul>
           </div>
@@ -615,7 +818,7 @@ function StepGuide({ content }: { content: StepGuideContent }) {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"
           >
-            {content.link.label}
+            {t(content.link.label.key, content.link.label.text)}
             <IconExternalLink className="h-3.5 w-3.5" aria-hidden />
           </Link>
         )}
@@ -625,13 +828,22 @@ function StepGuide({ content }: { content: StepGuideContent }) {
 }
 
 function WelcomeStep() {
+  const t = useTranslation('onboarding');
+
   return (
     <div className="space-y-3 text-sm text-muted-foreground">
       <p>
-        This is a fresh instance. The next few steps set the defaults every tenant inherits — the
-        instance name and support contact, whether people may sign themselves up, and how sign-in
-        works.
+        {t(
+          'welcome.intro',
+          'This is a fresh instance. The next few steps set the defaults every tenant inherits — the instance name and support contact, whether people may sign themselves up, and how sign-in works.'
+        )}
       </p>
+      {/*
+        NOT translated, deliberately: three phrases are emphasised with <span>
+        INSIDE the sentence, and `t()` returns a string — keeping them would mean
+        handing a translator five fragments in English word order. Needs the
+        emphasis lifted out of the sentence first.
+      */}
       <p>
         We&rsquo;ll also connect <span className="font-medium text-foreground">email (SMTP)</span> and{' '}
         <span className="font-medium text-foreground">file storage</span> — each step has a short guide
@@ -649,15 +861,20 @@ function ReviewStep({
   changedKeys: string[];
   valueForKey: (key: string) => string;
 }) {
-  // The registry field labels are translated (they are shared with the Settings
-  // console); this screen's own copy has not been extracted yet.
-  const t = useTranslation('admin');
+  const t = useTranslation('onboarding');
+  // Two domains on purpose. This screen's own copy is `onboarding`, but the
+  // registry field labels come from fieldMetaFor(), which is shared with the
+  // Settings console and keys its strings under `admin`. Passing the wrong one
+  // would silently render the English fallback for every field label.
+  const tAdmin = useTranslation('admin');
 
   if (changedKeys.length === 0) {
     return (
       <p className="text-sm text-muted-foreground" data-testid="onboarding-review-empty">
-        You&rsquo;ve kept the recommended defaults for everything. Finish to complete setup — you can
-        adjust any setting later in Global Settings.
+        {t(
+          'review.empty',
+          'You’ve kept the recommended defaults for everything. Finish to complete setup — you can adjust any setting later in Global Settings.'
+        )}
       </p>
     );
   }
@@ -668,8 +885,8 @@ function ReviewStep({
         const value = valueForKey(key);
         return (
           <div key={key} className="flex items-center justify-between gap-4 py-2.5">
-            <dt className="text-sm font-medium text-foreground">{fieldMetaFor(key, t).label}</dt>
-            <dd className="text-sm text-muted-foreground">{formatReviewValue(value)}</dd>
+            <dt className="text-sm font-medium text-foreground">{fieldMetaFor(key, tAdmin).label}</dt>
+            <dd className="text-sm text-muted-foreground">{formatReviewValue(t, value)}</dd>
           </div>
         );
       })}
@@ -677,8 +894,9 @@ function ReviewStep({
   );
 }
 
-function formatReviewValue(value: string): string {
-  if (value === 'true') return 'On';
-  if (value === 'false') return 'Off';
+function formatReviewValue(t: TranslateFn, value: string): string {
+  if (value === 'true') return t('review.value.on', 'On');
+  if (value === 'false') return t('review.value.off', 'Off');
+  // An em-dash placeholder for "nothing set" is punctuation, not language.
   return value.trim() === '' ? '—' : value;
 }

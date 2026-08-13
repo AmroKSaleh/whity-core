@@ -3,10 +3,12 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 export default function Home() {
   const router = useRouter();
   const { isLoading, isAuthenticated } = useAuth();
+  const t = useTranslation('common');
 
   useEffect(() => {
     if (!isLoading) {
@@ -20,7 +22,7 @@ export default function Home() {
 
   return (
     <div className="flex items-center justify-center min-h-screen">
-      <p>Redirecting...</p>
+      <p>{t('home.redirecting', 'Redirecting...')}</p>
     </div>
   );
 }

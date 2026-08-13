@@ -11,6 +11,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Self-service registration (WC-235). Provisions a NEW workspace (tenant) with
@@ -27,6 +28,7 @@ export default function RegisterPage() {
   const { isAuthenticated, isLoading, refreshAuth } = useAuth();
   const { addToast } = useToast();
   const branding = useBranding();
+  const t = useTranslation('auth');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -69,15 +71,21 @@ export default function RegisterPage() {
     const errors: { email?: string; password?: string; tenantName?: string } = {};
 
     if (!email.trim()) {
-      errors.email = 'Email is required';
+      errors.email = t('register.email.required', 'Email is required');
     }
     if (!password) {
-      errors.password = 'Password is required';
+      errors.password = t('register.password.required', 'Password is required');
     } else if (password.length < PASSWORD_MIN_LENGTH) {
-      errors.password = `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
+      // The minimum is a hole in the sentence, not a spliced-in number — the
+      // digit's position differs between languages.
+      errors.password = t(
+        'register.password.tooShort',
+        'Password must be at least {min} characters',
+        { min: PASSWORD_MIN_LENGTH }
+      );
     }
     if (!tenantName.trim()) {
-      errors.tenantName = 'Workspace name is required';
+      errors.tenantName = t('register.tenantName.required', 'Workspace name is required');
     }
 
     setFieldErrors(errors);
@@ -117,7 +125,10 @@ export default function RegisterPage() {
         const created = await response.json().catch(() => ({}));
         if (created?.data?.approval_required === true) {
           setPendingApproval(true);
-          addToast('Workspace created — awaiting administrator approval.', 'success');
+          addToast(
+            t('register.toast.pendingApproval', 'Workspace created — awaiting administrator approval.'),
+            'success'
+          );
           return;
         }
 
@@ -127,7 +138,13 @@ export default function RegisterPage() {
         // login. Independent of the approval gate above.
         if (created?.data?.verification_required === true) {
           setPendingVerification(true);
-          addToast('Workspace created — check your email to verify your address.', 'success');
+          addToast(
+            t(
+              'register.toast.pendingVerification',
+              'Workspace created — check your email to verify your address.'
+            ),
+            'success'
+          );
           return;
         }
 
@@ -146,12 +163,15 @@ export default function RegisterPage() {
 
         if (loginRes.ok) {
           await refreshAuth();
-          addToast('Welcome! Your workspace is ready.', 'success');
+          addToast(t('register.toast.welcome', 'Welcome! Your workspace is ready.'), 'success');
           router.push('/dashboard');
         } else {
           // Account exists but auto-login did not complete (unexpected for a
           // fresh single-membership owner) — send them to the login page.
-          addToast('Account created. Please sign in to continue.', 'success');
+          addToast(
+            t('register.toast.signInRequired', 'Account created. Please sign in to continue.'),
+            'success'
+          );
           router.push('/login');
         }
         return;
@@ -160,14 +180,23 @@ export default function RegisterPage() {
       const errorData = await response.json().catch(() => ({}));
       const message =
         response.status === 409
-          ? (errorData.error as string | undefined) ?? 'That email or workspace name is already taken'
+          ? (errorData.error as string | undefined) ??
+            t('register.error.conflict', 'That email or workspace name is already taken')
           : response.status === 422
-            ? (errorData.error as string | undefined) ?? 'Please check the details and try again'
-            : (errorData.error as string | undefined) ?? 'Registration failed';
+            ? (errorData.error as string | undefined) ??
+              t('register.error.invalid', 'Please check the details and try again')
+            : (errorData.error as string | undefined) ??
+              t('register.error.generic', 'Registration failed');
       setRegisterError(message);
-      addToast(`Registration failed (${response.status}): ${message}`, 'error');
+      addToast(
+        t('register.error.withStatus', 'Registration failed ({status}): {message}', {
+          status: response.status,
+          message,
+        }),
+        'error'
+      );
     } catch {
-      const message = 'Unable to reach the server. Please try again.';
+      const message = t('register.error.transport', 'Unable to reach the server. Please try again.');
       setRegisterError(message);
       addToast(message, 'error');
     } finally {
@@ -176,7 +205,9 @@ export default function RegisterPage() {
   };
 
   const isFormDisabled = isMounted ? (isSubmitting || isLoading) : false;
-  const buttonText = isFormDisabled ? 'Creating your workspace…' : 'Create workspace';
+  const buttonText = isFormDisabled
+    ? t('register.submit.pending', 'Creating your workspace…')
+    : t('register.submit', 'Create workspace');
 
   const clearErrorsOnChange = () => {
     if (registerError) {
@@ -199,17 +230,25 @@ export default function RegisterPage() {
           ) : null}
           <CardTitle className="text-2xl">
             {pendingApproval
-              ? 'Workspace created'
+              ? t('register.title.pendingApproval', 'Workspace created')
               : pendingVerification
-                ? 'Check your email'
-                : `Create your ${branding.siteName} workspace`}
+                ? t('register.title.pendingVerification', 'Check your email')
+                : t('register.title', 'Create your {site} workspace', {
+                    site: branding.siteName,
+                  })}
           </CardTitle>
           <CardDescription>
             {pendingApproval
-              ? 'Your workspace is awaiting administrator approval'
+              ? t(
+                  'register.subtitle.pendingApproval',
+                  'Your workspace is awaiting administrator approval'
+                )
               : pendingVerification
-                ? 'Confirm your email address to finish signing up'
-                : 'Set up a new workspace and your owner account'}
+                ? t(
+                    'register.subtitle.pendingVerification',
+                    'Confirm your email address to finish signing up'
+                  )
+                : t('register.subtitle', 'Set up a new workspace and your owner account')}
           </CardDescription>
         </CardHeader>
         {pendingApproval ? (
@@ -217,13 +256,14 @@ export default function RegisterPage() {
             <div className="space-y-4 text-center" data-testid="registration-pending-approval">
               <Alert>
                 <AlertDescription>
-                  Thanks for signing up! An administrator needs to approve your new workspace
-                  before you can sign in. You&rsquo;ll be able to log in with your email and
-                  password once it&rsquo;s approved.
+                  {t(
+                    'register.pendingApproval.body',
+                    'Thanks for signing up! An administrator needs to approve your new workspace before you can sign in. You’ll be able to log in with your email and password once it’s approved.'
+                  )}
                 </AlertDescription>
               </Alert>
               <Button asChild className="w-full">
-                <Link href="/login">Back to sign in</Link>
+                <Link href="/login">{t('register.backToSignIn', 'Back to sign in')}</Link>
               </Button>
             </div>
           </CardContent>
@@ -231,6 +271,14 @@ export default function RegisterPage() {
           <CardContent>
             <div className="space-y-4 text-center" data-testid="registration-pending-verification">
               <Alert>
+                {/* DELIBERATELY NOT TRANSLATED: the emphasised address sits in
+                    the MIDDLE of the sentence, so `t()` — which returns a
+                    string — could only cover it by splitting the sentence into
+                    "…verification link to" + address + ". Open it to confirm…".
+                    A translator cannot reorder halves they never see together,
+                    and the second half opening on a full stop is unrepairable.
+                    Needs a rich-text/`<Trans>`-style helper, which does not
+                    exist yet; left whole rather than badly split. */}
                 <AlertDescription>
                   Thanks for signing up! We&rsquo;ve sent a verification link to{' '}
                   <span className="font-medium">{email}</span>. Open it to confirm your address,
@@ -238,11 +286,13 @@ export default function RegisterPage() {
                 </AlertDescription>
               </Alert>
               <Button asChild className="w-full">
-                <Link href="/verify-email">Didn&rsquo;t get it? Resend the link</Link>
+                <Link href="/verify-email">
+                  {t('register.pendingVerification.resend', 'Didn’t get it? Resend the link')}
+                </Link>
               </Button>
               <p className="text-sm text-center text-muted-foreground">
                 <Link href="/login" className="font-medium text-primary hover:underline">
-                  Back to sign in
+                  {t('register.backToSignIn', 'Back to sign in')}
                 </Link>
               </p>
             </div>
@@ -259,12 +309,12 @@ export default function RegisterPage() {
             {/* Workspace name */}
             <div className="space-y-2">
               <label htmlFor="tenantName" className="text-sm font-medium">
-                Workspace name
+                {t('register.tenantName.label', 'Workspace name')}
               </label>
               <Input
                 id="tenantName"
                 type="text"
-                placeholder="Acme Inc"
+                placeholder={t('register.tenantName.placeholder', 'Acme Inc')}
                 value={tenantName}
                 onChange={(e) => {
                   setTenantName(e.target.value);
@@ -284,13 +334,13 @@ export default function RegisterPage() {
             {/* Email */}
             <div className="space-y-2">
               <label htmlFor="email" className="text-sm font-medium">
-                Email
+                {t('register.email.label', 'Email')}
               </label>
               <Input
                 ref={emailInputRef}
                 id="email"
                 type="email"
-                placeholder="you@example.com"
+                placeholder={t('register.email.placeholder', 'you@example.com')}
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
@@ -307,13 +357,20 @@ export default function RegisterPage() {
 
             {/* Display name (optional) */}
             <div className="space-y-2">
+              {/* Two keys because "(optional)" is its own ELEMENT (a muted
+                  span) and a self-contained qualifier, not half of a sentence
+                  split for convenience — same reasoning as the sign-in
+                  screen's <strong>Recovery codes</strong>. */}
               <label htmlFor="displayName" className="text-sm font-medium">
-                Your name <span className="text-muted-foreground">(optional)</span>
+                {t('register.displayName.label', 'Your name')}{' '}
+                <span className="text-muted-foreground">
+                  {t('register.displayName.optional', '(optional)')}
+                </span>
               </label>
               <Input
                 id="displayName"
                 type="text"
-                placeholder="Jane Doe"
+                placeholder={t('register.displayName.placeholder', 'Jane Doe')}
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 disabled={isFormDisabled}
@@ -323,12 +380,14 @@ export default function RegisterPage() {
             {/* Password */}
             <div className="space-y-2">
               <label htmlFor="password" className="text-sm font-medium">
-                Password
+                {t('register.password.label', 'Password')}
               </label>
               <Input
                 id="password"
                 type="password"
-                placeholder={`At least ${PASSWORD_MIN_LENGTH} characters`}
+                placeholder={t('register.password.placeholder', 'At least {min} characters', {
+                  min: PASSWORD_MIN_LENGTH,
+                })}
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
@@ -349,10 +408,13 @@ export default function RegisterPage() {
               {buttonText}
             </Button>
 
+            {/* Prompt and link text are SEPARATE keys because they are
+                separate elements — the same shape the sign-in screen uses for
+                its `login.register.prompt` / `login.register.link` footer. */}
             <p className="text-sm text-center text-muted-foreground">
-              Already have an account?{' '}
+              {t('register.signIn.prompt', 'Already have an account?')}{' '}
               <Link href="/login" className="font-medium text-primary hover:underline">
-                Sign in
+                {t('register.signIn.link', 'Sign in')}
               </Link>
             </p>
           </form>

@@ -6,11 +6,12 @@ import { TwoFactorSettings } from '@/components/TwoFactorSettings';
 import { SessionsSettings } from '@/components/SessionsSettings';
 import { DevicesSettings } from '@/components/DevicesSettings';
 import { EmailAddressesSettings } from '@/components/EmailAddressesSettings';
-import { LanguageSwitcher, useI18nEnabled } from '@amroksaleh/features/i18n';
+import { LanguageSwitcher, useI18nEnabled, useTranslation } from '@amroksaleh/features/i18n';
 import { ProfileForm } from './profile-form';
 
 export default function SettingsPage() {
   const auth = useAuth();
+  const t = useTranslation('auth');
   // Whether this instance offers a language choice at all (`i18n.enabled`).
   const isI18nEnabled = useI18nEnabled();
 
@@ -18,21 +19,25 @@ export default function SettingsPage() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-4xl font-bold">Settings</h1>
+        <h1 className="text-4xl font-bold">{t('settings.title', 'Settings')}</h1>
         <p className="text-muted-foreground mt-2">
-          Manage your account and security preferences
+          {t('settings.subtitle', 'Manage your account and security preferences')}
         </p>
       </div>
 
       {/* Profile — self-service edit (WC-64) */}
       <Card>
         <CardHeader>
-          <CardTitle>Profile</CardTitle>
-          <CardDescription>Update your email and password</CardDescription>
+          <CardTitle>{t('settings.profile.title', 'Profile')}</CardTitle>
+          <CardDescription>
+            {t('settings.profile.description', 'Update your email and password')}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div>
-            <label className="text-sm font-medium text-muted-foreground">Role</label>
+            <label className="text-sm font-medium text-muted-foreground">
+              {t('settings.profile.role', 'Role')}
+            </label>
             <p className="mt-2 text-sm bg-muted p-3 rounded capitalize">{auth.user?.role}</p>
           </div>
 
@@ -50,10 +55,12 @@ export default function SettingsPage() {
       {isI18nEnabled && (
         <Card>
           <CardHeader>
-            <CardTitle>Language</CardTitle>
+            <CardTitle>{t('settings.language.title', 'Language')}</CardTitle>
             <CardDescription>
-              Choose the language used across the interface. Right-to-left languages mirror the
-              layout automatically.
+              {t(
+                'settings.language.description',
+                'Choose the language used across the interface. Right-to-left languages mirror the layout automatically.'
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -68,8 +75,13 @@ export default function SettingsPage() {
       {/* Email addresses — multi-email self-service (WC-54fb5c37) */}
       <Card>
         <CardHeader>
-          <CardTitle>Email addresses</CardTitle>
-          <CardDescription>Add, verify, and manage the email addresses on your account</CardDescription>
+          <CardTitle>{t('settings.emails.title', 'Email addresses')}</CardTitle>
+          <CardDescription>
+            {t(
+              'settings.emails.description',
+              'Add, verify, and manage the email addresses on your account'
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <EmailAddressesSettings />
@@ -79,8 +91,13 @@ export default function SettingsPage() {
       {/* Security Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>Security</CardTitle>
-          <CardDescription>Protect your account with two-factor authentication</CardDescription>
+          <CardTitle>{t('settings.security.title', 'Security')}</CardTitle>
+          <CardDescription>
+            {t(
+              'settings.security.description',
+              'Protect your account with two-factor authentication'
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <TwoFactorSettings />
@@ -91,8 +108,13 @@ export default function SettingsPage() {
           native-device credentials are a genuinely separate list below (#409). */}
       <Card>
         <CardHeader>
-          <CardTitle>Sessions</CardTitle>
-          <CardDescription>Sign out of your active sessions on other browsers and apps</CardDescription>
+          <CardTitle>{t('settings.sessions.title', 'Sessions')}</CardTitle>
+          <CardDescription>
+            {t(
+              'settings.sessions.description',
+              'Sign out of your active sessions on other browsers and apps'
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <SessionsSettings />
@@ -103,8 +125,13 @@ export default function SettingsPage() {
           mobile apps), distinct from the interactive sessions above. */}
       <Card>
         <CardHeader>
-          <CardTitle>Devices</CardTitle>
-          <CardDescription>Manage native apps and devices with long-lived access to your account</CardDescription>
+          <CardTitle>{t('settings.devices.title', 'Devices')}</CardTitle>
+          <CardDescription>
+            {t(
+              'settings.devices.description',
+              'Manage native apps and devices with long-lived access to your account'
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <DevicesSettings />
