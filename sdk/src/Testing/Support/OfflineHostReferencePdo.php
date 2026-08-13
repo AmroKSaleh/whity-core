@@ -19,19 +19,22 @@ namespace Whity\Sdk\Testing\Support;
  * a future plugin using `JSONB`/`gen_random_uuid()`/`RETURNING` in DDL is
  * still unhandled here, same as in the real host.
  */
-final class OfflineHostReferencePdo extends \Pdo\Sqlite
+final class OfflineHostReferencePdo extends \PDO
 {
     public function __construct()
     {
         parent::__construct('sqlite::memory:');
         $this->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
         $this->setAttribute(\PDO::ATTR_STRINGIFY_FETCHES, true);
-        // Pdo\Sqlite::createFunction() (PHP 8.4+), not the deprecated
-        // PDO::sqliteCreateFunction() — matches the real offline host's own
-        // SqliteCompatPdo, which made this exact fix after PHP 8.5 started
-        // printing a deprecation notice that (there, in an HTTP response
-        // body) corrupted every JSON response.
-        $this->createFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+        // The same technique TenantIsolationConformanceTestCase::makePdo()
+        // already uses in this SDK: PDO::sqliteCreateFunction() is deprecated
+        // since PHP 8.5, but that only matters when a deprecation notice can
+        // corrupt an HTTP response body (the real offline host's production
+        // SqliteCompatPdo extends \Pdo\Sqlite for exactly that reason). This
+        // is test-only code run under PHPUnit CLI — no response body to
+        // corrupt — so it matches the SDK's own established, PHPStan-clean
+        // convention instead of introducing a second pattern.
+        $this->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
     }
 
     #[\Override]
@@ -40,6 +43,9 @@ final class OfflineHostReferencePdo extends \Pdo\Sqlite
         return parent::exec($this->rewrite($statement));
     }
 
+    /**
+     * @param array<int, mixed> $options
+     */
     #[\Override]
     public function prepare(string $query, array $options = []): \PDOStatement|false
     {

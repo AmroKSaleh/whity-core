@@ -137,7 +137,7 @@ abstract class OfflinePluginHostConformanceTestCase extends TestCase
             self::assertContains(
                 $permission,
                 $declared,
-                'Route ' . ($route['method'] ?? '?') . ' ' . ($route['path'] ?? '?')
+                'Route ' . $route['method'] . ' ' . $route['path']
                 . " requires permission '{$permission}', which getPermissions() does not declare — "
                 . 'this route can never be satisfied by any role, offline or in production.'
             );
@@ -230,8 +230,6 @@ abstract class OfflinePluginHostConformanceTestCase extends TestCase
                         . 'The real offline host would silently swallow this (per-plugin error boundary) and '
                         . 'carry on with the original payload, so this bug would otherwise ship invisibly.'
                     );
-
-                    continue;
                 }
 
                 self::assertIsArray(
