@@ -24,6 +24,7 @@ import { StatsChart } from "@/components/admin/stats-chart";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@amroksaleh/ui/tabs";
 import { Alert, AlertTitle, AlertDescription, AlertAction } from "@amroksaleh/ui/alert";
 import { Button } from "@amroksaleh/ui/button";
+import { useTranslation } from "@amroksaleh/features/i18n";
 
 interface StatsData {
   totals: {
@@ -67,6 +68,7 @@ const STATS_FETCH_TIMEOUT_MS = 15_000;
 
 export default function AdminStats() {
   const { apiClient } = useAuth();
+  const t = useTranslation("admin");
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -112,30 +114,30 @@ export default function AdminStats() {
 
   const statCards = [
     {
-      title: "Total Users",
+      title: t("stats.card.users.title", "Total Users"),
       value: stats?.totals.users ?? "--",
-      description: "Registered accounts",
+      description: t("stats.card.users.description", "Registered accounts"),
       icon: IconUsers,
       color: "text-blue-500",
     },
     {
-      title: "Active Roles",
+      title: t("stats.card.roles.title", "Active Roles"),
       value: stats?.totals.roles ?? "--",
-      description: "Configured permissions",
+      description: t("stats.card.roles.description", "Configured permissions"),
       icon: IconUserShield,
       color: "text-purple-500",
     },
     {
-      title: "Total Tenants",
+      title: t("stats.card.tenants.title", "Total Tenants"),
       value: stats?.totals.tenants ?? "--",
-      description: "Organizations",
+      description: t("stats.card.tenants.description", "Organizations"),
       icon: IconBuildingCommunity,
       color: "text-orange-500",
     },
     {
-      title: "Permissions",
+      title: t("stats.card.permissions.title", "Permissions"),
       value: stats?.totals.permissions ?? "--",
-      description: "Available actions",
+      description: t("stats.card.permissions.description", "Available actions"),
       icon: IconLock,
       color: "text-green-500",
     },
@@ -145,21 +147,24 @@ export default function AdminStats() {
     <div className="space-y-8">
       {/* Header */}
       <AdminHeader
-        title="System Statistics"
-        description="Real-time overview of system-wide metrics"
+        title={t("stats.title", "System Statistics")}
+        description={t("stats.description", "Real-time overview of system-wide metrics")}
       />
 
       {error && (
         <Alert variant="destructive" data-testid="stats-fetch-error">
-          <AlertTitle>Couldn&rsquo;t load system statistics</AlertTitle>
+          <AlertTitle>{t("stats.error.title", "Couldn’t load system statistics")}</AlertTitle>
           <AlertDescription>
-            The request failed or timed out. This page&rsquo;s data comes from several
-            database queries with no bound of their own — a slow/unhealthy
-            backend can take a while to respond.
+            {t(
+              "stats.error.description",
+              "The request failed or timed out. This page’s data comes from several " +
+                "database queries with no bound of their own — a slow/unhealthy " +
+                "backend can take a while to respond."
+            )}
           </AlertDescription>
           <AlertAction>
             <Button size="xs" variant="outline" onClick={() => setRetryKey((k) => k + 1)}>
-              Retry
+              {t("stats.error.retry", "Retry")}
             </Button>
           </AlertAction>
         </Alert>
@@ -195,9 +200,9 @@ export default function AdminStats() {
         {/* Role Breakdown */}
         <Card className="lg:col-span-1">
           <CardHeader>
-            <CardTitle>Users per Role</CardTitle>
+            <CardTitle>{t("stats.roles.title", "Users per Role")}</CardTitle>
             <CardDescription>
-              Distribution of users across system roles
+              {t("stats.roles.description", "Distribution of users across system roles")}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -224,7 +229,9 @@ export default function AdminStats() {
                           {role.name}
                         </span>
                         <span className="text-muted-foreground">
-                          {role.count} users
+                          {t("stats.roles.userCount", "{count} users", {
+                            count: role.count,
+                          })}
                         </span>
                       </div>
                       <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
@@ -244,14 +251,18 @@ export default function AdminStats() {
         {/* Growth Charts */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Growth Trends</CardTitle>
-            <CardDescription>Last 7 days registration activity</CardDescription>
+            <CardTitle>{t("stats.growth.title", "Growth Trends")}</CardTitle>
+            <CardDescription>
+              {t("stats.growth.description", "Last 7 days registration activity")}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="users" className="w-full">
               <TabsList className="grid w-full grid-cols-2 mb-4">
-                <TabsTrigger value="users">Users</TabsTrigger>
-                <TabsTrigger value="tenants">Tenants</TabsTrigger>
+                <TabsTrigger value="users">{t("stats.growth.tab.users", "Users")}</TabsTrigger>
+                <TabsTrigger value="tenants">
+                  {t("stats.growth.tab.tenants", "Tenants")}
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="users" className="h-[200px] mt-0">
                 {loading ? (
@@ -259,7 +270,7 @@ export default function AdminStats() {
                 ) : (
                   <StatsChart
                     data={stats?.growth.users ?? []}
-                    label="new users"
+                    label={t("stats.growth.users.label", "new users")}
                     color="var(--primary)"
                   />
                 )}
@@ -270,7 +281,7 @@ export default function AdminStats() {
                 ) : (
                   <StatsChart
                     data={stats?.growth.tenants ?? []}
-                    label="new tenants"
+                    label={t("stats.growth.tenants.label", "new tenants")}
                     color="var(--chart-2)"
                   />
                 )}
@@ -288,26 +299,28 @@ export default function AdminStats() {
               <IconDatabase className="h-5 w-5 text-info" />
             </div>
             <div>
-              <CardTitle>Database</CardTitle>
-              <CardDescription>PostgreSQL Status</CardDescription>
+              <CardTitle>{t("stats.database.title", "Database")}</CardTitle>
+              <CardDescription>{t("stats.database.subtitle", "PostgreSQL Status")}</CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Size</span>
+              <span className="text-muted-foreground">{t("stats.database.size", "Size")}</span>
               <span className="font-medium">
                 {stats?.database.size ?? "--"}
               </span>
             </div>
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Version</span>
+              <span className="text-muted-foreground">{t("stats.database.version", "Version")}</span>
               <span className="font-medium truncate max-w-[150px]">
                 {stats?.database.version ?? "--"}
               </span>
             </div>
             <div className="pt-2 border-t">
               <div className="flex justify-between items-center text-sm mb-1">
-                <span className="text-muted-foreground">Migrations</span>
+                <span className="text-muted-foreground">
+                  {t("stats.database.migrations", "Migrations")}
+                </span>
                 <span className="text-xs">
                   {stats?.maintenance.migrations_executed} /{" "}
                   {stats?.maintenance.migrations_total}
@@ -332,25 +345,31 @@ export default function AdminStats() {
               <IconCpu className="h-5 w-5 text-success" />
             </div>
             <div>
-              <CardTitle>System</CardTitle>
-              <CardDescription>Resource Usage</CardDescription>
+              <CardTitle>{t("stats.system.title", "System")}</CardTitle>
+              <CardDescription>{t("stats.system.subtitle", "Resource Usage")}</CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">PHP Version</span>
+              <span className="text-muted-foreground">
+                {t("stats.system.phpVersion", "PHP Version")}
+              </span>
               <span className="font-medium">
                 {stats?.system.php_version ?? "--"}
               </span>
             </div>
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Memory Usage</span>
+              <span className="text-muted-foreground">
+                {t("stats.system.memoryUsage", "Memory Usage")}
+              </span>
               <span className="font-medium">
                 {stats?.system.memory_usage ?? "--"}
               </span>
             </div>
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Peak Memory</span>
+              <span className="text-muted-foreground">
+                {t("stats.system.peakMemory", "Peak Memory")}
+              </span>
               <span className="font-medium">
                 {stats?.system.peak_memory ?? "--"}
               </span>
@@ -365,23 +384,29 @@ export default function AdminStats() {
               <IconServer className="h-5 w-5 text-warning" />
             </div>
             <div>
-              <CardTitle>Environment</CardTitle>
-              <CardDescription>Server Details</CardDescription>
+              <CardTitle>{t("stats.environment.title", "Environment")}</CardTitle>
+              <CardDescription>
+                {t("stats.environment.subtitle", "Server Details")}
+              </CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">OS</span>
+              <span className="text-muted-foreground">{t("stats.environment.os", "OS")}</span>
               <span className="font-medium">{stats?.system.os ?? "--"}</span>
             </div>
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Server Software</span>
+              <span className="text-muted-foreground">
+                {t("stats.environment.server", "Server Software")}
+              </span>
               <span className="font-medium truncate max-w-[150px]">
                 {stats?.system.server ?? "--"}
               </span>
             </div>
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Timezone</span>
+              <span className="text-muted-foreground">
+                {t("stats.environment.timezone", "Timezone")}
+              </span>
               <span className="font-medium">
                 {Intl.DateTimeFormat().resolvedOptions().timeZone}
               </span>
