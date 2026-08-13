@@ -13,7 +13,11 @@ import { Button } from '@amroksaleh/ui/button';
 import { Switch } from '@amroksaleh/ui/switch';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
-import { useI18nAvailability } from '@amroksaleh/features/i18n';
+import {
+  useI18nAvailability,
+  useRichTranslation,
+  useTranslation,
+} from '@amroksaleh/features/i18n';
 import { IconPlus } from '@tabler/icons-react';
 import { CreateLanguageModal } from './create-modal';
 import { errorMessage } from './shared';
@@ -41,6 +45,8 @@ export default function LanguagesPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
+  const rt = useRichTranslation('admin');
   // Three-valued: the notice below ASSERTS the feature is off, so it must wait
   // for a real answer rather than treating "not loaded yet" as "off".
   const i18n = useI18nAvailability();
@@ -59,7 +65,7 @@ export default function LanguagesPage() {
   } = useFetch(async () => {
     const { data: body, error } = await api.GET('/api/v1/admin/languages');
     if (body === undefined) {
-      throw new Error(errorMessage(error, 'Failed to fetch languages'));
+      throw new Error(errorMessage(error, t('languages.error.load', 'Failed to fetch languages')));
     }
     return body.data;
   }, []);
@@ -80,12 +86,20 @@ export default function LanguagesPage() {
         body: { enabled },
       });
       if (error) {
-        throw new Error(errorMessage(error, 'Failed to update language'));
+        throw new Error(errorMessage(error, t('languages.error.update', 'Failed to update language')));
       }
-      addToast(`${language.name} ${enabled ? 'enabled' : 'disabled'}.`, 'success');
+      addToast(
+        enabled
+          ? t('languages.toggle.enabled', '{name} enabled.', { name: language.name })
+          : t('languages.toggle.disabled', '{name} disabled.', { name: language.name }),
+        'success'
+      );
       fetchLanguages();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to update language', 'error');
+      addToast(
+        err instanceof Error ? err.message : t('languages.error.update', 'Failed to update language'),
+        'error'
+      );
     } finally {
       setTogglingId(null);
     }
@@ -104,26 +118,45 @@ export default function LanguagesPage() {
         body: { direction },
       });
       if (error) {
-        throw new Error(errorMessage(error, 'Failed to update language'));
+        throw new Error(errorMessage(error, t('languages.error.update', 'Failed to update language')));
       }
       addToast(
-        `${language.name} now reads ${direction === 'rtl' ? 'right to left' : 'left to right'}.`,
+        direction === 'rtl'
+          ? t('languages.direction.rtlToast', '{name} now reads right to left.', {
+              name: language.name,
+            })
+          : t('languages.direction.ltrToast', '{name} now reads left to right.', {
+              name: language.name,
+            }),
         'success'
       );
       fetchLanguages();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to update language', 'error');
+      addToast(
+        err instanceof Error ? err.message : t('languages.error.update', 'Failed to update language'),
+        'error'
+      );
     } finally {
       setTogglingId(null);
     }
   };
 
   const columns: DataTableColumn<Language>[] = [
-    { accessorKey: 'code', header: 'Code', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
+    {
+      accessorKey: 'code',
+      header: t('languages.table.code', 'Code'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    {
+      accessorKey: 'name',
+      header: t('languages.table.name', 'Name'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
     {
       id: 'direction',
-      header: 'Direction',
+      header: t('languages.table.direction', 'Direction'),
       enableSorting: true,
       cell: (language) => (
         <select
@@ -132,24 +165,26 @@ export default function LanguagesPage() {
           onChange={(e) =>
             void handleDirectionChange(language, e.target.value as 'ltr' | 'rtl')
           }
-          aria-label={`Writing direction for ${language.name}`}
+          aria-label={t('languages.table.directionLabel', 'Writing direction for {name}', {
+            name: language.name,
+          })}
           className="h-8 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
         >
-          <option value="ltr">Left to right</option>
-          <option value="rtl">Right to left</option>
+          <option value="ltr">{t('languages.direction.ltr', 'Left to right')}</option>
+          <option value="rtl">{t('languages.direction.rtl', 'Right to left')}</option>
         </select>
       ),
     },
     {
       id: 'enabled',
-      header: 'Enabled',
+      header: t('languages.table.enabled', 'Enabled'),
       enableSorting: true,
       cell: (language) => (
         <Switch
           checked={language.enabled}
           disabled={togglingId === language.id}
           onCheckedChange={(checked) => void handleToggle(language, checked)}
-          aria-label={`Toggle ${language.name}`}
+          aria-label={t('languages.table.toggleLabel', 'Toggle {name}', { name: language.name })}
         />
       ),
     },
@@ -166,15 +201,18 @@ export default function LanguagesPage() {
   if (!canRead) {
     return (
       <AccessDenied
-        description={
-          <>
-            You do not have the required permission (<code>languages:manage</code>) to view
-            Languages.
-          </>
-        }
+        // ONE sentence with the permission slug rendered as <code> inside it —
+        // rich rather than split, so a translator can move the slug where their
+        // grammar wants it.
+        description={rt(
+          'languages.accessDenied.permission',
+          'You do not have the required permission (<0>{permission}</0>) to view Languages.',
+          { permission: LANGUAGES_MANAGE },
+          [<code key="permission" />]
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('languages.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -184,7 +222,10 @@ export default function LanguagesPage() {
   if (!isSystemTenant) {
     return (
       <AccessDenied
-        description="Language management affects the whole platform and is restricted to the system tenant."
+        description={t(
+          'languages.accessDenied.systemTenant',
+          'Language management affects the whole platform and is restricted to the system tenant.'
+        )}
       />
     );
   }
@@ -192,12 +233,15 @@ export default function LanguagesPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Languages"
-        description="Manage which languages are available across the platform. Each language carries its own writing direction — the interface mirrors automatically for right-to-left languages."
+        title={t('languages.title', 'Languages')}
+        description={t(
+          'languages.description',
+          'Manage which languages are available across the platform. Each language carries its own writing direction — the interface mirrors automatically for right-to-left languages.'
+        )}
         action={
           <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2">
             <IconPlus size={18} />
-            Add Language
+            {t('languages.addButton', 'Add Language')}
           </Button>
         }
       />
@@ -205,10 +249,13 @@ export default function LanguagesPage() {
       {i18n === 'disabled' && (
         <Alert variant="info" data-testid="i18n-disabled-notice">
           <AlertDescription>
-            Multiple languages are switched off for this instance, so everyone currently sees
-            the default language, left to right, with no language control. Changes made here are
-            saved and take effect as soon as an operator turns the feature on under Feature
-            Flags — nothing set up now is lost in the meantime.
+            {t(
+              'languages.i18nDisabled',
+              'Multiple languages are switched off for this instance, so everyone currently sees ' +
+                'the default language, left to right, with no language control. Changes made here are ' +
+                'saved and take effect as soon as an operator turns the feature on under Feature ' +
+                'Flags — nothing set up now is lost in the meantime.'
+            )}
           </AlertDescription>
         </Alert>
       )}
@@ -219,7 +266,7 @@ export default function LanguagesPage() {
         getRowId={(language) => String(language.id)}
         isLoading={isLoading}
         enableGlobalFilter
-        globalFilterPlaceholder="Search languages…"
+        globalFilterPlaceholder={t('languages.searchPlaceholder', 'Search languages…')}
         pagination={{ pageSize: 10 }}
       />
 

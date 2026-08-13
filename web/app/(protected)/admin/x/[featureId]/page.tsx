@@ -15,6 +15,7 @@ import { AdminHeader } from '@/components/admin/admin-header';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconPuzzle } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Renders a registry override. Declared at module level and fed the component
@@ -52,6 +53,10 @@ export default function PluginFeaturePage() {
     : params.featureId;
 
   const { features, isLoading } = usePluginFeatures();
+  // The `plugin` domain, not `admin`: this screen is the host every plugin
+  // feature renders inside, and its header shares `feature.providedBy` with
+  // ActionScreen/EmbedScreen — one key, one English string, translated once.
+  const t = useTranslation('plugin');
 
   if (isLoading) {
     return (
@@ -73,17 +78,19 @@ export default function PluginFeaturePage() {
     return (
       <div className="space-y-8">
         <AdminHeader
-          title="Feature unavailable"
-          description="This plugin feature could not be resolved."
+          title={t('feature.unavailable.title', 'Feature unavailable')}
+          description={t(
+            'feature.unavailable.description',
+            'This plugin feature could not be resolved.'
+          )}
         />
         <AccessDenied
-          title="Not available"
-          description={
-            <>
-              The feature &apos;{featureId}&apos; does not exist or you do not
-              have permission to use it.
-            </>
-          }
+          title={t('feature.notAvailable.title', 'Not available')}
+          description={t(
+            'feature.notAvailable.description',
+            "The feature '{id}' does not exist or you do not have permission to use it.",
+            { id: featureId }
+          )}
         />
       </div>
     );
@@ -113,7 +120,9 @@ export default function PluginFeaturePage() {
       <div className="space-y-8">
         <AdminHeader
           title={feature.label}
-          description={`Provided by the ${feature.plugin} plugin.`}
+          description={t('feature.providedBy', 'Provided by the {plugin} plugin.', {
+            plugin: feature.plugin,
+          })}
         />
         <BlockRenderer blocks={feature.blocks ?? []} />
       </div>
@@ -124,16 +133,22 @@ export default function PluginFeaturePage() {
     <div className="space-y-8">
       <AdminHeader
         title={feature.label}
-        description={`Provided by the ${feature.plugin} plugin.`}
+        description={t('feature.providedBy', 'Provided by the {plugin} plugin.', {
+          plugin: feature.plugin,
+        })}
       />
       <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
         <IconPuzzle size={32} className="mx-auto mb-3 text-muted-foreground" />
         <h2 className="font-heading text-sm font-medium">
-          No screen registered
+          {t('feature.noScreen.title', 'No screen registered')}
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          This feature provides its own screen — register a component for
-          &apos;{feature.id}&apos; in the plugin UI registry.
+          {t(
+            'feature.noScreen.description',
+            "This feature provides its own screen — register a component for '{id}' in the " +
+              "plugin UI registry.",
+            { id: feature.id }
+          )}
         </p>
       </div>
     </div>
