@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -25,21 +25,32 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { errorMessage } from './shared';
 
-const createLanguageSchema = z.object({
-  code: z
-    .string()
-    .min(1, 'Code is required')
-    .regex(/^[a-z]{2,10}(-[A-Za-z]{2,10})?$/, 'Use a language code like "en", "ar", or "en-US"'),
-  name: z.string().min(1, 'Name is required'),
-  // Direction is a property of the LANGUAGE (languages.direction), which is
-  // exactly why it is asked for HERE: adding Hebrew, Farsi or Urdu is this
-  // form, not a release. Nothing in the codebase infers direction from a code.
-  direction: z.enum(['ltr', 'rtl']),
-});
+// Built from `t` rather than declared at module scope: a validation message is
+// user-facing text like any other, and a schema frozen at import time would
+// always speak English.
+const buildCreateLanguageSchema = (t: TranslateFn) =>
+  z.object({
+    code: z
+      .string()
+      .min(1, t('languages.create.validation.codeRequired', 'Code is required'))
+      .regex(
+        /^[a-z]{2,10}(-[A-Za-z]{2,10})?$/,
+        t(
+          'languages.create.validation.codeFormat',
+          'Use a language code like "en", "ar", or "en-US"'
+        )
+      ),
+    name: z.string().min(1, t('languages.create.validation.nameRequired', 'Name is required')),
+    // Direction is a property of the LANGUAGE (languages.direction), which is
+    // exactly why it is asked for HERE: adding Hebrew, Farsi or Urdu is this
+    // form, not a release. Nothing in the codebase infers direction from a code.
+    direction: z.enum(['ltr', 'rtl']),
+  });
 
-type CreateLanguageFormData = z.infer<typeof createLanguageSchema>;
+type CreateLanguageFormData = z.infer<ReturnType<typeof buildCreateLanguageSchema>>;
 
 interface CreateLanguageModalProps {
   isOpen: boolean;
@@ -49,10 +60,12 @@ interface CreateLanguageModalProps {
 
 export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateLanguageModalProps) {
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const schema = useMemo(() => buildCreateLanguageSchema(t), [t]);
   const form = useForm<CreateLanguageFormData>({
-    resolver: zodResolver(createLanguageSchema),
+    resolver: zodResolver(schema),
     defaultValues: { code: '', name: '', direction: 'ltr' },
   });
 
@@ -68,14 +81,17 @@ export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateL
         },
       });
       if (error) {
-        throw new Error(errorMessage(error, 'Failed to create language'));
+        throw new Error(errorMessage(error, t('languages.create.error', 'Failed to create language')));
       }
 
-      addToast('Language created successfully', 'success');
+      addToast(t('languages.create.success', 'Language created successfully'), 'success');
       form.reset();
       onSuccess();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to create language', 'error');
+      addToast(
+        err instanceof Error ? err.message : t('languages.create.error', 'Failed to create language'),
+        'error'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -91,10 +107,13 @@ export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateL
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Language</DialogTitle>
+          <DialogTitle>{t('languages.create.title', 'Add Language')}</DialogTitle>
           <DialogDescription>
-            New languages are added enabled by default and become selectable across the
-            platform immediately.
+            {t(
+              'languages.create.description',
+              'New languages are added enabled by default and become selectable across the ' +
+                'platform immediately.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -105,9 +124,12 @@ export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateL
               name="code"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Language Code</FormLabel>
+                  <FormLabel>{t('languages.create.code.label', 'Language Code')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., fr" {...field} />
+                    <Input
+                      placeholder={t('languages.create.code.placeholder', 'e.g., fr')}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -119,9 +141,12 @@ export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateL
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Display Name</FormLabel>
+                  <FormLabel>{t('languages.create.name.label', 'Display Name')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Français" {...field} />
+                    <Input
+                      placeholder={t('languages.create.name.placeholder', 'e.g., Français')}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -133,19 +158,24 @@ export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateL
               name="direction"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Writing Direction</FormLabel>
+                  <FormLabel>{t('languages.create.direction.label', 'Writing Direction')}</FormLabel>
                   <FormControl>
                     <select
                       {...field}
                       className="h-9 w-full rounded-md border border-input bg-input/20 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
                     >
-                      <option value="ltr">Left to right</option>
-                      <option value="rtl">Right to left</option>
+                      {/* The same two keys the Languages table's per-row picker
+                          uses — one key, one English string, translated once. */}
+                      <option value="ltr">{t('languages.direction.ltr', 'Left to right')}</option>
+                      <option value="rtl">{t('languages.direction.rtl', 'Right to left')}</option>
                     </select>
                   </FormControl>
                   <FormDescription>
-                    The interface mirrors automatically for anyone who selects this language —
-                    there is no separate setting.
+                    {t(
+                      'languages.create.direction.hint',
+                      'The interface mirrors automatically for anyone who selects this language — ' +
+                        'there is no separate setting.'
+                    )}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -154,10 +184,12 @@ export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateL
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t('languages.create.cancel', 'Cancel')}
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Adding...' : 'Add Language'}
+                {isSubmitting
+                  ? t('languages.create.submitting', 'Adding...')
+                  : t('languages.create.submit', 'Add Language')}
               </Button>
             </DialogFooter>
           </form>

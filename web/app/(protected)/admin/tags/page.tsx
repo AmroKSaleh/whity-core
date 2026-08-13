@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 interface Tag {
   id: number;
@@ -60,6 +61,7 @@ export default function TagsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
+  const t = useTranslation('admin');
   const canManage = hasPermission(TAGS_MANAGE);
 
   const { data, loading, error, refetch } = useFetch(async () => {
@@ -68,7 +70,7 @@ export default function TagsPage() {
       apiClient('/api/v1/tag-groups'),
     ]);
     if (!tagsRes.ok || !groupsRes.ok) {
-      throw new Error('Failed to fetch tags');
+      throw new Error(t('tags.error.load', 'Failed to fetch tags'));
     }
     const tagsBody = await tagsRes.json();
     const groupsBody = await groupsRes.json();
@@ -84,31 +86,49 @@ export default function TagsPage() {
   const [editing, setEditing] = useState<Tag | 'new' | null>(null);
   const [deleting, setDeleting] = useState<Tag | null>(null);
 
-  const rows = (data?.tags ?? []).map((t) => ({
-    ...t,
-    groupLabel: groupById.has(t.group_id) ? groupLabel(groupById.get(t.group_id)!) : `#${t.group_id}`,
+  const rows = (data?.tags ?? []).map((tag) => ({
+    ...tag,
+    groupLabel: groupById.has(tag.group_id)
+      ? groupLabel(groupById.get(tag.group_id)!)
+      : `#${tag.group_id}`,
   }));
   type Row = (typeof rows)[number];
 
   const columns: DataTableColumn<Row>[] = [
-    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'groupLabel', header: 'Group', enableSorting: true, enableColumnFilter: true },
+    {
+      accessorKey: 'name',
+      header: t('tags.table.name', 'Name'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    {
+      accessorKey: 'groupLabel',
+      header: t('tags.table.group', 'Group'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
   ];
 
   const rowActions = (tag: Row) => (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${tag.name}`}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('tags.rowActions.label', 'Actions for {name}', { name: tag.name })}
+        >
           <IconMenu2 size={16} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setEditing(tag)}>Rename</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setEditing(tag)}>
+          {t('tags.rowActions.rename', 'Rename')}
+        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => setDeleting(tag)}
           className="text-destructive focus:text-destructive"
         >
-          Delete
+          {t('tags.rowActions.delete', 'Delete')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -117,34 +137,41 @@ export default function TagsPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Tags"
-        description="Individual tags inside a group. Attach them to entities with the tag picker."
+        title={t('tags.title', 'Tags')}
+        description={t(
+          'tags.description',
+          'Individual tags inside a group. Attach them to entities with the tag picker.'
+        )}
         action={
           canManage ? (
             <Button
               onClick={() => setEditing('new')}
               className="gap-2"
               disabled={groups.length === 0}
-              title={groups.length === 0 ? 'Create a tag group first' : undefined}
+              title={
+                groups.length === 0
+                  ? t('tags.createDisabledHint', 'Create a tag group first')
+                  : undefined
+              }
             >
               <IconPlus size={18} />
-              Create Tag
+              {t('tags.createButton', 'Create Tag')}
             </Button>
           ) : undefined
         }
       />
 
       {error !== null ? (
-        <p className="text-sm text-destructive">Failed to load tags.</p>
+        <p className="text-sm text-destructive">{t('tags.loadError', 'Failed to load tags.')}</p>
       ) : (
         <DataTable
           columns={columns}
           data={rows}
-          getRowId={(t) => String(t.id)}
+          getRowId={(tag) => String(tag.id)}
           rowActions={canManage ? rowActions : undefined}
           isLoading={loading}
           enableGlobalFilter
-          globalFilterPlaceholder="Search tags…"
+          globalFilterPlaceholder={t('tags.searchPlaceholder', 'Search tags…')}
           pagination={{ pageSize: 10 }}
         />
       )}
@@ -196,6 +223,7 @@ function TagDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const t = useTranslation('admin');
   const isEdit = tag !== null;
   const [name, setName] = useState(tag?.name ?? '');
   const [groupId, setGroupId] = useState<string>(tag ? String(tag.group_id) : '');
@@ -206,12 +234,12 @@ function TagDialog({
   const submit = async () => {
     const trimmed = name.trim();
     if (trimmed === '' || trimmed.length > 128) {
-      setNameError('Name is required (max 128 characters).');
+      setNameError(t('tags.form.name.invalid', 'Name is required (max 128 characters).'));
       return;
     }
     setNameError(null);
     if (!isEdit && groupId === '') {
-      setGroupError('Choose a group.');
+      setGroupError(t('tags.form.group.required', 'Choose a group.'));
       return;
     }
     setGroupError(null);
@@ -229,16 +257,21 @@ function TagDialog({
             body: JSON.stringify({ group_id: Number(groupId), name: trimmed }),
           });
       if (response.status === 409) {
-        setNameError('A tag with this name already exists in this group.');
+        setNameError(
+          t('tags.form.conflict', 'A tag with this name already exists in this group.')
+        );
         return;
       }
       if (!response.ok) {
         throw new Error('Save failed');
       }
-      addToast(isEdit ? 'Tag renamed' : 'Tag created', 'success');
+      addToast(
+        isEdit ? t('tags.form.renamed', 'Tag renamed') : t('tags.form.created', 'Tag created'),
+        'success'
+      );
       onSaved();
     } catch {
-      addToast('Failed to save tag', 'error');
+      addToast(t('tags.form.error', 'Failed to save tag'), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -248,20 +281,28 @@ function TagDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Rename Tag' : 'Create Tag'}</DialogTitle>
+          <DialogTitle>
+            {isEdit
+              ? t('tags.form.editTitle', 'Rename Tag')
+              : t('tags.form.createTitle', 'Create Tag')}
+          </DialogTitle>
           <DialogDescription>
-            {isEdit ? 'Rename this tag.' : 'Add a tag to a group.'}
+            {isEdit
+              ? t('tags.form.editDescription', 'Rename this tag.')
+              : t('tags.form.createDescription', 'Add a tag to a group.')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <label htmlFor="tag-name" className="text-sm font-medium">Name</label>
+            <label htmlFor="tag-name" className="text-sm font-medium">
+              {t('tags.form.name.label', 'Name')}
+            </label>
             <Input
               id="tag-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. high"
+              placeholder={t('tags.form.name.placeholder', 'e.g. high')}
               autoComplete="off"
             />
             {nameError !== null && <p className="text-xs text-destructive">{nameError}</p>}
@@ -269,10 +310,12 @@ function TagDialog({
 
           {!isEdit && (
             <div className="space-y-1.5">
-              <label htmlFor="tag-group" className="text-sm font-medium">Group</label>
+              <label htmlFor="tag-group" className="text-sm font-medium">
+                {t('tags.form.group.label', 'Group')}
+              </label>
               <Select value={groupId} onValueChange={setGroupId}>
-                <SelectTrigger id="tag-group" aria-label="Group">
-                  <SelectValue placeholder="Select a group" />
+                <SelectTrigger id="tag-group" aria-label={t('tags.form.group.label', 'Group')}>
+                  <SelectValue placeholder={t('tags.form.group.placeholder', 'Select a group')} />
                 </SelectTrigger>
                 <SelectContent>
                   {groups.map((g) => (
@@ -289,10 +332,14 @@ function TagDialog({
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
+            {t('tags.form.cancel', 'Cancel')}
           </Button>
           <Button type="button" onClick={() => void submit()} disabled={submitting}>
-            {submitting ? 'Saving…' : isEdit ? 'Save' : 'Create'}
+            {submitting
+              ? t('tags.form.saving', 'Saving…')
+              : isEdit
+                ? t('tags.form.save', 'Save')
+                : t('tags.form.create', 'Create')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -313,6 +360,7 @@ function DeleteTagDialog({
   onClose: () => void;
   onDeleted: () => void;
 }) {
+  const t = useTranslation('admin');
   const [submitting, setSubmitting] = useState(false);
 
   const confirm = async () => {
@@ -322,10 +370,10 @@ function DeleteTagDialog({
       if (!response.ok) {
         throw new Error('Delete failed');
       }
-      addToast('Tag deleted', 'success');
+      addToast(t('tags.delete.success', 'Tag deleted'), 'success');
       onDeleted();
     } catch {
-      addToast('Failed to delete tag', 'error');
+      addToast(t('tags.delete.error', 'Failed to delete tag'), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -335,17 +383,22 @@ function DeleteTagDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete tag “{tag.name}”?</DialogTitle>
+          <DialogTitle>
+            {t('tags.delete.title', 'Delete tag “{name}”?', { name: tag.name })}
+          </DialogTitle>
           <DialogDescription>
-            This permanently deletes the tag and removes it from every entity it is attached to.
+            {t(
+              'tags.delete.description',
+              'This permanently deletes the tag and removes it from every entity it is attached to.'
+            )}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
+            {t('tags.delete.cancel', 'Cancel')}
           </Button>
           <Button type="button" variant="destructive" onClick={() => void confirm()} disabled={submitting}>
-            {submitting ? 'Deleting…' : 'Delete'}
+            {submitting ? t('tags.delete.pending', 'Deleting…') : t('tags.delete.confirm', 'Delete')}
           </Button>
         </DialogFooter>
       </DialogContent>
