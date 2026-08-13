@@ -31,6 +31,7 @@ final class OfflineHostReferencePdo extends \Pdo\Sqlite
         // SqliteCompatPdo, which made this exact fix after PHP 8.5 started
         // printing a deprecation notice that (there, in an HTTP response
         // body) corrupted every JSON response.
+        // @phpstan-ignore method.notFound (Pdo\Sqlite::createFunction() is real in PHP 8.4 — the analyser's PDO stubs still only declare the deprecated PDO::sqliteCreateFunction())
         $this->createFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
     }
 
@@ -40,6 +41,7 @@ final class OfflineHostReferencePdo extends \Pdo\Sqlite
         return parent::exec($this->rewrite($statement));
     }
 
+    /** @param array<int, mixed> $options Driver options, passed straight through to PDO. */
     #[\Override]
     public function prepare(string $query, array $options = []): \PDOStatement|false
     {
