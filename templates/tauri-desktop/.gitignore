@@ -8,6 +8,11 @@ dist
 dist-ssr
 *.local
 
+# Local build config (backend URL). Committed as .env.example instead —
+# src-tauri/build.rs reads this one at compile time.
+.env
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

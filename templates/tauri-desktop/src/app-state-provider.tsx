@@ -95,6 +95,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           await reloadAuth()
           await controller.refresh()
         }}
+        onReenroll={async () => {
+          // Clears the keychain credential + auth_state (local DATA is left
+          // intact), which drops this gate back to <EnrollForm> — the only
+          // screen that takes a password.
+          await authClient.logout()
+          await reloadAuth()
+          await controller.refresh()
+        }}
       />
     )
   }
@@ -174,26 +182,45 @@ function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) 
   )
 }
 
+/**
+ * The locked state re-authenticates SILENTLY — it exchanges the device
+ * credential already in the OS keychain, so there is deliberately no password
+ * field here (the password only ever appears at first enrollment).
+ *
+ * That leaves one dead end, which `onReenroll` exists to open: if the stored
+ * credential is no longer valid for the CURRENT backend — the device was
+ * revoked, the credential expired, or (easy to hit) the build was repointed at
+ * a different `WHITY_BACKEND_URL` than the one it enrolled against, since
+ * neither the keychain entry nor `auth_state` is scoped per backend — the
+ * exchange fails forever and `enrolled` stays true, so the gate never falls
+ * back to the enroll form on its own.
+ */
 function ReloginScreen({
   email,
   onRelogin,
+  onReenroll,
 }: {
   email: string | null
   onRelogin: () => Promise<void>
+  onReenroll: () => Promise<void>
 }) {
-  const [busy, setBusy] = React.useState(false)
+  const [busy, setBusy] = React.useState<"relogin" | "reenroll" | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
-  const relogin = async () => {
-    setBusy(true)
+  const run = (kind: "relogin" | "reenroll", action: () => Promise<void>, label: string) => async () => {
+    setBusy(kind)
     setError(null)
     try {
-      await onRelogin()
+      await action()
     } catch (err) {
-      setError("Couldn't reach the server. Reconnect and try again.")
-      console.warn("auth_login failed:", err)
+      setError(
+        kind === "relogin"
+          ? "Couldn't sign in with this device's stored credential. The server may be unreachable — or the credential is no longer valid for it (device revoked, or this build points at a different backend than it enrolled against). Use the password option below in that case."
+          : "Couldn't clear this device's enrollment. See the console for details.",
+      )
+      console.warn(`${label} failed:`, err)
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
@@ -207,8 +234,15 @@ function ReloginScreen({
       }
       action={
         <div className="grid gap-2">
-          <Button onClick={relogin} disabled={busy}>
-            {busy ? "Signing in…" : "Sign in again"}
+          <Button onClick={run("relogin", onRelogin, "auth_login")} disabled={busy !== null}>
+            {busy === "relogin" ? "Signing in…" : "Sign in again"}
+          </Button>
+          <Button
+            variant="link"
+            onClick={run("reenroll", onReenroll, "auth_logout")}
+            disabled={busy !== null}
+          >
+            {busy === "reenroll" ? "Clearing…" : "Sign in with your password instead"}
           </Button>
           {error ? (
             <p role="alert" className="text-sm text-destructive">

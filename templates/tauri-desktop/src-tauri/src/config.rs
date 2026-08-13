@@ -1,16 +1,23 @@
 //! Runtime configuration: which Whity backend to talk to, and the per-OS
 //! platform label sent when enrolling a device.
 //!
-//! The backend URL is env-overridable via `WHITY_BACKEND_URL` — this is THE knob
-//! for pointing a build at local dev, staging, or a customer's instance without
-//! recompiling (e.g. `WHITY_BACKEND_URL=https://whity.jameedium.org`).
+//! The backend URL is THE knob for pointing a build at local dev, staging, or a
+//! customer's instance, and it resolves in two layers:
+//!
+//!   * **Compile time** — `build.rs` bakes a default from the build
+//!     environment, then `.env`, then the pinned production URL. This is what a
+//!     shipped installer uses: it has no shell to read env vars from.
+//!   * **Runtime** — `WHITY_BACKEND_URL` in the process environment overrides
+//!     the baked value (e.g. `$env:WHITY_BACKEND_URL="http://localhost:8000"`
+//!     to point a dev build at the local stack without recompiling).
 
-/// Backend used when `WHITY_BACKEND_URL` is unset — the standard local dev stack.
-const DEFAULT_BACKEND_URL: &str = "http://localhost:8000";
+/// Backend used when `WHITY_BACKEND_URL` is unset at runtime — resolved at
+/// compile time by `build.rs` (see its docs for the precedence chain).
+const DEFAULT_BACKEND_URL: &str = env!("WHITY_DEFAULT_BACKEND_URL");
 
 #[derive(Clone)]
 pub struct Config {
-    /// Base origin, no trailing slash (e.g. `http://localhost:8000`).
+    /// Base origin, no trailing slash (e.g. `https://whity.jameedium.org`).
     pub backend_url: String,
     /// Device platform label: "windows" | "macos" | "linux".
     pub platform: &'static str,
@@ -30,7 +37,7 @@ impl Config {
         }
     }
 
-    /// The versioned API base, e.g. `http://localhost:8000/api/v1`.
+    /// The versioned API base, e.g. `https://whity.jameedium.org/api/v1`.
     pub fn api_base(&self) -> String {
         format!("{}/api/v1", self.backend_url)
     }
