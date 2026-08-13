@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -24,16 +24,31 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import type { NewCredential } from './types';
 
+// MCP scope identifiers, not copy: they are the protocol's own vocabulary and
+// travel to the server verbatim, so they stay out of the catalogue.
 const AVAILABLE_SCOPES = ['tools:call', 'resources:read', 'prompts:read'];
 
-const createSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(255, 'Name must not exceed 255 characters'),
-  scope: z.array(z.string()).min(1, 'Select at least one scope'),
-});
+// Built from `t` rather than declared at module scope: a validation message is
+// user-facing text like any other, and a schema frozen at import time would
+// always speak English.
+const buildCreateSchema = (t: TranslateFn) =>
+  z.object({
+    name: z
+      .string()
+      .min(1, t('aiPrincipals.create.validation.nameRequired', 'Name is required'))
+      .max(
+        255,
+        t('aiPrincipals.create.validation.nameMaxLength', 'Name must not exceed 255 characters')
+      ),
+    scope: z
+      .array(z.string())
+      .min(1, t('aiPrincipals.create.validation.scopeRequired', 'Select at least one scope')),
+  });
 
-type CreateFormData = z.infer<typeof createSchema>;
+type CreateFormData = z.infer<ReturnType<typeof buildCreateSchema>>;
 
 interface CreateAiPrincipalModalProps {
   isOpen: boolean;
@@ -48,10 +63,13 @@ export function CreateAiPrincipalModal({
 }: CreateAiPrincipalModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const schema = useMemo(() => buildCreateSchema(t), [t]);
+
   const form = useForm<CreateFormData>({
-    resolver: zodResolver(createSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
       name: '',
       scope: ['tools:call'],
@@ -79,7 +97,9 @@ export function CreateAiPrincipalModal({
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const errorObj = errorData as { message?: string };
-        throw new Error(errorObj.message ?? 'Failed to create AI principal');
+        throw new Error(
+          errorObj.message ?? t('aiPrincipals.create.error', 'Failed to create AI principal')
+        );
       }
 
       const credential = (await response.json()) as NewCredential;
@@ -87,7 +107,9 @@ export function CreateAiPrincipalModal({
       onSuccess(credential);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to create AI principal';
+        error instanceof Error
+          ? error.message
+          : t('aiPrincipals.create.error', 'Failed to create AI principal');
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
@@ -98,10 +120,13 @@ export function CreateAiPrincipalModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create AI Principal</DialogTitle>
+          <DialogTitle>{t('aiPrincipals.create.title', 'Create AI Principal')}</DialogTitle>
           <DialogDescription>
-            Issue a new long-lived MCP bearer credential. The token value is
-            shown only once — copy it immediately after creation.
+            {t(
+              'aiPrincipals.create.description',
+              'Issue a new long-lived MCP bearer credential. The token value is ' +
+                'shown only once — copy it immediately after creation.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -112,9 +137,15 @@ export function CreateAiPrincipalModal({
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Name</FormLabel>
+                  <FormLabel>{t('aiPrincipals.create.name.label', 'Name')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Automation Bot" {...field} />
+                    <Input
+                      placeholder={t(
+                        'aiPrincipals.create.name.placeholder',
+                        'e.g. Automation Bot'
+                      )}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -126,7 +157,7 @@ export function CreateAiPrincipalModal({
               name="scope"
               render={() => (
                 <FormItem>
-                  <FormLabel>Scopes</FormLabel>
+                  <FormLabel>{t('aiPrincipals.create.scopes.label', 'Scopes')}</FormLabel>
                   <div className="flex flex-wrap gap-2 pt-1">
                     {AVAILABLE_SCOPES.map((scope) => (
                       <button
@@ -156,10 +187,12 @@ export function CreateAiPrincipalModal({
                 onClick={() => onOpenChange(false)}
                 disabled={isSubmitting}
               >
-                Cancel
+                {t('aiPrincipals.create.cancel', 'Cancel')}
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Creating...' : 'Create'}
+                {isSubmitting
+                  ? t('aiPrincipals.create.submitting', 'Creating...')
+                  : t('aiPrincipals.create.submit', 'Create')}
               </Button>
             </DialogFooter>
           </form>

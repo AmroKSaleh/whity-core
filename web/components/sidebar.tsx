@@ -10,7 +10,7 @@ import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Switcher } from '@amroksaleh/ui/switcher';
-import { LanguageSwitcher, useI18nEnabled } from '@amroksaleh/features/i18n';
+import { LanguageSwitcher, useI18nEnabled, useTranslation } from '@amroksaleh/features/i18n';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,
@@ -75,6 +75,7 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
   const { switchTenant } = useAuth();
   const { refresh: refreshNav } = useNavigation();
   const { addToast } = useToast();
+  const t = useTranslation('common');
   const [isSwitching, setIsSwitching] = useState(false);
 
   const items = useMemo(
@@ -92,14 +93,17 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
           await switchTenant(tenantId);
           await refreshNav();
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'Couldn’t switch tenant';
+          const message =
+            err instanceof Error
+              ? err.message
+              : t('sidebar.tenantSwitcher.error', 'Couldn’t switch tenant');
           addToast(message, 'error');
         } finally {
           setIsSwitching(false);
         }
       })();
     },
-    [activeTenantId, isSwitching, switchTenant, refreshNav, addToast],
+    [activeTenantId, isSwitching, switchTenant, refreshNav, addToast, t],
   );
 
   return (
@@ -108,8 +112,8 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
       activeId={activeTenantId !== undefined ? String(activeTenantId) : undefined}
       onChange={handleSwitch}
       icon={<IconBuilding size={20} />}
-      switchLabel="Tenant"
-      emptyLabel="No tenant"
+      switchLabel={t('sidebar.tenantSwitcher.label', 'Tenant')}
+      emptyLabel={t('sidebar.tenantSwitcher.empty', 'No tenant')}
       collapsed={collapsed}
       disabled={isSwitching}
     />
@@ -125,6 +129,7 @@ export function Sidebar() {
   const { items: navItemsFlat, getGroupedItems } = useNavigation();
   const branding = useBranding();
   const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeMode();
+  const t = useTranslation('common');
   // Whether this instance offers a language choice at all (`i18n.enabled`).
   const isI18nEnabled = useI18nEnabled();
   const groupedItems = getGroupedItems();
@@ -194,7 +199,7 @@ export function Sidebar() {
       <button
         onClick={toggleSidebar}
         className="fixed top-4 inset-s-4 z-50 md:hidden p-2 rounded-lg bg-background border border-border hover:bg-muted transition-colors"
-        aria-label="Toggle sidebar"
+        aria-label={t('sidebar.toggle', 'Toggle sidebar')}
       >
         {isOpen ? <IconX size={24} /> : <IconMenu2 size={24} />}
       </button>
@@ -229,7 +234,9 @@ export function Sidebar() {
                 ) : (
                   <h1 className="text-2xl font-bold">{branding.siteName}</h1>
                 )}
-                <p className="text-sm text-muted-foreground mt-1">Admin</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {t('sidebar.subtitle', 'Admin')}
+                </p>
               </>
             ) : (
               branding.logoSquareUrl ? (
@@ -245,7 +252,11 @@ export function Sidebar() {
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
               className="p-1 hover:bg-background rounded transition-colors ms-2"
-              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={
+                isCollapsed
+                  ? t('sidebar.expand', 'Expand sidebar')
+                  : t('sidebar.collapse', 'Collapse sidebar')
+              }
             >
               {isCollapsed ? (
                 <IconChevronRight size={20} />
@@ -319,22 +330,24 @@ export function Sidebar() {
             <Link
               href="/settings"
               onClick={() => isMobile && setIsOpen(false)}
-              aria-label="Account settings"
+              aria-label={t('sidebar.accountSettings', 'Account settings')}
               className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg text-center md:text-start hover:bg-background/70 transition-colors"
-              title="Account settings"
+              title={t('sidebar.accountSettings', 'Account settings')}
             >
               <IconUserCog size={20} className="shrink-0 text-muted-foreground" />
               <span className="min-w-0">
-                <span className="block text-xs text-muted-foreground truncate">Logged in as</span>
+                <span className="block text-xs text-muted-foreground truncate">
+                  {t('sidebar.loggedInAs', 'Logged in as')}
+                </span>
                 <span className="block text-sm font-medium truncate">{user?.email}</span>
               </span>
             </Link>
           ) : (
             <Link
               href="/settings"
-              aria-label="Account settings"
+              aria-label={t('sidebar.accountSettings', 'Account settings')}
               className="flex justify-center px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors"
-              title="Account settings"
+              title={t('sidebar.accountSettings', 'Account settings')}
             >
               <IconUserCog size={20} className="shrink-0 text-muted-foreground" />
             </Link>
@@ -379,8 +392,12 @@ export function Sidebar() {
             variant="outline"
             size={isCollapsed && !isMobile ? 'icon' : 'default'}
             className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
-            title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            aria-label="Toggle color scheme"
+            title={
+              resolvedTheme === 'dark'
+                ? t('sidebar.theme.switchToLight', 'Switch to light mode')
+                : t('sidebar.theme.switchToDark', 'Switch to dark mode')
+            }
+            aria-label={t('sidebar.theme.toggle', 'Toggle color scheme')}
             data-testid="theme-toggle"
           >
             {resolvedTheme === 'dark' ? (
@@ -388,17 +405,20 @@ export function Sidebar() {
             ) : (
               <IconMoon size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
             )}
-            {(!isCollapsed || isMobile) && (resolvedTheme === 'dark' ? 'Light mode' : 'Dark mode')}
+            {(!isCollapsed || isMobile) &&
+              (resolvedTheme === 'dark'
+                ? t('sidebar.theme.light', 'Light mode')
+                : t('sidebar.theme.dark', 'Dark mode'))}
           </Button>
           <Button
             onClick={handleLogout}
             variant="outline"
             size={isCollapsed && !isMobile ? 'icon' : 'default'}
             className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
-            title={isCollapsed && !isMobile ? 'Logout' : undefined}
+            title={isCollapsed && !isMobile ? t('sidebar.logout', 'Logout') : undefined}
           >
             <IconLogout size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
-            {(!isCollapsed || isMobile) && 'Logout'}
+            {(!isCollapsed || isMobile) && t('sidebar.logout', 'Logout')}
           </Button>
         </div>
       </aside>

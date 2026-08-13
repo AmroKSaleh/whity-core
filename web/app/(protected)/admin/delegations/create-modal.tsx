@@ -21,6 +21,7 @@ import {
 } from '@amroksaleh/ui/select';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { useRichTranslation, useTranslation } from '@amroksaleh/features/i18n';
 import type {
   GranteeType,
   OuOption,
@@ -50,6 +51,8 @@ export function CreateDelegationModal({
   onSuccess,
 }: CreateDelegationModalProps) {
   const { addToast } = useToast();
+  const t = useTranslation('admin');
+  const rt = useRichTranslation('admin');
 
   // Starts true: the dialog remounts on open (parent `key`) and immediately
   // loads its picker options, so the loading state is shown from first paint
@@ -96,11 +99,14 @@ export function CreateDelegationModal({
         setOus(ousRes.data.data);
       }
     } catch {
-      addToast('Failed to load delegation options', 'error');
+      addToast(
+        t('delegations.create.optionsError', 'Failed to load delegation options'),
+        'error'
+      );
     } finally {
       setIsLoadingOptions(false);
     }
-  }, [addToast]);
+  }, [addToast, t]);
 
   // Load the picker options when the dialog opens. Fetching external data is a
   // legitimate effect (synchronising with an external system); the async work is
@@ -123,11 +129,17 @@ export function CreateDelegationModal({
 
   const handleSubmit = async () => {
     if (granteeId === '') {
-      addToast('Select a grantee', 'error');
+      addToast(t('delegations.create.validation.grantee', 'Select a grantee'), 'error');
       return;
     }
     if (selectedPermissions.length === 0) {
-      addToast('Select at least one permission to delegate', 'error');
+      addToast(
+        t(
+          'delegations.create.validation.permissions',
+          'Select at least one permission to delegate'
+        ),
+        'error'
+      );
       return;
     }
 
@@ -146,14 +158,18 @@ export function CreateDelegationModal({
       // status so a 5xx without a JSON body can never toast success.
       if (error !== undefined || !response.ok) {
         // 422 = subset-invariant violation (a permission the grantor lacks).
-        throw new Error(error?.error ?? 'Failed to create delegation');
+        throw new Error(
+          error?.error ?? t('delegations.create.error', 'Failed to create delegation')
+        );
       }
 
-      addToast('Delegation created successfully', 'success');
+      addToast(t('delegations.create.success', 'Delegation created successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to create delegation';
+        error instanceof Error
+          ? error.message
+          : t('delegations.create.error', 'Failed to create delegation');
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
@@ -169,10 +185,13 @@ export function CreateDelegationModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Create Delegation</DialogTitle>
+          <DialogTitle>{t('delegations.create.title', 'Create Delegation')}</DialogTitle>
           <DialogDescription>
-            Grant a subset of your own permissions to a role or a user. You can
-            only delegate permissions you currently hold.
+            {t(
+              'delegations.create.description',
+              'Grant a subset of your own permissions to a role or a user. You can ' +
+                'only delegate permissions you currently hold.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -186,7 +205,9 @@ export function CreateDelegationModal({
           <div className="space-y-5 py-2">
             {/* Grantee type */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Delegate to</label>
+              <label className="text-sm font-medium">
+                {t('delegations.create.granteeType.label', 'Delegate to')}
+              </label>
               <Select
                 value={granteeType}
                 onValueChange={(value) => {
@@ -198,8 +219,12 @@ export function CreateDelegationModal({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="role">Role</SelectItem>
-                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="role">
+                    {t('delegations.create.granteeType.role', 'Role')}
+                  </SelectItem>
+                  <SelectItem value="user">
+                    {t('delegations.create.granteeType.user', 'User')}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -207,12 +232,24 @@ export function CreateDelegationModal({
             {/* Grantee */}
             <div className="space-y-2">
               <label className="text-sm font-medium">
-                {granteeType === 'role' ? 'Role' : 'User'}
+                {granteeType === 'role'
+                  ? t('delegations.create.granteeType.role', 'Role')
+                  : t('delegations.create.granteeType.user', 'User')}
               </label>
               <Select value={granteeId} onValueChange={setGranteeId}>
                 <SelectTrigger>
+                  {/*
+                    Two keys rather than one with the grantee type interpolated
+                    in: "Select a role" and "Select a user" are separate
+                    sentences to a translator (gender, article, case all differ),
+                    and the raw enum value is not a word in any language.
+                  */}
                   <SelectValue
-                    placeholder={`Select a ${granteeType}`}
+                    placeholder={
+                      granteeType === 'role'
+                        ? t('delegations.create.grantee.placeholderRole', 'Select a role')
+                        : t('delegations.create.grantee.placeholderUser', 'Select a user')
+                    }
                   />
                 </SelectTrigger>
                 <SelectContent>
@@ -227,19 +264,32 @@ export function CreateDelegationModal({
 
             {/* OU scope (optional) */}
             <div className="space-y-2">
+              {/*
+                One key for the whole label, with "(optional)" as a hole rather
+                than a seam: the qualifier moves where a translator's grammar
+                needs it instead of being frozen after the noun phrase.
+              */}
               <label className="text-sm font-medium">
-                Scope to organizational unit{' '}
-                <span className="text-muted-foreground">(optional)</span>
+                {rt(
+                  'delegations.create.ou.label',
+                  'Scope to organizational unit <0>(optional)</0>',
+                  undefined,
+                  [<span key="optional" className="text-muted-foreground" />]
+                )}
               </label>
               <Select
                 value={ouId === '' ? 'none' : ouId}
                 onValueChange={(value) => setOuId(value === 'none' ? '' : value)}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Tenant-wide" />
+                  <SelectValue
+                    placeholder={t('delegations.create.ou.tenantWide', 'Tenant-wide')}
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Tenant-wide</SelectItem>
+                  <SelectItem value="none">
+                    {t('delegations.create.ou.tenantWide', 'Tenant-wide')}
+                  </SelectItem>
                   {ous.map((ou) => (
                     <SelectItem key={ou.id} value={String(ou.id)}>
                       {ou.name}
@@ -249,19 +299,24 @@ export function CreateDelegationModal({
               </Select>
               <Alert variant="info">
                 <AlertDescription>
-                  When set, the delegation applies only to grantees within that OU
-                  or its descendants.
+                  {t(
+                    'delegations.create.ou.hint',
+                    'When set, the delegation applies only to grantees within that OU ' +
+                      'or its descendants.'
+                  )}
                 </AlertDescription>
               </Alert>
             </div>
 
             {/* Permissions */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Permissions</label>
+              <label className="text-sm font-medium">
+                {t('delegations.create.permissions.label', 'Permissions')}
+              </label>
               <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-2">
                 {permissions.length === 0 ? (
                   <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-                    No permissions available.
+                    {t('delegations.create.permissions.empty', 'No permissions available.')}
                   </p>
                 ) : (
                   permissions.map((permission) => (
@@ -295,14 +350,16 @@ export function CreateDelegationModal({
             onClick={() => onOpenChange(false)}
             disabled={isSubmitting}
           >
-            Cancel
+            {t('delegations.create.cancel', 'Cancel')}
           </Button>
           <Button
             type="button"
             onClick={handleSubmit}
             disabled={isSubmitting || isLoadingOptions}
           >
-            {isSubmitting ? 'Creating...' : 'Create Delegation'}
+            {isSubmitting
+              ? t('delegations.create.submitting', 'Creating...')
+              : t('delegations.create.submit', 'Create Delegation')}
           </Button>
         </DialogFooter>
       </DialogContent>

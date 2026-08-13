@@ -9,6 +9,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { ErrorState } from '@amroksaleh/ui/empty-state';
 import { IconPlus, IconShare, IconShieldLock } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateDelegationModal } from './create-modal';
 import { RevokeDelegationModal } from './revoke-modal';
 import type { Delegation } from './types';
@@ -29,6 +30,7 @@ interface DelegationRow {
 
 export default function DelegationsPage() {
   const { addToast } = useToast();
+  const t = useTranslation('admin');
 
   const [delegations, setDelegations] = useState<Delegation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,18 +67,20 @@ export default function DelegationsPage() {
       setIsForbidden(false);
 
       if (data === undefined) {
-        throw new Error('Failed to fetch delegations');
+        throw new Error(t('delegations.error.load', 'Failed to fetch delegations'));
       }
 
       setDelegations(data.data);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to fetch delegations';
+        error instanceof Error
+          ? error.message
+          : t('delegations.error.load', 'Failed to fetch delegations');
       addToast(message, 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, t]);
 
   useEffect(() => {
     void (async () => {
@@ -91,30 +95,36 @@ export default function DelegationsPage() {
         permission: d.permission,
         grantee:
           d.granteeType === 'role'
-            ? `Role #${d.granteeId}`
-            : `User #${d.granteeId}`,
-        scope: d.ouId !== null ? `OU #${d.ouId}` : 'Tenant-wide',
-        status: d.revokedAt !== null ? 'Revoked' : 'Active',
+            ? t('delegations.grantee.role', 'Role #{id}', { id: d.granteeId })
+            : t('delegations.grantee.user', 'User #{id}', { id: d.granteeId }),
+        scope:
+          d.ouId !== null
+            ? t('delegations.scope.ou', 'OU #{id}', { id: d.ouId })
+            : t('delegations.scope.tenantWide', 'Tenant-wide'),
+        status:
+          d.revokedAt !== null
+            ? t('delegations.status.revoked', 'Revoked')
+            : t('delegations.status.active', 'Active'),
         source: d,
       })),
-    [delegations]
+    [delegations, t]
   );
 
   const columns: DataTableColumn<DelegationRow>[] = [
     {
       accessorKey: 'permission',
-      header: 'Permission',
+      header: t('delegations.table.permission', 'Permission'),
       enableSorting: true,
       enableColumnFilter: true,
     },
     {
       accessorKey: 'grantee',
-      header: 'Grantee',
+      header: t('delegations.table.grantee', 'Grantee'),
       enableSorting: true,
       enableColumnFilter: true,
     },
-    { accessorKey: 'scope', header: 'Scope', enableSorting: true },
-    { accessorKey: 'status', header: 'Status', enableSorting: true },
+    { accessorKey: 'scope', header: t('delegations.table.scope', 'Scope'), enableSorting: true },
+    { accessorKey: 'status', header: t('delegations.table.status', 'Status'), enableSorting: true },
   ];
 
   const handleRevokeClick = (delegation: Delegation) => {
@@ -124,7 +134,7 @@ export default function DelegationsPage() {
 
   const rowActions = (row: DelegationRow) => {
     if (row.source.revokedAt !== null) {
-      return <Badge variant="outline">Revoked</Badge>;
+      return <Badge variant="outline">{t('delegations.status.revoked', 'Revoked')}</Badge>;
     }
     return (
       <Button
@@ -133,7 +143,7 @@ export default function DelegationsPage() {
         className="text-destructive hover:text-destructive"
         onClick={() => handleRevokeClick(row.source)}
       >
-        Revoke
+        {t('delegations.action.revoke', 'Revoke')}
       </Button>
     );
   };
@@ -141,25 +151,34 @@ export default function DelegationsPage() {
   const accessDenied = isForbidden ? (
     <ErrorState
       icon={<IconShieldLock />}
-      title="Access denied"
-      description="You need the delegation:manage permission to manage delegations."
+      title={t('delegations.forbidden.title', 'Access denied')}
+      description={t(
+        'delegations.forbidden.description',
+        'You need the delegation:manage permission to manage delegations.'
+      )}
     />
   ) : undefined;
 
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Delegations"
+        title={t('delegations.title', 'Delegations')}
         description={
           isForbidden
-            ? 'Delegate a subset of your permissions to roles or users.'
-            : 'Delegate a subset of your permissions to roles or users, scoped to a tenant or an organizational unit.'
+            ? t(
+                'delegations.description.short',
+                'Delegate a subset of your permissions to roles or users.'
+              )
+            : t(
+                'delegations.description',
+                'Delegate a subset of your permissions to roles or users, scoped to a tenant or an organizational unit.'
+              )
         }
         action={
           isForbidden ? undefined : (
             <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
               <IconPlus size={18} />
-              Create Delegation
+              {t('delegations.header.create', 'Create Delegation')}
             </Button>
           )
         }
@@ -173,12 +192,15 @@ export default function DelegationsPage() {
         isLoading={isLoading}
         overrideContent={accessDenied}
         enableGlobalFilter
-        globalFilterPlaceholder="Search delegations…"
+        globalFilterPlaceholder={t('delegations.searchPlaceholder', 'Search delegations…')}
         pagination={{ pageSize: 10 }}
         emptyState={{
           icon: <IconShare size={32} className="text-muted-foreground" />,
-          title: 'No delegations yet',
-          description: 'Delegate a subset of your permissions to a role or a user.',
+          title: t('delegations.empty.title', 'No delegations yet'),
+          description: t(
+            'delegations.empty.description',
+            'Delegate a subset of your permissions to a role or a user.'
+          ),
           action: (
             <Button
               onClick={() => setIsCreateOpen(true)}
@@ -186,7 +208,7 @@ export default function DelegationsPage() {
               className="gap-2"
             >
               <IconPlus size={18} />
-              Create the first delegation
+              {t('delegations.empty.action', 'Create the first delegation')}
             </Button>
           ),
         }}

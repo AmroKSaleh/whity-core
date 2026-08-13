@@ -14,6 +14,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconAlertCircle } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { AiPrincipal } from './types';
 
 interface RevokeAiPrincipalModalProps {
@@ -31,6 +32,7 @@ export function RevokeAiPrincipalModal({
 }: RevokeAiPrincipalModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isRevoking, setIsRevoking] = useState(false);
 
   const handleRevoke = async () => {
@@ -43,20 +45,33 @@ export function RevokeAiPrincipalModal({
 
       if (!response.ok) {
         if (response.status === 404) {
-          addToast('Token not found — it may have already been revoked.', 'error');
+          addToast(
+            t(
+              'aiPrincipals.revoke.notFound',
+              'Token not found — it may have already been revoked.'
+            ),
+            'error'
+          );
           onSuccess();
           return;
         }
         const errorData = await response.json().catch(() => ({}));
         const errorObj = errorData as { message?: string };
-        throw new Error(errorObj.message ?? 'Failed to revoke token');
+        throw new Error(
+          errorObj.message ?? t('aiPrincipals.revoke.error', 'Failed to revoke token')
+        );
       }
 
-      addToast(`Token "${principal.name}" revoked`, 'success');
+      addToast(
+        t('aiPrincipals.revoke.success', 'Token "{name}" revoked', { name: principal.name }),
+        'success'
+      );
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to revoke token';
+        error instanceof Error
+          ? error.message
+          : t('aiPrincipals.revoke.error', 'Failed to revoke token');
       addToast(message, 'error');
     } finally {
       setIsRevoking(false);
@@ -67,10 +82,13 @@ export function RevokeAiPrincipalModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Revoke AI Principal</DialogTitle>
+          <DialogTitle>{t('aiPrincipals.revoke.title', 'Revoke AI Principal')}</DialogTitle>
           <DialogDescription>
-            This will immediately invalidate the bearer token. Any AI client
-            using it will receive 401 on the next request.
+            {t(
+              'aiPrincipals.revoke.description',
+              'This will immediately invalidate the bearer token. Any AI client ' +
+                'using it will receive 401 on the next request.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -97,8 +115,11 @@ export function RevokeAiPrincipalModal({
           <Alert>
             <IconAlertCircle className="h-4 w-4" />
             <AlertDescription>
-              Revocation is permanent. A new token must be issued if access is
-              needed again.
+              {t(
+                'aiPrincipals.revoke.warning',
+                'Revocation is permanent. A new token must be issued if access is ' +
+                  'needed again.'
+              )}
             </AlertDescription>
           </Alert>
         </div>
@@ -110,7 +131,7 @@ export function RevokeAiPrincipalModal({
             onClick={() => onOpenChange(false)}
             disabled={isRevoking}
           >
-            Cancel
+            {t('aiPrincipals.revoke.cancel', 'Cancel')}
           </Button>
           <Button
             type="button"
@@ -118,7 +139,9 @@ export function RevokeAiPrincipalModal({
             onClick={handleRevoke}
             disabled={isRevoking}
           >
-            {isRevoking ? 'Revoking...' : 'Revoke Token'}
+            {isRevoking
+              ? t('aiPrincipals.revoke.submitting', 'Revoking...')
+              : t('aiPrincipals.revoke.submit', 'Revoke Token')}
           </Button>
         </DialogFooter>
       </DialogContent>
