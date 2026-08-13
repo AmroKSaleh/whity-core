@@ -6,6 +6,7 @@ Frontend internationalization (i18n) support for Whity Core applications. Provid
 
 - **Language Management**: Switch between available languages with one hook call
 - **Direction Follows the Language**: each language carries its own `'ltr'`/`'rtl'`, so choosing Arabic mirrors the interface — there is no separate direction toggle, and no code branches on a language code
+- **The Whole Surface Is Flaggable**: an operator can switch i18n off entirely (`i18n.enabled`), and the product becomes single-language, left-to-right, with no language affordance anywhere — without losing a single stored preference or translation. See [Switching i18n Off](#switching-i18n-off)
 - **Lazy Domains**: asking for a domain is what loads it; there is no central list to maintain
 - **Translation Caching**: LocalStorage caching with 24-hour TTL reduces API calls
 - **Bilingual Support**: Multiple languages cached simultaneously for instant switching
@@ -121,6 +122,9 @@ The i18n system uses the following backend API endpoints:
 ### GET /api/v1/languages
 Public endpoint (no auth required) that returns available languages. Each record
 carries its `direction` — the interface writing direction that language implies.
+`i18n_enabled` is the instance's `i18n.enabled` flag; it rides on this call
+because it must be known before a session exists (the sign-in screen mounts the
+provider too).
 
 **Response:**
 ```json
@@ -128,12 +132,20 @@ carries its `direction` — the interface writing direction that language implie
   "languages": [
     { "code": "en", "name": "English", "direction": "ltr" },
     { "code": "ar", "name": "العربية", "direction": "rtl" }
-  ]
+  ],
+  "i18n_enabled": true
 }
 ```
 
+The `languages` array is **not** narrowed when the flag is off — it is the
+catalogue, and the admin translations screen reads it to prepare a language
+before the feature is switched on.
+
 ### GET /api/v1/settings/language
-Authenticated endpoint that returns user's language preference.
+Authenticated endpoint that returns the user's EFFECTIVE language preference.
+While `i18n_enabled` is `false` that is `null` (= the default language) whatever
+the profile stores; the stored value is untouched and comes back the moment the
+flag is switched on again.
 
 **Response:**
 ```json
@@ -142,12 +154,16 @@ Authenticated endpoint that returns user's language preference.
   "available_languages": [
     { "code": "en", "name": "English", "direction": "ltr" },
     { "code": "ar", "name": "العربية", "direction": "rtl" }
-  ]
+  ],
+  "i18n_enabled": true
 }
 ```
 
 ### PATCH /api/v1/settings/language
-Authenticated endpoint to update user's language preference.
+Authenticated endpoint to update user's language preference. **Refused with 503
+while `i18n.enabled` is off** — storing a preference nothing would honour is a
+silent no-op, and the refusal is what guarantees no stored language is
+overwritten while the feature is disabled.
 
 **Request:**
 ```json
@@ -314,6 +330,29 @@ resolves.
 const dir = useLanguageDirection()
 ```
 
+### `useI18nEnabled()`
+
+Returns whether this instance offers a CHOICE of language (`i18n.enabled`).
+Non-throwing, like `useLanguageDirection`: `false` when no provider is mounted,
+and `false` until the catalogue has answered — no affordance is drawn until the
+instance has said it offers one.
+
+Read it wherever the interface would otherwise present a language affordance, so
+that the surrounding chrome disappears with the control:
+
+```tsx
+const isI18nEnabled = useI18nEnabled()
+
+{isI18nEnabled && (
+  <div className="language-row">
+    <GlobeIcon />
+    <LanguageSwitcher variant="dropdown" />
+  </div>
+)}
+```
+
+It does **not** gate translation: `useTranslation` returns real text either way.
+
 ### `<LanguageProvider>`
 
 Context provider that manages language state and translations.
@@ -463,6 +502,36 @@ API, not a code change. Read the current direction with `useLanguageDirection()`
 Style with LOGICAL CSS utilities (`ms`/`me`, `ps`/`pe`, `start`/`end`,
 `border-s`/`border-e`, `text-start`/`text-end`) so components follow the
 direction automatically.
+
+## Switching i18n Off
+
+A deployment that is not ready to ship a second language sets the operator flag
+`i18n.enabled` to `false` (admin → Settings → Feature Flags, system tenant +
+`settings:manage`). It defaults to **`true`**: i18n shipped before the flag did,
+so an upgrade must never switch a live feature off underneath a deployment
+already using it.
+
+With the flag off:
+
+| | Behaviour |
+|---|---|
+| Resolved language | `defaultLanguage` for everyone, whatever `profiles.language_code` says |
+| `<html dir>` | `ltr`, pinned — not read off the default language's record |
+| `useI18nEnabled()` | `false` |
+| `<LanguageSwitcher />` | renders `null`; its surrounding chrome must gate on `useI18nEnabled()` too |
+| `useTranslation` / `t()` | **unchanged** — bundles still load, real text still resolves, a key is never rendered raw |
+| `PATCH /api/v1/settings/language` | refused, 503 |
+| Admin Languages + Translations pages | **still reachable and fully functional**, with a notice explaining the flag |
+
+**Disabling is never a data migration.** `profiles.language_code` keeps its
+value, the locally remembered code is neither read nor overwritten, and
+translation rows are untouched — so switching the flag back on restores every
+user's language exactly as they left it. That property is what makes the switch
+safe to flip while investigating a problem, and it is pinned by a test.
+
+The admin surfaces stay reachable on purpose: preparing the languages and
+strings BEFORE turning the feature on is the entire reason to have a flag rather
+than a code branch. Hiding them would make the feature impossible to get ready.
 
 ## Known Limitations
 

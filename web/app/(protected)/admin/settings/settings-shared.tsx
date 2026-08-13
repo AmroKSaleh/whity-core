@@ -211,6 +211,10 @@ export const FIELD_META: Record<string, FieldMeta> = {
     label: 'Workspace invitation email',
     help: 'Email people when they are invited to a workspace.',
   },
+  'i18n.enabled': {
+    label: 'Multiple languages',
+    help: 'Let people choose the language the interface is shown in, and mirror it for right-to-left languages. Off means everyone sees the default language, left-to-right, with no language control anywhere — stored preferences and translations are kept, so turning it back on restores them.',
+  },
   'plugins.store_enabled': {
     label: 'Plugin marketplace',
     help: 'Allow installing plugins from a trusted external store. A non-empty plugins.store_allowed_hosts allowlist is also required — this switch lets an operator disable the whole integration without losing that host list.',
@@ -242,6 +246,12 @@ export const SETTINGS_SECTIONS: readonly SectionDef[] = [
     title: 'Sign-up governance',
     description: 'Control whether and how new people can create accounts on this instance.',
     keys: ['auth.self_registration_enabled', 'auth.registration_approval_required'],
+  },
+  {
+    id: 'i18n',
+    title: 'Languages',
+    description: 'Whether this instance presents itself in more than one language.',
+    keys: ['i18n.enabled'],
   },
   {
     id: 'signin',

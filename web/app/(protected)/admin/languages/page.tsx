@@ -11,7 +11,9 @@ import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import { Switch } from '@amroksaleh/ui/switch';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { useI18nEnabled } from '@amroksaleh/features/i18n';
 import { IconPlus } from '@tabler/icons-react';
 import { CreateLanguageModal } from './create-modal';
 import { errorMessage } from './shared';
@@ -24,6 +26,14 @@ import type { Language } from './types';
  * item is already hidden from every other tenant (systemTenantOnly in
  * public/index.php's navigation.register), but a direct URL visit is still
  * gated here defensively.
+ *
+ * REACHABLE EVEN WHEN i18n IS SWITCHED OFF (`i18n.enabled`). Preparing the
+ * languages an instance will offer BEFORE turning the feature on is the whole
+ * reason the flag exists; hiding this page while it is off would make the
+ * feature impossible to get ready. Everything here still writes for real — a
+ * language added now is live the moment the flag flips — so there is no silent
+ * no-op. The banner below says so plainly, because an operator who cannot see
+ * their change take effect anywhere in the product deserves to know why.
  */
 const SYSTEM_TENANT_ID = 0;
 
@@ -31,6 +41,7 @@ export default function LanguagesPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const isI18nEnabled = useI18nEnabled();
 
   const canRead = hasPermission(LANGUAGES_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -188,6 +199,17 @@ export default function LanguagesPage() {
           </Button>
         }
       />
+
+      {!isI18nEnabled && (
+        <Alert variant="info" data-testid="i18n-disabled-notice">
+          <AlertDescription>
+            Multiple languages are switched off for this instance, so everyone currently sees
+            the default language, left to right, with no language control. Changes made here are
+            saved and take effect as soon as an operator turns the feature on under Feature
+            Flags — nothing set up now is lost in the meantime.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <DataTable
         columns={columns}

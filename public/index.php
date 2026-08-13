@@ -1397,7 +1397,10 @@ try {
 
 // Registered versioned (bare paths) so the router prepends /v1 itself —
 // writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
-$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry, $languageRepository, $roleChecker);
+// $settingsService (constructed earlier, near the register handler) supplies the
+// `i18n.enabled` feature flag: with it off the handler reports the default
+// language for everyone and refuses preference writes. See its class docblock.
+$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry, $languageRepository, $roleChecker, $settingsService);
 $router->register('GET',   '/api/languages',         [$languagesHandler, 'list'],          null);
 $router->register('GET',   '/api/settings/language', [$languagesHandler, 'getLanguage'],   null);
 $router->register('PATCH', '/api/settings/language', [$languagesHandler, 'patchLanguage'], null);

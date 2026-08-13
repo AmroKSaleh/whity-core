@@ -6,11 +6,13 @@ import { TwoFactorSettings } from '@/components/TwoFactorSettings';
 import { SessionsSettings } from '@/components/SessionsSettings';
 import { DevicesSettings } from '@/components/DevicesSettings';
 import { EmailAddressesSettings } from '@/components/EmailAddressesSettings';
-import { LanguageSwitcher } from '@amroksaleh/features/i18n';
+import { LanguageSwitcher, useI18nEnabled } from '@amroksaleh/features/i18n';
 import { ProfileForm } from './profile-form';
 
 export default function SettingsPage() {
   const auth = useAuth();
+  // Whether this instance offers a language choice at all (`i18n.enabled`).
+  const isI18nEnabled = useI18nEnabled();
 
   return (
     <div className="space-y-8">
@@ -40,22 +42,28 @@ export default function SettingsPage() {
 
       {/* Language. This also sets the interface DIRECTION: each language
           carries its own 'ltr'/'rtl', so choosing Arabic mirrors the interface.
-          See lib/direction-context.tsx — there is no separate toggle. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Language</CardTitle>
-          <CardDescription>
-            Choose the language used across the interface. Right-to-left languages mirror the
-            layout automatically.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LanguageSwitcher
-            variant="dropdown"
-            className="h-9 w-full max-w-xs rounded-md border border-input bg-input/20 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-          />
-        </CardContent>
-      </Card>
+          See lib/direction-context.tsx — there is no separate toggle.
+
+          The WHOLE CARD is gated on `i18n.enabled`, not just the control inside
+          it: an instance that offers one language should not show a "Language"
+          heading explaining a choice its users do not have. */}
+      {isI18nEnabled && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Language</CardTitle>
+            <CardDescription>
+              Choose the language used across the interface. Right-to-left languages mirror the
+              layout automatically.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <LanguageSwitcher
+              variant="dropdown"
+              className="h-9 w-full max-w-xs rounded-md border border-input bg-input/20 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Email addresses — multi-email self-service (WC-54fb5c37) */}
       <Card>

@@ -21,6 +21,15 @@
  * provider fetches that bundle once per language. Extraction can therefore fan
  * out screen by screen without anyone editing this provider.
  *
+ * i18n CAN BE SWITCHED OFF ENTIRELY (`i18n.enabled`, served on the public
+ * languages payload). With the flag off this provider resolves `defaultLanguage`
+ * for everyone — the stored profile preference and the locally remembered code
+ * are both left ALONE but not consulted — pins `direction` to 'ltr', and reports
+ * `i18nEnabled: false` so the switcher disappears. Translations keep loading and
+ * `t()` keeps returning real text; what goes away is the CHOICE, not the
+ * machinery. Because nothing is cleared, switching the flag back on restores
+ * every user's language exactly.
+ *
  * Usage:
  *   <LanguageProvider>
  *     <App />
@@ -35,7 +44,7 @@ import { createContext, useCallback, useEffect, useMemo, useRef, useState, React
 
 import type { Language, LanguageContextValue, CachedTranslations, Direction } from './types'
 import {
-  fetchAvailableLanguages,
+  fetchLanguageCatalogue,
   fetchLanguageSettings,
   updateLanguagePreference,
   fetchTranslations,
@@ -81,6 +90,11 @@ export function LanguageProvider({
   const [translations, setTranslations] = useState<CachedTranslations>({})
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
+  // Starts FALSE: no language affordance until the instance has said it offers
+  // one. An instance with i18n off must never paint a switcher and then remove
+  // it — that flicker is exactly the confusion the flag exists to prevent. See
+  // LanguageContextValue.i18nEnabled.
+  const [i18nEnabled, setI18nEnabled] = useState(false)
   // Domains some mounted component has asked for. Sorted+joined into the
   // effect's dependency so re-running is driven by the SET's contents, not by
   // the identity of a new array on every render.
@@ -94,9 +108,23 @@ export function LanguageProvider({
         setIsLoading(true)
         setError(null)
 
-        // Fetch available languages
-        const languages = await fetchAvailableLanguages()
+        // The catalogue AND the instance's i18n flag arrive together, on the
+        // one call that needs no session.
+        const { languages, i18nEnabled: enabled } = await fetchLanguageCatalogue()
         setAvailableLanguages(languages)
+        setI18nEnabled(enabled)
+
+        // i18n OFF: everyone gets the default language, whatever their profile
+        // or their browser remembers. Neither is read — and, just as
+        // importantly, neither is CLEARED: disabling a feature flag must never
+        // be a data migration, so turning it back on restores each user's
+        // language exactly as they left it. The preference fetch is skipped
+        // outright rather than fetched-then-ignored.
+        if (!enabled) {
+          setCurrentLanguage(defaultLanguage)
+          setIsLoading(false)
+          return
+        }
 
         // Resolution order: the signed-in user's PROFILE preference, then the
         // code remembered locally for a signed-out visitor (so the public
@@ -132,11 +160,18 @@ export function LanguageProvider({
     if (!currentLanguage) {
       return
     }
-    setRememberedLanguage(currentLanguage)
+    // With i18n off, the resolved language is the app default rather than
+    // anyone's choice — writing it to storage would OVERWRITE the code this
+    // browser remembered while the feature was on, quietly destroying the very
+    // preference the flag promises to preserve. <html lang> is still set: the
+    // document really is in that language.
+    if (i18nEnabled) {
+      setRememberedLanguage(currentLanguage)
+    }
     if (typeof document !== 'undefined') {
       document.documentElement.lang = currentLanguage
     }
-  }, [currentLanguage])
+  }, [currentLanguage, i18nEnabled])
 
   // Register a domain a component needs. Idempotent: calling it for an
   // already-known domain returns the same state array, so React bails out.
@@ -209,6 +244,14 @@ export function LanguageProvider({
       try {
         setError(null)
 
+        // i18n off: there is no language to change to. Refused HERE as well as
+        // by the server (PATCH /api/v1/settings/language answers 503) so a
+        // stray caller gets an immediate, honest error instead of a request
+        // that looks like it worked. Nothing stored is touched.
+        if (!i18nEnabled) {
+          throw new Error('Language selection is disabled on this instance')
+        }
+
         // Validate language
         const lang = availableLanguages.find((l) => l.code === code)
         if (!lang) {
@@ -249,7 +292,7 @@ export function LanguageProvider({
         throw err
       }
     },
-    [availableLanguages, currentLanguage]
+    [availableLanguages, currentLanguage, i18nEnabled]
   )
 
   // Helper to get a translation
@@ -271,14 +314,21 @@ export function LanguageProvider({
 
   // Direction comes off the RECORD, not off the code. An unknown or
   // not-yet-resolved language reads left-to-right rather than guessing.
-  const direction: Direction =
-    availableLanguages.find((l) => l.code === currentLanguage)?.direction ?? FALLBACK_DIRECTION
+  //
+  // With i18n off it is pinned left-to-right outright, rather than read off the
+  // default language's record: a deployment that has switched the feature off
+  // has been promised a left-to-right product, and must not end up mirrored
+  // because someone once set the default language's `direction` to 'rtl'.
+  const direction: Direction = i18nEnabled
+    ? availableLanguages.find((l) => l.code === currentLanguage)?.direction ?? FALLBACK_DIRECTION
+    : FALLBACK_DIRECTION
 
   const value = useMemo<LanguageContextValue>(
     () => ({
       currentLanguage,
       availableLanguages,
       direction,
+      i18nEnabled,
       translations,
       isLoading,
       error,
@@ -290,6 +340,7 @@ export function LanguageProvider({
       currentLanguage,
       availableLanguages,
       direction,
+      i18nEnabled,
       translations,
       isLoading,
       error,

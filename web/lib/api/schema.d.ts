@@ -10410,6 +10410,7 @@ export interface operations {
                             /** @enum {string} */
                             direction: "ltr" | "rtl";
                         }[];
+                        i18n_enabled: boolean;
                     };
                 };
             };
@@ -16278,7 +16279,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The user's language preference and available languages */
+            /** @description The user's EFFECTIVE language preference (null while i18n is disabled, whatever the profile stores) and the available languages */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16292,6 +16293,7 @@ export interface operations {
                             /** @enum {string} */
                             direction: "ltr" | "rtl";
                         }[];
+                        i18n_enabled: boolean;
                     };
                 };
             };
@@ -16424,6 +16426,15 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Language selection is disabled on this instance (i18n.enabled is off) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

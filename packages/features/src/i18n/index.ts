@@ -6,10 +6,16 @@
  * - useTranslation: Hook to translate strings in a domain
  * - useCurrentLanguage: Hook to get/set the current language
  * - useLanguageDirection: Hook for the resolved language's writing direction
+ * - useI18nEnabled: Hook for whether this instance offers a language CHOICE
  *
  * Architecture:
  * - LanguageProvider initializes on mount, fetches available languages and user preference
  * - Language resolution: profile preference → locally remembered code → defaultLanguage
+ * - THE WHOLE SURFACE IS FLAGGABLE: with the operator's `i18n.enabled` off
+ *   (served on GET /api/v1/languages), every user resolves defaultLanguage in
+ *   'ltr', `useI18nEnabled()` is false and the switcher renders nothing. Stored
+ *   preferences are left untouched, so re-enabling restores them exactly.
+ *   `useTranslation` is unaffected — it returns the default language's text.
  * - DIRECTION IS A PROPERTY OF THE LANGUAGE: each language record carries
  *   'ltr'/'rtl' and the app sets <html dir> from it. There is no separate
  *   direction toggle, and no code anywhere branches on a language code.
@@ -39,10 +45,12 @@ export { LanguageProvider, type LanguageProviderProps } from './LanguageProvider
 export { useTranslation, interpolate, type TranslateFn } from './useTranslation'
 export { useCurrentLanguage, type UseCurrentLanguageReturn } from './useCurrentLanguage'
 export { useLanguageDirection } from './useLanguageDirection'
+export { useI18nEnabled } from './useI18nEnabled'
 export { LanguageSwitcher, type LanguageSwitcherProps } from './LanguageSwitcher'
 export type {
   Direction,
   Language,
+  LanguageCatalogue,
   LanguageSettings,
   LanguageContextValue,
   TranslationMap,

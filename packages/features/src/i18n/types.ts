@@ -24,6 +24,22 @@ export interface LanguageSettings {
   available_languages: Language[]
 }
 
+/**
+ * The public language catalogue, plus whether this instance offers a CHOICE of
+ * language at all.
+ *
+ * `i18nEnabled` is the operator's `i18n.enabled` feature flag, served on the
+ * public languages payload because it must be known before a session exists —
+ * the sign-in screen mounts the provider too. It is read from that explicit
+ * field rather than inferred from how many languages came back: a single-language
+ * install with the feature ON is a different thing from the feature being OFF,
+ * and only the second one hides the switcher.
+ */
+export interface LanguageCatalogue {
+  languages: Language[]
+  i18nEnabled: boolean
+}
+
 export interface TranslationMap {
   [key: string]: string
 }
@@ -37,6 +53,22 @@ export interface LanguageContextValue {
   availableLanguages: Language[]
   /** The resolved language's direction; 'ltr' until a language resolves. */
   direction: Direction
+  /**
+   * Whether this instance offers a choice of language (`i18n.enabled`).
+   *
+   * FALSE means every user reads the default language left-to-right whatever
+   * their profile stores, and NO language affordance is rendered anywhere.
+   * Translation still works — `t()` returns the default language's text — so
+   * this is not a switch that breaks translated screens; it is a switch that
+   * removes the CHOICE.
+   *
+   * `false` until the catalogue has answered, deliberately: an instance with
+   * the feature OFF must never paint a switcher and then take it away, which
+   * is precisely the confusion the flag exists to remove. An instance with it
+   * ON reveals the switcher when the catalogue lands, the same moment the
+   * switcher would have had anything to show.
+   */
+  i18nEnabled: boolean
   translations: CachedTranslations
   isLoading: boolean
   error: Error | null

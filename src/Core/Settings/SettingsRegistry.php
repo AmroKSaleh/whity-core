@@ -230,6 +230,34 @@ final class SettingsRegistry
     public const ERROR_TRACKING_RETENTION_DAYS = 'error_tracking.retention_days';
 
     /**
+     * Interface internationalisation MASTER switch (WC-i18n-feature-flag).
+     *
+     * When 'false', the product presents itself as a single-language,
+     * left-to-right English application: every user resolves to the default
+     * language whatever their profile says, `<html dir>` is 'ltr', and the
+     * end-user language switcher is not rendered at all — the whole point being
+     * that a deployment which is not ready to ship a second language shows no
+     * affordance suggesting it could.
+     *
+     * GLOBAL-ONLY. The catalogue it governs (`languages`) has no `tenant_id`
+     * column, the sign-in screen is pre-tenant, and direction is applied to the
+     * document element — a per-tenant value would be inert and misleading.
+     *
+     * Default 'true' (ENABLED), and deliberately so: i18n already shipped, so an
+     * upgrade must not silently switch a live feature off underneath a
+     * deployment already using it. Turning it off is an operator's runtime
+     * decision (one setting), not a code default — same reasoning that made
+     * PLUGINS_STORE_ENABLED default 'true'.
+     *
+     * DISABLING IS NEVER A DATA MIGRATION. `profiles.language_code` keeps its
+     * stored value and translation rows keep theirs; the flag only changes what
+     * is RESOLVED and what is OFFERED. Re-enabling restores every user's
+     * previous language exactly, which is what makes the switch safe to flip
+     * while investigating a problem.
+     */
+    public const I18N_ENABLED = 'i18n.enabled';
+
+    /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
      * uploads go through BrandingService and the binary endpoints.
@@ -296,6 +324,11 @@ final class SettingsRegistry
         // render LIMITS below are deliberately NOT in this list (they ARE
         // meaningfully tenant-overridable).
         self::DOCUMENTS_RENDER_ENABLED,
+        // Languages are a PLATFORM catalogue (no tenant_id column) and the
+        // sign-in screen resolves a language before any tenant is known, so
+        // "does this instance offer more than one language" is an instance
+        // question, not a tenant one.
+        self::I18N_ENABLED,
     ];
 
     /**
@@ -323,6 +356,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_PASSWORD_RESET,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
+        self::I18N_ENABLED,
     ];
 
     /**
@@ -355,6 +389,12 @@ final class SettingsRegistry
      * `REGISTRATION_APPROVAL_REQUIRED` above. `MAIL_EVENT_PASSWORD_RESET` is
      * deliberately EXCLUDED, same reasoning as the other `mail.events.*` keys.
      *
+     * WC-i18n-feature-flag added `I18N_ENABLED`: whether this instance presents
+     * itself as multilingual at all is exactly the kind of whole-instance
+     * capability an operator switches on the Feature Flags tab, and it is the
+     * only one here whose OFF state is also visible to end users (the language
+     * switcher disappears with it).
+     *
      * @var list<string>
      */
     private const FEATURE_FLAG_KEYS = [
@@ -368,6 +408,7 @@ final class SettingsRegistry
         self::SSO_ENABLED,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
+        self::I18N_ENABLED,
     ];
 
     /**
@@ -485,6 +526,9 @@ final class SettingsRegistry
         self::ERROR_TRACKING_ENVIRONMENT => '',
         self::ERROR_TRACKING_NOTIFY_ADMINS => 'true',
         self::ERROR_TRACKING_RETENTION_DAYS => '90',
+        // ENABLED by default: i18n already shipped, and an upgrade must not
+        // switch a live feature off underneath a deployment using it.
+        self::I18N_ENABLED => 'true',
     ];
 
     /**
@@ -774,6 +818,7 @@ final class SettingsRegistry
             // it unset, exactly like the other optional string settings above.
             self::ERROR_TRACKING_ENVIRONMENT => null,
             self::ERROR_TRACKING_RETENTION_DAYS => self::validateRetentionDays($value),
+            self::I18N_ENABLED => self::validateBoolean($value, self::I18N_ENABLED),
             default => "Unknown setting key: {$key}",
         };
     }

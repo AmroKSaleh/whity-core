@@ -6,8 +6,10 @@ import { render, renderHook, screen, act, waitFor } from '@testing-library/react
 import { ReactNode } from 'react'
 import {
   LanguageProvider,
+  LanguageSwitcher,
   useTranslation,
   useCurrentLanguage,
+  useI18nEnabled,
   useLanguageDirection,
 } from '../index'
 import * as api from '../api'
@@ -58,10 +60,13 @@ describe('useTranslation hook', () => {
     jest.clearAllMocks()
     localStorage.clear()
 
-    mockApi.fetchAvailableLanguages.mockResolvedValue([
-      { code: 'en', name: 'English', direction: 'ltr' },
-      { code: 'ar', name: 'العربية', direction: 'rtl' },
-    ])
+    mockApi.fetchLanguageCatalogue.mockResolvedValue({
+      languages: [
+        { code: 'en', name: 'English', direction: 'ltr' },
+        { code: 'ar', name: 'العربية', direction: 'rtl' },
+      ],
+      i18nEnabled: true,
+    })
 
     mockApi.fetchLanguageSettings.mockResolvedValue({
       language_code: 'en',
@@ -151,10 +156,13 @@ describe('useCurrentLanguage hook', () => {
     jest.clearAllMocks()
     localStorage.clear()
 
-    mockApi.fetchAvailableLanguages.mockResolvedValue([
-      { code: 'en', name: 'English', direction: 'ltr' },
-      { code: 'ar', name: 'العربية', direction: 'rtl' },
-    ])
+    mockApi.fetchLanguageCatalogue.mockResolvedValue({
+      languages: [
+        { code: 'en', name: 'English', direction: 'ltr' },
+        { code: 'ar', name: 'العربية', direction: 'rtl' },
+      ],
+      i18nEnabled: true,
+    })
 
     mockApi.fetchLanguageSettings.mockResolvedValue({
       language_code: 'en',
@@ -258,10 +266,13 @@ describe('language direction', () => {
     jest.clearAllMocks()
     localStorage.clear()
 
-    mockApi.fetchAvailableLanguages.mockResolvedValue([
-      { code: 'en', name: 'English', direction: 'ltr' },
-      { code: 'ar', name: 'العربية', direction: 'rtl' },
-    ])
+    mockApi.fetchLanguageCatalogue.mockResolvedValue({
+      languages: [
+        { code: 'en', name: 'English', direction: 'ltr' },
+        { code: 'ar', name: 'العربية', direction: 'rtl' },
+      ],
+      i18nEnabled: true,
+    })
     mockApi.fetchLanguageSettings.mockResolvedValue({
       language_code: 'en',
       available_languages: [
@@ -304,11 +315,14 @@ describe('language direction', () => {
    */
   it('mirrors for a third right-to-left language with no code change', async () => {
     const hebrew = { code: 'he', name: 'עברית', direction: 'rtl' as const }
-    mockApi.fetchAvailableLanguages.mockResolvedValue([
-      { code: 'en', name: 'English', direction: 'ltr' },
-      { code: 'ar', name: 'العربية', direction: 'rtl' },
-      hebrew,
-    ])
+    mockApi.fetchLanguageCatalogue.mockResolvedValue({
+      languages: [
+        { code: 'en', name: 'English', direction: 'ltr' },
+        { code: 'ar', name: 'العربية', direction: 'rtl' },
+        hebrew,
+      ],
+      i18nEnabled: true,
+    })
     mockApi.fetchLanguageSettings.mockResolvedValue({
       language_code: 'he',
       available_languages: [hebrew],
@@ -365,10 +379,13 @@ describe('lazy domain loading', () => {
     jest.clearAllMocks()
     localStorage.clear()
 
-    mockApi.fetchAvailableLanguages.mockResolvedValue([
-      { code: 'en', name: 'English', direction: 'ltr' },
-      { code: 'ar', name: 'العربية', direction: 'rtl' },
-    ])
+    mockApi.fetchLanguageCatalogue.mockResolvedValue({
+      languages: [
+        { code: 'en', name: 'English', direction: 'ltr' },
+        { code: 'ar', name: 'العربية', direction: 'rtl' },
+      ],
+      i18nEnabled: true,
+    })
     mockApi.fetchLanguageSettings.mockResolvedValue({
       language_code: 'en',
       available_languages: [{ code: 'en', name: 'English', direction: 'ltr' }],
@@ -404,10 +421,13 @@ describe('LanguageProvider', () => {
     jest.clearAllMocks()
     localStorage.clear()
 
-    mockApi.fetchAvailableLanguages.mockResolvedValue([
-      { code: 'en', name: 'English', direction: 'ltr' },
-      { code: 'ar', name: 'العربية', direction: 'rtl' },
-    ])
+    mockApi.fetchLanguageCatalogue.mockResolvedValue({
+      languages: [
+        { code: 'en', name: 'English', direction: 'ltr' },
+        { code: 'ar', name: 'العربية', direction: 'rtl' },
+      ],
+      i18nEnabled: true,
+    })
 
     mockApi.fetchLanguageSettings.mockResolvedValue({
       language_code: 'ar',
@@ -447,7 +467,7 @@ describe('LanguageProvider', () => {
   })
 
   it('should handle API errors gracefully', async () => {
-    mockApi.fetchAvailableLanguages.mockRejectedValue(new Error('Network error'))
+    mockApi.fetchLanguageCatalogue.mockRejectedValue(new Error('Network error'))
 
     const { result } = renderHook(() => useCurrentLanguage(), { wrapper })
 
@@ -492,5 +512,184 @@ describe('LanguageProvider', () => {
     await waitFor(() => {
       expect(result.current.currentLanguage).toBe('ar')
     })
+  })
+})
+
+/**
+ * The i18n FEATURE FLAG (`i18n.enabled`).
+ *
+ * Off means: one language, left-to-right, no affordance — and, above all,
+ * nothing destroyed. The last test in this block is the one that matters most:
+ * a flag you cannot safely switch back is not a flag, it is a migration.
+ */
+describe('i18n feature flag', () => {
+  const LANGUAGES = [
+    { code: 'en', name: 'English', direction: 'ltr' as const },
+    { code: 'ar', name: 'العربية', direction: 'rtl' as const },
+  ]
+
+  /**
+   * Arrange an instance with the flag in a given state, and a profile whose
+   * stored preference is Arabic — the case that proves the flag overrides a
+   * real, saved choice rather than merely leaving an unset one alone.
+   */
+  function arrangeInstance(i18nEnabled: boolean) {
+    mockApi.fetchLanguageCatalogue.mockResolvedValue({ languages: LANGUAGES, i18nEnabled })
+    mockApi.fetchLanguageSettings.mockResolvedValue({
+      language_code: 'ar',
+      available_languages: LANGUAGES,
+    })
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    localStorage.clear()
+    // Seeded so a disabled instance renders REAL English text, not a raw key:
+    // switching i18n off must not turn translated screens into key soup.
+    mockApi.fetchTranslations.mockImplementation((language) =>
+      Promise.resolve(
+        language === 'ar' ? { 'login.submit': 'تسجيل الدخول' } : { 'login.submit': 'Sign in' }
+      )
+    )
+    mockApi.updateLanguagePreference.mockImplementation((code) =>
+      Promise.resolve({ status: 'saved' as const, languageCode: code })
+    )
+  })
+
+  it('renders the default language left-to-right for a profile set to Arabic', async () => {
+    arrangeInstance(false)
+
+    const { result } = renderHook(
+      () => ({ lang: useCurrentLanguage(), dir: useLanguageDirection() }),
+      { wrapper }
+    )
+
+    await waitFor(() => expect(result.current.lang.currentLanguage).toBe('en'))
+    expect(result.current.dir).toBe('ltr')
+  })
+
+  /**
+   * The stored preference is not merely overridden — it is never even asked
+   * for. A preference the instance will not honour is not a preference the
+   * instance should be reading.
+   */
+  it('does not consult the profile preference at all while disabled', async () => {
+    arrangeInstance(false)
+
+    const { result } = renderHook(() => useCurrentLanguage(), { wrapper })
+
+    await waitFor(() => expect(result.current.currentLanguage).toBe('en'))
+    expect(mockApi.fetchLanguageSettings).not.toHaveBeenCalled()
+  })
+
+  it('reports i18n as unavailable, so callers can drop their language affordances', async () => {
+    arrangeInstance(false)
+
+    const { result } = renderHook(() => useI18nEnabled(), { wrapper })
+
+    await waitFor(() => expect(result.current).toBe(false))
+  })
+
+  it('reports i18n as available when the instance offers it', async () => {
+    arrangeInstance(true)
+
+    const { result } = renderHook(() => useI18nEnabled(), { wrapper })
+
+    await waitFor(() => expect(result.current).toBe(true))
+  })
+
+  /**
+   * `t()` KEEPS WORKING. The flag removes the CHOICE of language, not the
+   * translation machinery: a converted screen must render its real English
+   * text, never the key.
+   */
+  it('keeps t() returning real text — never a raw key — while disabled', async () => {
+    arrangeInstance(false)
+
+    const { result } = renderHook(() => useTranslation('auth'), { wrapper })
+
+    // Asserted WITHOUT a fallback, which is the only form that can tell the two
+    // apart: it reads 'Sign in' only once the seeded English bundle is actually
+    // in hand, and would read the raw key 'login.submit' if the flag had cut
+    // translation loading off.
+    await waitFor(() => expect(result.current('login.submit')).toBe('Sign in'))
+    expect(mockApi.fetchTranslations).toHaveBeenCalledWith('en', 'auth')
+    expect(result.current('login.submit', 'Sign in')).toBe('Sign in')
+  })
+
+  it('refuses a language change rather than pretending to save one', async () => {
+    arrangeInstance(false)
+
+    const { result } = renderHook(() => useCurrentLanguage(), { wrapper })
+    await waitFor(() => expect(result.current.currentLanguage).toBe('en'))
+
+    await expect(
+      act(async () => {
+        await result.current.setLanguage('ar')
+      })
+    ).rejects.toThrow(/disabled/)
+    expect(mockApi.updateLanguagePreference).not.toHaveBeenCalled()
+  })
+
+  /**
+   * The switcher self-suppresses, so a call site added later cannot
+   * accidentally put the affordance back.
+   */
+  it('renders no language switcher at all', async () => {
+    arrangeInstance(false)
+
+    render(
+      <LanguageProvider defaultLanguage="en">
+        <LanguageSwitcher variant="dropdown" />
+      </LanguageProvider>
+    )
+
+    await waitFor(() => expect(screen.queryByRole('combobox')).not.toBeInTheDocument())
+    expect(screen.queryByText('Loading...')).not.toBeInTheDocument()
+  })
+
+  it('renders the switcher again once the instance offers a choice', async () => {
+    arrangeInstance(true)
+
+    render(
+      <LanguageProvider defaultLanguage="en">
+        <LanguageSwitcher variant="dropdown" />
+      </LanguageProvider>
+    )
+
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument())
+  })
+
+  /**
+   * THE PROPERTY THE WHOLE FEATURE RESTS ON: disabling is not a data
+   * migration. The same profile, unchanged on the server, comes back Arabic the
+   * moment the flag is switched on — and while it was off, the code this
+   * browser remembered was not overwritten with the default either.
+   */
+  it('restores the stored Arabic preference intact when re-enabled', async () => {
+    localStorage.setItem('i18n_language', 'ar')
+    arrangeInstance(false)
+
+    const disabled = render(
+      <LanguageProvider defaultLanguage="en">
+        <DirectionProbe />
+      </LanguageProvider>
+    )
+    await waitFor(() => expect(screen.getByTestId('dir')).toHaveTextContent('ltr'))
+    // Nothing wrote over what the browser remembered while the feature was off.
+    expect(localStorage.getItem('i18n_language')).toBe('ar')
+    disabled.unmount()
+
+    // The operator switches the flag back on. Nothing else changed: the same
+    // profile payload, the same catalogue.
+    arrangeInstance(true)
+
+    render(
+      <LanguageProvider defaultLanguage="en">
+        <DirectionProbe />
+      </LanguageProvider>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('dir')).toHaveTextContent('rtl'))
   })
 })
