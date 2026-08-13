@@ -100,6 +100,20 @@ export interface DataTableProps<TData> {
   emptyStateTitle?: string
   /** Placeholder for the per-column filter inputs. Defaults to "Filter…". */
   columnFilterPlaceholder?: string
+  /** Text of the column-visibility menu trigger. Defaults to "Columns". */
+  columnsMenuLabel?: string
+  /**
+   * Copy for the pagination controls this table renders for itself.
+   *
+   * Forwarded to <Pagination>. Without this the table's own footer — 'N
+   * entries', 'page 2 of 7', the prev/next buttons — would be the one part
+   * of a translated table still stuck in English, with no way for a caller
+   * to reach it.
+   */
+  paginationLabels?: Pick<
+    React.ComponentProps<typeof Pagination>,
+    "entriesLabel" | "pageLabel" | "navLabel" | "previousLabel" | "nextLabel"
+  >
   /** Show/hide-columns menu. Off by default. */
   enableColumnVisibility?: boolean
   /** Drag-resize column borders. Off by default. */
@@ -135,6 +149,8 @@ export function DataTable<TData>({
   rowActionsLabel = "Actions",
   emptyStateTitle = "No data available",
   columnFilterPlaceholder = "Filter…",
+  columnsMenuLabel = "Columns",
+  paginationLabels,
   enableColumnVisibility = false,
   enableColumnResizing = false,
   pagination,
@@ -302,7 +318,7 @@ export function DataTable<TData>({
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" size="xs">
                   <IconLayoutColumns className="size-3.5" />
-                  Columns
+                  {columnsMenuLabel}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -421,6 +437,7 @@ export function DataTable<TData>({
           perPage={table.getState().pagination.pageSize}
           total={serverMode ? pagination.total : table.getFilteredRowModel().rows.length}
           onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
+          {...paginationLabels}
         />
       )}
     </div>

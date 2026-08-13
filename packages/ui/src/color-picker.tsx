@@ -62,6 +62,8 @@ export interface ColorPickerProps {
   copiedLabel?: string
   /** Heading above the preset swatches. */
   presetsLabel?: string
+  /** Text of the "no colour" swatch. Defaults to "Clear selection". */
+  clearSelectionLabel?: string
   /**
    * Presets color swatches. Defaults to a modern curated color palette.
    */
@@ -126,6 +128,7 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
       copyLabel = "Copy",
       copiedLabel = "Copied",
       presetsLabel = "Presets",
+      clearSelectionLabel = "Clear selection",
       presets = DEFAULT_PRESETS,
       disabled,
       clearable = true,
@@ -328,7 +331,7 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
                 }}
                 className="text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
               >
-                Clear selection
+                {clearSelectionLabel}
               </button>
             </div>
           )}

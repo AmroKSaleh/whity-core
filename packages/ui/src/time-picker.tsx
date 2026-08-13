@@ -55,6 +55,14 @@ export interface TimePickerProps {
   tooltipTriggerLabel?: string
   /** Heading above the time columns. */
   timeHeadingLabel?: string
+  /** Meridiem column labels. */
+  amLabel?: string
+  pmLabel?: string
+  /** Hint under the columns explaining the scroll interaction. */
+  scrollHint?: string
+  /** Footer button text. */
+  nowLabel?: string
+  clearButtonLabel?: string
   /**
    * Time display format. Defaults to "12h".
    */
@@ -124,6 +132,11 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
       clearLabel = "Clear time",
       tooltipTriggerLabel = "More information",
       timeHeadingLabel = "Time",
+      amLabel = "AM",
+      pmLabel = "PM",
+      scrollHint = "Scroll wheel or click numbers to cycle time",
+      nowLabel = "Now",
+      clearButtonLabel = "Clear",
       format = "12h",
       minuteStep = 1,
       disabled,
@@ -439,7 +452,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                       period === "AM" ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    AM
+                    {amLabel}
                   </button>
                   <button
                     type="button"
@@ -449,7 +462,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                       period === "PM" ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    PM
+                    {pmLabel}
                   </button>
                 </div>
               )}
@@ -486,7 +499,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
           </div>
 
           <p className="mt-1 text-center text-[0.625rem] text-muted-foreground">
-            Scroll wheel or click numbers to cycle time
+            {scrollHint}
           </p>
 
           {/* Footer Now / Clear */}
@@ -496,7 +509,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
               onClick={handleSetNow}
               className="text-[0.6875rem] font-semibold text-primary hover:underline"
             >
-              Now
+              {nowLabel}
             </button>
             {selectedTime && (
               <button
@@ -508,7 +521,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                 }}
                 className="text-[0.6875rem] text-muted-foreground hover:text-foreground"
               >
-                Clear
+                {clearButtonLabel}
               </button>
             )}
           </div>
