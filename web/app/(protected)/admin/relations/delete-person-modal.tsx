@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
 import { IconAlertTriangle } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { Person } from './types';
 
 interface DeletePersonModalProps {
@@ -29,6 +30,7 @@ interface DeletePersonModalProps {
 export function DeletePersonModal({ isOpen, onClose, onSuccess, person }: DeletePersonModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleDelete = async () => {
@@ -38,13 +40,20 @@ export function DeletePersonModal({ isOpen, onClose, onSuccess, person }: Delete
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
-        throw new Error(error.error || 'Failed to delete person');
+        throw new Error(
+          error.error || t('relations.deletePerson.error', 'Failed to delete person')
+        );
       }
 
-      addToast('Person deleted', 'success');
+      addToast(t('relations.deletePerson.success', 'Person deleted'), 'success');
       onSuccess();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to delete person', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('relations.deletePerson.error', 'Failed to delete person'),
+        'error'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -56,31 +65,49 @@ export function DeletePersonModal({ isOpen, onClose, onSuccess, person }: Delete
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconAlertTriangle className="text-destructive" size={24} />
-            Delete relative
+            {t('relations.deletePerson.title', 'Delete relative')}
           </DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete &ldquo;{person.displayName}&rdquo;?
+            {t('relations.deletePerson.subtitle', 'Are you sure you want to delete “{name}”?', {
+              name: person.displayName,
+            })}
           </DialogDescription>
         </DialogHeader>
 
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          <p className="font-medium">Warning</p>
+          <p className="font-medium">{t('relations.deletePerson.warning', 'Warning')}</p>
           <ul className="mt-2 list-inside list-disc space-y-1">
-            <li>This action cannot be undone.</li>
             <li>
-              {person.relationCount > 0
-                ? `Its ${person.relationCount} relation${person.relationCount === 1 ? '' : 's'} will be removed.`
-                : 'This person has no relations.'}
+              {t('relations.deletePerson.consequence.irreversible', 'This action cannot be undone.')}
+            </li>
+            <li>
+              {/* Singular and plural are separate keys rather than a suffix
+                  spliced onto a count: a language whose plural rules differ from
+                  English cannot be served by appending an "s". */}
+              {person.relationCount <= 0
+                ? t('relations.deletePerson.consequence.noRelations', 'This person has no relations.')
+                : person.relationCount === 1
+                  ? t(
+                      'relations.deletePerson.consequence.oneRelation',
+                      'Its 1 relation will be removed.'
+                    )
+                  : t(
+                      'relations.deletePerson.consequence.manyRelations',
+                      'Its {count} relations will be removed.',
+                      { count: person.relationCount }
+                    )}
             </li>
           </ul>
         </div>
 
         <div className="flex justify-end gap-3">
           <Button variant="outline" onClick={onClose} disabled={isLoading}>
-            Cancel
+            {t('relations.deletePerson.cancel', 'Cancel')}
           </Button>
           <Button variant="destructive" onClick={handleDelete} disabled={isLoading}>
-            {isLoading ? 'Deleting…' : 'Delete'}
+            {isLoading
+              ? t('relations.deletePerson.submitting', 'Deleting…')
+              : t('relations.deletePerson.submit', 'Delete')}
           </Button>
         </div>
       </DialogContent>

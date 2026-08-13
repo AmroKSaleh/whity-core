@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@amroksaleh/ui/select';
 import { Textarea } from '@amroksaleh/ui/textarea';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { OU } from './types';
 
 interface CreateOuModalProps {
@@ -40,6 +41,7 @@ export function CreateOuModal({
 }: CreateOuModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -52,7 +54,7 @@ export function CreateOuModal({
 
   const handleCreate = async () => {
     if (!name.trim()) {
-      addToast('Name is required', 'error');
+      addToast(t('ous.create.validation.nameRequired', 'Name is required'), 'error');
       return;
     }
 
@@ -74,17 +76,21 @@ export function CreateOuModal({
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to create organizational unit');
+        throw new Error(
+          error.error || t('ous.create.error', 'Failed to create organizational unit')
+        );
       }
 
-      addToast('Organizational unit created successfully', 'success');
+      addToast(t('ous.create.success', 'Organizational unit created successfully'), 'success');
       setName('');
       setDescription('');
       setParentId('');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to create organizational unit';
+        error instanceof Error
+          ? error.message
+          : t('ous.create.error', 'Failed to create organizational unit');
       addToast(message, 'error');
     } finally {
       setIsLoading(false);
@@ -104,42 +110,49 @@ export function CreateOuModal({
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create Organizational Unit</DialogTitle>
+          <DialogTitle>{t('ous.create.title', 'Create Organizational Unit')}</DialogTitle>
           <DialogDescription>
-            Add a new organizational unit to your organization
+            {t('ous.create.subtitle', 'Add a new organizational unit to your organization')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Name *</label>
+            <label className="text-sm font-medium">{t('ous.create.name.label', 'Name *')}</label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., Engineering"
+              placeholder={t('ous.create.name.placeholder', 'e.g., Engineering')}
               disabled={isLoading}
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium">Description</label>
+            <label className="text-sm font-medium">
+              {t('ous.create.description.label', 'Description')}
+            </label>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional description for this OU"
+              placeholder={t(
+                'ous.create.description.placeholder',
+                'Optional description for this OU'
+              )}
               disabled={isLoading}
               rows={3}
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium">Parent OU</label>
+            <label className="text-sm font-medium">{t('ous.create.parent.label', 'Parent OU')}</label>
             <Select value={parentId} onValueChange={setParentId} disabled={isLoading}>
               <SelectTrigger>
-                <SelectValue placeholder="Select a parent OU (optional)" />
+                <SelectValue
+                  placeholder={t('ous.create.parent.placeholder', 'Select a parent OU (optional)')}
+                />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="null">None (Root OU)</SelectItem>
+                <SelectItem value="null">{t('ous.create.parent.none', 'None (Root OU)')}</SelectItem>
                 {ous.map((ou) => (
                   <SelectItem key={ou.id} value={ou.id.toString()}>
                     {ou.name}
@@ -155,13 +168,15 @@ export function CreateOuModal({
               onClick={onClose}
               disabled={isLoading}
             >
-              Cancel
+              {t('ous.create.cancel', 'Cancel')}
             </Button>
             <Button
               onClick={handleCreate}
               disabled={isLoading}
             >
-              {isLoading ? 'Creating...' : 'Create'}
+              {isLoading
+                ? t('ous.create.submitting', 'Creating...')
+                : t('ous.create.submit', 'Create')}
             </Button>
           </div>
         </div>

@@ -17,6 +17,7 @@ import {
   IconFolderOpen,
   IconPointFilled,
 } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { OuNode } from './ou-tree-util';
 import type { OuViewProps } from './ou-view';
 
@@ -33,6 +34,7 @@ import type { OuViewProps } from './ou-view';
  * the first child), ArrowLeft collapses (or moves to the parent).
  */
 export function OuTree({ tree, selectedId, onSelect, onAction, canCreate = false, canEdit = false, canDelete = false }: OuViewProps) {
+  const t = useTranslation('admin');
   // Expanded by default so the seeded hierarchy is visible on first paint.
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
 
@@ -55,7 +57,7 @@ export function OuTree({ tree, selectedId, onSelect, onAction, canCreate = false
   return (
     <div
       role="tree"
-      aria-label="Organizational unit hierarchy"
+      aria-label={t('ous.tree.label', 'Organizational unit hierarchy')}
       className="rounded-lg border border-border bg-card p-2"
     >
       {tree.map((node) => (
@@ -99,6 +101,7 @@ function OuTreeItem({
   canEdit,
   canDelete,
 }: OuTreeItemProps) {
+  const t = useTranslation('admin');
   const hasChildren = node.children.length > 0;
   const isExpanded = hasChildren && !collapsed.has(node.id);
   const isSelected = selectedId === node.id;
@@ -142,7 +145,11 @@ function OuTreeItem({
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+            aria-label={
+              isExpanded
+                ? t('ous.tree.collapse', 'Collapse {name}', { name: node.name })
+                : t('ous.tree.expand', 'Expand {name}', { name: node.name })
+            }
             onClick={(e) => {
               e.stopPropagation();
               onToggle(node.id);
@@ -182,7 +189,7 @@ function OuTreeItem({
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`Actions for ${node.name}`}
+              aria-label={t('ous.node.actions', 'Actions for {name}', { name: node.name })}
               className="opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
               onClick={(e) => e.stopPropagation()}
             >
@@ -192,14 +199,18 @@ function OuTreeItem({
           <DropdownMenuContent align="end">
             {canCreate && (
               <DropdownMenuItem onClick={() => onAction('create-child', node)}>
-                Create child OU
+                {t('ous.node.createChild', 'Create child OU')}
               </DropdownMenuItem>
             )}
             {canEdit && (
-              <DropdownMenuItem onClick={() => onAction('edit', node)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onAction('edit', node)}>
+                {t('ous.node.edit', 'Edit')}
+              </DropdownMenuItem>
             )}
             {canEdit && (
-              <DropdownMenuItem onClick={() => onAction('move', node)}>Move to&hellip;</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onAction('move', node)}>
+                {t('ous.node.move', 'Move to…')}
+              </DropdownMenuItem>
             )}
             {(canCreate || canEdit) && canDelete && <DropdownMenuSeparator />}
             {canDelete && (
@@ -207,7 +218,7 @@ function OuTreeItem({
                 variant="destructive"
                 onClick={() => onAction('delete', node)}
               >
-                Delete
+                {t('ous.node.delete', 'Delete')}
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

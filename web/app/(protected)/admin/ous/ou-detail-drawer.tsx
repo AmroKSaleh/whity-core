@@ -28,6 +28,7 @@ import {
   IconUsers,
   IconX,
 } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { OU } from './types';
 import type { OuAction } from './ou-view';
 
@@ -69,6 +70,7 @@ interface OuDetailDrawerProps {
 export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDrawerProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
 
   const [roles, setRoles] = useState<OuRole[]>([]);
   const [members, setMembers] = useState<OuMember[]>([]);
@@ -102,11 +104,11 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
         setAllRoles(((await allRolesRes.json()).data ?? []) as OuRole[]);
       }
     } catch {
-      addToast('Failed to load OU details', 'error');
+      addToast(t('ous.detail.loadError', 'Failed to load OU details'), 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [apiClient, ouId, addToast]);
+  }, [apiClient, ouId, addToast, t]);
 
   useEffect(() => {
     if (ouId !== null) {
@@ -131,14 +133,19 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Failed to assign role');
+        throw new Error(body.error || t('ous.detail.roles.assignError', 'Failed to assign role'));
       }
-      addToast('Role assigned', 'success');
+      addToast(t('ous.detail.roles.assignSuccess', 'Role assigned'), 'success');
       setPendingRoleId('');
       await loadDetail();
       onChanged();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to assign role', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('ous.detail.roles.assignError', 'Failed to assign role'),
+        'error'
+      );
     } finally {
       setIsMutating(false);
     }
@@ -153,13 +160,18 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
       const res = await apiClient(`/api/v1/ous/${ouId}/roles/${roleId}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Failed to remove role');
+        throw new Error(body.error || t('ous.detail.roles.removeError', 'Failed to remove role'));
       }
-      addToast('Role removed', 'success');
+      addToast(t('ous.detail.roles.removeSuccess', 'Role removed'), 'success');
       await loadDetail();
       onChanged();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to remove role', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('ous.detail.roles.removeError', 'Failed to remove role'),
+        'error'
+      );
     } finally {
       setIsMutating(false);
     }
@@ -173,31 +185,31 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
             <SheetHeader>
               <SheetTitle>{ou.name}</SheetTitle>
               <SheetDescription>
-                {ou.description ? ou.description : 'No description.'}
+                {ou.description ? ou.description : t('ous.detail.noDescription', 'No description.')}
               </SheetDescription>
               <p className="mt-1 font-mono text-[0.625rem] text-muted-foreground">
-                slug: {ou.slug}
+                {t('ous.detail.slug', 'slug: {slug}', { slug: ou.slug })}
               </p>
             </SheetHeader>
 
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="outline" onClick={() => onAction('create-child', ou)}>
                 <IconPlus />
-                Add child
+                {t('ous.detail.action.addChild', 'Add child')}
               </Button>
               <Button size="sm" variant="outline" onClick={() => onAction('edit', ou)}>
                 <IconEdit />
-                Edit
+                {t('ous.detail.action.edit', 'Edit')}
               </Button>
               <Button size="sm" variant="destructive" onClick={() => onAction('delete', ou)}>
                 <IconTrash />
-                Delete
+                {t('ous.detail.action.delete', 'Delete')}
               </Button>
             </div>
 
             <section aria-labelledby="ou-roles-heading" className="space-y-2">
               <h3 id="ou-roles-heading" className="font-heading text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Roles
+                {t('ous.detail.roles.heading', 'Roles')}
               </h3>
 
               <div className="flex gap-2">
@@ -206,10 +218,15 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
                   onValueChange={setPendingRoleId}
                   disabled={isMutating || assignableRoles.length === 0}
                 >
-                  <SelectTrigger aria-label="Select a role to assign" className="flex-1">
+                  <SelectTrigger
+                    aria-label={t('ous.detail.roles.select', 'Select a role to assign')}
+                    className="flex-1"
+                  >
                     <SelectValue
                       placeholder={
-                        assignableRoles.length === 0 ? 'All roles assigned' : 'Select a role to assign'
+                        assignableRoles.length === 0
+                          ? t('ous.detail.roles.allAssigned', 'All roles assigned')
+                          : t('ous.detail.roles.select', 'Select a role to assign')
                       }
                     />
                   </SelectTrigger>
@@ -226,14 +243,16 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
                   onClick={handleAssignRole}
                   disabled={isMutating || !pendingRoleId}
                 >
-                  Assign
+                  {t('ous.detail.roles.assign', 'Assign')}
                 </Button>
               </div>
 
               {isLoading ? (
                 <Skeleton className="h-8 w-full" />
               ) : roles.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No roles assigned to this OU.</p>
+                <p className="text-xs text-muted-foreground">
+                  {t('ous.detail.roles.empty', 'No roles assigned to this OU.')}
+                </p>
               ) : (
                 <ul className="space-y-1">
                   {roles.map((role) => (
@@ -252,7 +271,9 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        aria-label={`Remove role ${role.name}`}
+                        aria-label={t('ous.detail.roles.remove', 'Remove role {name}', {
+                          name: role.name,
+                        })}
                         disabled={isMutating}
                         onClick={() => handleRemoveRole(role.id)}
                       >
@@ -267,12 +288,14 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
             <section aria-labelledby="ou-members-heading" className="space-y-2">
               <h3 id="ou-members-heading" className="flex items-center gap-1.5 font-heading text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <IconUsers className="size-3.5" />
-                Members
+                {t('ous.detail.members.heading', 'Members')}
               </h3>
               {isLoading ? (
                 <Skeleton className="h-8 w-full" />
               ) : members.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No users are assigned to this OU.</p>
+                <p className="text-xs text-muted-foreground">
+                  {t('ous.detail.members.empty', 'No users are assigned to this OU.')}
+                </p>
               ) : (
                 <ul className="space-y-1">
                   {members.map((member) => (
@@ -288,7 +311,10 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
               )}
               <Alert variant="info">
                 <AlertDescription>
-                  Members are read-only here; assign users to an OU from user management.
+                  {t(
+                    'ous.detail.members.note',
+                    'Members are read-only here; assign users to an OU from user management.'
+                  )}
                 </AlertDescription>
               </Alert>
             </section>

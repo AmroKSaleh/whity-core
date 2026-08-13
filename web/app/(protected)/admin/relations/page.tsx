@@ -16,6 +16,7 @@ import {
   IconShieldLock,
   IconUsersGroup,
 } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreatePersonModal } from './create-person-modal';
 import { EditPersonModal } from './edit-person-modal';
 import { DeletePersonModal } from './delete-person-modal';
@@ -52,6 +53,7 @@ interface PersonRow {
 export default function RelationsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   // Caller's relations:manage capability (WC-177, WC-204). Fail-closed via
   // useCapabilities: write controls stay hidden until proven otherwise, so a
   // delegate holding only relations:read never sees affordances that would 403.
@@ -110,7 +112,7 @@ export default function RelationsPage() {
       setIsForbidden(false);
 
       if (!personsRes.ok) {
-        throw new Error('Failed to fetch persons');
+        throw new Error(t('relations.error.loadPersons', 'Failed to fetch persons'));
       }
       setPersons(((await personsRes.json()).data ?? []) as Person[]);
       if (edgesRes.ok) {
@@ -120,11 +122,16 @@ export default function RelationsPage() {
         setTypes(((await typesRes.json()).data ?? []) as RelationshipType[]);
       }
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to fetch relations', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : t('relations.error.load', 'Failed to fetch relations'),
+        'error'
+      );
     } finally {
       setIsLoading(false);
     }
-  }, [apiClient, addToast]);
+  }, [apiClient, addToast, t]);
 
   useEffect(() => {
     void (async () => {
@@ -142,17 +149,24 @@ export default function RelationsPage() {
       persons.map((p) => ({
         id: p.id,
         name: p.displayName,
-        account: p.hasAccount ? 'Account' : '—',
+        // The em dash is a typographic "no value" marker, not a sentence — it is
+        // left as a literal here exactly as elsewhere in the admin screens.
+        account: p.hasAccount ? t('relations.table.account', 'Account') : '—',
         relations: p.relationCount,
         source: p,
       })),
-    [persons]
+    [persons, t]
   );
 
   const columns: DataTableColumn<PersonRow>[] = [
-    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'account', header: 'Has account', enableSorting: true },
-    { accessorKey: 'relations', header: 'Relations', enableSorting: true },
+    {
+      accessorKey: 'name',
+      header: t('relations.table.name', 'Name'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    { accessorKey: 'account', header: t('relations.table.hasAccount', 'Has account'), enableSorting: true },
+    { accessorKey: 'relations', header: t('relations.table.relations', 'Relations'), enableSorting: true },
   ];
 
   const handleAction = (action: PersonAction, person: Person) => {
@@ -172,12 +186,16 @@ export default function RelationsPage() {
 
   const rowActions = (row: PersonRow) => (
     <Button variant="ghost" size="sm" onClick={() => setSelectedId(row.source.id)}>
-      View
+      {t('relations.action.view', 'View')}
     </Button>
   );
 
   const ViewToggle = (
-    <div role="group" aria-label="View mode" className="inline-flex rounded-md border border-border p-0.5">
+    <div
+      role="group"
+      aria-label={t('relations.view.label', 'View mode')}
+      className="inline-flex rounded-md border border-border p-0.5"
+    >
       <Button
         variant={view === 'list' ? 'secondary' : 'ghost'}
         size="sm"
@@ -186,7 +204,7 @@ export default function RelationsPage() {
         className="gap-1.5"
       >
         <IconList />
-        List
+        {t('relations.view.list', 'List')}
       </Button>
       <Button
         variant={view === 'graph' ? 'secondary' : 'ghost'}
@@ -196,7 +214,7 @@ export default function RelationsPage() {
         className="gap-1.5"
       >
         <IconBinaryTree2 />
-        Graph
+        {t('relations.view.graph', 'Graph')}
       </Button>
     </div>
   );
@@ -207,8 +225,11 @@ export default function RelationsPage() {
   const accessDeniedContent = (
     <ErrorState
       icon={<IconShieldLock />}
-      title="Access denied"
-      description="You need the relations:read permission to view family relations."
+      title={t('relations.forbidden.title', 'Access denied')}
+      description={t(
+        'relations.forbidden.description',
+        'You need the relations:read permission to view family relations.'
+      )}
     />
   );
 
@@ -217,14 +238,17 @@ export default function RelationsPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Family Relations"
-        description="Record and manage familial relationships, including relatives without a platform account."
+        title={t('relations.title', 'Family Relations')}
+        description={t(
+          'relations.description',
+          'Record and manage familial relationships, including relatives without a platform account.'
+        )}
         action={
           // Manage-gated (WC-177): hidden for callers without relations:manage.
           canManage ? (
             <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
               <IconPlus />
-              Add relative
+              {t('relations.header.create', 'Add relative')}
             </Button>
           ) : undefined
         }
@@ -239,22 +263,27 @@ export default function RelationsPage() {
       ) : isEmpty ? (
         <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
           <IconUsersGroup size={32} className="mx-auto mb-3 text-muted-foreground" />
-          <h2 className="font-heading text-sm font-medium">No people yet</h2>
+          <h2 className="font-heading text-sm font-medium">
+            {t('relations.empty.title', 'No people yet')}
+          </h2>
           {canManage ? (
             <>
               <p className="mt-1 text-xs text-muted-foreground">
-                Add a relative, or relate existing platform accounts to build the family graph.
+                {t(
+                  'relations.empty.description',
+                  'Add a relative, or relate existing platform accounts to build the family graph.'
+                )}
               </p>
               <Button onClick={() => setIsCreateOpen(true)} variant="outline" className="mt-4 gap-2">
                 <IconPlus />
-                Add the first relative
+                {t('relations.empty.create', 'Add the first relative')}
               </Button>
             </>
           ) : (
             // Read-only callers (relations:read without relations:manage, WC-177)
             // get the empty state without the create CTA.
             <p className="mt-1 text-xs text-muted-foreground">
-              No people have been added to the family graph yet.
+              {t('relations.empty.readOnly', 'No people have been added to the family graph yet.')}
             </p>
           )}
         </div>
@@ -266,7 +295,7 @@ export default function RelationsPage() {
           rowActions={rowActions}
           isLoading={isLoading}
           enableGlobalFilter
-          globalFilterPlaceholder="Search by name…"
+          globalFilterPlaceholder={t('relations.searchPlaceholder', 'Search by name…')}
           pagination={{ pageSize: 10 }}
           overrideContent={isForbidden ? accessDeniedContent : undefined}
         />

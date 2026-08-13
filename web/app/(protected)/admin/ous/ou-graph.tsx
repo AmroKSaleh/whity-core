@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconDotsVertical } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { flattenOuTree, type OuNode } from './ou-tree-util';
 import type { OuAction, OuViewProps } from './ou-view';
 
@@ -87,6 +88,7 @@ function layout(tree: OuNode[]): { nodes: Array<{ node: OuNode; x: number; y: nu
 /** Custom react-flow node: a selectable card with a per-node action menu. */
 function OuFlowNode({ data }: NodeProps<Node<OuNodeData>>) {
   const { ou, selected, onSelect, onAction, canCreate, canEdit, canDelete } = data;
+  const t = useTranslation('admin');
   const hasAnyAction = canCreate || canEdit || canDelete;
   return (
     <div
@@ -110,7 +112,7 @@ function OuFlowNode({ data }: NodeProps<Node<OuNodeData>>) {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`Actions for ${ou.name}`}
+              aria-label={t('ous.node.actions', 'Actions for {name}', { name: ou.name })}
               className="nodrag"
             >
               <IconDotsVertical />
@@ -119,19 +121,23 @@ function OuFlowNode({ data }: NodeProps<Node<OuNodeData>>) {
           <DropdownMenuContent align="end">
             {canCreate && (
               <DropdownMenuItem onClick={() => onAction('create-child', ou)}>
-                Create child OU
+                {t('ous.node.createChild', 'Create child OU')}
               </DropdownMenuItem>
             )}
             {canEdit && (
-              <DropdownMenuItem onClick={() => onAction('edit', ou)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onAction('edit', ou)}>
+                {t('ous.node.edit', 'Edit')}
+              </DropdownMenuItem>
             )}
             {canEdit && (
-              <DropdownMenuItem onClick={() => onAction('move', ou)}>Move to&hellip;</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onAction('move', ou)}>
+                {t('ous.node.move', 'Move to…')}
+              </DropdownMenuItem>
             )}
             {(canCreate || canEdit) && canDelete && <DropdownMenuSeparator />}
             {canDelete && (
               <DropdownMenuItem variant="destructive" onClick={() => onAction('delete', ou)}>
-                Delete
+                {t('ous.node.delete', 'Delete')}
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>
