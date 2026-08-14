@@ -1034,3 +1034,77 @@ jobs:
         run: |
           npm run build-storybook -w @amroksaleh/ui
           npm run build-storybook -w web
+
+  # ---------------------------------------------------------------------------
+  # The single check branch protection requires.
+  #
+  # Every substantive job above is gated on a path filter (`needs.changes`), so
+  # a frontend-only PR never runs `static-analysis` and a backend-only PR never
+  # runs `web`. Requiring those jobs directly in branch protection would be a
+  # trap: GitHub waits for a required check that will never report, and the PR
+  # can never merge. Requiring only the always-on jobs instead would mean the
+  # protection silently stops covering whatever is added next.
+  #
+  # So this job always runs, depends on all of them, and reports one verdict.
+  # A SKIPPED job is a pass — that is the path filter working as designed. A
+  # failed or cancelled one fails the gate.
+  #
+  # Adding a job above? Add it to `needs` here, or it is not covered.
+  gate:
+    name: CI gate
+    if: always()
+    needs:
+      - changes
+      - test
+      - coverage
+      - static-analysis
+      - i18n-catalogue
+      - postgres-migrations
+      - postgres-integration
+      - postgres-dialect
+      - render-service
+      - web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Without this, adding a job above and forgetting to list it in `needs`
+      # silently drops it from the protected gate: it still runs, still goes
+      # red, and merging is no longer blocked by it. That is the failure this
+      # whole job exists to prevent, so it is checked rather than trusted to a
+      # comment.
+      - name: The gate covers every job in this workflow
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sys, yaml
+          d = yaml.safe_load(open('.github/workflows/automated-tests.yml'))
+          jobs = set(d['jobs']) - {'gate'}
+          needs = set(d['jobs']['gate']['needs'])
+          missing = sorted(jobs - needs)
+          if missing:
+              for j in missing:
+                  print(f"::error::job '{j}' is not in the CI gate's `needs`, so branch protection does not cover it")
+              sys.exit(1)
+          print(f"gate covers all {len(jobs)} job(s)")
+          PY
+
+      - name: Every required job succeeded or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          # `skipped` is deliberately allowed; `failure` and `cancelled` are not.
+          # A cancelled job is treated as a failure on purpose: it means the run
+          # did not finish, so nothing was actually verified.
+          bad=$(echo "$RESULTS" | jq -r '
+            to_entries[]
+            | select(.value.result == "failure" or .value.result == "cancelled")
+            | .key')
+          if [ -n "$bad" ]; then
+            echo "::error::CI gate failed — these jobs did not pass:"
+            printf '::error::  %s\n' $bad
+            exit 1
+          fi
+          echo "CI gate passed."
