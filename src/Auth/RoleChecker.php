@@ -552,8 +552,16 @@ class RoleChecker
     private function getMembershipRow(int $profileId, int $tenantId): ?array
     {
         $statement = $this->db->query(
+            // ORDER BY, not bare LIMIT 1: once a profile may hold more than
+            // one membership in a tenant (migration 094), an unordered pick
+            // returns whichever row the plan reaches first, so "what is my
+            // role here?" and "which OU am I in?" would answer differently
+            // between runs. The PRIMARY row is the answer; `id` breaks ties
+            // so the result is stable even if the partial unique index were
+            // ever missing.
             'SELECT role_id, ou_id, status FROM memberships
              WHERE profile_id = :profileId AND tenant_id = :tenantId
+             ORDER BY is_primary DESC, id ASC
              LIMIT 1',
             [':profileId' => $profileId, ':tenantId' => $tenantId]
         );

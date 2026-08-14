@@ -205,7 +205,7 @@ class Seeder
                      (profile_id, tenant_id, role_id, ou_id, status, created_at)
                  VALUES
                      (:profile_id, :tenant_id, :role_id, NULL, 'active', NOW())
-                 ON CONFLICT (profile_id, tenant_id) DO NOTHING",
+                 ON CONFLICT (profile_id, tenant_id) WHERE is_primary DO NOTHING",
                 [
                     ':profile_id' => $profileId,
                     ':tenant_id'  => $account['tenant_id'],

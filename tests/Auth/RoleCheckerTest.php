@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Auth;
 
 use PDO;
+use PDOException;
+use PDOStatement;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Tests\Support\SchemaFromMigrations;
@@ -249,6 +251,72 @@ class RoleCheckerTest extends TestCase
     {
         $this->pdo->prepare('UPDATE roles SET parent_id = ? WHERE id = ?')
             ->execute([$this->roleId($parentRoleName), $this->roleId($roleName)]);
+    }
+
+    // ---------------------------------------------------------------------
+    // Membership primacy (#712 §1, migration 094)
+    // ---------------------------------------------------------------------
+
+    /**
+     * The DATABASE still permits exactly one membership per (profile, tenant)
+     * — the rule moved onto `is_primary`, it did not relax. Phase 1 changes
+     * where the invariant lives, not what it allows.
+     */
+    public function testASecondPrimaryMembershipIsStillRefused(): void
+    {
+        $profileId = $this->seedProfile('primary@example.com', 'user');
+
+        $this->expectException(PDOException::class);
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
+             VALUES (?, ?, ?, true, 'active', datetime('now'))"
+        )->execute([$profileId, self::TENANT, $this->roleId('editor')]);
+    }
+
+    /**
+     * A NON-primary row is what §1 phase 2 will write. It must be storable
+     * now, or the constraint has not actually been relocated.
+     */
+    public function testASecondaryMembershipIsAccepted(): void
+    {
+        $profileId = $this->seedProfile('secondary@example.com', 'user');
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
+             VALUES (?, ?, ?, false, 'active', datetime('now'))"
+        )->execute([$profileId, self::TENANT, $this->roleId('editor')]);
+
+        $stmt = $this->pdo->query(
+            'SELECT COUNT(*) FROM memberships WHERE profile_id = ' . $profileId
+        );
+        self::assertInstanceOf(PDOStatement::class, $stmt);
+        $count = (int) $stmt->fetchColumn();
+
+        self::assertSame(2, $count, 'a secondary membership must be storable');
+    }
+
+    /**
+     * The point of the whole phase: with two rows present, the single-row read
+     * resolves the PRIMARY one rather than whichever the plan reaches first.
+     *
+     * Asserted through hasRoleForProfile() rather than by reading the table,
+     * because that is the path RbacMiddleware and every handler actually take
+     * — an ORDER BY that fixed the query but not the caller would still leave
+     * "what is my role here?" undefined.
+     */
+    public function testTheSingleRowReadResolvesThePrimaryMembership(): void
+    {
+        $profileId = $this->seedProfile('primacy@example.com', 'user');
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
+             VALUES (?, ?, ?, false, 'active', datetime('now'))"
+        )->execute([$profileId, self::TENANT, $this->roleId('editor')]);
+
+        self::assertTrue(
+            $this->roleChecker->hasRoleForProfile($profileId, 'user', self::TENANT),
+            'the primary membership decides the tenant-wide role'
+        );
     }
 
     private function seedProfile(string $email, string $roleName): int
