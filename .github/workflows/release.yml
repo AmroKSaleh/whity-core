@@ -8,12 +8,15 @@
 #      pass, migrations + seed must run on real PostgreSQL, and the frontend
 #      types/tests/generated-artifact drift checks must pass on the tagged
 #      commit. A release is never gated weaker than a PR.
-#   2. image — build the production container image (the Dockerfile `release`
-#      stage: code + no-dev vendor baked in) and push it to GHCR as
-#      ghcr.io/<repo>:vX.Y.Z and :latest.
+#   2. image — build BOTH production container images and push them to GHCR
+#      under the same tags (vX.Y.Z and latest): the backend
+#      (`ghcr.io/<repo>`, root Dockerfile `release` stage — code + no-dev
+#      vendor baked in) and the frontend (`ghcr.io/<repo>/web`, web/Dockerfile
+#      `runtime` stage — the built Next app). A deployment is not the product
+#      without both, so they ship together or not at all.
 #   3. release — create the GitHub Release with auto-generated notes (the
 #      source archives GitHub attaches are the deploy artifact for
-#      checkout-based hosts; the GHCR image serves container-based ones).
+#      checkout-based hosts; the GHCR images serve container-based ones).
 #
 # Consumers check for updates with `php public/index.php update:check` and
 # apply them via docs/wiki/Core-Update.md.
@@ -211,7 +214,7 @@ jobs:
         run: npx jest
 
   image:
-    name: Build + push container image
+    name: Build + push ${{ matrix.image }} image
     runs-on: ubuntu-latest
     needs: [verify, postgres-integration, web]
 
@@ -219,6 +222,34 @@ jobs:
       contents: read
       packages: write
       security-events: write   # WC-d: upload the Trivy image-scan SARIF
+
+    # BOTH tiers of the product are published here, by ONE matrixed job, so they
+    # can never drift apart: identical gates, identical tags, identical scan.
+    # A release that shipped only the PHP image left deployments assembled from
+    # published artifacts with an API and no user interface (WHIT-588) — the
+    # frontend was validated by the `web` job above and then thrown away.
+    #
+    #   app — PHP/FrankenPHP backend, root Dockerfile, `release` stage.
+    #   web — Next.js frontend, web/Dockerfile, `runtime` stage.
+    #
+    # `app` keeps the unsuffixed repository path it has always published under,
+    # because existing deployments already pin `ghcr.io/<repo>:vX.Y.Z`; the
+    # frontend takes the `/web` sub-path beside it.
+    strategy:
+      # Do not cancel the sibling when one leg fails: a broken release wants
+      # both build logs in the same run. Either leg failing still fails every
+      # job that `needs: [image]`, so this weakens no gate.
+      fail-fast: false
+      matrix:
+        include:
+          - image: app
+            dockerfile: Dockerfile
+            target: release
+            suffix: ''
+          - image: web
+            dockerfile: web/Dockerfile
+            target: runtime
+            suffix: /web
 
     steps:
       - name: Checkout tag
@@ -234,13 +265,16 @@ jobs:
       # GHCR requires a lowercase repository path; github.repository may not be.
       - name: Resolve image name
         id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        env:
+          SUFFIX: ${{ matrix.suffix }}
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}${SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
-          target: release
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.ref_name }}
@@ -261,27 +295,35 @@ jobs:
           ignore-unfixed: true
           exit-code: '0'
 
+      # One category per image: code scanning REPLACES the previous results for a
+      # category, so a shared one would leave whichever leg finished last as the
+      # only findings in the Security tab.
       - name: Upload Trivy SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v4.37.3
         with:
           sarif_file: trivy-results.sarif
-          category: trivy
+          category: trivy-${{ matrix.image }}
 
   smoke:
-    # WC-2990117b: Boot the GHCR image that was just pushed and confirm it serves
-    # a real HTTP 200 from GET /api/health before the GitHub Release is created.
-    # This closes the gap where a broken image (bad migration, missing extension,
-    # wrong Caddyfile, boot crash) would become a published Release and be picked
-    # up by every sovereign deployment running `update:check`.
+    # WC-2990117b: Boot the GHCR images that were just pushed and confirm they
+    # serve a real HTTP 200 before the GitHub Release is created. This closes the
+    # gap where a broken image (bad migration, missing extension, wrong
+    # Caddyfile, boot crash) would become a published Release and be picked up by
+    # every sovereign deployment running `update:check`.
+    #
+    # WHIT-588: the frontend is gated the same way, and for the same reason. A
+    # release whose UI does not boot is as broken as one whose API does not, and
+    # a green /api/health is exactly what hid the missing frontend last time —
+    # so the UI is proven by fetching a real page (/login) off the published web
+    # image, wired to the app container the way a deployment wires it.
     #
     # Networking approach: GitHub Actions `services:` containers live on a
     # separate Docker-managed bridge that job-level `docker run` containers
     # CANNOT reach by container name — only the runner host can. To mirror a
-    # real docker-compose deploy (app → postgres by DNS name) we create a
-    # user-defined bridge network and run BOTH the Postgres container AND the
-    # release image on it, so the app reaches Postgres as `postgres:5432`.
-    name: Smoke-test the release image
+    # real docker-compose deploy (app → postgres, web → app, all by DNS name) we
+    # create a user-defined bridge network and run every container on it.
+    name: Smoke-test the release images
     runs-on: ubuntu-latest
     needs: [image]
 
@@ -297,11 +339,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Resolve the image name the same way the `image` job does: lowercase the
+      # Resolve the image names the same way the `image` job does: lowercase the
       # repository path because GHCR requires it and github.repository may not be.
-      - name: Resolve image name
+      - name: Resolve image names
         id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "name=ghcr.io/${GITHUB_REPOSITORY,,}"
+            echo "web=ghcr.io/${GITHUB_REPOSITORY,,}/web"
+          } >> "$GITHUB_OUTPUT"
 
       # Isolated bridge so the app reaches Postgres by the container name
       # `postgres` — same topology as docker-compose.yml (DB_HOST: postgres).
@@ -332,8 +378,10 @@ jobs:
           done
           docker exec postgres pg_isready -U whity -d whity_core
 
-      - name: Pull release image
-        run: docker pull "${{ steps.image.outputs.name }}:${{ github.ref_name }}"
+      - name: Pull release images
+        run: |
+          docker pull "${{ steps.image.outputs.name }}:${{ github.ref_name }}"
+          docker pull "${{ steps.image.outputs.web }}:${{ github.ref_name }}"
 
       # Run migrations and seed inside the release image on the same network so
       # the app can reach Postgres by the container name `postgres`. APP_ENV is
@@ -430,12 +478,44 @@ jobs:
           docker ps -a
           exit 1
 
+      # Start the frontend on the same bridge, pointed at the app container by
+      # its DNS name — the topology docker-compose.staging-remote.yml deploys.
+      # WHITY_BACKEND_URL is read from the process environment per request
+      # (web/lib/backend-url.ts), so this is pure runtime config: the same
+      # published image takes a different origin in every deployment.
+      - name: Start web container
+        run: |
+          docker run -d \
+            --name whity-web \
+            --network whity-smoke \
+            -p 3000:3000 \
+            -e WHITY_BACKEND_URL=http://whity-app \
+            "${{ steps.image.outputs.web }}:${{ github.ref_name }}"
+
+      # Poll GET /login until HTTP 200 — a real rendered page, not a liveness
+      # ping, so a frontend that boots but cannot render fails the release.
+      - name: Wait for the UI to serve /login
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/login || true)
+            echo "Attempt $i/30 — HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "UI check passed."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::GET /login did not return 200 within 60 seconds."
+          docker logs whity-web
+          docker ps -a
+          exit 1
+
       # Always clean up the containers and network, even on failure, so the
       # runner is left in a clean state for any subsequent jobs.
       - name: Tear down
         if: always()
         run: |
-          docker rm -f whity-app postgres 2>/dev/null || true
+          docker rm -f whity-web whity-app postgres 2>/dev/null || true
           docker network rm whity-smoke 2>/dev/null || true
 
   release:
