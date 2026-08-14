@@ -3111,10 +3111,17 @@ final class CoreApiSchemas
             ], ['personId', 'relations'])),
 
             // Relation create request and response
+            // `kind`, not `type`: RelationsApiHandler reads $ref['kind'] and
+            // RelationResolver::KIND_PROFILE/KIND_PERSON are its values. The
+            // spec said `type`, so a codegen consumer sent `type` and got a
+            // validation error every time — the spec was wrong, not the
+            // clients (the web modal has always sent `kind`). Fixed to follow
+            // the handler rather than renaming the handler, which would have
+            // broken every existing caller to make a document right.
             'RelationRef' => self::object([
-                'type' => ['type' => 'string', 'enum' => ['profile', 'person']],
+                'kind' => ['type' => 'string', 'enum' => ['profile', 'person']],
                 'id' => self::int(),
-            ], ['type', 'id']),
+            ], ['kind', 'id']),
             'RelationCreateRequest' => self::object([
                 'from' => SchemaBuilder::ref('RelationRef'),
                 'to' => SchemaBuilder::ref('RelationRef'),

@@ -93,11 +93,17 @@ export function AddRelationModal({
         }
         const data = await res.json();
         if (!cancelled) {
-          // Only include users that have a resolved profile_id; users without one
-          // (not yet migrated to the identity model) cannot be auto-provisioned.
-          const options = (data.data ?? [] as Array<{ profileId: number | null; email: string }>)
-            .filter((u: { profileId: number | null; email: string }) => u.profileId !== null)
-            .map((u: { profileId: number; email: string }) => ({ profileId: u.profileId, email: u.email }));
+          // `id` IS the profile id on this endpoint — UsersApiHandler
+          // documents it as "the canonical profile_id (ADR 0005 hard
+          // cutover)" and returns no separate `profileId`. This read
+          // `u.profileId`, which was always undefined, and the guard below it
+          // (`!== null`) did not catch that because `undefined !== null` is
+          // true — so every option was built with `profileId: undefined` and
+          // the picker looked populated while selecting one sent no id at all.
+          // There is no longer a profile-less row to filter out: the identity
+          // cutover made every membership row carry one.
+          const options = (data.data ?? [] as Array<{ id: number; email: string }>)
+            .map((u: { id: number; email: string }) => ({ profileId: u.id, email: u.email }));
           setProfiles(options);
         }
       } catch {
