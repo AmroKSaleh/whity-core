@@ -62,6 +62,9 @@ services:
       INITIAL_USER_PASSWORD: ${INITIAL_USER_PASSWORD:?INITIAL_USER_PASSWORD must be set for staging}
       INITIAL_SYSTEM_ADMIN_PASSWORD: ${INITIAL_SYSTEM_ADMIN_PASSWORD:?INITIAL_SYSTEM_ADMIN_PASSWORD must be set for staging}
       INITIAL_SUPERUSER_PASSWORD: ${INITIAL_SUPERUSER_PASSWORD:?INITIAL_SUPERUSER_PASSWORD must be set for staging}
+      # Address of the bootstrap administrator (WC-779). Optional, unlike the
+      # passwords above: empty keeps the historical system@whity.local default.
+      INITIAL_SYSTEM_ADMIN_EMAIL: ${INITIAL_SYSTEM_ADMIN_EMAIL:-}
       # No project Caddyfile is mounted here (the image ships the base FrankenPHP
       # Caddyfile). auto_https off + SERVER_NAME :80 bind it to plain HTTP on :80,
       # and FRANKENPHP_CONFIG enables persistent worker mode — same knobs the
