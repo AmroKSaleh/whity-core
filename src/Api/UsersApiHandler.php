@@ -124,7 +124,7 @@ class UsersApiHandler
             if ($tenantId === self::SYSTEM_TENANT_ID) {
                 // @tenant-guard-ignore: system-tenant (id 0) counts active memberships across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
                 $countStmt = $this->db->prepare(
-                    "SELECT COUNT(*) AS cnt FROM memberships m WHERE m.status = 'active'"
+                    "SELECT COUNT(*) AS cnt FROM memberships m WHERE m.is_primary AND m.status = 'active'"
                 );
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
@@ -139,7 +139,7 @@ class UsersApiHandler
                     JOIN roles r ON m.role_id = r.id
                     JOIN profiles p ON p.id = m.profile_id
                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
-                    WHERE m.status = 'active'
+                    WHERE m.is_primary AND m.status = 'active'
                     ORDER BY m.tenant_id, m.created_at DESC, m.profile_id ASC
                     LIMIT :limit OFFSET :offset
                 ");
@@ -148,7 +148,7 @@ class UsersApiHandler
                 $stmt->execute();
             } else {
                 $countStmt = $this->db->prepare(
-                    "SELECT COUNT(*) AS cnt FROM memberships m WHERE m.tenant_id = :tenant_id AND m.status = 'active'"
+                    "SELECT COUNT(*) AS cnt FROM memberships m WHERE m.is_primary AND m.tenant_id = :tenant_id AND m.status = 'active'"
                 );
                 $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
                 $countStmt->execute();
@@ -163,7 +163,7 @@ class UsersApiHandler
                     JOIN roles r ON m.role_id = r.id
                     JOIN profiles p ON p.id = m.profile_id
                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
-                    WHERE m.tenant_id = :tenant_id AND m.status = 'active'
+                    WHERE m.is_primary AND m.tenant_id = :tenant_id AND m.status = 'active'
                     ORDER BY m.created_at DESC, m.profile_id ASC
                     LIMIT :limit OFFSET :offset
                 ");
