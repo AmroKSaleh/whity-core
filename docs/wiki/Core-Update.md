@@ -13,9 +13,13 @@ operator-driven runbook — no deployment self-mutates.
 - Releases are git tags `v<VERSION>` on `main`. The release workflow
   (`.github/workflows/release.yml`) **refuses** a tag that does not match
   `CoreVersion::VERSION`, re-runs the full backend suite on the tagged
-  commit, pushes the container image to GHCR
-  (`ghcr.io/<repo>:vX.Y.Z` and `:latest`), and creates the GitHub Release
-  with generated notes.
+  commit, pushes **both** container images to GHCR under the same tags —
+  the API `ghcr.io/<repo>` and the UI `ghcr.io/<repo>/web`, each as
+  `:vX.Y.Z` and `:latest` — and creates the GitHub Release with generated
+  notes.
+- The two images are one release: they are built by the same gated job and
+  carry identical tags, so a deployment upgrades them as a pair. Running a
+  `v0.3.0` API against a `v0.2.0` UI is not a supported configuration.
 
 ## Cutting a release (maintainers)
 
@@ -65,8 +69,9 @@ For a compose-based deployment (the per-product deployment anatomy in
    composer install --no-dev   # if the release changed dependencies
    ```
 
-   (Container-image deployments instead pull
-   `ghcr.io/<repo>:v<VERSION>` and update their compose/image reference.)
+   (Container-image deployments instead pull `ghcr.io/<repo>:v<VERSION>`
+   **and** `ghcr.io/<repo>/web:v<VERSION>` and update both compose/image
+   references — the UI ships as its own image.)
 
 3. **Run migrations** (also applies any new migrations from installed
    plugins): `php public/index.php migrate run` — in compose,

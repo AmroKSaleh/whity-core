@@ -1,16 +1,22 @@
 # Remote staging stack for whity-core (WC-e) — PULLS a pre-built image.
 #
 # Unlike docker-compose.staging.yml (which BUILDS from a bind-mounted checkout
-# for local use), this file runs the published GHCR *release* image — the same
-# artifact release.yml builds, pushes, and smoke-tests on every tag. It carries
+# for local use), this file runs the published GHCR *release* images — the same
+# artifacts release.yml builds, pushes, and smoke-tests on every tag. They carry
 # the code baked in, so there is NO source bind mount and NO Caddyfile mount:
-# the app is exactly what shipped, which is the whole point of a staging deploy.
+# what runs is exactly what shipped, which is the whole point of a staging deploy.
+#
+# Two tiers, because the product is both: `frankenphp` serves the API and `web`
+# serves the user interface. The release job tags them together, so deploy them
+# together — a stack with only the app is an API nobody can log in to.
 #
 # It is driven by .github/workflows/deploy-staging.yml, which copies this file
 # to the staging host and runs:
-#   WHITY_IMAGE=ghcr.io/<repo>:<tag> docker compose \
-#     -p whity-staging -f docker-compose.staging-remote.yml --env-file .env.staging up -d
-# then `... exec frankenphp php public/index.php migrate run` and a health poll.
+#   WHITY_IMAGE=ghcr.io/<repo>:<tag> WHITY_WEB_IMAGE=ghcr.io/<repo>/web:<tag> \
+#     docker compose -p whity-staging -f docker-compose.staging-remote.yml \
+#     --env-file .env.staging up -d
+# then `... exec frankenphp php public/index.php migrate run`, a health poll on
+# the API and a page fetch against the UI.
 #
 # All secrets come from .env.staging on the host (never committed). The
 # `:?message` guards make a missing secret fail fast rather than boot a weak,
@@ -77,6 +83,43 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # The published FRONTEND image (WHIT-588) — without it a deployment built from
+  # release artifacts is an API nobody can log in to, which is exactly how
+  # v0.2.0 shipped. Tagged in lockstep with the app image by the same release
+  # job, so overriding both refs to the same version is the normal deploy and
+  # mixing versions takes deliberate effort.
+  web:
+    image: ${WHITY_WEB_IMAGE:-ghcr.io/amroksaleh/whity-core/web:latest}
+    container_name: whity_staging_web
+    restart: unless-stopped
+    pull_policy: always
+    # `next start` is PID 1 here; an init reaps it properly on `compose down`
+    # instead of leaving it to the 10-second SIGKILL timeout.
+    init: true
+    ports:
+      - "${WEB_PORT_HOST:-3100}:3000"
+    environment:
+      # Where the Next server-side proxy sends /api/* — the app service on the
+      # compose network, NOT the public origin: this hop never leaves the host.
+      # Read from the environment on every request (web/lib/backend-url.ts), so
+      # one published image serves every deployment without a rebuild.
+      WHITY_BACKEND_URL: ${WHITY_BACKEND_URL:-http://frankenphp}
+    # Start order only. The frontend resolves the backend per request, so it
+    # comes up cleanly ahead of the app and simply proxies 502 until the worker
+    # pool is serving — waiting on the app's health would gate the login page on
+    # a migration finishing.
+    depends_on:
+      - frankenphp
+    # Fetch a REAL page, not a liveness ping: a Next server that boots but
+    # cannot render is the failure mode that matters, and /login is the one
+    # route every deployment must serve before anyone can do anything at all.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/login',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   postgres_data_staging:
