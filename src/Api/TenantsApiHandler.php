@@ -620,7 +620,16 @@ class TenantsApiHandler
         try {
             PasswordPolicy::validate($password);
         } catch (\InvalidArgumentException $e) {
-            return Response::error($e->getMessage(), 400);
+            // Bound to a named local first, as the same PasswordPolicy call in
+            // UsersApiHandler::create() does. The message is authored BY the
+            // policy FOR the person typing the password ("must be at least N
+            // characters"), so surfacing it is the point — telling someone their
+            // password was rejected without saying why is a dead end. The naming
+            // is what distinguishes that from forwarding an engine error, which
+            // ExceptionLeakageTest exists to stop.
+            $policyViolation = $e->getMessage();
+
+            return Response::error($policyViolation, 400);
         }
 
         $role = trim((string) ($raw['role'] ?? 'admin'));
