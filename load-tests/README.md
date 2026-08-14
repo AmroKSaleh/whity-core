@@ -44,7 +44,7 @@ defaults.
    cp .env.staging.example .env.staging        # then set real secrets
    docker compose -p whity-staging -f docker-compose.staging.yml \
      --env-file .env.staging up -d --build
-   ./scripts/init-staging-db.sh                 # migrate + seed
+   ./scripts/init-staging-db.sh                 # migrate + seed --with-fixtures
    curl http://localhost:8100/api/health        # expect HTTP 200
    ```
 

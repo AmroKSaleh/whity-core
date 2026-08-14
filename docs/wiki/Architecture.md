@@ -243,7 +243,7 @@ The schema is built by ordered migrations in `database/migrations/` (`001`–`01
 
 Key tables and the migration that introduces them:
 
-- **`tenants`** (001; `slug` added in 003) — `id`, `name UNIQUE`, `slug UNIQUE`, `created_at`. Migration 011 seeds the **system tenant id 0** plus a `system@whity.local` admin user.
+- **`tenants`** (001; `slug` added in 003) — `id`, `name UNIQUE`, `slug UNIQUE`, `created_at`. Migration 010 seeds the **system tenant id 0** plus a bootstrap admin account, at `system@whity.local` or whatever `INITIAL_SYSTEM_ADMIN_EMAIL` names (applied by migration 095).
 - **`roles`** (001; `description` in 004; `parent_id` self-reference for hierarchy in 017; `tenant_id` in 018) — `id`, `name UNIQUE`, `description`, `parent_id → roles(id) ON DELETE SET NULL`, `tenant_id → tenants(id) ON DELETE CASCADE` (NULL = global role).
 - **`users`** (001; `ou_id` in 008; 2FA columns in 014) — `id`, `tenant_id → tenants(id)`, `email`, `password`, `role_id → roles(id)`, `ou_id → organizational_units(id) ON DELETE SET NULL`, `two_factor_secret`, `two_factor_enabled`, `two_factor_backup_codes_version`, `created_at`, `UNIQUE(tenant_id, email)`.
 - **`permissions`** (002) — `id`, `name UNIQUE` (`resource:action`), `description`, `created_at`. Seeds were normalized from dot to colon notation in 016.

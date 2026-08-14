@@ -12,8 +12,9 @@ Related: [Deployment Guide](DEPLOYMENT_GUIDE.md) · [Cron Operations](Cron-Opera
 
 - [ ] **[BLOCKER] `JWT_SECRET` set to a real ≥32-char secret.** The runtime fast-fails on a missing/short secret (`JwtSecretGuard`). Never reuse the dev/CI value.
 - [ ] **[BLOCKER] `ENCRYPTION_KEY` set to a real ≥32-char key** (encrypts TOTP secrets and other at-rest secrets). Losing/rotating it invalidates encrypted data — store it in your secret manager, not in the image.
-- [ ] **[BLOCKER] Initial account passwords set explicitly** — `INITIAL_ADMIN_PASSWORD`, `INITIAL_USER_PASSWORD`, `INITIAL_SYSTEM_ADMIN_PASSWORD`, `INITIAL_SUPERUSER_PASSWORD`. If any is unset, `InitialPassword` generates a random one and prints it **once** to stdout/stderr — acceptable for recovery, but set them deliberately for a known bootstrap. Rotate immediately after first login.
-- [ ] **[BLOCKER] `APP_ENV=production`.** Not `development`. In development the one-shot `db-init` auto-seeds demo accounts and the `Secure` cookie flag is dropped — both wrong for production.
+- [ ] **[BLOCKER] Initial account passwords set explicitly** — `INITIAL_ADMIN_PASSWORD`, `INITIAL_USER_PASSWORD`, `INITIAL_SYSTEM_ADMIN_PASSWORD`, `INITIAL_SUPERUSER_PASSWORD`. If any is unset, `InitialPassword` generates a random one and prints it **once** to stdout/stderr — acceptable for recovery, but set them deliberately for a known bootstrap. Rotate immediately after first login. These apply at account **creation** only: setting one for an account that already exists is inert (the seeder says so and refuses to rewrite a live credential) — change an existing password through the admin UI.
+- [ ] **[BLOCKER] `INITIAL_SYSTEM_ADMIN_EMAIL` set to a mailbox you control**, *before the first* `migrate run`. The default, `system@whity.local`, is unroutable: no password reset and no verification mail can ever reach it, and it names the vendor rather than your organisation. On an install that already exists, setting it and re-running `migrate run` (or `seed`) **moves** the existing account — same profile, same password, same tenant-0 admin membership. See [retiring the bootstrap account](#retiring-the-bootstrap-administrator) below.
+- [ ] **[BLOCKER] `APP_ENV=production`.** Not `development`. In development the one-shot `db-init` auto-seeds demo accounts and the `Secure` cookie flag is dropped — both wrong for production. Outside development the seeder also refuses to create `admin@example.com` / `user@example.com` / `superuser@example.com` at all, so a production seed cannot materialise a demo credential by accident.
 - [ ] **DB connection vars** correct and pointing at the production database: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`. The app reads from `$_ENV` (a `.env` file is loaded by the CLI bootstrap for `migrate`/`seed`).
 - [ ] **Secrets are injected at runtime** (orchestrator secret store / env), **never baked into the image** or committed. Confirm `git grep` finds no real secret in the repo.
 - [ ] **`TRUSTED_PROXY` / client-IP config** set so `X-Forwarded-For` is only trusted from your ingress — audit IPs and rate-limit keys must not be spoofable.
@@ -22,7 +23,7 @@ Related: [Deployment Guide](DEPLOYMENT_GUIDE.md) · [Cron Operations](Cron-Opera
 
 - [ ] **[BLOCKER] Migrations applied and idempotent:** `php public/index.php migrate run` completes clean; running it a second time is a no-op. Verify on the real engine (Postgres), not SQLite.
 - [ ] **Schema matches the release** — no pending/failed migration in `core_schema_migrations`.
-- [ ] **Seed policy decided.** Production does **not** auto-seed (that's a development-only `db-init` behavior). If you need the bootstrap accounts, run `php public/index.php seed` deliberately, then rotate the initial passwords.
+- [ ] **Seed policy decided.** Production does **not** auto-seed (that's a development-only `db-init` behavior). Note that `migrate run` **alone** already creates the bootstrap administrator — `seed` is not required for a working install. If you run `seed` anyway it is idempotent and adds the default tenant and the notification-template baseline; the `*@example.com` demo accounts stay out unless you pass `--with-fixtures`, which production should not.
 - [ ] **`shared_store` table present** — the rate-limiter (`DatabaseSharedStore`) INSERTs into it on every request; a missing table 500s the whole app. It's created by migration `032`; confirmed by a clean `migrate run`.
 - [ ] **[BLOCKER] Automated, encrypted, scheduled backups armed** with a tested retention policy and a backup-success alert. **A rehearsed restore has been performed** (restore to a clean stack, migrate/verify) with known RPO/RTO. *(Backup/restore automation is tracked separately — do not go live without it for a sovereign deployment.)*
 - [ ] **Connection pool tuning** reviewed for the worker count (`DB_MAX_LIFETIME` / liveness throttle) — see the performance/capacity guidance.
@@ -36,6 +37,36 @@ Related: [Deployment Guide](DEPLOYMENT_GUIDE.md) · [Cron Operations](Cron-Opera
 - [ ] **[BLOCKER] Tenant isolation gate green** — `php scripts/ci-tenant-predicate-guard.php` passes (every query on a tenant-owned table carries a `tenant_id` predicate or a justified `@tenant-guard-ignore`). This is the #1 platform risk.
 - [ ] **No internal error detail leaks to clients** — 4xx/5xx bodies are generic; exceptions/stack traces are logged server-side only.
 - [ ] **System tenant (id 0) accounts** reviewed — the superuser/system-admin bootstrap credentials are rotated and access is restricted.
+- [ ] **Bootstrap administrator retired** once a named human administrator exists — see below.
+
+### Retiring the bootstrap administrator
+
+The bootstrap account exists so that a fresh install has *something* to sign in with. Once a real, named administrator holds the tenant-0 admin role, the bootstrap account is a standing credential nobody owns. Retire it — do not delete it, because the audit trail references it.
+
+**Deactivate it.** Set the profile's account status to `inactive`:
+
+```http
+PATCH /api/users/{profileId}
+{ "accountStatus": "inactive" }
+```
+
+(`CorePermissions::USERS_WRITE`, same gate as every other field on that endpoint.) `profiles.status` is a **global** switch, not a per-tenant one: `AuthHandler` refuses the login of any profile whose status is `inactive` — with a generic `401 Invalid credentials`, deliberately indistinguishable from a wrong password so the account cannot be enumerated. Nothing else in the platform resolves the bootstrap account by address, so deactivating it removes the login and leaves history intact.
+
+Order matters. Before you deactivate:
+
+1. A second account **already holds an active tenant-0 admin membership** — deactivate the only tenant-0 administrator and nobody can administer the platform.
+2. That account has a **verified, routable** primary email, so it can complete a password reset.
+
+To undo, `PATCH` the same field back to `"active"`.
+
+Verify afterwards that the bootstrap address can no longer authenticate:
+
+```bash
+curl -si https://<host>/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"<bootstrap address>","password":"<INITIAL_SYSTEM_ADMIN_PASSWORD>"}' | head -1
+# HTTP/1.1 401 Unauthorized
+```
 - [ ] **Dependency audits clean** — `composer audit` and `npm audit --audit-level=high` pass (gated in CI). No known-vulnerable dependency ships.
 
 ## 4. Build & release

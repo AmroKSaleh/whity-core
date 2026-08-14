@@ -60,6 +60,12 @@ docker compose -p whity-staging -f docker-compose.staging-remote.yml \
   --env-file .env.staging exec -T frankenphp php public/index.php seed
 ```
 
+This creates the **bootstrap administrator** (system tenant id 0) — at
+`INITIAL_SYSTEM_ADMIN_EMAIL`, or `system@whity.local` if that is unset. Because
+staging runs `APP_ENV=staging`, the `*@example.com` demo accounts are **not**
+created; append `--with-fixtures` if this particular staging box is meant to
+carry them (the load-test scripts expect `admin@example.com`).
+
 ## Triggering
 
 - **Automatic:** every successful `Release` run deploys `:latest`.

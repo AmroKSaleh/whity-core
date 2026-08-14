@@ -57,8 +57,8 @@ final class InitialPassword
      */
     public static function resolvePlaintext(string $envVar, string $accountLabel): string
     {
-        $configured = $_ENV[$envVar] ?? getenv($envVar);
-        if (is_string($configured) && $configured !== '') {
+        $configured = self::configuredPlaintext($envVar);
+        if ($configured !== null) {
             return $configured;
         }
 
@@ -66,6 +66,24 @@ final class InitialPassword
         self::announceGeneratedPassword($envVar, $accountLabel, $generated);
 
         return $generated;
+    }
+
+    /**
+     * The plaintext the operator actually configured, or null when they did not.
+     *
+     * Distinct from {@see resolvePlaintext()} because a caller may need to know
+     * whether a value was SUPPLIED without triggering the generate-and-announce
+     * fallback — the seeder asks this to tell "the operator set a password that
+     * cannot take effect" apart from "nobody set one".
+     *
+     * @param string $envVar Environment variable to read from.
+     * @return string|null The configured plaintext, or null when absent/empty.
+     */
+    public static function configuredPlaintext(string $envVar): ?string
+    {
+        $configured = $_ENV[$envVar] ?? getenv($envVar);
+
+        return (is_string($configured) && $configured !== '') ? $configured : null;
     }
 
     /**
