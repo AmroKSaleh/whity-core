@@ -1110,6 +1110,47 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         )->execute([$id, $email]);
     }
 
+    /**
+     * A profile holding a SECOND membership in the same tenant must appear once.
+     *
+     * The list joins memberships, so without a predicate on the primary row a
+     * two-role person becomes two rows — and because the join is paginated with
+     * LIMIT/OFFSET, the page boundaries shift too. Nothing throws; the endpoint
+     * just reports a tenant with more people in it than it has, which is why
+     * this is pinned rather than left to review.
+     *
+     * `true`/`false` literals, not 1/0: SQLite accepts an integer for a boolean
+     * column and PostgreSQL does not, and this suite runs on both.
+     */
+    public function testASecondMembershipDoesNotDuplicateTheUserInTheList(): void
+    {
+        $this->seedProfile(95, 'p95@example.com');
+        $this->seedMembership(95, 1, 2, 'active');
+
+        // The same person, a second tenant-wide role (migration 094 permits it).
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, is_primary, status, created_at)
+             VALUES (?, ?, ?, NULL, false, 'active', datetime('now'))"
+        )->execute([95, 1, 1]);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->list($this->authedRequest('GET', '/api/users'));
+        $this->assertSame(200, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+
+        $ids = array_column($decoded['data'], 'id');
+        $this->assertSame(
+            [95],
+            $ids,
+            'a profile with two memberships must appear exactly once in the list'
+        );
+        $this->assertSame(
+            1,
+            $decoded['pagination']['total'],
+            'the paginated total must count people, not memberships — it drives LIMIT/OFFSET'
+        );
+    }
+
     private function seedMembership(int $profileId, int $tenantId, int $roleId, string $status = 'active'): void
     {
         $this->pdo->prepare(

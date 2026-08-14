@@ -101,7 +101,7 @@ class TenantsApiHandler
                 // @tenant-guard-ignore: system-tenant (isSystemUser) lists all real tenants; memberships LEFT JOIN is unscoped by design — each row is a distinct tenant
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
-                           COUNT(m.id) as userCount
+                           COUNT(DISTINCT m.profile_id) as userCount
                     FROM tenants t
                     LEFT JOIN memberships m ON t.id = m.tenant_id AND m.status = \'active\'
                     WHERE t.id != 0
@@ -127,7 +127,7 @@ class TenantsApiHandler
                 // @tenant-guard-ignore: caller's own tenant; WHERE t.id = :tenant_id on tenants constrains the memberships LEFT JOIN to one tenant's rows
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
-                           COUNT(m.id) as userCount
+                           COUNT(DISTINCT m.profile_id) as userCount
                     FROM tenants t
                     LEFT JOIN memberships m ON t.id = m.tenant_id AND m.status = \'active\'
                     WHERE t.id = :tenant_id
@@ -437,7 +437,7 @@ class TenantsApiHandler
             // active memberships block deletion — a tenant whose only memberships are
             // invited/suspended has no active occupants and can be deleted.
             $checkStmt = $this->db->prepare(
-                "SELECT COUNT(*) as count FROM memberships WHERE tenant_id = ? AND status = 'active'"
+                "SELECT COUNT(DISTINCT profile_id) as count FROM memberships WHERE tenant_id = ? AND status = 'active'"
             );
             $checkStmt->execute([$id]);
             $result = $checkStmt->fetch(PDO::FETCH_ASSOC);

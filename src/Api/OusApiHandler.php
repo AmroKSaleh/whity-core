@@ -423,7 +423,7 @@ class OusApiHandler
             // Only active memberships block deletion — an OU whose only members are
             // invited/suspended has no active occupants and can be deleted.
             $usersStmt = $this->db->prepare("
-                SELECT COUNT(*) FROM memberships WHERE ou_id = ? AND tenant_id = ? AND status = 'active'
+                SELECT COUNT(DISTINCT profile_id) FROM memberships WHERE ou_id = ? AND tenant_id = ? AND status = 'active'
             ");
             $usersStmt->execute([$id, $tenantId]);
             $userCount = $usersStmt->fetchColumn();
