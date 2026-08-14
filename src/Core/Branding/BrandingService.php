@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\Branding;
 
+use Whity\Storage\MimeTypes;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\SettingsValidationException;
@@ -87,7 +88,13 @@ final class BrandingService
         $settingKey = BrandingAssetKind::settingKey($assetKey);
         $previous = $this->currentStorageKey($tenantId, $settingKey);
 
-        $this->storage->put($storageKey, $validated->bytes);
+        // The content type must be supplied HERE, not derived on read: an object
+        // store bakes it into the stored object, so a missing one is permanent
+        // (#786). `$validated->ext` is the authoritative extension — the
+        // validator decides it from magic bytes, not from the client's filename.
+        $this->storage->put($storageKey, $validated->bytes, [
+            'ContentType' => MimeTypes::forExtension($validated->ext),
+        ]);
         $this->writeReference($tenantId, $settingKey, $storageKey);
 
         if (
