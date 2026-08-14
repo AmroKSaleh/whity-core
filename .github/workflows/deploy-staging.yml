@@ -1,9 +1,15 @@
-# WC-e: deploy the published release image to a staging host over SSH.
+# WC-e: deploy the published release images to a staging host over SSH.
 #
 # Flow: pick an image tag -> copy docker-compose.staging-remote.yml to the host
 # -> write .env.staging from a secret -> `docker compose pull && up -d` ->
-# `migrate run` inside the app container -> poll GET /api/health on the host
-# until 200. A deploy that does not end in a healthy /api/health FAILS the run.
+# `migrate run` inside the app container -> poll GET /api/health AND GET /login
+# on the host until both return 200. A deploy that does not end with a healthy
+# API *and* a rendering UI FAILS the run.
+#
+# The UI check is not belt-and-braces (WHIT-588): v0.2.0 deployed green on
+# /api/health alone while shipping no frontend at all, so "the deploy worked"
+# and "a human can use it" were two different facts and only the first was
+# being measured.
 #
 # ACTIVATE-BY-CONFIG: this does nothing until you set the staging secrets. The
 # `preflight` job checks whether STAGING_SSH_HOST is set and, if not, the deploy
@@ -19,6 +25,7 @@
 #   STAGING_SSH_PORT       ssh port                 (default 22)
 #   STAGING_DEPLOY_DIR     dir on the host          (default /opt/whity-staging)
 #   STAGING_APP_PORT       host port the app binds  (default 8100)
+#   STAGING_WEB_PORT       host port the UI binds   (default 3100)
 #   STAGING_REGISTRY_USER  GHCR user (private image pull)
 #   STAGING_REGISTRY_TOKEN GHCR read:packages token (private image pull)
 name: Deploy to staging
@@ -71,7 +78,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Resolve image reference
+      # One tag drives BOTH tiers. The release job publishes them together under
+      # identical tags, so resolving them from the same `tag` here is what keeps
+      # a deploy from pairing a new API with a stale UI.
+      - name: Resolve image references
         id: image
         env:
           # workflow_dispatch supplies a tag; a Release-triggered run deploys :latest
@@ -81,7 +91,8 @@ jobs:
           name="ghcr.io/${GITHUB_REPOSITORY,,}"
           tag="${INPUT_TAG:-latest}"
           echo "ref=${name}:${tag}" >> "$GITHUB_OUTPUT"
-          echo "Deploying image: ${name}:${tag}"
+          echo "web_ref=${name}/web:${tag}" >> "$GITHUB_OUTPUT"
+          echo "Deploying images: ${name}:${tag} + ${name}/web:${tag}"
 
       - name: Copy compose file to the host
         uses: appleboy/scp-action@v1.0.0
@@ -97,9 +108,11 @@ jobs:
         uses: appleboy/ssh-action@v1.2.5
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
+          WEB_IMAGE_REF: ${{ steps.image.outputs.web_ref }}
           STAGING_ENV: ${{ secrets.STAGING_ENV }}
           DEPLOY_DIR: ${{ secrets.STAGING_DEPLOY_DIR || '/opt/whity-staging' }}
           APP_PORT: ${{ secrets.STAGING_APP_PORT || '8100' }}
+          WEB_PORT: ${{ secrets.STAGING_WEB_PORT || '3100' }}
           REGISTRY_USER: ${{ secrets.STAGING_REGISTRY_USER }}
           REGISTRY_TOKEN: ${{ secrets.STAGING_REGISTRY_TOKEN }}
         with:
@@ -109,7 +122,7 @@ jobs:
           port: ${{ secrets.STAGING_SSH_PORT || 22 }}
           # Pass the CI-side env through to the remote shell so the heredoc/secrets
           # never get expanded or logged on the runner.
-          envs: IMAGE_REF,STAGING_ENV,DEPLOY_DIR,APP_PORT,REGISTRY_USER,REGISTRY_TOKEN
+          envs: IMAGE_REF,WEB_IMAGE_REF,STAGING_ENV,DEPLOY_DIR,APP_PORT,WEB_PORT,REGISTRY_USER,REGISTRY_TOKEN
           command_timeout: 15m
           script: |
             set -euo pipefail
@@ -121,16 +134,25 @@ jobs:
 
             COMPOSE="docker compose -p whity-staging -f docker-compose.staging-remote.yml --env-file .env.staging"
 
+            # Compose resolves these out of the environment. Exported once rather
+            # than prefixed per invocation so `pull`, `up`, `exec` and `logs`
+            # cannot disagree about which images the stack is made of — and so
+            # adding a service does not mean remembering another prefix.
+            export WHITY_IMAGE="$IMAGE_REF"
+            export WHITY_WEB_IMAGE="$WEB_IMAGE_REF"
+            export APP_PORT_HOST="$APP_PORT"
+            export WEB_PORT_HOST="$WEB_PORT"
+
             # Log in to GHCR only if a private-pull token was provided.
             if [ -n "${REGISTRY_TOKEN:-}" ]; then
               echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "${REGISTRY_USER:-x}" --password-stdin
             fi
 
-            echo "==> Pulling ${IMAGE_REF}"
-            WHITY_IMAGE="$IMAGE_REF" APP_PORT_HOST="$APP_PORT" $COMPOSE pull
+            echo "==> Pulling ${IMAGE_REF} + ${WEB_IMAGE_REF}"
+            $COMPOSE pull
 
             echo "==> Starting stack"
-            WHITY_IMAGE="$IMAGE_REF" APP_PORT_HOST="$APP_PORT" $COMPOSE up -d
+            $COMPOSE up -d
 
             # Wait for Postgres to accept connections before migrating.
             echo "==> Waiting for Postgres"
@@ -145,20 +167,47 @@ jobs:
             # Migrations are idempotent; seeding is a deliberate one-time step and
             # is intentionally NOT run here so a redeploy never mutates staging data.
             echo "==> Running migrations"
-            WHITY_IMAGE="$IMAGE_REF" $COMPOSE exec -T frankenphp php public/index.php migrate run
+            $COMPOSE exec -T frankenphp php public/index.php migrate run
 
-            # Health gate: poll the app on the host until it serves 200, or fail.
-            echo "==> Health check http://localhost:${APP_PORT}/api/health"
+            # API gate: poll the backend on the host until it serves 200, or fail.
+            echo "==> API health check http://localhost:${APP_PORT}/api/health"
+            api_ok=false
             for i in $(seq 1 30); do
               code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${APP_PORT}/api/health" || true)
               echo "Attempt $i/30 -> HTTP $code"
               if [ "$code" = "200" ]; then
-                echo "Staging is healthy."
+                api_ok=true
                 curl -s "http://localhost:${APP_PORT}/api/health" || true
-                exit 0
+                echo
+                break
               fi
               sleep 2
             done
-            echo "Health check failed — dumping app logs:"
-            WHITY_IMAGE="$IMAGE_REF" $COMPOSE logs --tail=100 frankenphp
-            exit 1
+            if [ "$api_ok" != true ]; then
+              echo "API health check failed — dumping app logs:"
+              $COMPOSE logs --tail=100 frankenphp
+              exit 1
+            fi
+
+            # UI gate (WHIT-588): fetch a real rendered page off the web tier.
+            # /login is the route every deployment must serve before a human can
+            # do anything, and it is the one that was silently missing while this
+            # very workflow reported a successful deploy.
+            echo "==> UI check http://localhost:${WEB_PORT}/login"
+            web_ok=false
+            for i in $(seq 1 30); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${WEB_PORT}/login" || true)
+              echo "Attempt $i/30 -> HTTP $code"
+              if [ "$code" = "200" ]; then
+                web_ok=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$web_ok" != true ]; then
+              echo "UI check failed — dumping web logs:"
+              $COMPOSE logs --tail=100 web
+              exit 1
+            fi
+
+            echo "Staging is healthy: API answering and UI rendering."
