@@ -974,6 +974,20 @@ jobs:
           npm run generate:api
           git diff --exit-code -- lib/api/schema.d.ts
 
+      # The SAME spec also generates the PUBLISHED @amroksaleh/api-client
+      # types, and that copy had no drift gate at all — it went ~4 weeks and
+      # 8,000 lines out of date while the web copy above stayed honest, because
+      # only the web one was checked. Downstream consumers install the package,
+      # not web/, so the unchecked copy was the one that mattered.
+      #
+      # `frontend` already filters on packages/** and public/openapi.json, so
+      # this job runs whenever either side can move.
+      - name: Typed-client schema drift check (@amroksaleh/api-client)
+        working-directory: packages/api-client
+        run: |
+          npm run generate
+          git diff --exit-code -- src/schema.d.ts
+
       # The committed design-token outputs must match the generator (base.json
       # is the single source of truth for styling variables).
       - name: Design-token drift check
