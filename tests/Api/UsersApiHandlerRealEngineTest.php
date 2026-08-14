@@ -250,6 +250,197 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         );
     }
 
+    // ==================== create: optional ou_id placement ====================
+    //
+    // POST /api/users used to hard-code `ou_id = NULL`, so placing a new user in
+    // an organizational unit needed a second PATCH. It now accepts an optional
+    // `ou_id` and validates it through the SAME gate update() uses.
+
+    /**
+     * A valid, own-tenant `ou_id` is persisted on the membership by the CREATE
+     * call itself — no follow-up PATCH — and is echoed in the response.
+     */
+    public function testCreateWithOwnTenantOuIdPersistsOnMembership(): void
+    {
+        $ouId = $this->seedOu(1, 'Provisioning');
+
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-with-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+            'ou_id' => $ouId,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        $profileId = (int) $this->pdo
+            ->query("SELECT profile_id FROM profile_emails WHERE email = 'create-with-ou@example.com'")
+            ->fetchColumn();
+        $this->assertSame(
+            $ouId,
+            (int) $this->pdo->query("SELECT ou_id FROM memberships WHERE profile_id = {$profileId} AND tenant_id = 1")->fetchColumn(),
+            'The submitted ou_id must be persisted by the create call itself.'
+        );
+
+        // toPublicUser() already returned ou_id, so the response shape is unchanged.
+        $this->assertSame($ouId, json_decode($response->getBody(), true)['data']['ou_id']);
+    }
+
+    /**
+     * SECURITY: an `ou_id` owned by ANOTHER tenant is refused with 403 and
+     * nothing is persisted — neither the membership nor the profile.
+     */
+    public function testCreateWithCrossTenantOuIdReturns403AndCreatesNothing(): void
+    {
+        $foreignOuId = $this->seedOu(2, 'Tenant2 Provisioning');
+
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-foreign-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+            'ou_id' => $foreignOuId,
+        ]));
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertStringContainsString(
+            'OU does not belong to current tenant',
+            json_decode($response->getBody(), true)['error']
+        );
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM profile_emails WHERE email = 'create-foreign-ou@example.com'")->fetchColumn(),
+            'A cross-tenant OU must be refused BEFORE any identity is written.'
+        );
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM memberships WHERE ou_id = ' . $foreignOuId)->fetchColumn(),
+            'No membership may be planted across the tenant boundary.'
+        );
+    }
+
+    /**
+     * Omitting `ou_id` behaves exactly as before the field existed: the
+     * membership is created with a NULL ou_id, so no existing caller changes.
+     */
+    public function testCreateWithoutOuIdLeavesMembershipUnassigned(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-no-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        $profileId = (int) $this->pdo
+            ->query("SELECT profile_id FROM profile_emails WHERE email = 'create-no-ou@example.com'")
+            ->fetchColumn();
+        $this->assertNull(
+            $this->pdo->query("SELECT ou_id FROM memberships WHERE profile_id = {$profileId} AND tenant_id = 1")->fetchColumn() ?: null,
+            'An absent ou_id must still produce a NULL membership.ou_id.'
+        );
+        $this->assertNull(json_decode($response->getBody(), true)['data']['ou_id']);
+    }
+
+    /**
+     * An explicit `{"ou_id": null}` is the same as omitting it (no OU), not an
+     * error — mirroring update()'s "null clears the assignment" contract.
+     */
+    public function testCreateWithNullOuIdIsTreatedAsUnassigned(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-null-ou@example.com',
+            'password' => 'secret-123',
+            'ou_id' => null,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        $profileId = (int) $this->pdo
+            ->query("SELECT profile_id FROM profile_emails WHERE email = 'create-null-ou@example.com'")
+            ->fetchColumn();
+        $this->assertNull(
+            $this->pdo->query("SELECT ou_id FROM memberships WHERE profile_id = {$profileId} AND tenant_id = 1")->fetchColumn() ?: null
+        );
+    }
+
+    /**
+     * A non-numeric `ou_id` is a clean 400 rather than an opaque 500 from the
+     * driver rejecting the comparison against an integer column.
+     */
+    public function testCreateWithNonNumericOuIdReturns400(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-bad-ou@example.com',
+            'password' => 'secret-123',
+            'ou_id' => 'engineering',
+        ]));
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM profile_emails WHERE email = 'create-bad-ou@example.com'")->fetchColumn()
+        );
+    }
+
+    /**
+     * Re-adding a profile whose membership is non-active (invited/suspended)
+     * PROMOTES the existing row; a submitted ou_id is applied to it too.
+     */
+    public function testCreatePromotesInactiveMembershipAndAppliesOuId(): void
+    {
+        $this->seedProfile(510, 'promote-with-ou@example.com');
+        $this->seedMembership(510, 1, 2, 'invited');
+        $ouId = $this->seedOu(1, 'Promotions');
+
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'promote-with-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+            'ou_id' => $ouId,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        $membership = $this->pdo
+            ->query('SELECT status, role_id, ou_id FROM memberships WHERE profile_id = 510 AND tenant_id = 1')
+            ->fetch(PDO::FETCH_ASSOC);
+        $this->assertSame('active', (string) $membership['status']);
+        $this->assertSame(1, (int) $membership['role_id']);
+        $this->assertSame($ouId, (int) $membership['ou_id'], 'The promote path must honour the submitted ou_id.');
+    }
+
+    /**
+     * Promoting WITHOUT an `ou_id` must leave the OU the membership already had
+     * alone — an omitted field is not a request to blank it.
+     */
+    public function testCreatePromotionWithoutOuIdKeepsExistingOu(): void
+    {
+        $ouId = $this->seedOu(1, 'Retained');
+        $this->seedProfile(511, 'promote-keep-ou@example.com');
+        $this->seedMembershipWithOu(511, 1, 2, $ouId, 'suspended');
+
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'promote-keep-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(
+            $ouId,
+            (int) $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 511 AND tenant_id = 1')->fetchColumn(),
+            'An omitted ou_id must not clear an existing OU assignment.'
+        );
+    }
+
     // ==================== update: role via membership ====================
 
     /**
@@ -823,6 +1014,28 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         );
         $this->assertNull(
             $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 73 AND tenant_id = 1')->fetchColumn() ?: null
+        );
+    }
+
+    /**
+     * A non-numeric `ou_id` is a clean 400 on UPDATE too — the shared gate used
+     * to hand the raw value to the driver, which on PostgreSQL raised "invalid
+     * input syntax for integer" and surfaced as an opaque 500.
+     */
+    public function testUpdateWithNonNumericOuIdReturns400(): void
+    {
+        $this->seedProfile(75, 'ou-nonnumeric@example.com');
+        $this->seedMembership(75, 1, 2);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/75', ['ou_id' => 'engineering']),
+            ['id' => '75']
+        );
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertNull(
+            $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 75 AND tenant_id = 1')->fetchColumn() ?: null
         );
     }
 
