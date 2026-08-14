@@ -164,6 +164,32 @@ known-bug notes.
 
 ## Git Workflow
 
+### The two long-lived branches
+
+`develop` is where work lands. `main` is the release line.
+
+```
+feature/… ──▶ develop ──▶ main ──▶ tag v0.x.y
+                 │           │
+             staging     releases + patches
+```
+
+- **Open PRs against `develop`.** It is the default branch, so a PR opened with
+  no explicit base already targets it.
+- **`main` receives `develop`** when a release is being cut, plus direct
+  bug-fix PRs for anything that must ship without waiting for the rest of
+  `develop`.
+- **Tags are cut on `main`.** The release workflow refuses a tag whose name is
+  not `v` + `CoreVersion::VERSION`, so the version bump lands in a normal PR
+  first (see [`Core-Update.md`](docs/wiki/Core-Update.md)).
+
+Both branches are protected identically: a PR is required, and `CI gate`,
+`CodeQL` and `Semgrep SAST (PHP + JS/TS)` must pass. Neither accepts a direct
+push, force-push or deletion — including from admins. `CI gate` is one job that
+depends on every other job in `automated-tests.yml` and reports a single
+verdict, because the individual jobs are path-filtered and a required check that
+never reports would block a PR forever.
+
 ### Branch naming
 
 Branches follow `type/WC-XX-short-description`, where `WC-XX` is the tracking
@@ -176,7 +202,7 @@ fix/WC-42-tenant-leak
 ```
 
 Common `type` prefixes: `feature`, `fix`, `docs`, `refactor`, `test`, `chore`.
-Branch off the latest `origin/main`.
+Branch off the latest `origin/develop` (or `origin/main` for a release fix).
 
 ### Commit messages
 
@@ -195,8 +221,9 @@ are authored solely by the human contributor.
 
 ### Keeping your branch current
 
-Keep your branch up to date with `main` before opening or updating a PR. Prefer
-rebasing onto `origin/main` so history stays linear:
+Keep your branch up to date with its base before opening or updating a PR —
+`develop` for feature work, `main` for a release fix. Prefer rebasing so history
+stays linear:
 
 ```bash
 git fetch origin
