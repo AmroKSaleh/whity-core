@@ -252,6 +252,8 @@ abstract class BaseCommand
         $router->register('PATCH', '/api/roles/{id}', [$rolesHandler, 'update'], 'admin');
         $router->register('DELETE', '/api/roles/{id}', [$rolesHandler, 'delete'], 'admin');
         $router->register('GET', '/api/roles/{id}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
+        $router->register('POST', '/api/roles/{id}/permissions', [$rolesHandler, 'grantPermissions'], 'admin');
+        $router->register('DELETE', '/api/roles/{id}/permissions', [$rolesHandler, 'revokePermissions'], 'admin');
 
         $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
         // Only GET allowed - tenants can view their own info

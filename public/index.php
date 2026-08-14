@@ -1150,6 +1150,10 @@ $router->register('GET', '/api/roles/{id:\d+}', [$rolesHandler, 'get'], 'admin')
 $router->register('PATCH', '/api/roles/{id:\d+}', [$rolesHandler, 'update'], 'admin');
 $router->register('DELETE', '/api/roles/{id:\d+}', [$rolesHandler, 'delete'], 'admin');
 $router->register('GET', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
+// #712: additive/subtractive grants, so concurrent admins editing one role stop
+// clobbering each other through the read-modify-write PATCH forces on them.
+$router->register('POST', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'grantPermissions'], 'admin');
+$router->register('DELETE', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'revokePermissions'], 'admin');
 
 $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');

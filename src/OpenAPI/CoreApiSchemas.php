@@ -552,6 +552,30 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not visible'),
                 ] + self::authErrors(),
             ]),
+            // #712: additive/subtractive grants. PATCH replaces the whole set,
+            // so adding one permission means reading the set and writing it back
+            // — and two admins doing that at once silently lose one edit. These
+            // send only the delta, and are idempotent in both directions.
+            self::adminRoute('POST', '/api/roles/{id:\d+}/permissions', [
+                'summary' => 'Grant permissions to a role (additive, idempotent)',
+                'tags' => ['roles'],
+                'request' => 'RolePermissionsChangeRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The grants added and the resulting set', 'RolePermissionsGrantResponse'),
+                    400 => self::errorResponse('permissions missing or not an array'),
+                    404 => self::errorResponse('Role not found or not manageable by the tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::adminRoute('DELETE', '/api/roles/{id:\d+}/permissions', [
+                'summary' => 'Revoke permissions from a role (subtractive, idempotent)',
+                'tags' => ['roles'],
+                'request' => 'RolePermissionsChangeRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The grants removed and the resulting set', 'RolePermissionsRevokeResponse'),
+                    400 => self::errorResponse('permissions missing or not an array'),
+                    404 => self::errorResponse('Role not found or not manageable by the tenant'),
+                ] + self::authErrors(),
+            ]),
             self::adminRoute('GET', '/api/permissions', [
                 'summary' => 'List the permission catalogue',
                 'tags' => ['roles'],
@@ -2691,6 +2715,28 @@ final class CoreApiSchemas
                 'description' => self::str(),
                 'permissionCount' => self::int(),
             ], ['id', 'name'])),
+            // #712 — the delta body shared by POST and DELETE
+            // /api/roles/{id}/permissions. Same mixed id-or-`resource:action`
+            // notation as RoleCreateRequest.permissions, so a client that can
+            // already build a full replace can build a delta with no new code.
+            'RolePermissionsChangeRequest' => self::object([
+                'permissions' => ['type' => 'array', 'items' => $permissionRef],
+            ], ['permissions']),
+            // `granted` / `revoked` count what the call actually CHANGED, which
+            // for an idempotent endpoint is not the size of the request: a
+            // re-grant of a held permission reports 0 and still returns 200.
+            'RolePermissionsGrantResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'message' => self::str(),
+                'granted' => self::int(),
+                'permissions' => ['type' => 'array', 'items' => SchemaBuilder::ref('Permission')],
+            ], ['id', 'message', 'granted', 'permissions'])),
+            'RolePermissionsRevokeResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'message' => self::str(),
+                'revoked' => self::int(),
+                'permissions' => ['type' => 'array', 'items' => SchemaBuilder::ref('Permission')],
+            ], ['id', 'message', 'revoked', 'permissions'])),
             'RoleSummary' => $roleSummary,
             'RoleSummaryListResponse' => self::listEnvelope('RoleSummary'),
 

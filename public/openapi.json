@@ -14331,6 +14331,110 @@
             }
         },
         "/api/v1/roles/{id}/permissions": {
+            "delete": {
+                "operationId": "delete_api_v1_roles_id_permissions",
+                "summary": "Revoke permissions from a role (subtractive, idempotent)",
+                "tags": [
+                    "roles"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RolePermissionsChangeRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The grants removed and the resulting set",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RolePermissionsRevokeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "permissions missing or not an array",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Role not found or not manageable by the tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
             "get": {
                 "operationId": "get_api_v1_roles_id_permissions",
                 "summary": "List a role's permissions",
@@ -14380,6 +14484,110 @@
                     },
                     "404": {
                         "description": "Role not found or not visible",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_roles_id_permissions",
+                "summary": "Grant permissions to a role (additive, idempotent)",
+                "tags": [
+                    "roles"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RolePermissionsChangeRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The grants added and the resulting set",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RolePermissionsGrantResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "permissions missing or not an array",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Role not found or not manageable by the tenant",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -22951,6 +23159,95 @@
                 "required": [
                     "data",
                     "pagination"
+                ]
+            },
+            "RolePermissionsChangeRequest": {
+                "type": "object",
+                "properties": {
+                    "permissions": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "integer"
+                                },
+                                {
+                                    "type": "string"
+                                }
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "permissions"
+                ]
+            },
+            "RolePermissionsGrantResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "integer"
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "granted": {
+                                "type": "integer"
+                            },
+                            "permissions": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/Permission"
+                                }
+                            }
+                        },
+                        "required": [
+                            "id",
+                            "message",
+                            "granted",
+                            "permissions"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "RolePermissionsRevokeResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "integer"
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "revoked": {
+                                "type": "integer"
+                            },
+                            "permissions": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/Permission"
+                                }
+                            }
+                        },
+                        "required": [
+                            "id",
+                            "message",
+                            "revoked",
+                            "permissions"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "RoleSummary": {

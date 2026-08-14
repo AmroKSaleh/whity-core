@@ -2078,8 +2078,10 @@ export interface paths {
         /** List a role's permissions */
         get: operations["get_api_v1_roles_id_permissions"];
         put?: never;
-        post?: never;
-        delete?: never;
+        /** Grant permissions to a role (additive, idempotent) */
+        post: operations["post_api_v1_roles_id_permissions"];
+        /** Revoke permissions from a role (subtractive, idempotent) */
+        delete: operations["delete_api_v1_roles_id_permissions"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3610,6 +3612,25 @@ export interface components {
         RoleListResponse: {
             data: components["schemas"]["Role"][];
             pagination: components["schemas"]["Pagination"];
+        };
+        RolePermissionsChangeRequest: {
+            permissions: (number | string)[];
+        };
+        RolePermissionsGrantResponse: {
+            data: {
+                id: number;
+                message: string;
+                granted: number;
+                permissions: components["schemas"]["Permission"][];
+            };
+        };
+        RolePermissionsRevokeResponse: {
+            data: {
+                id: number;
+                message: string;
+                revoked: number;
+                permissions: components["schemas"]["Permission"][];
+            };
         };
         RoleSummary: {
             id: number;
@@ -15939,6 +15960,166 @@ export interface operations {
                 };
             };
             /** @description Role not found or not visible */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_roles_id_permissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RolePermissionsChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description The grants added and the resulting set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolePermissionsGrantResponse"];
+                };
+            };
+            /** @description permissions missing or not an array */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Role not found or not manageable by the tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_roles_id_permissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RolePermissionsChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description The grants removed and the resulting set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolePermissionsRevokeResponse"];
+                };
+            };
+            /** @description permissions missing or not an array */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Role not found or not manageable by the tenant */
             404: {
                 headers: {
                     [name: string]: unknown;

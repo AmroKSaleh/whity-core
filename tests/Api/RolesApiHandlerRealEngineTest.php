@@ -482,6 +482,134 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $this->assertNotContains('TenantAPrivate', $names, "Tenant B must not see tenant A's owned role.");
     }
 
+    // ============ #712: role names are unique PER TENANT, not globally ============
+
+    public function testTwoTenantsMayEachCreateARoleWithTheSameName(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $first = $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Supervisor']));
+        $this->assertSame(201, $first->getStatusCode());
+
+        TenantContext::reset();
+        MockRequestFactory::setTestTenant(2);
+        $second = $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Supervisor']));
+
+        $this->assertSame(
+            201,
+            $second->getStatusCode(),
+            "Tenant B must not be blocked by a role name tenant A happens to use."
+        );
+
+        // Two distinct roles, each owned by its own tenant.
+        $this->assertNotSame(
+            json_decode($first->getBody(), true)['data']['id'],
+            json_decode($second->getBody(), true)['data']['id']
+        );
+    }
+
+    public function testDuplicateNameWithinTheSameTenantIsStillRejected(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Supervisor']));
+
+        $again = $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Supervisor']));
+
+        $this->assertSame(409, $again->getStatusCode(), 'A tenant may still not name two of its roles alike.');
+    }
+
+    public function testTenantCannotShadowAGlobalRoleName(): void
+    {
+        // `admin` is a seeded GLOBAL role every tenant already sees in its list;
+        // letting a tenant own a second `admin` would put two identically named
+        // roles in that tenant's own picker.
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $response = $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'admin']));
+
+        $this->assertSame(409, $response->getStatusCode());
+    }
+
+    public function testRenamingToANameAnotherTenantUsesIsAllowed(): void
+    {
+        // Tenant B parks the name first.
+        MockRequestFactory::setTestTenant(2);
+        $handler = $this->handler();
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Supervisor']));
+
+        // Tenant A renames one of its own roles to the same word.
+        TenantContext::reset();
+        MockRequestFactory::setTestTenant(1);
+        $created = json_decode(
+            $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Lead']))->getBody(),
+            true
+        )['data'];
+
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/roles/' . $created['id'], ['name' => 'Supervisor']),
+            ['id' => (string) $created['id']]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(2, $this->countRolesNamed('Supervisor'));
+    }
+
+    public function testRenamingOntoAnotherOfTheSameTenantsRolesIsRejected(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Supervisor']));
+        $other = json_decode(
+            $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Lead']))->getBody(),
+            true
+        )['data'];
+
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/roles/' . $other['id'], ['name' => 'Supervisor']),
+            ['id' => (string) $other['id']]
+        );
+
+        $this->assertSame(409, $response->getStatusCode());
+    }
+
+    public function testSystemTenantRenamingATenantRoleIsCheckedAgainstThatTenantsNamespace(): void
+    {
+        // Tenant 1 owns two roles. The SYSTEM tenant may rename either, but the
+        // uniqueness question is "is this free in TENANT 1?", not "is it free
+        // under tenant 0?" — the acting tenant is not the owning one here.
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Supervisor']));
+        $target = json_decode(
+            $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Lead']))->getBody(),
+            true
+        )['data'];
+
+        TenantContext::reset();
+        MockRequestFactory::setTestTenant(0);
+
+        $clash = $handler->update(
+            $this->authedRequest('PATCH', '/api/roles/' . $target['id'], ['name' => 'Supervisor']),
+            ['id' => (string) $target['id']]
+        );
+        $this->assertSame(409, $clash->getStatusCode(), "The clash inside tenant 1 must be seen from tenant 0.");
+
+        // A name only OTHER tenants use is free for tenant 1.
+        TenantContext::reset();
+        MockRequestFactory::setTestTenant(2);
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'Auditor']));
+
+        TenantContext::reset();
+        MockRequestFactory::setTestTenant(0);
+        $ok = $handler->update(
+            $this->authedRequest('PATCH', '/api/roles/' . $target['id'], ['name' => 'Auditor']),
+            ['id' => (string) $target['id']]
+        );
+        $this->assertSame(200, $ok->getStatusCode(), "Tenant 2's name must not block a rename inside tenant 1.");
+    }
+
     // ==================== Helpers ====================
 
     private function handler(): RolesApiHandler
@@ -519,6 +647,17 @@ final class RolesApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, '', NULL, datetime('now'))"
         );
         $stmt->execute([$id, $name]);
+    }
+
+    /** How many roles carry this name across every tenant and the global namespace. */
+    private function countRolesNamed(string $name): int
+    {
+        $stmt = $this->pdo->query('SELECT COUNT(*) FROM roles WHERE name = ' . $this->pdo->quote($name));
+        if ($stmt === false) {
+            throw new \RuntimeException('Failed to count roles named ' . $name);
+        }
+
+        return (int) $stmt->fetchColumn();
     }
 
     private function permIdFor(string $name): int

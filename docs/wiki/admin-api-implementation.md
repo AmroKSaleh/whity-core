@@ -28,6 +28,19 @@ Complete implementation of backend API endpoints for admin panel functionality. 
 | PATCH | `/api/roles/{id}` | Update a role | admin |
 | DELETE | `/api/roles/{id}` | Delete a role | admin |
 | GET | `/api/roles/{id}/permissions` | Get role permissions | admin |
+| POST | `/api/roles/{id}/permissions` | Grant permissions (additive, idempotent) | admin |
+| DELETE | `/api/roles/{id}/permissions` | Revoke permissions (subtractive, idempotent) | admin |
+
+`POST`/`PATCH /api/roles` REPLACE a role's whole permission set, so adding one
+grant through them means read-modify-write — and two admins doing that at once
+silently lose one of the two edits. The two endpoints above take the same
+`{"permissions": [...]}` body (numeric ids and/or `resource:action` names) and
+apply only the DELTA, so concurrent edits compose instead of clobbering. Both
+are idempotent: re-granting a held permission and revoking one that is not held
+are successes, and the response's `granted` / `revoked` count reports what
+actually changed. Same `admin` gate and tenant scoping as `PATCH
+/api/roles/{id}` — a tenant may only touch its own roles, and a global base role
+is manageable only by the system tenant.
 
 ### Tenants Management
 
