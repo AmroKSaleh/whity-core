@@ -38,6 +38,7 @@ Related: [Deployment Guide](DEPLOYMENT_GUIDE.md) · [Cron Operations](Cron-Opera
 - [ ] **No internal error detail leaks to clients** — 4xx/5xx bodies are generic; exceptions/stack traces are logged server-side only.
 - [ ] **System tenant (id 0) accounts** reviewed — the superuser/system-admin bootstrap credentials are rotated and access is restricted.
 - [ ] **Bootstrap administrator retired** once a named human administrator exists — see below.
+- [ ] **Dependency audits clean** — `composer audit` and `npm audit --audit-level=high` pass (gated in CI). No known-vulnerable dependency ships.
 
 ### Retiring the bootstrap administrator
 
@@ -67,7 +68,6 @@ curl -si https://<host>/api/login \
   -d '{"email":"<bootstrap address>","password":"<INITIAL_SYSTEM_ADMIN_PASSWORD>"}' | head -1
 # HTTP/1.1 401 Unauthorized
 ```
-- [ ] **Dependency audits clean** — `composer audit` and `npm audit --audit-level=high` pass (gated in CI). No known-vulnerable dependency ships.
 
 ## 4. Build & release
 
