@@ -3550,7 +3550,7 @@ export interface components {
         };
         RelationRef: {
             /** @enum {string} */
-            type: "profile" | "person";
+            kind: "profile" | "person";
             id: number;
         };
         RelationSummary: {

@@ -22691,7 +22691,7 @@
             "RelationRef": {
                 "type": "object",
                 "properties": {
-                    "type": {
+                    "kind": {
                         "type": "string",
                         "enum": [
                             "profile",
@@ -22703,7 +22703,7 @@
                     }
                 },
                 "required": [
-                    "type",
+                    "kind",
                     "id"
                 ]
             },
