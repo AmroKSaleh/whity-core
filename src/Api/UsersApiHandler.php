@@ -955,10 +955,17 @@ class UsersApiHandler
 
             // Null-safe comparison written longhand: SQLite has no
             // IS NOT DISTINCT FROM, and this suite runs on both engines.
+            //
+            // The CASTs are load-bearing on PostgreSQL. A bare placeholder in
+            // `? IS NULL` gives the planner nothing to infer a type from and it
+            // refuses the statement outright (42P18, "could not determine data
+            // type of parameter") — so without them every grant answered 500 on
+            // PostgreSQL while passing on SQLite, which infers happily.
             $existing = $this->db->prepare(
                 'SELECT id, is_primary FROM memberships
                   WHERE profile_id = ? AND tenant_id = ? AND role_id = ?
-                    AND ((ou_id IS NULL AND ? IS NULL) OR ou_id = ?)
+                    AND ((ou_id IS NULL AND CAST(? AS INTEGER) IS NULL)
+                          OR ou_id = CAST(? AS INTEGER))
                   LIMIT 1'
             );
             $existing->execute([$profileId, $ownerTenantId, $roleId, $ouId, $ouId]);
