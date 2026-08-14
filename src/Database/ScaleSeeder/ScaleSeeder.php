@@ -533,13 +533,19 @@ final class ScaleSeeder
                 continue;
             }
 
+            // Migration 093 (#712) replaced the platform-global UNIQUE(name) on
+            // roles with two PARTIAL unique indexes, so a conflict target has to
+            // carry the matching predicate — a bare `ON CONFLICT (name)` now
+            // matches no index and PostgreSQL refuses the statement. Every role
+            // seeded here is tenant-OWNED, so the per-tenant index is the one.
+            $conflictTarget = 'ON CONFLICT (tenant_id, name) WHERE tenant_id IS NOT NULL DO NOTHING';
             $insertSql = $driver === 'pgsql'
                 ? 'INSERT INTO roles (name, description, tenant_id, created_at)
                    VALUES (:name, :description, :tenant_id, NOW())
-                   ON CONFLICT (name) DO NOTHING RETURNING id'
+                   ' . $conflictTarget . ' RETURNING id'
                 : 'INSERT INTO roles (name, description, tenant_id, created_at)
                    VALUES (:name, :description, :tenant_id, NOW())
-                   ON CONFLICT (name) DO NOTHING';
+                   ' . $conflictTarget;
             $stmt = $pdo->prepare($insertSql);
             $stmt->execute([
                 ':name' => $name,
