@@ -49,7 +49,11 @@ use PDO;
  * already exists for that profile in this tenant is rejected (409). The role is
  * resolved the same way as update via {@see self::resolveVisibleRoleId()} (a
  * role NAME as the Create form sends it, or a numeric role_id; absent role
- * defaults to the global `user` role; an unresolvable/foreign role is 404).
+ * defaults to the global `user` role; an unresolvable/foreign role is 404). An
+ * optional `ou_id` places the new membership in an organizational unit in the
+ * same one call — validated by the SAME gate update() uses
+ * ({@see self::resolveOuIdForTenant()}), so a foreign OU is a 403; omitting it
+ * leaves the membership's `ou_id` NULL exactly as before.
  *
  * Update (PATCH /api/users/{id})
  * ------------------------------
@@ -272,8 +276,11 @@ class UsersApiHandler
      * (409) when an active membership already exists for that profile in this
      * tenant. The role is resolved via {@see self::resolveVisibleRoleId()} (name
      * or numeric id; absent defaults to the global `user` role; an
-     * unresolvable/foreign role is a 404). The SYSTEM tenant (id 0) creates in
-     * the caller's TenantContext per the existing contract.
+     * unresolvable/foreign role is a 404). An optional `ou_id` places the
+     * membership in an organizational unit of the SAME tenant (403 otherwise) so
+     * provisioning needs no follow-up PATCH; omitted, the `ou_id` stays NULL.
+     * The SYSTEM tenant (id 0) creates in the caller's TenantContext per the
+     * existing contract.
      *
      * @param Request $request The incoming request.
      * @return Response JSON created user under the `data` key (201) or an error.
@@ -327,6 +334,21 @@ class UsersApiHandler
                 }
             }
 
+            // Optional OU placement, so provisioning is ONE atomic call instead of
+            // POST + a follow-up PATCH. Validated by the same gate update() uses
+            // ({@see self::resolveOuIdForTenant()}), against the tenant the
+            // membership is about to be created in — a foreign OU is refused, not
+            // silently accepted. An absent/null `ou_id` resolves to null, i.e. the
+            // pre-existing behaviour, byte for byte.
+            $ouId = null;
+            if (array_key_exists('ou_id', $body)) {
+                $resolvedOu = $this->resolveOuIdForTenant($body['ou_id'], $tenantId);
+                if ($resolvedOu instanceof Response) {
+                    return $resolvedOu;
+                }
+                $ouId = $resolvedOu;
+            }
+
             // Dispatch filter hook before creating the user (may modify email/role).
             $userData = $this->hookManager->dispatch('user.creating', [
                 'email' => $email,
@@ -364,25 +386,34 @@ class UsersApiHandler
                 if ($existing !== null) {
                     // A non-active membership (invited/suspended) exists: promote it
                     // to active with the resolved role. The predicate is on
-                    // (profile_id, tenant_id).
-                    $upd = $this->db->prepare(
-                        "UPDATE memberships SET status = 'active', role_id = :role_id
-                         WHERE profile_id = :profile_id AND tenant_id = :tenant_id"
-                    );
-                    $upd->execute([
+                    // (profile_id, tenant_id). `ou_id` is only touched when the
+                    // request actually carried one — an omitted `ou_id` must leave
+                    // the OU the membership already had alone, not blank it.
+                    $params = [
                         ':role_id' => $roleId,
                         ':profile_id' => $profileId,
                         ':tenant_id' => $tenantId,
-                    ]);
+                    ];
+                    $ouAssignment = '';
+                    if ($ouId !== null) {
+                        $ouAssignment = ', ou_id = :ou_id';
+                        $params[':ou_id'] = $ouId;
+                    }
+                    $upd = $this->db->prepare(
+                        "UPDATE memberships SET status = 'active', role_id = :role_id{$ouAssignment}
+                         WHERE profile_id = :profile_id AND tenant_id = :tenant_id"
+                    );
+                    $upd->execute($params);
                 } else {
                     $ins = $this->db->prepare(
                         "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
-                         VALUES (:profile_id, :tenant_id, :role_id, NULL, 'active', NOW())"
+                         VALUES (:profile_id, :tenant_id, :role_id, :ou_id, 'active', NOW())"
                     );
                     $ins->execute([
                         ':profile_id' => $profileId,
                         ':tenant_id' => $tenantId,
                         ':role_id' => $roleId,
+                        ':ou_id' => $ouId,
                     ]);
                 }
 
@@ -559,22 +590,16 @@ class UsersApiHandler
             // otherwise silently drop the change (the same class of bug
             // OusApiHandler::update() documents for parent_id).
             if (array_key_exists('ou_id', $body)) {
-                $ouId = $body['ou_id'];
-                if ($ouId !== null && $ouId !== 0 && $ouId !== '') {
-                    // SECURITY: ou_id must belong to the membership's owning tenant.
-                    $stmtCheckOu = $this->db->prepare(
-                        'SELECT id FROM organizational_units WHERE id = ? AND tenant_id = ?'
-                    );
-                    $stmtCheckOu->execute([$ouId, $ownerTenantId]);
-                    if (!$stmtCheckOu->fetch()) {
-                        return Response::error('OU does not belong to current tenant', 403);
-                    }
-                    $newOuId = (int)$ouId;
-                    $ouChanged = true;
-                } else {
-                    $ouSetNull = true;
-                    $ouChanged = true;
+                $resolvedOu = $this->resolveOuIdForTenant($body['ou_id'], $ownerTenantId);
+                if ($resolvedOu instanceof Response) {
+                    return $resolvedOu;
                 }
+                if ($resolvedOu === null) {
+                    $ouSetNull = true;
+                } else {
+                    $newOuId = $resolvedOu;
+                }
+                $ouChanged = true;
             }
 
             // Account-level status (profiles.status) — the WC-user-status
@@ -1008,6 +1033,59 @@ class UsersApiHandler
         }
 
         return (int)$row['id'];
+    }
+
+    /**
+     * Resolve a submitted `ou_id` to the value to persist on a membership whose
+     * owning tenant is `$ownerTenantId`.
+     *
+     * The SINGLE OU-assignment gate shared by {@see self::create()} and
+     * {@see self::update()} — both endpoints write `memberships.ou_id`, so both
+     * must clear the same bar. SECURITY: an OU is only assignable when it belongs
+     * to the membership's OWNING tenant; a foreign OU would otherwise plant a
+     * membership across the tenant boundary (the system tenant is NOT exempt —
+     * the OU still has to live in the tenant the membership does).
+     *
+     * `null`, `0`/`"0"` and `''` all mean "no OU" and resolve to null, so an explicit
+     * `{"ou_id": null}` clears the assignment on update and creates an unassigned
+     * membership on create (identical to omitting the field).
+     *
+     * @param  mixed $ouRef         The raw submitted value.
+     * @param  int   $ownerTenantId The tenant that owns the target membership.
+     * @return int|Response|null    The OU id to persist, null for "no OU", or a
+     *                              ready-to-return error Response (400/403).
+     */
+    private function resolveOuIdForTenant(mixed $ouRef, int $ownerTenantId): int|Response|null
+    {
+        if ($ouRef === null || $ouRef === '') {
+            return null;
+        }
+
+        // Only an integer-ish reference can be an OU id. Rejecting anything else
+        // HERE keeps a non-numeric body (e.g. `{"ou_id": "eng"}`) a clean 400
+        // instead of an "invalid input syntax for integer" driver error surfacing
+        // as an opaque 500 on PostgreSQL.
+        if (!is_int($ouRef) && !(is_string($ouRef) && ctype_digit($ouRef))) {
+            return Response::error('Invalid ou_id', 400);
+        }
+
+        $ouId = (int)$ouRef;
+
+        // 0 (and its string form) is the "no OU" sentinel the Edit form submits
+        // for an empty select — never a real organizational_units.id.
+        if ($ouId === 0) {
+            return null;
+        }
+
+        $stmtCheckOu = $this->db->prepare(
+            'SELECT id FROM organizational_units WHERE id = ? AND tenant_id = ?'
+        );
+        $stmtCheckOu->execute([$ouId, $ownerTenantId]);
+        if (!$stmtCheckOu->fetch()) {
+            return Response::error('OU does not belong to current tenant', 403);
+        }
+
+        return $ouId;
     }
 
     /**

@@ -24992,6 +24992,10 @@
                                 "type": "string"
                             }
                         ]
+                    },
+                    "ou_id": {
+                        "type": "integer",
+                        "nullable": true
                     }
                 },
                 "required": [

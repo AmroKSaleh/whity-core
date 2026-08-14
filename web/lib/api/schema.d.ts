@@ -4129,6 +4129,7 @@ export interface components {
             email: string;
             password: string;
             role?: number | string;
+            ou_id?: number | null;
         };
         UserListResponse: {
             data: components["schemas"]["User"][];

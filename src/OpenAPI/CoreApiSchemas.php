@@ -2638,6 +2638,10 @@ final class CoreApiSchemas
                 'email' => self::str(),
                 'password' => ['type' => 'string', 'minLength' => 6],
                 'role' => $permissionRef,
+                // Optional OU placement, so provisioning is one atomic call. The
+                // OU must belong to the caller's tenant (403 otherwise); omitted
+                // or null leaves the membership unassigned.
+                'ou_id' => self::int(true),
             ], ['email', 'password']),
             'UserUpdateRequest' => self::object([
                 'email' => self::str(),

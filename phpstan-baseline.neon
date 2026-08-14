@@ -577,12 +577,12 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
-			count: 2
+			count: 3
 			path: tests/Api/UsersApiHandlerRealEngineTest.php
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 29
+			count: 40
 			path: tests/Api/UsersApiHandlerRealEngineTest.php
 
 		-
