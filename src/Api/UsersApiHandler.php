@@ -875,6 +875,7 @@ class UsersApiHandler
                 JOIN profiles p ON p.id = m.profile_id
                 LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                 WHERE m.profile_id = ? AND m.tenant_id = ?
+                ORDER BY m.is_primary DESC, m.id ASC
                 LIMIT 1
             ");
             $stmt->execute([$profileId, $tenantId]);
@@ -901,6 +902,7 @@ class UsersApiHandler
             "SELECT m.profile_id AS id, m.tenant_id, m.status, m.role_id
              FROM memberships m
              WHERE m.profile_id = ? AND m.tenant_id = ?
+             ORDER BY m.is_primary DESC, m.id ASC
              LIMIT 1"
         );
         $stmt->execute([$profileId, $tenantId]);

@@ -784,6 +784,7 @@ class AuthHandler
              FROM memberships m
              LEFT JOIN roles r ON r.id = m.role_id
              WHERE m.profile_id = ? AND m.tenant_id = ? AND m.status = 'active'
+             ORDER BY m.is_primary DESC, m.id ASC
              LIMIT 1"
         );
         $membershipStmt->execute([$profileId, $activeTenantId]);
@@ -907,7 +908,10 @@ class AuthHandler
     private function activeMembershipOuId(int $profileId, int $activeTenantId): ?int
     {
         $stmt = $this->db->prepare(
-            "SELECT ou_id FROM memberships WHERE profile_id = ? AND tenant_id = ? AND status = 'active' LIMIT 1"
+            "SELECT ou_id FROM memberships
+             WHERE profile_id = ? AND tenant_id = ? AND status = 'active'
+             ORDER BY is_primary DESC, id ASC
+             LIMIT 1"
         );
         $stmt->execute([$profileId, $activeTenantId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
