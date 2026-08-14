@@ -10,6 +10,7 @@ use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
@@ -953,39 +954,11 @@ class UsersApiHandler
      */
     private function findOrCreateProfile(string $email, string $passwordHash): int
     {
-        // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
-        $peStmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
-        $peStmt->execute([$email]);
-        $existingProfileId = $peStmt->fetchColumn();
-
-        if ($existingProfileId !== false) {
-            return (int)$existingProfileId;
-        }
-
-        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-        $profStmt = $this->db->prepare(
-            'INSERT INTO profiles
-                 (display_name, password_hash, two_factor_enabled,
-                  two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, ?, false, 0, 0, NOW(), NOW())'
-        );
-        $profStmt->execute([$this->localPart($email), $passwordHash]);
-        $profileId = (int)$this->db->lastInsertId();
-
-        // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2)
-        $this->db->prepare(
-            'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (?, ?, true, true, NOW())'
-        )->execute([$profileId, $email]);
-
-        return $profileId;
-    }
-
-    /** Local-part (before @) of an email, used as the profile display name. */
-    private function localPart(string $email): string
-    {
-        $at = strrpos($email, '@');
-        return $at !== false ? substr($email, 0, $at) : $email;
+        // Shared with tenant provisioning (#779), which needs exactly this to
+        // give a new tenant its first administrator. Kept as one implementation
+        // rather than two: an identity written two slightly different ways is an
+        // identity that eventually diverges.
+        return (new ProfileProvisioner($this->db))->findOrCreate($email, $passwordHash);
     }
 
     /**

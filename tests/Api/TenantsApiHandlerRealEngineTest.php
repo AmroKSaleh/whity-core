@@ -522,4 +522,164 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
         }
         return $pdo;
     }
+
+    // ── Bootstrap: a tenant and its first administrator (#779) ───────────────
+
+    /**
+     * Provisioning a tenant WITH an administrator is one atomic call.
+     *
+     * Before this, POST /api/tenants inserted only the tenants row, and the
+     * three API paths that could have finished the job formed a cycle:
+     * POST /api/users always targets the CALLER's tenant, and both
+     * switch-tenant and select-tenant require an active membership in the target
+     * before minting a token for it. So the membership needed a token and the
+     * token needed the membership, and every install broke the cycle with a
+     * direct SQL insert — outside the API's validation and outside its audit
+     * trail.
+     */
+    public function testCreateProvisionsTheTenantAndItsFirstAdministrator(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->create($this->createRequest([
+            'name' => 'Bootstrapped',
+            'admin' => ['email' => 'owner@example.com', 'password' => 'Str0ng-Bootstrap-Pw!'],
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+        $data = json_decode($response->getBody(), true)['data'];
+        $tenantId = (int) $data['id'];
+
+        $this->assertSame('owner@example.com', $data['admin']['email']);
+        $this->assertSame(1, $data['userCount'], 'the tenant has a member the moment it exists');
+
+        $stmt = $this->pdo->prepare(
+            'SELECT m.status, m.is_primary, r.name AS role
+               FROM memberships m
+               JOIN roles r ON r.id = m.role_id
+               JOIN profile_emails pe ON pe.profile_id = m.profile_id
+              WHERE m.tenant_id = ? AND pe.email = ?'
+        );
+        $stmt->execute([$tenantId, 'owner@example.com']);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $this->assertNotFalse($row, 'the administrator is a real membership in the NEW tenant');
+        $this->assertSame('active', $row['status']);
+        $this->assertSame('admin', $row['role']);
+        $this->assertTrue((bool) $row['is_primary'], 'the first membership is the primary one');
+    }
+
+    /**
+     * An existing person becomes the new tenant's administrator without a second
+     * identity being created.
+     *
+     * profile_emails.email is globally unique (ADR 0005 §2). A duplicate profile
+     * would split that person's credential and token epoch across two rows, so a
+     * password change or a forced logout would apply to only one of them.
+     */
+    public function testAnExistingProfileIsReusedAsTheAdministrator(): void
+    {
+        $this->seedProfileWithEmail(900, 'shared@example.com');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->create($this->createRequest([
+            'name' => 'Second Home',
+            'admin' => ['email' => 'shared@example.com', 'password' => 'Str0ng-Bootstrap-Pw!'],
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+        $this->assertSame(900, json_decode($response->getBody(), true)['data']['admin']['id']);
+
+        $count = $this->pdo->prepare('SELECT COUNT(*) FROM profile_emails WHERE email = ?');
+        $count->execute(['shared@example.com']);
+        $this->assertSame(1, (int) $count->fetchColumn(), 'one identity, two memberships');
+    }
+
+    /**
+     * A rejected administrator leaves NO tenant behind.
+     *
+     * This is the failure semantic the whole change turns on. A tenant with no
+     * members is invisible to every API path that requires a membership, so
+     * anything left behind here could only be finished or removed by the direct
+     * SQL this endpoint exists to eliminate.
+     *
+     * @dataProvider badAdminProvider
+     * @param array<mixed> $admin
+     */
+    public function testARejectedAdministratorLeavesNoTenantBehind(array $admin, int $expectedStatus): void
+    {
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->create($this->createRequest([
+            'name' => 'Never Created',
+            'admin' => $admin,
+        ]));
+
+        $this->assertSame($expectedStatus, $response->getStatusCode(), $response->getBody());
+
+        $orphans = $this->pdo->prepare('SELECT COUNT(*) FROM tenants WHERE name = ?');
+        $orphans->execute(['Never Created']);
+        $this->assertSame(0, (int) $orphans->fetchColumn(), 'the tenant was not left behind');
+    }
+
+    /** @return array<string, array{0: array<mixed>, 1: int}> */
+    public static function badAdminProvider(): array
+    {
+        return [
+            'malformed email' => [['email' => 'not-an-email', 'password' => 'Str0ng-Bootstrap-Pw!'], 400],
+            'password below policy' => [['email' => 'owner@example.com', 'password' => 'short'], 400],
+            'missing password' => [['email' => 'owner@example.com'], 400],
+            'unknown role' => [
+                ['email' => 'owner@example.com', 'password' => 'Str0ng-Bootstrap-Pw!', 'role' => 'sorcerer'],
+                404,
+            ],
+            'not an object' => [['nonsense'], 400],
+        ];
+    }
+
+    /**
+     * Creating a tenant WITHOUT an administrator behaves exactly as before.
+     *
+     * The block is optional, so every existing caller must be unaffected —
+     * including the userCount the response reports.
+     */
+    public function testCreateWithoutAnAdministratorIsUnchanged(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->create($this->createRequest(['name' => 'Bare Tenant']));
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+        $data = json_decode($response->getBody(), true)['data'];
+
+        $this->assertArrayNotHasKey('admin', $data);
+        $this->assertSame(0, $data['userCount']);
+
+        $members = $this->pdo->prepare('SELECT COUNT(*) FROM memberships WHERE tenant_id = ?');
+        $members->execute([(int) $data['id']]);
+        $this->assertSame(0, (int) $members->fetchColumn());
+    }
+
+    /**
+     * A create request carrying a JSON body.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function createRequest(array $body): Request
+    {
+        return new Request('POST', '/api/tenants', [], (string) json_encode($body));
+    }
+
+    /** A profile that already owns an email, for the identity-reuse case. */
+    private function seedProfileWithEmail(int $profileId, string $email): void
+    {
+        $this->pdo->prepare(
+            "INSERT INTO profiles
+                (id, display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, NOW(), NOW())"
+        )->execute([$profileId, $email]);
+
+        $this->pdo->prepare(
+            'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, NOW())'
+        )->execute([$profileId, $email]);
+    }
 }
