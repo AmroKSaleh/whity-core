@@ -10,6 +10,9 @@
 .worktrees
 
 # Documentation and the Next.js frontend: the backend image serves neither.
+# The frontend ships as its own image and needs the opposite slice of the repo,
+# so it overrides this file wholesale with web/Dockerfile.dockerignore rather
+# than re-including anything here.
 docs
 wiki
 web
