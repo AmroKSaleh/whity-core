@@ -3918,6 +3918,16 @@ export interface components {
         TenantCreateRequest: {
             name: string;
             slug?: string;
+            admin?: components["schemas"]["TenantInitialAdmin"];
+        };
+        TenantCreatedResponse: {
+            data: components["schemas"]["Tenant"] & {
+                admin?: {
+                    id: number;
+                    email: string;
+                    role: string;
+                };
+            };
         };
         TenantEmailDomain: {
             id: number;
@@ -3970,6 +3980,13 @@ export interface components {
                     [key: string]: components["schemas"]["EntitlementCatalogueEntry"];
                 };
             };
+        };
+        TenantInitialAdmin: {
+            /** Format: email */
+            email: string;
+            /** Format: password */
+            password: string;
+            role?: string;
         };
         TenantListResponse: {
             data: components["schemas"]["Tenant"][];
@@ -17952,7 +17969,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TenantResponse"];
+                    "application/json": components["schemas"]["TenantCreatedResponse"];
                 };
             };
             /** @description Validation failed */
@@ -17982,7 +17999,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Not found */
+            /** @description The requested initial administrator role does not exist */
             404: {
                 headers: {
                     [name: string]: unknown;

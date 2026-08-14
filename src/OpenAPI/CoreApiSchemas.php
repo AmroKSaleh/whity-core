@@ -641,8 +641,9 @@ final class CoreApiSchemas
                 'tags' => ['tenants'],
                 'request' => 'TenantCreateRequest',
                 'responses' => [
-                    201 => self::jsonResponse('The created tenant', 'TenantResponse'),
+                    201 => self::jsonResponse('The created tenant', 'TenantCreatedResponse'),
                     400 => self::errorResponse('Validation failed'),
+                    404 => self::errorResponse('The requested initial administrator role does not exist'),
                     409 => self::errorResponse('Tenant name or slug already exists'),
                 ] + self::authErrors(),
             ]),
@@ -2811,10 +2812,36 @@ final class CoreApiSchemas
             'Tenant' => $tenant,
             'TenantListResponse' => self::paginatedListEnvelope('Tenant'),
             'TenantResponse' => self::dataEnvelope(SchemaBuilder::ref('Tenant')),
+            // Create echoes the administrator it provisioned, so the caller can
+            // report who now owns the tenant without a second round trip. Absent
+            // when the request carried no `admin` block.
+            'TenantCreatedResponse' => self::dataEnvelope(['allOf' => [
+                SchemaBuilder::ref('Tenant'),
+                self::object([
+                    'admin' => self::object([
+                        'id' => self::int(),
+                        'email' => self::str(),
+                        'role' => self::str(),
+                    ], ['id', 'email', 'role']),
+                ], []),
+            ]]),
+            // #779: the optional `admin` block provisions the tenant's first
+            // administrator in the SAME transaction as the tenant. Without it,
+            // POST /api/tenants leaves a tenant no API path can reach — creating
+            // a user targets the caller's tenant, and switching to the new one
+            // requires the very membership that cannot yet be made.
             'TenantCreateRequest' => self::object([
                 'name' => self::str(),
                 'slug' => ['type' => 'string', 'pattern' => '^[a-z0-9-]+$'],
+                'admin' => SchemaBuilder::ref('TenantInitialAdmin'),
             ], ['name']),
+            // `role` names a role the new tenant can see: one it owns (seeded by
+            // a tenant.created listener) or a global one. Defaults to `admin`.
+            'TenantInitialAdmin' => self::object([
+                'email' => ['type' => 'string', 'format' => 'email'],
+                'password' => ['type' => 'string', 'format' => 'password'],
+                'role' => self::str(),
+            ], ['email', 'password']),
             'TenantUpdateRequest' => self::object([
                 'name' => self::str(),
                 'slug' => ['type' => 'string', 'pattern' => '^[a-z0-9-]+$'],

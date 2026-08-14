@@ -16746,7 +16746,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/TenantResponse"
+                                    "$ref": "#/components/schemas/TenantCreatedResponse"
                                 }
                             }
                         }
@@ -16782,7 +16782,7 @@
                         }
                     },
                     "404": {
-                        "description": "Not found",
+                        "description": "The requested initial administrator role does not exist",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -24542,10 +24542,52 @@
                     "slug": {
                         "type": "string",
                         "pattern": "^[a-z0-9-]+$"
+                    },
+                    "admin": {
+                        "$ref": "#/components/schemas/TenantInitialAdmin"
                     }
                 },
                 "required": [
                     "name"
+                ]
+            },
+            "TenantCreatedResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/Tenant"
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "admin": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {
+                                                "type": "integer"
+                                            },
+                                            "email": {
+                                                "type": "string"
+                                            },
+                                            "role": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": [
+                                            "id",
+                                            "email",
+                                            "role"
+                                        ]
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "TenantEmailDomain": {
@@ -24745,6 +24787,26 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "TenantInitialAdmin": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "password": {
+                        "type": "string",
+                        "format": "password"
+                    },
+                    "role": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "email",
+                    "password"
                 ]
             },
             "TenantListResponse": {
