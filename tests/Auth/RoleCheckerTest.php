@@ -269,7 +269,7 @@ class RoleCheckerTest extends TestCase
         $this->expectException(PDOException::class);
         $this->pdo->prepare(
             "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
-             VALUES (?, ?, ?, 1, 'active', datetime('now'))"
+             VALUES (?, ?, ?, true, 'active', datetime('now'))"
         )->execute([$profileId, self::TENANT, $this->roleId('editor')]);
     }
 
@@ -283,7 +283,7 @@ class RoleCheckerTest extends TestCase
 
         $this->pdo->prepare(
             "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
-             VALUES (?, ?, ?, 0, 'active', datetime('now'))"
+             VALUES (?, ?, ?, false, 'active', datetime('now'))"
         )->execute([$profileId, self::TENANT, $this->roleId('editor')]);
 
         $stmt = $this->pdo->query(
@@ -310,7 +310,7 @@ class RoleCheckerTest extends TestCase
 
         $this->pdo->prepare(
             "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
-             VALUES (?, ?, ?, 0, 'active', datetime('now'))"
+             VALUES (?, ?, ?, false, 'active', datetime('now'))"
         )->execute([$profileId, self::TENANT, $this->roleId('editor')]);
 
         self::assertTrue(
