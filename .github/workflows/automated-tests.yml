@@ -356,8 +356,19 @@ jobs:
           key: phpstan-${{ github.sha }}
           restore-keys: phpstan-
 
+      # 1G, not 512M. PHPStan runs parallel workers and each holds its own
+      # analysis state, so the ceiling is per-worker rather than total — 512M
+      # was enough until the suite grew past it, at which point a worker
+      # crashes and the whole job fails with "Result is incomplete because of
+      # severe errors" rather than with a real finding. That reads exactly like
+      # a code defect and is not one, which is the expensive part: the failure
+      # names a memory limit only if you open the log.
+      #
+      # The runner has ~7GB, so this is not near anything. It is also what the
+      # documented local invocation already uses, so a clean local run no
+      # longer disagrees with CI.
       - name: Run PHPStan
-        run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=512M
+        run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=1G
 
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
