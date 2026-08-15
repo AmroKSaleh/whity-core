@@ -250,7 +250,7 @@ function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
                     <p
                       role="alert"
                       data-testid="feature-flags-approval-gate-warning"
-                      className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400"
+                      className="rounded-md border border-warning/50 bg-warning/10 p-3 text-xs text-warning-foreground"
                     >
                       {t(
                         'settings.featureFlags.passwordResetApproval.warning',
