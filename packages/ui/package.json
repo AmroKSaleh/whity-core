@@ -49,7 +49,6 @@
     "./plugin-card": "./src/plugin-card.tsx",
     "./popover": "./src/popover.tsx",
     "./radio-group": "./src/radio-group.tsx",
-    "./screen-too-small": "./src/screen-too-small.tsx",
     "./select": "./src/select.tsx",
     "./separator": "./src/separator.tsx",
     "./sheet": "./src/sheet.tsx",

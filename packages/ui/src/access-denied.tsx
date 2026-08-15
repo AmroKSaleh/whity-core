@@ -4,6 +4,7 @@ import {
   IconAlertTriangle,
   IconArrowRight,
   IconCircleCheck,
+  IconDeviceDesktop,
   IconFileText,
   IconLock,
   IconSearch,
@@ -22,6 +23,7 @@ export type AccessDeniedVariant =
   | "error"
   | "success"
   | "maintenance"
+  | "screen-too-small"
 
 export interface ActionConfig {
   label: string
@@ -44,7 +46,14 @@ export interface AccessDeniedProps extends Omit<React.ComponentProps<"div">, "ti
   variant?: AccessDeniedVariant
   icon?: React.ReactNode
   title?: React.ReactNode
-  description: React.ReactNode
+  description?: React.ReactNode
+  /** Minimum width the feature needs, in px — shown to explain the gate when variant is "screen-too-small" or similar. */
+  minWidth?: number
+  /**
+   * The "needs a wider window" line. A function because the pixel count sits
+   * inside the sentence and languages order it differently.
+   */
+  minWidthHint?: (minWidth: number) => string
   /** Enable an inline site search form (automatically true for "not-found"). */
   showSearch?: boolean
   /** Placeholder text for the search input. */
@@ -67,9 +76,10 @@ const VARIANT_CONFIGS: Record<
   AccessDeniedVariant,
   {
     title: string
+    defaultDescription?: string
     defaultIcon: React.ReactNode
     iconWrapper: string
-    buttonVariant: "destructive-solid" | "warning-solid" | "info-solid" | "success-solid" | "purple-solid"
+    buttonVariant: "destructive-solid" | "warning-solid" | "info-solid" | "success-solid" | "purple-solid" | "outline"
   }
 > = {
   forbidden: {
@@ -114,6 +124,14 @@ const VARIANT_CONFIGS: Record<
       "bg-purple-500/10 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400 border border-purple-500/20 shadow-2xs",
     buttonVariant: "purple-solid",
   },
+  "screen-too-small": {
+    title: "This screen is too small",
+    defaultDescription: "Please switch to a larger screen to continue.",
+    defaultIcon: <IconDeviceDesktop />,
+    iconWrapper:
+      "bg-sky-500/10 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400 border border-sky-500/20 shadow-2xs",
+    buttonVariant: "outline",
+  },
 }
 
 function renderAction(
@@ -154,8 +172,9 @@ function renderAction(
 
 /**
  * Generic full-screen status and permission-denied feedback screen (AccessDenied / StatusPage).
- * Supports semantic variants (forbidden, unauthorized, not-found, error, success, maintenance),
- * integrated site search for Page Not Found (404), live search results list, and matching color larger action buttons.
+ * Supports semantic variants (forbidden, unauthorized, not-found, error, success, maintenance, screen-too-small),
+ * integrated site search for Page Not Found (404), live search results list, minWidth gate messaging,
+ * and matching color larger action buttons.
  */
 function AccessDenied({
   className,
@@ -163,6 +182,8 @@ function AccessDenied({
   icon,
   title,
   description,
+  minWidth,
+  minWidthHint = (px: number) => `Needs a window at least ${px}px wide.`,
   showSearch = variant === "not-found",
   searchPlaceholder = "Search site pages, resources, or docs...",
   searchButtonLabel = "Search",
@@ -178,6 +199,7 @@ function AccessDenied({
   const config = VARIANT_CONFIGS[variant] ?? VARIANT_CONFIGS.forbidden
   const resolvedTitle = title ?? config.title
   const resolvedIcon = icon ?? config.defaultIcon
+  const resolvedDescription = description ?? config.defaultDescription
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -227,12 +249,23 @@ function AccessDenied({
         {resolvedTitle}
       </h2>
 
-      <div
-        data-slot="access-denied-description"
-        className="mb-6 max-w-md text-xs/relaxed text-muted-foreground md:text-sm/relaxed"
-      >
-        {description}
-      </div>
+      {resolvedDescription && (
+        <div
+          data-slot="access-denied-description"
+          className={cn(
+            "max-w-md text-xs/relaxed text-muted-foreground md:text-sm/relaxed",
+            minWidth !== undefined ? "mb-2" : "mb-6"
+          )}
+        >
+          {resolvedDescription}
+        </div>
+      )}
+
+      {minWidth !== undefined && (
+        <p data-slot="access-denied-min-width" className="mb-6 text-xs text-muted-foreground/80">
+          {minWidthHint(minWidth)}
+        </p>
+      )}
 
       {showSearch && (
         <div className="mb-6 flex w-full max-w-md flex-col gap-3">
@@ -246,7 +279,7 @@ function AccessDenied({
                 className="h-8 text-xs"
               />
             </div>
-            <Button type="submit" size="default" variant={config.buttonVariant}>
+            <Button type="submit" size="default" variant={config.buttonVariant === "outline" ? "outline" : config.buttonVariant}>
               <IconSearch data-icon="inline-start" />
               {searchButtonLabel}
             </Button>
@@ -315,4 +348,39 @@ function AccessDenied({
   )
 }
 
-export { AccessDenied }
+const hasMatchMedia = () => typeof window !== "undefined" && typeof window.matchMedia === "function"
+
+/**
+ * Whether the viewport is at least `minWidth` CSS px, tracked live.
+ *
+ * Returns `undefined` for the hydration render — i.e. "not measured yet" — so a
+ * caller can hold off rendering EITHER branch for one paint instead of guessing.
+ * Guessing is what goes wrong here: assume wide and phones flash the editor;
+ * assume narrow and desktops flash the gate.
+ *
+ * A media query IS an external store, so this uses `useSyncExternalStore` rather
+ * than measuring in an effect: React swaps from the server snapshot to the live
+ * value immediately after hydration, with no setState cascade and no mismatch.
+ */
+function useViewportAtLeast(minWidth: number): boolean | undefined {
+  const subscribe = React.useCallback(
+    (onChange: () => void) => {
+      if (!hasMatchMedia()) return () => {}
+      const query = window.matchMedia(`(min-width: ${minWidth}px)`)
+      query.addEventListener("change", onChange)
+      return () => query.removeEventListener("change", onChange)
+    },
+    [minWidth]
+  )
+
+  const getSnapshot = React.useCallback(
+    // No matchMedia (very old browser / non-DOM env): fail OPEN rather than
+    // permanently gating someone out of the feature.
+    () => (hasMatchMedia() ? window.matchMedia(`(min-width: ${minWidth}px)`).matches : true),
+    [minWidth]
+  )
+
+  return React.useSyncExternalStore(subscribe, getSnapshot, () => undefined)
+}
+
+export { AccessDenied, useViewportAtLeast }

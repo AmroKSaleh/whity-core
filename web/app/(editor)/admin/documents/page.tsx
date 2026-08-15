@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ScreenTooSmall, useViewportAtLeast } from '@/components/ui/screen-too-small';
+import { AccessDenied, useViewportAtLeast } from '@amroksaleh/ui/access-denied';
 import { Button } from '@amroksaleh/ui/button';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { DocumentDesigner } from '@/components/documents/document-designer';
@@ -28,7 +28,7 @@ import { DocumentDesigner } from '@/components/documents/document-designer';
 /**
  * Below this width the three-pane editor cannot be made honest: the rails alone
  * exceed a phone's viewport before the page itself gets any room. Gate rather
- * than degrade — see `ScreenTooSmall`.
+ * than degrade — see `AccessDenied(variant="screen-too-small")`.
  */
 const MIN_EDITOR_WIDTH = 1024;
 
@@ -50,7 +50,8 @@ export default function DocumentsPage() {
 
   if (!wideEnough) {
     return (
-      <ScreenTooSmall
+      <AccessDenied
+        variant="screen-too-small"
         title={t('editor.tooSmall.title', 'The document editor needs a larger screen')}
         description={t(
           'editor.tooSmall.description',
@@ -59,6 +60,7 @@ export default function DocumentsPage() {
             'laptop or desktop.'
         )}
         minWidth={MIN_EDITOR_WIDTH}
+        className="min-h-svh border-none bg-transparent shadow-none"
         action={
           <Button asChild variant="outline" size="sm" className="mt-2">
             <Link href="/admin">{t('editor.tooSmall.back', 'Back to dashboard')}</Link>

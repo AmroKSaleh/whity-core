@@ -1,6 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import * as React from "react"
-import { IconArrowLeft, IconBuilding, IconHome, IconRefresh, IconSettings, IconUsers } from "@tabler/icons-react"
+import {
+  IconArrowLeft,
+  IconBuilding,
+  IconHome,
+  IconRefresh,
+  IconRulerMeasure,
+  IconSettings,
+  IconUsers,
+} from "@tabler/icons-react"
 
 import { AccessDenied, type SearchResultItem } from "./access-denied"
 
@@ -12,7 +20,7 @@ const meta = {
   argTypes: {
     variant: {
       control: "select",
-      options: ["forbidden", "unauthorized", "not-found", "error", "success", "maintenance"],
+      options: ["forbidden", "unauthorized", "not-found", "error", "success", "maintenance", "screen-too-small"],
     },
     showSearch: { control: "boolean" },
   },
@@ -174,6 +182,35 @@ export const MaintenanceState: Story = {
     primaryAction: {
       label: "Check Status",
       onClick: () => {},
+    },
+  },
+}
+
+export const ScreenTooSmallVariant: Story = {
+  args: {
+    variant: "screen-too-small",
+    title: "This screen is too small",
+    description: "Designing print-accurate labels and documents needs room for the page plus its layers and properties panels. Open this on a tablet in landscape, laptop or desktop.",
+    minWidth: 1024,
+    primaryAction: {
+      label: "Back to Dashboard",
+      icon: <IconHome />,
+      href: "/admin",
+    },
+  },
+}
+
+export const ScreenTooSmallCustomIcon: Story = {
+  args: {
+    variant: "screen-too-small",
+    icon: <IconRulerMeasure />,
+    title: "Window too narrow",
+    description: "Widen the window to at least 1280px to use the side-by-side comparison.",
+    minWidth: 1280,
+    secondaryAction: {
+      label: "Go Back",
+      icon: <IconArrowLeft />,
+      onClick: () => window.history.back(),
     },
   },
 }
