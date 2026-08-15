@@ -98,13 +98,10 @@ final class LocalStorageDriver implements StorageDriverInterface
 
     public function mimeType(string $key): string
     {
-        return match (strtolower(pathinfo($key, PATHINFO_EXTENSION))) {
-            'png' => 'image/png',
-            'webp' => 'image/webp',
-            'svg' => 'image/svg+xml',
-            'ico' => 'image/x-icon',
-            default => 'application/octet-stream',
-        };
+        // Shared with the WRITE path (see MimeTypes): an object store bakes the
+        // type into the object, so read-side and write-side must agree, and two
+        // lists that must agree eventually do not.
+        return MimeTypes::forKey($key);
     }
 
     public function lastModified(string $key): int

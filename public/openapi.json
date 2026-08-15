@@ -16898,7 +16898,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/TenantResponse"
+                                    "$ref": "#/components/schemas/TenantCreatedResponse"
                                 }
                             }
                         }
@@ -16934,7 +16934,7 @@
                         }
                     },
                     "404": {
-                        "description": "Not found",
+                        "description": "The requested initial administrator role does not exist",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -19245,6 +19245,310 @@
                     },
                     "409": {
                         "description": "Email already exists in the tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/users/{id}/memberships": {
+            "get": {
+                "operationId": "get_api_v1_users_id_memberships",
+                "summary": "List every role a user holds in this tenant",
+                "tags": [
+                    "users"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The user's memberships, primary first",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MembershipListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_users_id_memberships",
+                "summary": "Grant a user an additional role in this tenant",
+                "tags": [
+                    "users"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/MembershipCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The membership already existed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MembershipResponse"
+                                }
+                            }
+                        }
+                    },
+                    "201": {
+                        "description": "The membership that was created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MembershipResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User or role not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/users/{id}/memberships/{membershipId}": {
+            "delete": {
+                "operationId": "delete_api_v1_users_id_memberships_membershipid",
+                "summary": "Revoke one of a user's additional roles",
+                "tags": [
+                    "users"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "membershipId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Removal confirmation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MutationResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User or membership not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The primary membership cannot be removed here",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -21781,6 +22085,106 @@
                 },
                 "required": [
                     "current_password"
+                ]
+            },
+            "Membership": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "roleId": {
+                        "type": "integer"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "isPrimary": {
+                        "type": "boolean"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "active",
+                            "invited",
+                            "suspended"
+                        ]
+                    }
+                },
+                "required": [
+                    "id",
+                    "roleId",
+                    "role",
+                    "isPrimary",
+                    "status"
+                ]
+            },
+            "MembershipCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "role_id": {
+                        "type": "integer"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                }
+            },
+            "MembershipListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Membership"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "MembershipResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "integer"
+                            },
+                            "roleId": {
+                                "type": "integer"
+                            },
+                            "ou_id": {
+                                "type": "integer",
+                                "nullable": true
+                            },
+                            "isPrimary": {
+                                "type": "boolean"
+                            },
+                            "created": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "id",
+                            "roleId",
+                            "isPrimary",
+                            "created"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "MigrationEntry": {
@@ -24359,10 +24763,52 @@
                     "slug": {
                         "type": "string",
                         "pattern": "^[a-z0-9-]+$"
+                    },
+                    "admin": {
+                        "$ref": "#/components/schemas/TenantInitialAdmin"
                     }
                 },
                 "required": [
                     "name"
+                ]
+            },
+            "TenantCreatedResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/Tenant"
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "admin": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {
+                                                "type": "integer"
+                                            },
+                                            "email": {
+                                                "type": "string"
+                                            },
+                                            "role": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": [
+                                            "id",
+                                            "email",
+                                            "role"
+                                        ]
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "TenantEmailDomain": {
@@ -24562,6 +25008,26 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "TenantInitialAdmin": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "password": {
+                        "type": "string",
+                        "format": "password"
+                    },
+                    "role": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "email",
+                    "password"
                 ]
             },
             "TenantListResponse": {

@@ -1143,6 +1143,14 @@ $router->register('POST',   '/api/users',           [$usersHandler, 'create'], n
 $router->register('PATCH',  '/api/users/{id:\d+}',  [$usersHandler, 'update'], null, null, CorePermissions::USERS_WRITE);
 $router->register('DELETE', '/api/users/{id:\d+}',  [$usersHandler, 'delete'], null, null, CorePermissions::USERS_DELETE);
 
+// WC-712 §1: a profile may hold more than one role in a tenant (migration 094).
+// The user LIST shows one row per person with their PRIMARY role, so these are
+// where an additional role is seen, granted and revoked. Same permission gates
+// as the user routes above — granting a role is a user write.
+$router->register('GET',    '/api/users/{id:\d+}/memberships',                      [$usersHandler, 'listMemberships'],  null, null, CorePermissions::USERS_READ);
+$router->register('POST',   '/api/users/{id:\d+}/memberships',                      [$usersHandler, 'addMembership'],    null, null, CorePermissions::USERS_WRITE);
+$router->register('DELETE', '/api/users/{id:\d+}/memberships/{membershipId:\d+}',   [$usersHandler, 'removeMembership'], null, null, CorePermissions::USERS_WRITE);
+
 $rolesHandler = new RolesApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
 $router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');

@@ -14,6 +14,11 @@ class CliRunner
      */
     private array $commands = [
         'migrate'    => 'Whity\Cli\Commands\MigrationsCommand',
+        // Registered here as well as in public/index.php (WC-779): `migrate` was
+        // reachable through this tool and `seed` was not, so the only bootstrap
+        // an operator following the CLI could produce was the migration-seeded
+        // administrator — the one account nothing let them configure.
+        'seed'       => 'Whity\Cli\Commands\SeedCommand',
         'plugin'     => 'Whity\Cli\Commands\PluginsCommand',
         'tenant'     => 'Whity\Cli\Commands\TenantsCommand',
         'totp'       => 'Whity\Cli\Commands\TotpCommand',
@@ -83,6 +88,7 @@ class CliRunner
         echo "  whity-cli <command> [options] [arguments]\n\n";
         echo "Available Commands:\n";
         echo "  migrate    Manage database migrations (status, run, rollback)\n";
+        echo "  seed       Seed default tenant/roles/accounts (--with-fixtures for the demo logins)\n";
         echo "  plugin     Manage plugins (list, enable, disable, reload)\n";
         echo "  tenant     Manage tenants (list, create, update, delete)\n";
         echo "  totp       TOTP secret maintenance (reencrypt legacy secrets)\n";

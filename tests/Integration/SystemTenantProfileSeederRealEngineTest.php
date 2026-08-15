@@ -86,8 +86,17 @@ final class SystemTenantProfileSeederRealEngineTest extends TestCase
     private PDO $pdo;
     private Database $db;
 
+    /** APP_ENV as the process had it before setUp() forced 'development'. */
+    private string|false $savedAppEnv = false;
+
     protected function setUp(): void
     {
+        // WC-779: the *@example.com fixtures asserted in section (c) are
+        // development-only now, so this suite asks for that environment.
+        $this->savedAppEnv = $_ENV['APP_ENV'] ?? getenv('APP_ENV');
+        $_ENV['APP_ENV']   = 'development';
+        putenv('APP_ENV=development');
+
         // Silence seeder password announcements during tests.
         $_ENV['INITIAL_SYSTEM_ADMIN_PASSWORD'] = self::SYSTEM_ADMIN_PASSWORD;
         $_ENV['INITIAL_ADMIN_PASSWORD']         = self::DEV_FIXTURE_PASSWORD;
@@ -111,6 +120,15 @@ final class SystemTenantProfileSeederRealEngineTest extends TestCase
             unset($_ENV[$var]);
             putenv($var);
         }
+
+        if (is_string($this->savedAppEnv)) {
+            $_ENV['APP_ENV'] = $this->savedAppEnv;
+            putenv('APP_ENV=' . $this->savedAppEnv);
+        } else {
+            unset($_ENV['APP_ENV']);
+            putenv('APP_ENV');
+        }
+
         $_COOKIE = [];
     }
 

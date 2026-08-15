@@ -59,8 +59,13 @@ echo -e "${YELLOW}Running migrations...${NC}"
 docker exec "${APP_CONTAINER}" php public/index.php migrate run
 echo -e "${GREEN}Migrations complete${NC}"
 
+# --with-fixtures because staging runs with APP_ENV=staging, where the
+# *@example.com demo accounts are NOT seeded by default (WC-779) — and this
+# script exists precisely to produce the logins the load-test scripts use
+# (load-tests/run.sh defaults ADMIN_EMAIL to admin@example.com). A real
+# deployment seeds without the flag and gets only the bootstrap administrator.
 echo -e "${YELLOW}Seeding database...${NC}"
-docker exec "${APP_CONTAINER}" php public/index.php seed
+docker exec "${APP_CONTAINER}" php public/index.php seed --with-fixtures
 echo -e "${GREEN}Seeding complete${NC}"
 
 echo -e "${GREEN}Staging database initialization complete${NC}"

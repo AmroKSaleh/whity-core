@@ -1,0 +1,49 @@
+# Per-Dockerfile ignore override for web/Dockerfile (BuildKit's
+# "<dockerfile>.dockerignore takes precedence over the root .dockerignore"
+# convention), the same mechanism render-service/Dockerfile.dockerignore uses.
+#
+# This file is NOT optional here. The root .dockerignore excludes `web`
+# outright — correct for the PHP image, which serves no frontend, and fatal for
+# this one: without the override the build fails on a COPY of a directory that
+# plainly exists in the checkout, which reads as a broken Dockerfile rather than
+# as an ignore rule.
+#
+# Starts from `*` and re-includes, because this image needs a different slice of
+# the monorepo than the PHP core image and gets its own ruleset rather than
+# holes punched in that one. Re-including a nested path after an
+# exclude-everything `*` requires re-including EVERY ancestor directory one
+# level at a time (the same limitation .gitignore has).
+
+*
+
+# The workspace root. A single lockfile governs every workspace, so `npm ci`
+# can only run from here.
+!package.json
+!package-lock.json
+
+# The frontend itself. node_modules and .next are rebuilt inside the image —
+# copying the host's would drag in host-arch binaries and a stale build, and
+# they dwarf the source they would ship alongside.
+!web
+web/node_modules
+web/.next
+web/storybook-static
+web/test-results
+web/playwright-report
+web/tsconfig.tsbuildinfo
+
+# The workspace packages web imports. @amroksaleh/ui is consumed as SOURCE
+# (next.config.ts transpilePackages) — there is no prebuilt artifact to copy, so
+# the whole package tree has to be here.
+!packages
+packages/*/node_modules
+packages/*/storybook-static
+
+# npm validates the lockfile against EVERY workspace the root package.json
+# declares, so each template's manifest has to exist or `npm ci` refuses to
+# install. Nothing else under templates/ is part of this build — and
+# src-tauri/target alone is a multi-gigabyte Rust build directory that would
+# otherwise be uploaded as build context.
+!templates
+templates/*
+!templates/*/package.json

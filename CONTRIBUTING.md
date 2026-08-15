@@ -112,10 +112,17 @@ docker exec whity_frankenphp php bin/whity-cli migrate run
 docker exec whity_frankenphp php public/index.php seed
 ```
 
-> `php bin/whity-cli migrate run` and `php public/index.php migrate run` are
-> equivalent entry points (both dispatch to `Whity\Cli\CliRunner`). See the
-> [CLI Reference](docs/wiki/CLI_REFERENCE.md) for `migrate status`,
-> `migrate rollback`, and the `plugin` / `tenant` commands.
+> `php bin/whity-cli <cmd>` and `php public/index.php <cmd>` are equivalent
+> entry points for `migrate` and `seed` (both dispatch to
+> `Whity\Cli\CliRunner`). See the [CLI Reference](docs/wiki/CLI_REFERENCE.md)
+> for `migrate status`, `migrate rollback`, and the `plugin` / `tenant`
+> commands.
+
+> The `admin@example.com` / `user@example.com` / `superuser@example.com` logins
+> are **development-only**: the seeder creates them under `APP_ENV=development`
+> (the compose default) or with an explicit `seed --with-fixtures`. Every
+> environment gets the bootstrap administrator instead — `system@whity.local`,
+> or whatever `INITIAL_SYSTEM_ADMIN_EMAIL` names.
 
 Core migrations are tracked in the `core_schema_migrations` table; plugin
 migrations must use the standard `schema_migrations` table (see
