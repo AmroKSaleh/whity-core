@@ -19,35 +19,58 @@ use PDO;
  * password is generated and printed once (see {@see InitialPassword}).
  * No static default.
  *
- * In addition to the two default-tenant accounts, the seeder provisions a
- * system-tenant (id 0) superuser (superuser@example.com) holding the admin
- * role.  Unlike the default-tenant admin, a system-tenant admin may manage
- * the global base roles (NULL-tenant roles) and every tenant — see
- * WC-110/WC-223.
+ * Two account tiers (WC-779)
+ * ──────────────────────────
+ *  1. The BOOTSTRAP administrator — system tenant (id 0), admin role, address
+ *     from {@see BootstrapIdentity}. Every install needs this: it is the
+ *     account an operator first signs in with. Seeded in every environment,
+ *     and kept in step with the address migration 095 resolved.
+ *  2. The DEV FIXTURES — admin@example.com, user@example.com and the
+ *     system-tenant superuser@example.com. These are demo logins for local
+ *     work, and are provisioned ONLY under APP_ENV=development. A
+ *     production/staging seed that quietly materialised three known-address
+ *     accounts holding real credentials is precisely what this gate exists to
+ *     prevent; the release smoke job has documented the seeder as "a no-op
+ *     outside development" since before it actually was one. Pass
+ *     $includeDevFixtures explicitly (the `seed --with-fixtures` flag) when a
+ *     non-development environment genuinely wants them.
+ *
+ * Unlike the default-tenant admin, a system-tenant admin may manage the global
+ * base roles (NULL-tenant roles) and every tenant — see WC-110/WC-223.
  *
  * Profile model (ADR 0005 / WC-10522424 / WC-idcut-F)
  * ───────────────────────────────────────────────────
  * Every seeded account is provisioned as a profile + profile_email +
- * membership so that on a fresh install the system admin (system@whity.local,
- * tenant 0) and the dev fixtures (admin@example.com, user@example.com,
- * superuser@example.com) authenticate through the profile login path
+ * membership so that on a fresh install the bootstrap administrator (tenant 0)
+ * and the dev fixtures authenticate through the profile login path
  * (AuthHandler::identityClaims). The legacy `users` table was retired by the
  * identity hard cutover (migration 042), so profiles/profile_emails/memberships
  * are now the sole identity layer.
  *
  * All profile/profile_email/membership inserts use ON CONFLICT guards so
- * re-seeding is idempotent.
+ * re-seeding is idempotent. An account that ALREADY exists is left completely
+ * alone — including its password (see {@see reportInertPassword()}).
  */
 class Seeder
 {
     /**
      * Seed the database with default data
      *
-     * @param Database $db Database connection instance
-     * @return void
+     * @param Database  $db                Database connection instance
+     * @param bool|null $includeDevFixtures Whether to provision the
+     *        `*@example.com` demo accounts. Null (the default) decides from
+     *        APP_ENV: development only.
+     * @return string The address the bootstrap administrator is at afterwards.
+     *         Returned rather than left to the caller to re-derive, because a
+     *         refused rename (see {@see BootstrapIdentity::applyConfiguredEmail()})
+     *         means it is NOT always what INITIAL_SYSTEM_ADMIN_EMAIL names, and a
+     *         summary line contradicting the warning printed just above it is
+     *         worse than no summary line at all.
      */
-    public static function seed(Database $db): void
+    public static function seed(Database $db, ?bool $includeDevFixtures = null): string
     {
+        $includeDevFixtures ??= self::isDevelopment();
+
         $pdo    = $db->getPdo();
         $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
 
@@ -82,45 +105,52 @@ class Seeder
         $userRole   = $userRoleResult->fetch();
         $userRoleId = (int) ($userRole['id'] ?? 2);
 
-        // ── Resolve passwords ────────────────────────────────────────────────
-        // Sourced from env vars or a one-time random value — never a static literal.
-        $adminPassword     = InitialPassword::hashFor('INITIAL_ADMIN_PASSWORD', 'admin@example.com');
-        $userPassword      = InitialPassword::hashFor('INITIAL_USER_PASSWORD', 'user@example.com');
-        $superuserPassword = InitialPassword::hashFor('INITIAL_SUPERUSER_PASSWORD', 'superuser@example.com');
-        $systemPassword    = InitialPassword::hashFor('INITIAL_SYSTEM_ADMIN_PASSWORD', 'system@whity.local');
+        // ── Reconcile the bootstrap administrator's address (WC-779) ──────────
+        // Runs BEFORE any account is looked up by email, so a rename the
+        // operator configured after migration 095 already ran (as a no-op) is
+        // applied here instead of producing a SECOND bootstrap administrator at
+        // the new address alongside the old one.
+        $bootstrapEmail = BootstrapIdentity::applyConfiguredEmail($db);
 
         // ── Seed profile model (ADR 0005, WC-10522424) ────────────────────────
         // Each account gets: profile row + primary verified profile_email +
         // membership in its tenant.  All inserts are idempotent via ON CONFLICT.
+        //
+        // Passwords are resolved LAZILY, per account, and only when the account
+        // is actually being created: hashing up front meant a re-seed of an
+        // install with no INITIAL_* variables set announced a freshly generated
+        // password for every existing account that it then did not use.
 
-        // Accounts: (email, password_hash, tenant_id, role_id)
-        /** @var list<array{email: string, password: string, tenant_id: int, role_id: int}> */
+        /** @var list<array{email: string, password_env: string, tenant_id: int, role_id: int}> */
         $accounts = [
             [
-                'email'     => 'system@whity.local',
-                'password'  => $systemPassword,
-                'tenant_id' => 0,
-                'role_id'   => $adminRoleId,
-            ],
-            [
-                'email'     => 'admin@example.com',
-                'password'  => $adminPassword,
-                'tenant_id' => $tenantId,
-                'role_id'   => $adminRoleId,
-            ],
-            [
-                'email'     => 'user@example.com',
-                'password'  => $userPassword,
-                'tenant_id' => $tenantId,
-                'role_id'   => $userRoleId,
-            ],
-            [
-                'email'     => 'superuser@example.com',
-                'password'  => $superuserPassword,
-                'tenant_id' => 0,
-                'role_id'   => $adminRoleId,
+                'email'        => $bootstrapEmail,
+                'password_env' => 'INITIAL_SYSTEM_ADMIN_PASSWORD',
+                'tenant_id'    => 0,
+                'role_id'      => $adminRoleId,
             ],
         ];
+
+        if ($includeDevFixtures) {
+            $accounts[] = [
+                'email'        => 'admin@example.com',
+                'password_env' => 'INITIAL_ADMIN_PASSWORD',
+                'tenant_id'    => $tenantId,
+                'role_id'      => $adminRoleId,
+            ];
+            $accounts[] = [
+                'email'        => 'user@example.com',
+                'password_env' => 'INITIAL_USER_PASSWORD',
+                'tenant_id'    => $tenantId,
+                'role_id'      => $userRoleId,
+            ];
+            $accounts[] = [
+                'email'        => 'superuser@example.com',
+                'password_env' => 'INITIAL_SUPERUSER_PASSWORD',
+                'tenant_id'    => 0,
+                'role_id'      => $adminRoleId,
+            ];
+        }
 
         foreach ($accounts as $account) {
             $normEmail = strtolower(trim($account['email']));
@@ -135,14 +165,18 @@ class Seeder
             if ($existing !== false) {
                 // Profile model rows already present — ensure the membership
                 // row exists (may have been removed externally) and move on.
+                // The credential is NOT touched; if the operator configured one
+                // that therefore cannot take effect, say so rather than let it
+                // sit there looking applied.
                 $profileId = (int) $existing['profile_id'];
+                self::reportInertPassword($db, $account['password_env'], $normEmail, $profileId);
             } else {
                 // ── b. INSERT a profiles row ──────────────────────────────────
                 // Use RETURNING id on PostgreSQL; lastInsertId() on SQLite.
                 // @tenant-guard-ignore: profiles is a sanctioned GLOBAL table (ADR 0005 §1)
                 $profileParams = [
                     ':display_name'                    => self::localPart($normEmail),
-                    ':password_hash'                   => $account['password'],
+                    ':password_hash'                   => InitialPassword::hashFor($account['password_env'], $normEmail),
                     ':two_factor_enabled'              => 0,
                     ':two_factor_secret'               => null,
                     ':two_factor_backup_codes_version' => 0,
@@ -217,6 +251,80 @@ class Seeder
         // ── Global default notification templates (WC-notifications #2aa3411a) ──
         // The operator-managed baseline every tenant inherits (idempotent).
         \Whity\Core\Notification\NotificationTemplateSeeder::seed($pdo);
+
+        return $bootstrapEmail;
+    }
+
+    /**
+     * Say so when a configured INITIAL_*_PASSWORD cannot take effect.
+     *
+     * The seeder skips an account whose profile_email already exists, which is
+     * what makes re-seeding safe — but it also means a password variable the
+     * operator sets AFTER the first seed is silently inert: the documented
+     * variable is present, the account authenticates with something else, and
+     * nothing anywhere says why. That dead end is diagnosable only by hand
+     * (WHIT-587 item 5, where superuser@example.com was found authenticating
+     * with the value of a DIFFERENT variable).
+     *
+     * This reports the mismatch and stops there. It deliberately does NOT
+     * rewrite the stored hash: a seed run that silently reset a live
+     * administrator's credential would be a credential reset wearing a seeder's
+     * clothes. Nothing is reported when the variable is unset (nothing was
+     * asked for) or when the stored hash already verifies (nothing is wrong).
+     */
+    private static function reportInertPassword(
+        Database $db,
+        string $envVar,
+        string $email,
+        int $profileId
+    ): void {
+        $configured = InitialPassword::configuredPlaintext($envVar);
+        if ($configured === null) {
+            return;
+        }
+
+        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL table (ADR 0005 §1)
+        $row = $db->query(
+            'SELECT password_hash FROM profiles WHERE id = :id',
+            [':id' => $profileId]
+        )->fetch(PDO::FETCH_ASSOC);
+
+        if ($row === false) {
+            return;
+        }
+
+        if (password_verify($configured, (string) $row['password_hash'])) {
+            return;
+        }
+
+        $message = sprintf(
+            '[whity] %s already exists and its stored password does not match %s. '
+            . 'The seeder never rewrites an existing credential, so that value is inert for this account — '
+            . 'change the password through the admin UI (PATCH /api/users/{id}) if you meant it to take effect.',
+            $email,
+            $envVar
+        );
+
+        // Same two channels InitialPassword announces on: stdout for an
+        // interactive `seed`, error_log for the container's stderr.
+        echo $message . "\n";
+        error_log($message);
+    }
+
+    /**
+     * Whether this is a development install, and therefore may hold the
+     * `*@example.com` demo accounts.
+     *
+     * An unset APP_ENV counts as NOT development — the same fail-closed default
+     * every other environment-gated guard in this codebase uses (CookieManager,
+     * TotpService, EncryptedSecretStore), and the safe direction here: forget to
+     * set it and you get no demo credentials rather than three.
+     */
+    private static function isDevelopment(): bool
+    {
+        $appEnv = $_ENV['APP_ENV'] ?? getenv('APP_ENV');
+
+        return is_string($appEnv) && $appEnv === 'development';
     }
 
     /** Returns the local-part (before @) of an email address for display_name. */

@@ -461,27 +461,28 @@ class RoleChecker
     ): array {
         $roleIds = [];
 
-        $membership = $this->getMembershipRow($profileId, $tenantId);
-        if ($membership === null) {
+        // EVERY active membership, not just the primary one (#712 §1). A profile
+        // may hold more than one tenant-wide role, each with its own OU — the
+        // doctor attending in Emergency and part-timing in Family Medicine. Both
+        // roles apply, and both OU chains are in scope.
+        //
+        // Only ACTIVE rows are returned, per row: a suspended second role stops
+        // granting without disturbing the primary one. No active row at all means
+        // no membership, which is the gate a resource grant must never bypass.
+        $memberships = $this->getActiveMembershipRows($profileId, $tenantId);
+        if ($memberships === []) {
             return [];
         }
 
-        // Only ACTIVE memberships grant permissions. Suspended/invited memberships
-        // contribute nothing — the HTTP layer should already have rejected the
-        // request, but this is a belt-and-braces guard.
-        if ((string) $membership['status'] !== 'active') {
-            return [];
-        }
+        foreach ($memberships as $membership) {
+            if ($membership['role_id'] !== null) {
+                $roleIds[$membership['role_id']] = true;
+            }
 
-        $directRoleId = $membership['role_id'] !== null ? (int) $membership['role_id'] : null;
-        if ($directRoleId !== null) {
-            $roleIds[$directRoleId] = true;
-        }
-
-        $ouId = $membership['ou_id'] !== null ? (int) $membership['ou_id'] : null;
-        if ($ouId !== null) {
-            foreach ($this->getOuChainRoleIds($ouId, $tenantId) as $roleId) {
-                $roleIds[$roleId] = true;
+            if ($membership['ou_id'] !== null) {
+                foreach ($this->getOuChainRoleIds($membership['ou_id'], $tenantId) as $roleId) {
+                    $roleIds[$roleId] = true;
+                }
             }
         }
 
@@ -540,14 +541,54 @@ class RoleChecker
     }
 
     /**
-     * Fetch the active membership row for a (profile, tenant) pair.
+     * Every ACTIVE membership a profile holds in a tenant.
      *
-     * Returns null when no membership exists OR when the membership status is not
-     * 'active'. Only active memberships contribute to permission resolution.
+     * `getMembershipRow()` answers "what is this profile HERE?" and must give
+     * exactly one answer — the primary row — because callers render it as the
+     * person's role and OU. This answers a different question: "everything this
+     * profile is here", which is a set.
+     *
+     * A doctor attending in Emergency and part-timing in Family Medicine holds
+     * two rows with two OUs; both contribute roles, and both OU chains are in
+     * scope. Only ACTIVE rows count, per row — a suspended second role stops
+     * granting without disturbing the primary one.
+     *
+     * @return list<array{role_id: int|null, ou_id: int|null}>
+     */
+    private function getActiveMembershipRows(int $profileId, int $tenantId): array
+    {
+        $statement = $this->db->query(
+            // Ordered so the primary row is first. Nothing here depends on the
+            // order today — it is a union — but a stable order keeps the cache
+            // key and any future first-wins reading deterministic.
+            "SELECT role_id, ou_id FROM memberships
+              WHERE profile_id = :profileId AND tenant_id = :tenantId
+                AND status = 'active'
+              ORDER BY is_primary DESC, id ASC",
+            [':profileId' => $profileId, ':tenantId' => $tenantId]
+        );
+
+        $rows = [];
+        foreach ($statement->fetchAll() as $row) {
+            $rows[] = [
+                'role_id' => $row['role_id'] !== null ? (int) $row['role_id'] : null,
+                'ou_id'   => $row['ou_id']   !== null ? (int) $row['ou_id']   : null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * The ONE membership row that speaks for this profile in this tenant.
+     *
+     * Distinct from {@see self::getActiveMembershipRows()}, which answers the
+     * set-valued question. Callers here render a single role and a single OU,
+     * so they need exactly one answer: the primary row.
      *
      * @param int $profileId The profile id.
      * @param int $tenantId  The tenant id.
-     * @return array<string, mixed>|null The normalised membership row, or null.
+     * @return array{role_id: int|null, ou_id: int|null, status: string}|null
      */
     private function getMembershipRow(int $profileId, int $tenantId): ?array
     {

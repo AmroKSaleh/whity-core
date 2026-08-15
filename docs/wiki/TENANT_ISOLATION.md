@@ -170,7 +170,7 @@ The in-tree HelloWorld plugin is the reference fixture: `tests/Plugins/HelloWorl
 
 ## The system tenant (id 0)
 
-Migration `011_create_system_tenant.php` provisions tenant id **0** ("System") and a `system@whity.local` admin user. A caller resolved to tenant 0 holds cross-tenant authority: `EnforceTenantIsolation` lets it cross tenant boundaries (audited), and `RolesApiHandler` lets it see and manage every tenant's roles. This is the same mechanism trusted tooling uses via `TenantContext::isSystemMode()` — there is no separate super-admin flag.
+Migration `010_create_system_tenant.php` provisions tenant id **0** ("System") and a bootstrap admin account — `system@whity.local` unless `INITIAL_SYSTEM_ADMIN_EMAIL` names another address (migration `095` applies it). A caller resolved to tenant 0 holds cross-tenant authority: `EnforceTenantIsolation` lets it cross tenant boundaries (audited), and `RolesApiHandler` lets it see and manage every tenant's roles. This is the same mechanism trusted tooling uses via `TenantContext::isSystemMode()` — there is no separate super-admin flag.
 
 ## End-to-end flow
 

@@ -35,6 +35,9 @@ final class SeederRealEngineTest extends TestCase
     private PDO $pdo;
     private Database $db;
 
+    /** APP_ENV as the process had it before setUp() forced 'development'. */
+    private string|false $savedAppEnv = false;
+
     /**
      * Initial-password env vars set for the test so {@see Seeder::seed()} runs
      * deterministically and never prints a "generated password" notice (which
@@ -59,6 +62,13 @@ final class SeederRealEngineTest extends TestCase
             putenv($var . '=' . self::SUPERUSER_PASSWORD);
         }
 
+        // WC-779: superuser@example.com is a DEV FIXTURE now, provisioned only
+        // under APP_ENV=development. This suite is about that account, so it
+        // asks for the environment that has it.
+        $this->savedAppEnv  = $_ENV['APP_ENV'] ?? getenv('APP_ENV');
+        $_ENV['APP_ENV']    = 'development';
+        putenv('APP_ENV=development');
+
         $this->pdo = SchemaFromMigrations::make();
         $this->db = Database::withFactory(fn(): PDO => $this->pdo, 86400, 86400);
         $this->db->forceConnect();
@@ -69,6 +79,14 @@ final class SeederRealEngineTest extends TestCase
         foreach (self::PASSWORD_ENV_VARS as $var) {
             unset($_ENV[$var]);
             putenv($var);
+        }
+
+        if (is_string($this->savedAppEnv)) {
+            $_ENV['APP_ENV'] = $this->savedAppEnv;
+            putenv('APP_ENV=' . $this->savedAppEnv);
+        } else {
+            unset($_ENV['APP_ENV']);
+            putenv('APP_ENV');
         }
     }
 

@@ -491,6 +491,39 @@ final class CoreApiSchemas
                     404 => self::errorResponse('User not found'),
                 ] + self::authErrors(),
             ]),
+            // WC-712 §1: a profile may hold more than one role in a tenant. The
+            // user list carries only the PRIMARY one (one row per person), so
+            // these are where an additional role is seen, granted and revoked.
+            self::adminRoute('GET', '/api/users/{id:\d+}/memberships', [
+                'summary' => 'List every role a user holds in this tenant',
+                'tags' => ['users'],
+                'responses' => [
+                    200 => self::jsonResponse('The user\'s memberships, primary first', 'MembershipListResponse'),
+                    404 => self::errorResponse('User not found'),
+                ] + self::authErrors(),
+            ]),
+            self::adminRoute('POST', '/api/users/{id:\d+}/memberships', [
+                'summary' => 'Grant a user an additional role in this tenant',
+                'tags' => ['users'],
+                'request' => 'MembershipCreateRequest',
+                'responses' => [
+                    // 200 rather than 201 when the role is already held with the
+                    // same OU: the call is idempotent and reports created=false.
+                    200 => self::jsonResponse('The membership already existed', 'MembershipResponse'),
+                    201 => self::jsonResponse('The membership that was created', 'MembershipResponse'),
+                    400 => self::errorResponse('Validation failed'),
+                    404 => self::errorResponse('User or role not found'),
+                ] + self::authErrors(),
+            ]),
+            self::adminRoute('DELETE', '/api/users/{id:\d+}/memberships/{membershipId:\d+}', [
+                'summary' => 'Revoke one of a user\'s additional roles',
+                'tags' => ['users'],
+                'responses' => [
+                    200 => self::jsonResponse('Removal confirmation', 'MutationResponse'),
+                    404 => self::errorResponse('User or membership not found'),
+                    409 => self::errorResponse('The primary membership cannot be removed here'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -608,8 +641,9 @@ final class CoreApiSchemas
                 'tags' => ['tenants'],
                 'request' => 'TenantCreateRequest',
                 'responses' => [
-                    201 => self::jsonResponse('The created tenant', 'TenantResponse'),
+                    201 => self::jsonResponse('The created tenant', 'TenantCreatedResponse'),
                     400 => self::errorResponse('Validation failed'),
+                    404 => self::errorResponse('The requested initial administrator role does not exist'),
                     409 => self::errorResponse('Tenant name or slug already exists'),
                 ] + self::authErrors(),
             ]),
@@ -1079,6 +1113,26 @@ final class CoreApiSchemas
                     ],
                 ],
             ],
+            // WHIT-587: platform version state. settings:manage AND the system
+            // tenant (the tenant half is enforced in the handler, which the
+            // router cannot express) — it describes the whole deployment.
+            self::permissionRoute('GET', '/api/platform/version', 'settings:manage', [
+                'summary' => 'Running core, plugin-SDK and PHP versions (system tenant only)',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('The versions this deployment is running', 'PlatformVersionResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/platform/version/latest', 'settings:manage', [
+                'summary' => 'Compare the running core against the latest published release (system tenant only)',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The comparison verdict — including `check_failed` when the release stream could not be reached',
+                        'PlatformLatestReleaseResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
             // No auth gate — any authenticated caller may read navigation
             [
                 'method' => 'GET',
@@ -2658,6 +2712,41 @@ final class CoreApiSchemas
             // NOTE: no tenantId field — the handler always creates the user in
             // the caller's TenantContext (a declared field with zero runtime
             // effect would be a contract lie).
+            // WC-712 §1: one row per role the profile holds in this tenant.
+            // `isPrimary` marks the row that answers "what is this person here?"
+            // for display and defaults — exactly one per (profile, tenant),
+            // enforced by migration 094's partial unique index.
+            'Membership' => self::object([
+                'id' => self::int(),
+                'roleId' => self::int(),
+                'role' => self::str(),
+                'ou_id' => self::int(true),
+                'isPrimary' => ['type' => 'boolean'],
+                'status' => ['type' => 'string', 'enum' => ['active', 'invited', 'suspended']],
+            ], ['id', 'roleId', 'role', 'isPrimary', 'status']),
+            'MembershipListResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('Membership'),
+            ]),
+            // `created` is false when the role was already held with the same OU:
+            // the call is idempotent rather than a 409, because granting a role
+            // somebody already has is not an error.
+            'MembershipResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'roleId' => self::int(),
+                'ou_id' => self::int(true),
+                'isPrimary' => ['type' => 'boolean'],
+                'created' => ['type' => 'boolean'],
+            ], ['id', 'roleId', 'isPrimary', 'created'])),
+            // No required list: the caller supplies role_id OR role (a name),
+            // which OpenAPI cannot express as "exactly one of these two" without
+            // a oneOf the generator does not emit. The handler enforces it and
+            // answers 400 when neither is present.
+            'MembershipCreateRequest' => self::object([
+                'role_id' => self::int(),
+                'role' => self::str(),
+                'ou_id' => self::int(true),
+            ], []),
             'UserCreateRequest' => self::object([
                 'email' => self::str(),
                 'password' => ['type' => 'string', 'minLength' => 6],
@@ -2743,10 +2832,36 @@ final class CoreApiSchemas
             'Tenant' => $tenant,
             'TenantListResponse' => self::paginatedListEnvelope('Tenant'),
             'TenantResponse' => self::dataEnvelope(SchemaBuilder::ref('Tenant')),
+            // Create echoes the administrator it provisioned, so the caller can
+            // report who now owns the tenant without a second round trip. Absent
+            // when the request carried no `admin` block.
+            'TenantCreatedResponse' => self::dataEnvelope(['allOf' => [
+                SchemaBuilder::ref('Tenant'),
+                self::object([
+                    'admin' => self::object([
+                        'id' => self::int(),
+                        'email' => self::str(),
+                        'role' => self::str(),
+                    ], ['id', 'email', 'role']),
+                ], []),
+            ]]),
+            // #779: the optional `admin` block provisions the tenant's first
+            // administrator in the SAME transaction as the tenant. Without it,
+            // POST /api/tenants leaves a tenant no API path can reach — creating
+            // a user targets the caller's tenant, and switching to the new one
+            // requires the very membership that cannot yet be made.
             'TenantCreateRequest' => self::object([
                 'name' => self::str(),
                 'slug' => ['type' => 'string', 'pattern' => '^[a-z0-9-]+$'],
+                'admin' => SchemaBuilder::ref('TenantInitialAdmin'),
             ], ['name']),
+            // `role` names a role the new tenant can see: one it owns (seeded by
+            // a tenant.created listener) or a global one. Defaults to `admin`.
+            'TenantInitialAdmin' => self::object([
+                'email' => ['type' => 'string', 'format' => 'email'],
+                'password' => ['type' => 'string', 'format' => 'password'],
+                'role' => self::str(),
+            ], ['email', 'password']),
             'TenantUpdateRequest' => self::object([
                 'name' => self::str(),
                 'slug' => ['type' => 'string', 'pattern' => '^[a-z0-9-]+$'],
@@ -2982,6 +3097,28 @@ final class CoreApiSchemas
                 'db_connected' => self::bool(),
                 'memory_usage_mb' => ['type' => 'number', 'format' => 'float'],
             ], ['status', 'version', 'worker_count', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
+
+            // GET /api/platform/version (WHIT-587)
+            'PlatformVersionResponse' => self::object([
+                'core_version' => self::str(),
+                'sdk_version' => self::str(),
+                'php_version' => self::str(),
+            ], ['core_version', 'sdk_version', 'php_version']),
+
+            // GET /api/platform/version/latest (WHIT-587). `check_failed` is a
+            // 200 verdict, not an HTTP error — "could not tell" must never be
+            // read as "up to date".
+            'PlatformLatestReleaseResponse' => self::object([
+                'status' => ['type' => 'string', 'enum' => ['up_to_date', 'update_available', 'ahead', 'no_releases', 'check_failed']],
+                'update_available' => self::bool(),
+                'repository' => self::str(),
+                'current_version' => self::str(),
+                'latest_version' => self::str(true),
+                'release_url' => self::str(true),
+                'published_at' => self::str(true),
+                'failure_reason' => self::str(true),
+                'detail' => self::str(true),
+            ], ['status', 'update_available', 'repository', 'current_version']),
 
             // GET /api/instance/status (WC-instance-first-run)
             'InstanceStatusResponse' => self::object([

@@ -96,7 +96,15 @@ class RbacLifecycleTest extends TestCase
                 // memberships row lookup (getMembershipRow).
                 if (str_contains($sql, 'FROM memberships')) {
                     $profileId = $params[':profileId'];
-                    return $this->statement(['role_id' => $profileId, 'ou_id' => null, 'status' => 'active']);
+                    // fetch() serves getMembershipRow() (the ONE row that speaks
+                    // for this profile); fetchAll() serves
+                    // getActiveMembershipRows() (#712 §1 — every active row).
+                    // Both are stubbed, or the multi-row reader sees an empty
+                    // set and the profile resolves to no roles at all.
+                    return $this->statement(
+                        ['role_id' => $profileId, 'ou_id' => null, 'status' => 'active'],
+                        [['role_id' => $profileId, 'ou_id' => null]]
+                    );
                 }
 
                 // roles.parent_id lookup (getParentRoleId).
@@ -297,7 +305,10 @@ class RbacLifecycleTest extends TestCase
         $db->method('query')->willReturnCallback(
             function (string $sql, array $params) use (&$hierarchyQueryCount): PDOStatement {
                 if (str_contains($sql, 'FROM memberships')) {
-                    return $this->statement(['role_id' => 4, 'ou_id' => null, 'status' => 'active']);
+                    return $this->statement(
+                        ['role_id' => 4, 'ou_id' => null, 'status' => 'active'],
+                        [['role_id' => 4, 'ou_id' => null]]
+                    );
                 }
                 if (str_contains($sql, 'SELECT parent_id FROM roles')) {
                     $hierarchyQueryCount++;

@@ -1792,6 +1792,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Running core, plugin-SDK and PHP versions (system tenant only) */
+        get: operations["get_api_v1_platform_version"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/version/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compare the running core against the latest published release (system tenant only) */
+        get: operations["get_api_v1_platform_version_latest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plugins": {
         parameters: {
             query?: never;
@@ -2566,6 +2600,41 @@ export interface paths {
         patch: operations["patch_api_v1_users_id"];
         trace?: never;
     };
+    "/api/v1/users/{id}/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every role a user holds in this tenant */
+        get: operations["get_api_v1_users_id_memberships"];
+        put?: never;
+        /** Grant a user an additional role in this tenant */
+        post: operations["post_api_v1_users_id_memberships"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/memberships/{membershipId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke one of a user's additional roles */
+        delete: operations["delete_api_v1_users_id_memberships_membershipid"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3223,6 +3292,32 @@ export interface components {
             password?: string;
             current_password: string;
         };
+        Membership: {
+            id: number;
+            roleId: number;
+            role: string;
+            ou_id?: number | null;
+            isPrimary: boolean;
+            /** @enum {string} */
+            status: "active" | "invited" | "suspended";
+        };
+        MembershipCreateRequest: {
+            role_id?: number;
+            role?: string;
+            ou_id?: number | null;
+        };
+        MembershipListResponse: {
+            data: components["schemas"]["Membership"][];
+        };
+        MembershipResponse: {
+            data: {
+                id: number;
+                roleId: number;
+                ou_id?: number | null;
+                isPrimary: boolean;
+                created: boolean;
+            };
+        };
         MigrationEntry: {
             name: string;
             executed: boolean;
@@ -3493,6 +3588,23 @@ export interface components {
             description?: string | null;
             is_active?: boolean;
             sort_order?: number;
+        };
+        PlatformLatestReleaseResponse: {
+            /** @enum {string} */
+            status: "up_to_date" | "update_available" | "ahead" | "no_releases" | "check_failed";
+            update_available: boolean;
+            repository: string;
+            current_version: string;
+            latest_version?: string | null;
+            release_url?: string | null;
+            published_at?: string | null;
+            failure_reason?: string | null;
+            detail?: string | null;
+        };
+        PlatformVersionResponse: {
+            core_version: string;
+            sdk_version: string;
+            php_version: string;
         };
         PluginEntry: {
             id: string;
@@ -3857,6 +3969,16 @@ export interface components {
         TenantCreateRequest: {
             name: string;
             slug?: string;
+            admin?: components["schemas"]["TenantInitialAdmin"];
+        };
+        TenantCreatedResponse: {
+            data: components["schemas"]["Tenant"] & {
+                admin?: {
+                    id: number;
+                    email: string;
+                    role: string;
+                };
+            };
         };
         TenantEmailDomain: {
             id: number;
@@ -3909,6 +4031,13 @@ export interface components {
                     [key: string]: components["schemas"]["EntitlementCatalogueEntry"];
                 };
             };
+        };
+        TenantInitialAdmin: {
+            /** Format: email */
+            email: string;
+            /** Format: password */
+            password: string;
+            role?: string;
         };
         TenantListResponse: {
             data: components["schemas"]["Tenant"][];
@@ -14342,6 +14471,136 @@ export interface operations {
             };
         };
     };
+    get_api_v1_platform_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The versions this deployment is running */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformVersionResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_platform_version_latest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The comparison verdict — including `check_failed` when the release stream could not be reached */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformLatestReleaseResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_plugins: {
         parameters: {
             query?: never;
@@ -17891,7 +18150,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TenantResponse"];
+                    "application/json": components["schemas"]["TenantCreatedResponse"];
                 };
             };
             /** @description Validation failed */
@@ -17921,7 +18180,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Not found */
+            /** @description The requested initial administrator role does not exist */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -19791,6 +20050,239 @@ export interface operations {
                 };
             };
             /** @description Email already exists in the tenant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_users_id_memberships: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user's memberships, primary first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description User not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_users_id_memberships: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MembershipCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The membership already existed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipResponse"];
+                };
+            };
+            /** @description The membership that was created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipResponse"];
+                };
+            };
+            /** @description Validation failed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description User or role not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_users_id_memberships_membershipid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                membershipId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removal confirmation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MutationResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description User or membership not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The primary membership cannot be removed here */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -1143,6 +1143,14 @@ $router->register('POST',   '/api/users',           [$usersHandler, 'create'], n
 $router->register('PATCH',  '/api/users/{id:\d+}',  [$usersHandler, 'update'], null, null, CorePermissions::USERS_WRITE);
 $router->register('DELETE', '/api/users/{id:\d+}',  [$usersHandler, 'delete'], null, null, CorePermissions::USERS_DELETE);
 
+// WC-712 §1: a profile may hold more than one role in a tenant (migration 094).
+// The user LIST shows one row per person with their PRIMARY role, so these are
+// where an additional role is seen, granted and revoked. Same permission gates
+// as the user routes above — granting a role is a user write.
+$router->register('GET',    '/api/users/{id:\d+}/memberships',                      [$usersHandler, 'listMemberships'],  null, null, CorePermissions::USERS_READ);
+$router->register('POST',   '/api/users/{id:\d+}/memberships',                      [$usersHandler, 'addMembership'],    null, null, CorePermissions::USERS_WRITE);
+$router->register('DELETE', '/api/users/{id:\d+}/memberships/{membershipId:\d+}',   [$usersHandler, 'removeMembership'], null, null, CorePermissions::USERS_WRITE);
+
 $rolesHandler = new RolesApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
 $router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');
@@ -1245,6 +1253,23 @@ $router->registerUnversioned('GET', '/api/version', static function () use ($rou
         ['Content-Type' => 'application/json']
     );
 });
+
+// WHIT-587: platform version state for operators without a shell. The running
+// core + plugin-SDK versions, and the latest-release comparison that until now
+// only `update:check` could answer. Both routes are settings:manage AND system
+// tenant (the second half enforced in the handler) — this describes the whole
+// deployment, which on a shared install is none of a tenant admin's business.
+// Read-only on purpose: applying an update stays the manual runbook
+// (docs/wiki/Core-Update.md), because "apply" cannot mean the same thing for a
+// source checkout as for an immutable container image.
+$platformVersionHandler = new \Whity\Api\PlatformVersionApiHandler(
+    $roleChecker,
+    new \Whity\Core\Update\LatestReleaseCheck()
+);
+$router->register('GET', '/api/platform/version',        [$platformVersionHandler, 'version'], null, null, CorePermissions::SETTINGS_MANAGE);
+// Separate route because it reaches out to the release stream: the local
+// snapshot above must stay instant and offline-safe.
+$router->register('GET', '/api/platform/version/latest', [$platformVersionHandler, 'latest'],  null, null, CorePermissions::SETTINGS_MANAGE);
 
 // WC-209: dynamic OpenAPI document. Regenerates the spec from the LIVE router
 // at request time, so a plugin installed/uninstalled/reloaded after the last

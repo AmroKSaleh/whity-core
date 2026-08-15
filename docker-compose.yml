@@ -67,6 +67,19 @@ services:
       FRANKENPHP_WORKERS: ${FRANKENPHP_WORKERS:-8}
       FRANKENPHP_TIMEOUT: ${FRANKENPHP_TIMEOUT:-60s}
       MAX_REQUESTS: ${MAX_REQUESTS:-500}
+      # Bootstrap/seed identity, mirrored from db-init below. The app itself
+      # never reads these — but `docker exec whity_frankenphp php
+      # public/index.php migrate run|seed` is the flow the README and the
+      # go-live checklist document, and enumerated-only compose environments
+      # mean a variable absent here is a variable that silently does not exist
+      # for that command (WC-779: the whole point of INITIAL_SYSTEM_ADMIN_EMAIL
+      # is defeated if setting it in .env cannot reach the process that applies
+      # it). Same defaults as db-init so both paths bootstrap identically.
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-admin123}
+      INITIAL_USER_PASSWORD: ${INITIAL_USER_PASSWORD:-user123}
+      INITIAL_SYSTEM_ADMIN_PASSWORD: ${INITIAL_SYSTEM_ADMIN_PASSWORD:-systemadmin123}
+      INITIAL_SUPERUSER_PASSWORD: ${INITIAL_SUPERUSER_PASSWORD:-superuser123}
+      INITIAL_SYSTEM_ADMIN_EMAIL: ${INITIAL_SYSTEM_ADMIN_EMAIL:-}
     volumes:
       - .:/app
       - ./Caddyfile:/etc/frankenphp/Caddyfile
@@ -354,6 +367,9 @@ services:
       INITIAL_SYSTEM_ADMIN_PASSWORD: ${INITIAL_SYSTEM_ADMIN_PASSWORD:-systemadmin123}
       # Seeds the system-tenant (id 0) superuser superuser@example.com.
       INITIAL_SUPERUSER_PASSWORD: ${INITIAL_SUPERUSER_PASSWORD:-superuser123}
+      # Address of the bootstrap administrator (WC-779). Left empty so the
+      # historical system@whity.local default applies unless an operator sets it.
+      INITIAL_SYSTEM_ADMIN_EMAIL: ${INITIAL_SYSTEM_ADMIN_EMAIL:-}
     depends_on:
       postgres:
         condition: service_healthy
