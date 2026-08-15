@@ -40,7 +40,11 @@ use PDO;
  *
  * `password_resets` is a sanctioned GLOBAL table (no tenant_id) — see
  * {@see \Whity\Core\Tenant\SanctionedGlobalTables}; the admin approval QUEUE is
- * tenant-scoped at query time via a JOIN to `memberships`.
+ * tenant-scoped at query time via a JOIN to `memberships`, with one deliberate
+ * exception: the PLATFORM tenant ({@see self::SYSTEM_TENANT_ID}) drops that
+ * JOIN and can list/approve/reject across every tenant (WC-797 §4d). Without it
+ * a tenant whose only approver is the person whose own reset is parked has no
+ * exit that is not direct database access.
  */
 final class PasswordResetService
 {
@@ -49,6 +53,13 @@ final class PasswordResetService
 
     /** Raw-token entropy in bytes (256-bit → 64 hex chars). */
     private const TOKEN_BYTES = 32;
+
+    /**
+     * The platform (system) tenant. It owns no per-tenant resource but may act
+     * across every tenant — the same authority it already carries everywhere
+     * else in the system, applied here to the approval queue (WC-797 §4d).
+     */
+    public const SYSTEM_TENANT_ID = 0;
 
     /** Row states. */
     public const STATUS_PENDING = 'pending';
@@ -215,6 +226,36 @@ final class PasswordResetService
     }
 
     /**
+     * Find the outstanding awaiting-approval request for a profile, if any.
+     *
+     * Exists so the public `forgot` endpoint can recognise a REPEAT of a
+     * request that is already parked and answer it idempotently instead of
+     * minting a second token nobody asked for (WC-797 §4c). Reads only — the
+     * caller decides what to do with the answer.
+     *
+     * @return array{id:int, created_at:string}|null
+     */
+    public function findPendingApprovalForProfile(int $profileId): ?array
+    {
+        // @tenant-guard-ignore: password_resets is a sanctioned GLOBAL table (no tenant_id); scoped to a single profile
+        $stmt = $this->db->prepare(
+            "SELECT id, created_at
+             FROM password_resets
+             WHERE profile_id = :pid AND status = '" . self::STATUS_AWAITING_APPROVAL . "'
+             ORDER BY created_at ASC
+             LIMIT 1"
+        );
+        $stmt->execute([':pid' => $profileId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row === false) {
+            return null;
+        }
+
+        return ['id' => (int) $row['id'], 'created_at' => (string) ($row['created_at'] ?? '')];
+    }
+
+    /**
      * List pending (awaiting-approval) password-reset requests for profiles
      * that hold an ACTIVE membership in the given tenant.
      *
@@ -225,23 +266,49 @@ final class PasswordResetService
      * wins (the atomic, status-guarded UPDATE in {@see self::approveForTenant()}
      * makes a second approve/reject a safe no-op).
      *
+     * The PLATFORM tenant ({@see self::SYSTEM_TENANT_ID}) is the one exception
+     * and the reason WC-797 §4d exists: a tenant whose only approver is the
+     * person whose own reset is parked can never resolve it, because the
+     * membership JOIN below hides the request from everyone who could. The
+     * platform tenant holds no membership in the tenants it acts for, so for it
+     * the JOIN is dropped entirely and it sees every parked request. This
+     * widens NOTHING for a tenant administrator — $tenantId comes from the
+     * authenticated tenant context, so only a caller genuinely acting in
+     * tenant 0 can reach the unscoped branch.
+     *
      * @return list<array{id:int, profile_id:int, email:string, display_name:string, created_at:string}>
      */
     public function listPendingForTenant(int $tenantId): array
     {
-        // @tenant-guard-ignore: joins the global password_resets/profiles tables to memberships, scoped by the tenant_id predicate below
-        $stmt = $this->db->prepare(
-            "SELECT DISTINCT pr.id, pr.profile_id, pr.created_at,
-                    p.display_name,
-                    pe.email AS email
-             FROM password_resets pr
-             JOIN memberships m ON m.profile_id = pr.profile_id AND m.tenant_id = :tenant_id AND m.status = 'active'
-             JOIN profiles p ON p.id = pr.profile_id
-             LEFT JOIN profile_emails pe ON pe.profile_id = pr.profile_id AND pe.is_primary = TRUE
-             WHERE pr.status = '" . self::STATUS_AWAITING_APPROVAL . "'
-             ORDER BY pr.created_at ASC"
-        );
-        $stmt->execute([':tenant_id' => $tenantId]);
+        if ($tenantId === self::SYSTEM_TENANT_ID) {
+            // @tenant-guard-ignore: platform (system tenant 0) break-glass — cross-tenant by design; every other caller takes the membership-scoped branch below
+            $stmt = $this->db->prepare(
+                "SELECT pr.id, pr.profile_id, pr.created_at,
+                        p.display_name,
+                        pe.email AS email
+                 FROM password_resets pr
+                 JOIN profiles p ON p.id = pr.profile_id
+                 LEFT JOIN profile_emails pe ON pe.profile_id = pr.profile_id AND pe.is_primary = TRUE
+                 WHERE pr.status = '" . self::STATUS_AWAITING_APPROVAL . "'
+                 ORDER BY pr.created_at ASC"
+            );
+            $stmt->execute();
+        } else {
+            // @tenant-guard-ignore: joins the global password_resets/profiles tables to memberships, scoped by the tenant_id predicate below
+            $stmt = $this->db->prepare(
+                "SELECT DISTINCT pr.id, pr.profile_id, pr.created_at,
+                        p.display_name,
+                        pe.email AS email
+                 FROM password_resets pr
+                 JOIN memberships m ON m.profile_id = pr.profile_id AND m.tenant_id = :tenant_id AND m.status = 'active'
+                 JOIN profiles p ON p.id = pr.profile_id
+                 LEFT JOIN profile_emails pe ON pe.profile_id = pr.profile_id AND pe.is_primary = TRUE
+                 WHERE pr.status = '" . self::STATUS_AWAITING_APPROVAL . "'
+                 ORDER BY pr.created_at ASC"
+            );
+            $stmt->execute([':tenant_id' => $tenantId]);
+        }
+
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $items = [];
@@ -268,6 +335,10 @@ final class PasswordResetService
      * double-approve (e.g. from two tenants sharing the same profile) a safe
      * no-op for the loser.
      *
+     * The PLATFORM tenant ({@see self::SYSTEM_TENANT_ID}) approves across
+     * tenants — see {@see self::listPendingForTenant()} for why that break-glass
+     * exists and why it does not widen any tenant administrator's reach.
+     *
      * @return array{profile_id:int, email:string}|null null = not found, not
      *   awaiting approval, or the target is not a member of $tenantId.
      */
@@ -279,16 +350,29 @@ final class PasswordResetService
         }
 
         try {
-            // @tenant-guard-ignore: joins the global password_resets table to memberships, scoped by the tenant_id predicate below
-            $stmt = $this->db->prepare(
-                "SELECT pr.id, pr.profile_id, pr.staged_password_hash, pe.email
-                 FROM password_resets pr
-                 JOIN memberships m ON m.profile_id = pr.profile_id AND m.tenant_id = :tenant_id AND m.status = 'active'
-                 LEFT JOIN profile_emails pe ON pe.profile_id = pr.profile_id AND pe.is_primary = TRUE
-                 WHERE pr.id = :id AND pr.status = '" . self::STATUS_AWAITING_APPROVAL . "'
-                 LIMIT 1"
-            );
-            $stmt->execute([':id' => $requestId, ':tenant_id' => $tenantId]);
+            if ($tenantId === self::SYSTEM_TENANT_ID) {
+                // @tenant-guard-ignore: platform (system tenant 0) break-glass — cross-tenant by design; every other caller takes the membership-scoped branch below
+                $stmt = $this->db->prepare(
+                    "SELECT pr.id, pr.profile_id, pr.staged_password_hash, pe.email
+                     FROM password_resets pr
+                     LEFT JOIN profile_emails pe ON pe.profile_id = pr.profile_id AND pe.is_primary = TRUE
+                     WHERE pr.id = :id AND pr.status = '" . self::STATUS_AWAITING_APPROVAL . "'
+                     LIMIT 1"
+                );
+                $stmt->execute([':id' => $requestId]);
+            } else {
+                // @tenant-guard-ignore: joins the global password_resets table to memberships, scoped by the tenant_id predicate below
+                $stmt = $this->db->prepare(
+                    "SELECT pr.id, pr.profile_id, pr.staged_password_hash, pe.email
+                     FROM password_resets pr
+                     JOIN memberships m ON m.profile_id = pr.profile_id AND m.tenant_id = :tenant_id AND m.status = 'active'
+                     LEFT JOIN profile_emails pe ON pe.profile_id = pr.profile_id AND pe.is_primary = TRUE
+                     WHERE pr.id = :id AND pr.status = '" . self::STATUS_AWAITING_APPROVAL . "'
+                     LIMIT 1"
+                );
+                $stmt->execute([':id' => $requestId, ':tenant_id' => $tenantId]);
+            }
+
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($row === false || $row['staged_password_hash'] === null) {
@@ -346,43 +430,71 @@ final class PasswordResetService
      * Admin-reject a staged password reset. `profiles` is left untouched;
      * the staged hash is discarded.
      *
-     * Tenant-scoped identically to {@see self::approveForTenant()}.
+     * Tenant-scoped identically to {@see self::approveForTenant()}, including
+     * the platform-tenant break-glass branch.
      *
      * @return array{profile_id:int}|null null = not found, not awaiting
      *   approval, or the target is not a member of $tenantId.
      */
     public function rejectForTenant(int $requestId, int $tenantId): ?array
     {
-        // @tenant-guard-ignore: joins the global password_resets table to memberships, scoped by the tenant_id predicate below
-        $lookup = $this->db->prepare(
-            "SELECT pr.profile_id
-             FROM password_resets pr
-             JOIN memberships m ON m.profile_id = pr.profile_id AND m.tenant_id = :tenant_id AND m.status = 'active'
-             WHERE pr.id = :id AND pr.status = '" . self::STATUS_AWAITING_APPROVAL . "'
-             LIMIT 1"
-        );
-        $lookup->execute([':id' => $requestId, ':tenant_id' => $tenantId]);
+        $platform = $tenantId === self::SYSTEM_TENANT_ID;
+
+        if ($platform) {
+            // @tenant-guard-ignore: platform (system tenant 0) break-glass — cross-tenant by design; every other caller takes the membership-scoped branch below
+            $lookup = $this->db->prepare(
+                "SELECT profile_id
+                 FROM password_resets
+                 WHERE id = :id AND status = '" . self::STATUS_AWAITING_APPROVAL . "'
+                 LIMIT 1"
+            );
+            $lookup->execute([':id' => $requestId]);
+        } else {
+            // @tenant-guard-ignore: joins the global password_resets table to memberships, scoped by the tenant_id predicate below
+            $lookup = $this->db->prepare(
+                "SELECT pr.profile_id
+                 FROM password_resets pr
+                 JOIN memberships m ON m.profile_id = pr.profile_id AND m.tenant_id = :tenant_id AND m.status = 'active'
+                 WHERE pr.id = :id AND pr.status = '" . self::STATUS_AWAITING_APPROVAL . "'
+                 LIMIT 1"
+            );
+            $lookup->execute([':id' => $requestId, ':tenant_id' => $tenantId]);
+        }
+
         $row = $lookup->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
             return null;
         }
 
-        // @tenant-guard-ignore: joins the global password_resets table to memberships; tenant_id predicate is on the correlated subquery below
-        $stmt = $this->db->prepare(
-            "UPDATE password_resets
-                SET status = '" . self::STATUS_REJECTED . "',
-                    staged_password_hash = NULL,
-                    updated_at = NOW()
-              WHERE id = :id
-                AND status = '" . self::STATUS_AWAITING_APPROVAL . "'
-                AND EXISTS (
-                    SELECT 1 FROM memberships m
-                    WHERE m.profile_id = password_resets.profile_id
-                      AND m.tenant_id = :tenant_id
-                      AND m.status = 'active'
-                )"
-        );
-        $stmt->execute([':id' => $requestId, ':tenant_id' => $tenantId]);
+        if ($platform) {
+            // @tenant-guard-ignore: platform (system tenant 0) break-glass — cross-tenant by design; every other caller takes the membership-scoped branch below
+            $stmt = $this->db->prepare(
+                "UPDATE password_resets
+                    SET status = '" . self::STATUS_REJECTED . "',
+                        staged_password_hash = NULL,
+                        updated_at = NOW()
+                  WHERE id = :id
+                    AND status = '" . self::STATUS_AWAITING_APPROVAL . "'"
+            );
+            $stmt->execute([':id' => $requestId]);
+        } else {
+            // @tenant-guard-ignore: joins the global password_resets table to memberships; tenant_id predicate is on the correlated subquery below
+            $stmt = $this->db->prepare(
+                "UPDATE password_resets
+                    SET status = '" . self::STATUS_REJECTED . "',
+                        staged_password_hash = NULL,
+                        updated_at = NOW()
+                  WHERE id = :id
+                    AND status = '" . self::STATUS_AWAITING_APPROVAL . "'
+                    AND EXISTS (
+                        SELECT 1 FROM memberships m
+                        WHERE m.profile_id = password_resets.profile_id
+                          AND m.tenant_id = :tenant_id
+                          AND m.status = 'active'
+                    )"
+            );
+            $stmt->execute([':id' => $requestId, ':tenant_id' => $tenantId]);
+        }
 
         return $stmt->rowCount() > 0 ? ['profile_id' => (int) $row['profile_id']] : null;
     }

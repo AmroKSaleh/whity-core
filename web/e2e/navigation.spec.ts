@@ -17,7 +17,9 @@ test.describe('Sidebar navigation (admin)', () => {
     await adminPage.shell.clickNav('Users');
     await page.waitForURL('**/admin/users');
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
-    await expect(page.getByRole('table')).toBeVisible();
+    // Named explicitly: the page renders a second table (pending invitations),
+    // so an unnamed role query is a strict-mode violation rather than a choice.
+    await expect(page.getByRole('table', { name: 'Users' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Email' })).toBeVisible();
   });
 

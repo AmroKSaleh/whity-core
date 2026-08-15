@@ -29,6 +29,15 @@ use Whity\Core\Tenant\TenantContext;
  * {@see PasswordResetService::approveForTenant()} /
  * {@see PasswordResetService::rejectForTenant()} enforce this via a JOIN to
  * `memberships` — never trust a bare request id.
+ *
+ * BREAK-GLASS (WC-797 §4d): a caller acting in the SYSTEM tenant (id 0) and
+ * holding `password_resets:approve` there reviews the queue across ALL tenants.
+ * That is the exit from the state this feature can otherwise create — a tenant
+ * with exactly one approver cannot approve that approver's own parked reset, and
+ * before this the only way out was an operator writing SQL. The scope decision
+ * lives entirely in the service, driven by the tenant on the authenticated
+ * context, so a tenant administrator's reach is unchanged: holding the
+ * permission in tenant N still only ever reaches tenant N.
  */
 final class PasswordResetApprovalsApiHandler
 {

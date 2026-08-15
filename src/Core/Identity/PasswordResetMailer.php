@@ -13,8 +13,9 @@ use Whity\Core\Settings\SettingsService;
 
 /**
  * Sends the forgotten-password transactional emails
- * (WC-password-reset-2fa-recovery): the reset-link itself, and the courtesy
- * "your password was reset" notice once an admin-approved reset is applied.
+ * (WC-password-reset-2fa-recovery): the reset-link itself, the "your request is
+ * waiting for approval" notice, and the courtesy "your password was reset"
+ * notice once an admin-approved reset is applied.
  *
  * Direct-call sender (mirrors {@see TokenEmailVerificationProvider}) rather
  * than a hook-subscriber (like {@see \Whity\Core\Mail\EmailNotifications}):
@@ -65,6 +66,44 @@ final class PasswordResetMailer
             EmailBranding::fromSettings($this->settings),
         );
         $this->mailer->send($email, 'Reset your password', $rendered->text, $rendered->html);
+    }
+
+    /**
+     * Tell the requester their reset is parked in the approval queue
+     * (WC-797 §4b).
+     *
+     * This is the ONLY channel that may say so. `forgot` answers an identical
+     * 202 for every address precisely so a prober cannot learn which addresses
+     * exist; putting "your reset is awaiting approval" in that response would
+     * hand them the oracle the generic answer exists to deny. The mail is
+     * delivered to the address itself, so it tells the account holder something
+     * only they can act on and tells a prober nothing at all.
+     *
+     * The three facts below are all load-bearing. Someone who believes they
+     * rotated a credential and did not holds a false belief about their own
+     * security state — worse than a visible failure — and someone who does not
+     * know retrying cannot help will retry until the throttle locks them out on
+     * top of it.
+     */
+    public function sendAwaitingApprovalNotice(string $email): void
+    {
+        if (!$this->eventEnabled()) {
+            return;
+        }
+
+        $rendered = $this->layout->render(
+            new EmailContent(
+                heading: 'Your password reset is waiting for approval',
+                paragraphs: [
+                    'You asked to reset your password, and an administrator has to approve the change before it takes effect. That approval has not happened yet.',
+                    'Until it does, your current password is still the one that works — nothing about your account has changed.',
+                    'There is no need to request another reset: a new request will not reach an administrator any sooner, and the one you already made is still in the queue.',
+                ],
+                footnote: "If you didn't request this, contact an administrator.",
+            ),
+            EmailBranding::fromSettings($this->settings),
+        );
+        $this->mailer->send($email, 'Your password reset is waiting for approval', $rendered->text, $rendered->html);
     }
 
     /**

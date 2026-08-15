@@ -57,6 +57,56 @@ final class DatabaseSharedStoreTest extends TestCase
         self::assertSame(1, $this->store->count('b'));
     }
 
+    // ── decrement ────────────────────────────────────────────────────────────
+
+    public function testDecrementReleasesASingleUnit(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->increment('k1', 60);
+        self::assertSame(1, $this->store->decrement('k1'));
+        self::assertSame(1, $this->store->count('k1'));
+    }
+
+    public function testDecrementFloorsAtZero(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->decrement('k1');
+        self::assertSame(0, $this->store->decrement('k1'));
+    }
+
+    public function testDecrementOnMissingKeyIsANoOp(): void
+    {
+        self::assertSame(0, $this->store->decrement('ghost'));
+        self::assertSame(0, $this->store->count('ghost'));
+    }
+
+    public function testDecrementDoesNotResurrectAnExpiredWindow(): void
+    {
+        $this->store->increment('k1', -1);
+        self::assertSame(0, $this->store->decrement('k1'));
+        self::assertSame(0, $this->store->count('k1'));
+    }
+
+    public function testDecrementKeepsTheOriginalWindow(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->increment('k1', 60);
+        $this->store->decrement('k1');
+
+        self::assertGreaterThan(0, $this->store->ttl('k1'));
+        self::assertSame(2, $this->store->increment('k1', 60));
+    }
+
+    public function testDecrementOnlyTouchesTargetKey(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->increment('k2', 60);
+        $this->store->decrement('k1');
+
+        self::assertSame(0, $this->store->count('k1'));
+        self::assertSame(1, $this->store->count('k2'));
+    }
+
     // ── count ────────────────────────────────────────────────────────────────
 
     public function testCountReturnZeroForMissingKey(): void

@@ -277,6 +277,7 @@ export function InvitationsPanel() {
       </CardHeader>
       <CardContent>
         <DataTable
+          ariaLabel={t('users.invitations.table.label', 'Pending invitations')}
           columns={columns}
           data={invitations}
           getRowId={(invitation) => String(invitation.id)}

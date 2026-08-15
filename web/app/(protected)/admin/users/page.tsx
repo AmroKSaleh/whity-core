@@ -24,6 +24,7 @@ import { CreateUserModal } from './create-modal';
 import { EditUserModal } from './edit-modal';
 import { DeleteUserModal } from './delete-modal';
 import { InvitationsPanel } from './invitations-panel';
+import { MembershipsModal } from './memberships-modal';
 
 /**
  * The user row shape, derived from the OpenAPI schema (WC-168) so it tracks
@@ -42,6 +43,7 @@ export default function UsersPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isMembershipsModalOpen, setIsMembershipsModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   // The backend supports page/per_page but not sort/filter query params, so
@@ -75,6 +77,11 @@ export default function UsersPage() {
   const handleDeleteClick = (user: User) => {
     setSelectedUser(user);
     setIsDeleteModalOpen(true);
+  };
+
+  const handleMembershipsClick = (user: User) => {
+    setSelectedUser(user);
+    setIsMembershipsModalOpen(true);
   };
 
   // Deactivate/reactivate (WC-user-status) is gated on the SAME users:write
@@ -143,8 +150,11 @@ export default function UsersPage() {
     },
   ];
 
+  // The dropdown is always rendered: "which tenants is this person in?" is a
+  // READ, available to anyone who can reach this page, and it is the only place
+  // that question is answered at all (#797 §2). The grant/revoke controls inside
+  // the modal are gated on users:write separately.
   const rowActions = (user: User) => {
-    if (!canEdit && !canDelete) return null;
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -157,6 +167,9 @@ export default function UsersPage() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => handleMembershipsClick(user)}>
+            {t('users.rowActions.memberships', 'Tenants and roles')}
+          </DropdownMenuItem>
           {canEdit && (
             <DropdownMenuItem onClick={() => handleEditClick(user)}>
               {t('users.rowActions.edit', 'Edit')}
@@ -201,6 +214,7 @@ export default function UsersPage() {
       />
 
       <DataTable
+        ariaLabel={t('users.table.label', 'Users')}
         columns={columns}
         data={users}
         getRowId={(user) => String(user.id)}
@@ -249,6 +263,23 @@ export default function UsersPage() {
               setSelectedUser(null);
               fetchUsers();
             }}
+          />
+
+          {/*
+            Closing re-fetches the list: a granted role can change the PRIMARY
+            row the list shows, and a stale table would contradict the modal
+            the operator just used.
+          */}
+          <MembershipsModal
+            isOpen={isMembershipsModalOpen}
+            onOpenChange={(open) => {
+              setIsMembershipsModalOpen(open);
+              if (!open) {
+                fetchUsers();
+              }
+            }}
+            user={selectedUser}
+            canManage={canEdit}
           />
         </>
       )}

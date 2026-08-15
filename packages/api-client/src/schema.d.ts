@@ -1686,6 +1686,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/password-resets/approver-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many accounts in this tenant can approve a parked password reset */
+        get: operations["get_api_v1_password_resets_approver_coverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/password-resets/pending": {
         parameters: {
             query?: never;
@@ -2677,10 +2694,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List every role a user holds in this tenant */
+        /** List the roles a user holds (every tenant for a system-tenant caller) */
         get: operations["get_api_v1_users_id_memberships"];
         put?: never;
-        /** Grant a user an additional role in this tenant */
+        /** Grant a user a role, optionally in another tenant (system tenant only) */
         post: operations["post_api_v1_users_id_memberships"];
         delete?: never;
         options?: never;
@@ -2705,10 +2722,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send this user a password-reset link (never returns a credential) */
+        post: operations["post_api_v1_users_id_password_reset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AdminPasswordResetSentResponse: {
+            data: {
+                /** @enum {string} */
+                status: "sent";
+                profile_id: number;
+            };
+        };
         AdminStatsResponse: {
             stats: {
                 totals: {
@@ -3413,6 +3454,8 @@ export interface components {
         };
         Membership: {
             id: number;
+            tenantId: number;
+            tenantName: string;
             roleId: number;
             role: string;
             ou_id?: number | null;
@@ -3424,6 +3467,7 @@ export interface components {
             role_id?: number;
             role?: string;
             ou_id?: number | null;
+            tenant_id?: number;
         };
         MembershipListResponse: {
             data: components["schemas"]["Membership"][];
@@ -3431,6 +3475,7 @@ export interface components {
         MembershipResponse: {
             data: {
                 id: number;
+                tenantId: number;
                 roleId: number;
                 ou_id?: number | null;
                 isPrimary: boolean;
@@ -3571,6 +3616,17 @@ export interface components {
             perPage: number;
             total: number;
             totalPages: number;
+        };
+        PasswordResetApproverCoverageResponse: {
+            data: {
+                tenant_id: number;
+                minimum_recommended: number;
+                approval_required: boolean;
+                approver_count: number;
+                approver_profile_ids: number[];
+                approver_role_names: string[];
+                below_minimum: boolean;
+            };
         };
         PasswordResetConfirmRequest: {
             token: string;
@@ -13869,6 +13925,71 @@ export interface operations {
             };
         };
     };
+    get_api_v1_password_resets_approver_coverage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approver coverage for the calling tenant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResetApproverCoverageResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_password_resets_pending: {
         parameters: {
             query?: never;
@@ -20765,7 +20886,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Insufficient permissions */
+            /** @description Insufficient permissions, or a non-system caller named a target tenant */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -20774,7 +20895,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description User or role not found */
+            /** @description User, tenant or role not found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -20862,6 +20983,91 @@ export interface operations {
             };
             /** @description The primary membership cannot be removed here */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_users_id_password_reset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A reset link has been mailed to the user */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPasswordResetSentResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description User not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Password-reset emails are disabled for this instance */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid user id, or the user has no email address */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
