@@ -12,6 +12,7 @@ use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Core\Tenant\SanctionedGlobalTables;
 use Whity\Core\Tenant\TenantOwnedTables;
+use Whity\Database\Database;
 
 /**
  * WHIT-417 (#797 item 3): the invitation lifecycle on a REAL SQL engine.
@@ -89,6 +90,36 @@ final class InvitationServiceRealEngineTest extends TestCase
         self::assertFalse(
             SanctionedGlobalTables::isGlobal('invitations'),
             'An invitation belongs to the tenant that issued it — it is not a global identity row.'
+        );
+    }
+
+    // ── the migration itself ─────────────────────────────────────────────────
+
+    public function testTheMigrationIsReversibleAndRepeatable(): void
+    {
+        require_once dirname(__DIR__, 2) . '/database/migrations/096_create_invitations.php';
+        $db = Database::withFactory(fn (): PDO => $this->pdo, 86400, 86400);
+        $db->forceConnect();
+
+        self::assertTrue($this->tableExists('invitations'));
+
+        \Database\Migrations\CreateInvitations::down($db);
+        self::assertFalse($this->tableExists('invitations'), 'down() must drop the table.');
+
+        // Forward again, twice: a migration that cannot be re-run is a migration
+        // that fails the second time a deployment is interrupted mid-run.
+        \Database\Migrations\CreateInvitations::up($db);
+        \Database\Migrations\CreateInvitations::up($db);
+        self::assertTrue($this->tableExists('invitations'));
+
+        // And the partial unique index came back with it — dropping and
+        // recreating the table must not quietly lose the rule that stops two
+        // live invitations existing for one address.
+        $this->service->invite(self::TENANT_A, 'again@example.test', self::ROLE_USER);
+        $this->service->invite(self::TENANT_A, 'again@example.test', self::ROLE_USER);
+        self::assertSame(
+            '1',
+            $this->scalar("SELECT COUNT(*) FROM invitations WHERE status = 'pending'")
         );
     }
 
@@ -431,6 +462,22 @@ final class InvitationServiceRealEngineTest extends TestCase
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Whether a table exists, asked in a way both engines answer: `sqlite_master`
+     * and `information_schema` are each other's blind spot, and this suite runs
+     * on both.
+     */
+    private function tableExists(string $table): bool
+    {
+        try {
+            $this->pdo->query('SELECT 1 FROM ' . $table . ' WHERE 1 = 0');
+
+            return true;
+        } catch (\PDOException) {
+            return false;
+        }
+    }
 
     /**
      * A single scalar, with the PDO::query() false branch closed off — level-8

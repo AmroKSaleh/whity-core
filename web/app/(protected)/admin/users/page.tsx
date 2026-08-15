@@ -23,6 +23,7 @@ import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateUserModal } from './create-modal';
 import { EditUserModal } from './edit-modal';
 import { DeleteUserModal } from './delete-modal';
+import { InvitationsPanel } from './invitations-panel';
 
 /**
  * The user row shape, derived from the OpenAPI schema (WC-168) so it tracks
@@ -209,6 +210,13 @@ export default function UsersPage() {
         globalFilterPlaceholder={t('users.searchPlaceholder', 'Search users…')}
         pagination={{ pageSize: 10 }}
       />
+
+      {/*
+        Invitations sit under the user list rather than on a page of their own:
+        an invited person is a user who has not arrived yet, and "is Sara in?"
+        should not depend on knowing whether she was added or invited (WHIT-417).
+      */}
+      <InvitationsPanel />
 
       <CreateUserModal
         isOpen={isCreateModalOpen}

@@ -17,7 +17,14 @@
 /** Permission required to create/edit/delete persons and relations. */
 export const RELATIONS_MANAGE = 'relations:manage';
 
-/** Permissions for user management. */
+/**
+ * Permissions for user management.
+ *
+ * `USERS_READ` is here for the invitations panel (WHIT-417), which is the first
+ * UI surface whose READ half is gated separately — the Users list itself sits
+ * behind a route the reader already reached.
+ */
+export const USERS_READ = 'users:read';
 export const USERS_WRITE = 'users:write';
 export const USERS_DELETE = 'users:delete';
 
