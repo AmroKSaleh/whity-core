@@ -23,6 +23,7 @@ use Whity\Http\JsonBody;
  *  - POST   /api/resource-role-grants   {resource_type, resource_id, role_id, profile_id?}
  *  - GET    /api/resource-role-grants?resource_type=T&resource_id=N
  *  - DELETE /api/resource-role-grants/{id}
+ *  - DELETE /api/resource-role-grants/all?resource_type=T&resource_id=N
  *
  * Why this exists
  * ---------------
@@ -44,6 +45,14 @@ use Whity\Http\JsonBody;
  * there is deliberately no third state, because "unspecified" would have to
  * resolve to one of the two anyway and silently picking one is how a caller
  * ends up granting broader authority than it asked for.
+ *
+ * Cleaning up after a deleted record
+ * ----------------------------------
+ * `resource_id` carries no foreign key, so core is never told when a record
+ * disappears and its grants outlive it — to be inherited by whatever record
+ * reuses that id. {@see self::revokeAll()} is how an owner closes that hole in
+ * one call, and it is the one route here that does NOT ask the owner to vouch
+ * for the resource: by then the record is usually already gone.
  *
  * What is validated at this boundary
  * ----------------------------------
@@ -296,6 +305,114 @@ final class ResourceRoleGrantsApiHandler
         ]);
 
         return Response::json([], 204);
+    }
+
+    /**
+     * DELETE /api/resource-role-grants/all?resource_type=T&resource_id=N —
+     * revoke EVERY grant at one resource.
+     *
+     * The cleanup an owner runs when it deletes the record itself. Nothing
+     * removes these rows automatically: `resource_id` carries no foreign key, so
+     * core is never told a record disappeared, and the grants outlive it — then
+     * a later record REUSING that id silently inherits authority granted to a
+     * dead one. Without this route the first consumer to delete such a record
+     * hand-rolls list-then-revoke-each: the loop this surface exists to remove,
+     * and one that leaves the resource half-cleaned if it dies midway.
+     *
+     * A DISTINCT `/all` path, mirroring `/api/entity-tags/all`, rather than an
+     * argument-shape variant of DELETE /{id}: the path segment says "every grant
+     * here" out loud, and a malformed single-revoke can never degrade into
+     * "remove everything". `all` is not `\d+`, so the two routes cannot collide.
+     *
+     * Takes the SAME parameters, with the same validation, as {@see self::list()}.
+     * That is deliberate: a caller can GET exactly what this DELETE will remove.
+     * Any divergence would mean rows a caller can list but not clean, or clean
+     * but never have seen.
+     *
+     * Returns 200 with a COUNT rather than a bare 204. Here 0 is a success — see
+     * below — so a bare confirmation would leave the caller unable to tell
+     * "wiped 7 grants" from "wiped nothing because I typed the wrong id", which
+     * is the one distinction a cleanup path needs in its log.
+     *
+     * IDEMPOTENT: a resource with no grants answers 200 / `revoked: 0`, never
+     * 404. That property is the entire point — the caller is deleting a record
+     * and neither knows nor cares whether it carried grants, so cleanup must be
+     * safe to call unconditionally and safe to retry.
+     *
+     * Deliberately does NOT run the ownership check {@see self::create()} runs
+     * ------------------------------------------------------------------------
+     * `create()` makes the owning plugin vouch for the resource and fails CLOSED
+     * when nobody does, because writing a grant against an unvalidated id is
+     * exactly the hazard it exists to prevent. Cleanup is the mirror image: by
+     * the time it runs the record is usually ALREADY DELETED, so nobody can
+     * vouch for it — a fails-closed check would refuse precisely the calls that
+     * matter, stranding the rows at an id a later record will reuse. It would
+     * also make cleanup impossible while the owning plugin is disabled, which is
+     * the worst moment to be unable to remove authority.
+     *
+     * Skipping it grants nothing new. The DELETE is tenant-scoped, so the
+     * blast radius is rows the caller could already have listed and revoked one
+     * id at a time; and a delete can only ever REMOVE authority, never confer
+     * it, so an id nobody vouches for costs nothing to over-clean.
+     */
+    public function revokeAll(Request $request): Response
+    {
+        $auth = $this->authorize($request, CorePermissions::ROLES_MANAGE);
+        if ($auth instanceof Response) {
+            return $auth;
+        }
+        $tenantId = $auth;
+
+        $query = self::queryParams($request);
+
+        // `resource_type` IS still validated, unlike ownership, and for the
+        // opposite reason: an unregistered type here would answer `revoked: 0`,
+        // which is indistinguishable from "that record had no grants". The
+        // caller would log a successful cleanup that removed nothing while the
+        // real rows survive for the next record to inherit. The registry is the
+        // only thing that can turn that silent no-op into a loud error.
+        $resourceType = trim((string) ($query['resource_type'] ?? ''));
+        if ($resourceType === '' || !$this->resourceTypes->exists($resourceType)) {
+            return Response::error(
+                'resource_type is required and must be a registered resource type',
+                422,
+                ['resource_type' => $resourceType]
+            );
+        }
+
+        $resourceId = self::positiveInt($query['resource_id'] ?? null);
+        if ($resourceId === null) {
+            return Response::error('resource_id is required and must be a positive integer', 422);
+        }
+
+        $revoked = $this->repository->revokeAllFor($tenantId, $resourceType, $resourceId);
+
+        // A DISTINCT event, not N × `rbac.resource_grant.revoked`: that payload
+        // names one grant id and this route deliberately never collects them —
+        // reading the ids back would reintroduce the list-then-delete round trip
+        // it exists to replace, and race a concurrent revoke between the two
+        // statements. A listener mirroring grants still has to hear about a bulk
+        // wipe, or it keeps believing rows that are gone are still there.
+        //
+        // Announced only when rows actually went, matching create() (which
+        // announces a grant only when a row was really written) and the
+        // repository's own cache-clear guard. A no-op cleanup is not an event.
+        if ($revoked > 0) {
+            $this->hooks->dispatch('rbac.resource_grant.revoked_all', [
+                'tenant_id' => $tenantId,
+                'resource_type' => $resourceType,
+                'resource_id' => $resourceId,
+                'revoked' => $revoked,
+            ]);
+        }
+
+        return Response::json([
+            'data' => [
+                'resource_type' => $resourceType,
+                'resource_id' => $resourceId,
+                'revoked' => $revoked,
+            ],
+        ]);
     }
 
     /**

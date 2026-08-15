@@ -1596,6 +1596,81 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    /**
+     * WC-712 §4: the bulk cleanup is the single worst thing this surface could
+     * get wrong — one call that removes rows in bulk, addressed by a
+     * `resource_id` that carries no foreign key and therefore COLLIDES across
+     * tenants in normal use.
+     *
+     * The fixture's third row is Tenant B's grant at resource_id 10, which is
+     * Tenant A's OU. Tenant A wiping its own resource must leave it standing.
+     * That route deliberately does not ask the owning plugin to vouch for the
+     * resource (the record is usually already deleted by then), so the
+     * `tenant_id` predicate is the ONLY thing keeping the cleanup inside the
+     * caller's tenant — which is exactly what this pins.
+     */
+    public function testResourceGrantRevokeAllDoesNotTouchForeignRowsAtTheSameResourceId(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->revokeAll(
+            $this->req('DELETE', '/api/resource-role-grants/all?resource_type=ou&resource_id=10')
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $data = json_decode($response->getBody(), true);
+        $this->assertSame(1, $data['data']['revoked'], "Only Tenant A's row may be counted as revoked");
+
+        $this->assertSame(
+            0,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 1 AND resource_id = 10"
+            ),
+            "Tenant A's own grant must be gone"
+        );
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 2 AND resource_id = 10"
+            ),
+            "Tenant B's grant at the SAME resource id must survive Tenant A's cleanup"
+        );
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 2 AND resource_id = 20"
+            ),
+            "Tenant B's grant at its own resource must be untouched"
+        );
+    }
+
+    /**
+     * WC-712 §4: aiming the cleanup at ANOTHER tenant's resource removes
+     * nothing and reports a plain, successful zero.
+     *
+     * Not a 404 on purpose: the caller is deleting a record and a cleanup that
+     * had nothing to clean is a normal outcome. Answering "not found" for a
+     * foreign id would also confirm the id is not the caller's — a probe. The
+     * count is what tells the truth: zero rows, zero disclosure.
+     */
+    public function testResourceGrantRevokeAllAtAForeignResourceRemovesNothing(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->revokeAll(
+            $this->req('DELETE', '/api/resource-role-grants/all?resource_type=ou&resource_id=20')
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $data = json_decode($response->getBody(), true);
+        $this->assertSame(0, $data['data']['revoked'], "A foreign resource must yield an empty cleanup");
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 2 AND resource_id = 20"
+            ),
+            "Tenant B's grant must survive Tenant A aiming a cleanup at Tenant B's resource"
+        );
+    }
+
     // ==================== role_permissions (tenant-scoped via parent role) ====================
 
     /**
