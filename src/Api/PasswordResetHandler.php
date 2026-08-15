@@ -62,6 +62,11 @@ final class PasswordResetHandler
      * message. Dispatch happens only for a known address AND when
      * `auth.self_password_reset_enabled` is on; either way the response never
      * varies.
+     *
+     * When the address already has a reset PARKED for administrator approval,
+     * the dispatch becomes the idempotent branch in
+     * {@see self::notifyAwaitingApproval()} instead of minting a fresh link —
+     * still behind the same unchanged 202.
      */
     public function forgot(Request $request): Response
     {
@@ -94,8 +99,10 @@ final class PasswordResetHandler
         // Count this attempt against both windows before doing any work — same
         // ordering as EmailVerificationHandler, so the throttle behaves
         // identically whether the flag below is on or off (no enumeration of
-        // whether self-service reset is even enabled).
-        $this->store->increment($emailKey, self::WINDOW_SECONDS);
+        // whether self-service reset is even enabled). This ordering is
+        // load-bearing: anything that decides whether to count AFTER looking the
+        // address up turns the 429 boundary into an existence oracle.
+        $emailCount = $this->store->increment($emailKey, self::WINDOW_SECONDS);
         if ($ipKey !== null) {
             $this->store->increment($ipKey, self::WINDOW_SECONDS);
         }
@@ -105,14 +112,19 @@ final class PasswordResetHandler
             if ($row !== null) {
                 try {
                     $profileId = (int) $row['profile_id'];
-                    $token = $this->service->issue($profileId);
-                    $this->mailer->sendResetLink($email, $token);
-                    $this->audit->record('auth.password_reset.requested', [
-                        'tenant_id'   => self::SYSTEM_TENANT_ID,
-                        'target_type' => 'profile',
-                        'target_id'   => $profileId,
-                        'ip_address'  => $ip,
-                    ]);
+
+                    if ($this->service->findPendingApprovalForProfile($profileId) !== null) {
+                        $this->notifyAwaitingApproval($email, $profileId, $ip, $emailKey, $emailCount);
+                    } else {
+                        $token = $this->service->issue($profileId);
+                        $this->mailer->sendResetLink($email, $token);
+                        $this->audit->record('auth.password_reset.requested', [
+                            'tenant_id'   => self::SYSTEM_TENANT_ID,
+                            'target_type' => 'profile',
+                            'target_id'   => $profileId,
+                            'ip_address'  => $ip,
+                        ]);
+                    }
                 } catch (\Throwable $e) {
                     // Delivery/issuance failure must not change the response shape.
                     error_log('[password-reset] forgot dispatch failed: ' . $e->getMessage());
@@ -196,6 +208,50 @@ final class PasswordResetHandler
                 'message' => 'Your password reset has been submitted for administrator approval.',
             ],
         ], 200);
+    }
+
+    /**
+     * Answer a repeat request for a profile whose reset is ALREADY parked in
+     * the approval queue (WC-797 §4b/§4c).
+     *
+     * Idempotent by construction: the parked request is left exactly as it is —
+     * no second token, no supersede, no second queue entry for an administrator
+     * to disambiguate — and the requester is told, by mail, that it is waiting.
+     *
+     * The rate-limit release is the delicate part. The unit was already counted
+     * above and stays counted for the FIRST request of every window, for every
+     * address, known or not: that is what keeps the 429 boundary silent about
+     * whether an address exists. Only a REPEAT inside a window that has already
+     * been charged is released, and only for a profile whose parked state
+     * nobody but the account holder could have created (it takes a valid,
+     * mailed, single-use token to park a request at all). So the residual
+     * signal is available only to someone already holding the mailbox, while
+     * the failure it removes — a locked-out user throttled for retrying a reset
+     * that could never apply — is the one an adopter actually hit.
+     *
+     * The per-IP unit is deliberately NOT released: it is a shared ceiling
+     * across every address probed from one host, and leaving it charged means
+     * this path can never be used to buy unlimited requests from a single IP.
+     */
+    private function notifyAwaitingApproval(
+        string $email,
+        int $profileId,
+        ?string $ip,
+        string $emailKey,
+        int $emailCount
+    ): void {
+        $this->mailer->sendAwaitingApprovalNotice($email);
+
+        $this->audit->record('auth.password_reset.awaiting_approval_notified', [
+            'tenant_id'   => self::SYSTEM_TENANT_ID,
+            'target_type' => 'profile',
+            'target_id'   => $profileId,
+            'ip_address'  => $ip,
+        ]);
+
+        if ($emailCount > 1) {
+            $this->store->decrement($emailKey);
+        }
     }
 
     private function selfServiceEnabled(): bool

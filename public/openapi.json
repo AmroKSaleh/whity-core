@@ -10927,6 +10927,82 @@
                 ]
             }
         },
+        "/api/v1/password-resets/approver-coverage": {
+            "get": {
+                "operationId": "get_api_v1_password_resets_approver_coverage",
+                "summary": "How many accounts in this tenant can approve a parked password reset",
+                "tags": [
+                    "auth"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Approver coverage for the calling tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PasswordResetApproverCoverageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/password-resets/pending": {
             "get": {
                 "operationId": "get_api_v1_password_resets_pending",
@@ -19574,10 +19650,142 @@
                     }
                 ]
             }
+        },
+        "/api/v1/users/{id}/password-reset": {
+            "post": {
+                "operationId": "post_api_v1_users_id_password_reset",
+                "summary": "Send this user a password-reset link (never returns a credential)",
+                "tags": [
+                    "users"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "A reset link has been mailed to the user",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AdminPasswordResetSentResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User not found in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Password-reset emails are disabled for this instance",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Invalid user id, or the user has no email address",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "components": {
         "schemas": {
+            "AdminPasswordResetSentResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "status": {
+                                "type": "string",
+                                "enum": [
+                                    "sent"
+                                ]
+                            },
+                            "profile_id": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "status",
+                            "profile_id"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "AdminStatsResponse": {
                 "type": "object",
                 "properties": {
@@ -22720,6 +22928,55 @@
                     "perPage",
                     "total",
                     "totalPages"
+                ]
+            },
+            "PasswordResetApproverCoverageResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "tenant_id": {
+                                "type": "integer"
+                            },
+                            "minimum_recommended": {
+                                "type": "integer"
+                            },
+                            "approval_required": {
+                                "type": "boolean"
+                            },
+                            "approver_count": {
+                                "type": "integer"
+                            },
+                            "approver_profile_ids": {
+                                "type": "array",
+                                "items": {
+                                    "type": "integer"
+                                }
+                            },
+                            "approver_role_names": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "below_minimum": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "tenant_id",
+                            "minimum_recommended",
+                            "approval_required",
+                            "approver_count",
+                            "approver_profile_ids",
+                            "approver_role_names",
+                            "below_minimum"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "PasswordResetConfirmRequest": {

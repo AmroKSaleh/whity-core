@@ -34,6 +34,22 @@ final class ArraySharedStore implements SharedStoreInterface
         return $this->entries[$key]['counter'];
     }
 
+    public function decrement(string $key): int
+    {
+        $now   = microtime(true);
+        $entry = $this->entries[$key] ?? null;
+
+        if ($entry === null || ($entry['expires_at'] !== null && $entry['expires_at'] <= $now)) {
+            return 0;
+        }
+
+        // max(0, …) rather than a plain subtraction: a negative budget would be
+        // silently spent by the next increments instead of refusing them.
+        $this->entries[$key]['counter'] = max(0, $entry['counter'] - 1);
+
+        return $this->entries[$key]['counter'];
+    }
+
     public function count(string $key): int
     {
         $now   = microtime(true);
