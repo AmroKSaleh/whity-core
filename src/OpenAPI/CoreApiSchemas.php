@@ -111,7 +111,8 @@ final class CoreApiSchemas
             self::tagRoutes(),
             self::passwordResetRoutes(),
             self::twoFactorRecoveryRoutes(),
-            self::dataTypeRoutes()
+            self::dataTypeRoutes(),
+            self::resourceRoleGrantRoutes()
         );
     }
 
@@ -2713,6 +2714,35 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
             ], []),
 
+            // ── Resource-scoped role grants (WC-712 §3) ───────────────────────
+            // `profile_id` nullability carries the meaning, so it is nullable
+            // here and NOT in the required list of the create request: null (or
+            // omitted) is the "everyone at this resource" grant, a value is the
+            // "this profile at this resource" grant.
+            'ResourceRoleGrant' => self::object([
+                'id' => self::int(),
+                'role_id' => self::int(),
+                'profile_id' => self::int(true),
+            ], ['id', 'role_id', 'profile_id']),
+            'ResourceRoleGrantListResponse' => self::listEnvelope('ResourceRoleGrant'),
+            'ResourceRoleGrantCreateRequest' => self::object([
+                'resource_type' => self::str(),
+                'resource_id' => self::int(),
+                'role_id' => self::int(),
+                'profile_id' => self::int(true),
+            ], ['resource_type', 'resource_id', 'role_id']),
+            // `created` distinguishes a fresh grant from an idempotent repeat,
+            // so a caller can tell the two apart without comparing status codes.
+            'ResourceRoleGrantResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'resource_type' => self::str(),
+                'resource_id' => self::int(),
+                'role_id' => self::int(),
+                'profile_id' => self::int(true),
+                'created' => self::bool(),
+            ], ['id', 'tenant_id', 'resource_type', 'resource_id', 'role_id', 'profile_id', 'created'])),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -4925,6 +4955,67 @@ final class CoreApiSchemas
         ];
     }
 
+    /**
+     * Resource-scoped role grants (WC-712 §3) — the write path for
+     * `resource_role_assignments`.
+     *
+     * Gated on the EXISTING roles:read / roles:manage. A new permission would
+     * need a grant migration, and such a migration reaches the `admin` role
+     * only, so operators running a custom administrative role would silently
+     * lose a capability their plugins depend on.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function resourceRoleGrantRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/resource-role-grants', 'roles:read', [
+                'summary' => 'List the role grants addressed at one resource',
+                'description' => 'Returns both grant shapes: a null `profile_id` is the '
+                    . '"everyone at this resource" grant, a set `profile_id` grants to that one profile. '
+                    . 'Always scoped to the caller\'s tenant, so a resource belonging to another tenant '
+                    . 'yields an empty list rather than an error.',
+                'tags' => ['rbac'],
+                'parameters' => [
+                    self::queryParam('resource_type', 'string', 'A registered resource type (e.g. `ou`, `acme:record`)', true),
+                    self::queryParam('resource_id', 'integer', 'The record the grants are addressed at', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The grants at this resource', 'ResourceRoleGrantListResponse'),
+                    422 => self::errorResponse('resource_type is unregistered, or resource_id is missing/invalid'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/resource-role-grants', 'roles:manage', [
+                'summary' => 'Grant a role at one resource (idempotent)',
+                'description' => 'Granting a role that is already granted at that resource is a SUCCESS '
+                    . '(200 with `created: false` and the existing grant id), not a conflict — mirroring '
+                    . 'POST /api/users/{id}/memberships. A grant WIDENS authority at one resource and is '
+                    . 'never a substitute for tenant membership: resolution still requires an active '
+                    . 'membership in the tenant.',
+                'tags' => ['rbac'],
+                'request' => 'ResourceRoleGrantCreateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The grant already existed', 'ResourceRoleGrantResponse'),
+                    201 => self::jsonResponse('The grant was created', 'ResourceRoleGrantResponse'),
+                    404 => self::errorResponse('The resource, role or profile is not the caller tenant\'s'),
+                    422 => self::errorResponse('Validation failed, or resource_type is unregistered'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/resource-role-grants/{id:\d+}', 'roles:manage', [
+                'summary' => 'Revoke one resource role grant by its id',
+                'description' => 'By id rather than by (resource, role, profile): over HTTP an omitted '
+                    . '`profile_id` and an explicit null are indistinguishable, so a tuple-addressed revoke '
+                    . 'would let a dropped parameter silently revoke the everyone-grant instead of one '
+                    . 'profile\'s. The ids come from the list route.',
+                'tags' => ['rbac'],
+                'responses' => [
+                    204 => ['description' => 'Grant revoked'],
+                    404 => self::errorResponse('No such grant in the caller\'s tenant'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
     // ==================== declaration helpers ====================
 
     /**
@@ -4998,12 +5089,16 @@ final class CoreApiSchemas
     /**
      * @return array<string, mixed>
      */
-    private static function queryParam(string $name, string $type, string $description): array
-    {
+    private static function queryParam(
+        string $name,
+        string $type,
+        string $description,
+        bool $required = false
+    ): array {
         return [
             'name' => $name,
             'in' => 'query',
-            'required' => false,
+            'required' => $required,
             'description' => $description,
             'schema' => ['type' => $type],
         ];
