@@ -1455,6 +1455,147 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ==================== resource_role_assignments ====================
+
+    /**
+     * WC-712 §3: listing the grants at a resource is scoped by `tenant_id`, not
+     * inferred from the resource.
+     *
+     * The fixture seeds a Tenant B row at resource_id 10 — Tenant A's OU. That
+     * row could not be written through the API (the create path rejects a
+     * foreign resource), and that is the point: this proves the READ predicate
+     * on its own, rather than relying on the write guard to keep the table
+     * clean. `resource_id` carries no foreign key, so ids DO collide across
+     * tenants in normal use and the predicate is the only thing separating them.
+     */
+    public function testResourceRoleGrantListIsTenantScoped(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->list(
+            $this->req('GET', '/api/resource-role-grants?resource_type=ou&resource_id=10')
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true);
+        $roleIds = array_column($data['data'], 'role_id');
+        $this->assertContains(100, $roleIds, "Tenant A must see its own grant at its own resource");
+        $this->assertNotContains(
+            200,
+            $roleIds,
+            "Tenant B's grant at the same resource id must never appear in Tenant A's list"
+        );
+    }
+
+    /**
+     * WC-712 §3: Tenant A cannot address a grant at Tenant B's OU — the resource
+     * is not found for Tenant A (404) and no row is written.
+     */
+    public function testTenantCannotGrantAtForeignResourceAndRowStaysAbsent(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->create($this->req(
+            'POST',
+            '/api/resource-role-grants',
+            ['resource_type' => 'ou', 'resource_id' => 20, 'role_id' => 100]
+        ));
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign resource must report not-found');
+        $this->assertSame(
+            0,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments
+                  WHERE resource_type = 'ou' AND resource_id = 20 AND role_id = 100"
+            ),
+            'No spurious cross-tenant resource_role_assignments row may exist after the rejected grant'
+        );
+    }
+
+    /**
+     * WC-712 §3: a resource grant must not become a way to attach another
+     * tenant's PRIVATE role to your own record — the leak would be written one
+     * role id at a time. Reported as not-found so the role's existence is never
+     * disclosed.
+     */
+    public function testTenantCannotAttachForeignPrivateRoleToItsOwnResource(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->create($this->req(
+            'POST',
+            '/api/resource-role-grants',
+            ['resource_type' => 'ou', 'resource_id' => 10, 'role_id' => 200]
+        ));
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign role must be not-found, never forbidden');
+        $this->assertStringNotContainsString(
+            'tenant-b-private',
+            $response->getBody(),
+            'The refusal must not leak the Tenant B role name'
+        );
+        $this->assertSame(
+            0,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments
+                  WHERE tenant_id = 1 AND resource_id = 10 AND role_id = 200"
+            ),
+            "Tenant B's private role must not be attached to Tenant A's resource"
+        );
+    }
+
+    /**
+     * WC-712 §3: revoking is by grant id, so the tenant predicate on the DELETE
+     * is what stops a caller walking ids into another tenant's rows.
+     */
+    public function testTenantCannotRevokeForeignGrantAndRowSurvives(): void
+    {
+        $foreignId = $this->grantId(self::TENANT_B, 20);
+        $this->assertGreaterThan(0, $foreignId, 'Fixture: Tenant B must hold a grant at its own OU');
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->revoke(
+            $this->req('DELETE', '/api/resource-role-grants/' . $foreignId),
+            ['id' => (string) $foreignId]
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign grant revoke must report not-found');
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE id = {$foreignId}"
+            ),
+            "Tenant B's grant must survive a cross-tenant revoke attempt"
+        );
+    }
+
+    /**
+     * WC-712 §3 (positive control): Tenant A revokes its OWN grant and the row
+     * is gone, while Tenant B's row is untouched — so the test above is proving
+     * the predicate, not a revoke path that never works.
+     */
+    public function testOwnResourceGrantRevokeSucceedsAndLeavesForeignRowIntact(): void
+    {
+        $ownId = $this->grantId(self::TENANT_A, 10);
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->revoke(
+            $this->req('DELETE', '/api/resource-role-grants/' . $ownId),
+            ['id' => (string) $ownId]
+        );
+
+        $this->assertSame(204, $response->getStatusCode(), "Tenant A's own grant revoke must succeed");
+        $this->assertSame(
+            0,
+            $this->countRows("SELECT COUNT(*) FROM resource_role_assignments WHERE id = {$ownId}"),
+            "Tenant A's own grant must be gone"
+        );
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 2 AND resource_id = 20"
+            ),
+            "Tenant B's grant must be untouched by Tenant A's own-grant revoke"
+        );
+    }
+
     // ==================== role_permissions (tenant-scoped via parent role) ====================
 
     /**
@@ -1884,6 +2025,44 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         return new \Whity\Api\PersonsApiHandler(
             new PersonRepository($this->pdo),
             new RelationRepository($this->pdo)
+        );
+    }
+
+    /**
+     * The id of the resource_role_assignments row a tenant holds at a resource.
+     *
+     * Fetched rather than hardcoded: the fixture inserts without explicit ids so
+     * the sequence assigns them, and PostgreSQL and SQLite need not agree.
+     */
+    private function grantId(int $tenantId, int $resourceId): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id FROM resource_role_assignments
+              WHERE tenant_id = ? AND resource_type = ? AND resource_id = ?'
+        );
+        $stmt->execute([$tenantId, 'ou', $resourceId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * The RoleChecker is mocked permissive on purpose: this suite proves TENANT
+     * isolation, so the handler must be shown to refuse a cross-tenant row even
+     * when the caller's permissions are not in question.
+     */
+    private function resourceRoleGrantsHandler(): \Whity\Api\ResourceRoleGrantsApiHandler
+    {
+        $roleChecker = $this->createMock(RoleChecker::class);
+        $roleChecker->method('hasPermissionForProfile')->willReturn(true);
+
+        $resourceTypes = new \Whity\Core\RBAC\ResourceTypeRegistry();
+
+        return new \Whity\Api\ResourceRoleGrantsApiHandler(
+            $this->pdo,
+            new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($this->pdo, $resourceTypes),
+            $resourceTypes,
+            $roleChecker,
+            $this->hooks()
         );
     }
 
@@ -2483,6 +2662,22 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             INSERT INTO ou_role_assignments (tenant_id, ou_id, role_id, created_at) VALUES
                 (1, 10, 100, datetime('now')),
                 (2, 20, 200, datetime('now'))
+        ");
+
+        // resource_role_assignments (migration 088): the polymorphic grant table.
+        // Tenant A holds role 100 at its own OU 10; Tenant B holds role 200 at its
+        // own OU 20. The THIRD row is the important one — Tenant B claiming a
+        // grant at resource_id 10, which is Tenant A's OU. The API would refuse to
+        // write it, and seeding it by hand is deliberate: `resource_id` carries no
+        // foreign key, so ids collide across tenants in normal use and the
+        // tenant_id predicate is the only thing that separates them. A read test
+        // that never sees a colliding id proves nothing.
+        $pdo->exec("
+            INSERT INTO resource_role_assignments
+                (tenant_id, resource_type, resource_id, role_id, profile_id, created_at) VALUES
+                (1, 'ou', 10, 100, NULL, datetime('now')),
+                (2, 'ou', 20, 200, NULL, datetime('now')),
+                (2, 'ou', 10, 200, NULL, datetime('now'))
         ");
 
         // persons: two standalone (non-profile-linked) persons, one per tenant, so
