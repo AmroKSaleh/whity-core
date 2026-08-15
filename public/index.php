@@ -1254,6 +1254,23 @@ $router->registerUnversioned('GET', '/api/version', static function () use ($rou
     );
 });
 
+// WHIT-587: platform version state for operators without a shell. The running
+// core + plugin-SDK versions, and the latest-release comparison that until now
+// only `update:check` could answer. Both routes are settings:manage AND system
+// tenant (the second half enforced in the handler) — this describes the whole
+// deployment, which on a shared install is none of a tenant admin's business.
+// Read-only on purpose: applying an update stays the manual runbook
+// (docs/wiki/Core-Update.md), because "apply" cannot mean the same thing for a
+// source checkout as for an immutable container image.
+$platformVersionHandler = new \Whity\Api\PlatformVersionApiHandler(
+    $roleChecker,
+    new \Whity\Core\Update\LatestReleaseCheck()
+);
+$router->register('GET', '/api/platform/version',        [$platformVersionHandler, 'version'], null, null, CorePermissions::SETTINGS_MANAGE);
+// Separate route because it reaches out to the release stream: the local
+// snapshot above must stay instant and offline-safe.
+$router->register('GET', '/api/platform/version/latest', [$platformVersionHandler, 'latest'],  null, null, CorePermissions::SETTINGS_MANAGE);
+
 // WC-209: dynamic OpenAPI document. Regenerates the spec from the LIVE router
 // at request time, so a plugin installed/uninstalled/reloaded after the last
 // manual `generate:openapi` is immediately reflected — the schema-driven plugin

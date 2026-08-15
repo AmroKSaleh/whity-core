@@ -1,4 +1,6 @@
 import type { NextConfig } from "next";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "path";
 
 /**
@@ -27,6 +29,64 @@ import path from "path";
  */
 const isDevelopment = process.env.NODE_ENV === "development";
 
+/**
+ * Build identity (WHIT-587).
+ *
+ * A restart after a checkout used to silently re-serve the previous bundle,
+ * because nothing about a build recorded WHICH checkout it came from. These
+ * three facts, resolved once here and frozen into the build by `env` below,
+ * make that observable: `scripts/start-web.sh` compares the built commit to
+ * the checked-out one before deciding to rebuild, and `GET /web-build` serves
+ * them so the staleness is visible from outside the container.
+ *
+ * All of it degrades to null rather than failing a build: a source tarball
+ * with no `.git`, or an image build with no git binary, is a legitimate way to
+ * build this app.
+ */
+const buildCommit = resolveBuildCommit();
+
+/**
+ * The commit HEAD points at, or null when this is not a readable git checkout.
+ */
+function resolveBuildCommit(): string | null {
+  if (process.env.WHITY_BUILD_COMMIT) {
+    // Image builds pass it in: the build context is a copied tree with no .git.
+    return process.env.WHITY_BUILD_COMMIT;
+  }
+
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: __dirname,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `CoreVersion::VERSION` — the platform's single source of truth for its own
+ * version, read straight from the file that declares it.
+ *
+ * Parsed rather than duplicated into package.json: a copy is a copy that can
+ * drift, and this number's whole job is to be comparable with the `version`
+ * the backend reports on `/api/health`. The web app is built from the same
+ * checkout as the core it serves, which is exactly the invariant being pinned.
+ */
+function resolveCoreVersion(): string | null {
+  try {
+    const source = readFileSync(
+      path.join(__dirname, "..", "src", "Core", "CoreVersion.php"),
+      "utf8",
+    );
+
+    return /const VERSION = '([^']+)'/.exec(source)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
@@ -50,6 +110,27 @@ const nextConfig: NextConfig = {
   // hoisted root node_modules and the ../packages/ui workspace are in scope.
   outputFileTracingRoot: path.join(__dirname, ".."),
   transpilePackages: ["@amroksaleh/ui"],
+  /**
+   * BUILD_ID *is* the commit (WHIT-587). Next's default is a random id, which
+   * makes a build output impossible to trace back to a source revision —
+   * `scripts/start-web.sh` can then only ask "does a build exist?", which is
+   * how a restart came to serve a bundle 268 commits stale. Pinning it to the
+   * commit turns that into "is the build the one this checkout describes?".
+   *
+   * Returning null hands the decision back to Next (its random default), which
+   * is the honest answer when there is no commit to name.
+   */
+  generateBuildId: async () => buildCommit,
+  /**
+   * Statically replaced at BUILD time — deliberately not runtime env. See
+   * lib/build-info.ts for why the distinction is the whole feature.
+   */
+  env: {
+    WHITY_BUILD_ID: buildCommit ?? "",
+    WHITY_BUILD_COMMIT: buildCommit ?? "",
+    WHITY_BUILD_CORE_VERSION: resolveCoreVersion() ?? "",
+    WHITY_BUILT_AT: new Date().toISOString(),
+  },
   // Peer-dep singletons (react, radix, react-hook-form, …) are guaranteed by
   // npm workspaces hoisting them to the root node_modules, so the previous
   // turbopack.resolveAlias pins are no longer needed.

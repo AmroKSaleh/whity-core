@@ -1113,6 +1113,26 @@ final class CoreApiSchemas
                     ],
                 ],
             ],
+            // WHIT-587: platform version state. settings:manage AND the system
+            // tenant (the tenant half is enforced in the handler, which the
+            // router cannot express) — it describes the whole deployment.
+            self::permissionRoute('GET', '/api/platform/version', 'settings:manage', [
+                'summary' => 'Running core, plugin-SDK and PHP versions (system tenant only)',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('The versions this deployment is running', 'PlatformVersionResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/platform/version/latest', 'settings:manage', [
+                'summary' => 'Compare the running core against the latest published release (system tenant only)',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The comparison verdict — including `check_failed` when the release stream could not be reached',
+                        'PlatformLatestReleaseResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
             // No auth gate — any authenticated caller may read navigation
             [
                 'method' => 'GET',
@@ -3077,6 +3097,28 @@ final class CoreApiSchemas
                 'db_connected' => self::bool(),
                 'memory_usage_mb' => ['type' => 'number', 'format' => 'float'],
             ], ['status', 'version', 'worker_count', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
+
+            // GET /api/platform/version (WHIT-587)
+            'PlatformVersionResponse' => self::object([
+                'core_version' => self::str(),
+                'sdk_version' => self::str(),
+                'php_version' => self::str(),
+            ], ['core_version', 'sdk_version', 'php_version']),
+
+            // GET /api/platform/version/latest (WHIT-587). `check_failed` is a
+            // 200 verdict, not an HTTP error — "could not tell" must never be
+            // read as "up to date".
+            'PlatformLatestReleaseResponse' => self::object([
+                'status' => ['type' => 'string', 'enum' => ['up_to_date', 'update_available', 'ahead', 'no_releases', 'check_failed']],
+                'update_available' => self::bool(),
+                'repository' => self::str(),
+                'current_version' => self::str(),
+                'latest_version' => self::str(true),
+                'release_url' => self::str(true),
+                'published_at' => self::str(true),
+                'failure_reason' => self::str(true),
+                'detail' => self::str(true),
+            ], ['status', 'update_available', 'repository', 'current_version']),
 
             // GET /api/instance/status (WC-instance-first-run)
             'InstanceStatusResponse' => self::object([

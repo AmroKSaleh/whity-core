@@ -12397,6 +12397,158 @@
                 ]
             }
         },
+        "/api/v1/platform/version": {
+            "get": {
+                "operationId": "get_api_v1_platform_version",
+                "summary": "Running core, plugin-SDK and PHP versions (system tenant only)",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The versions this deployment is running",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlatformVersionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/platform/version/latest": {
+            "get": {
+                "operationId": "get_api_v1_platform_version_latest",
+                "summary": "Compare the running core against the latest published release (system tenant only)",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The comparison verdict \u2014 including `check_failed` when the release stream could not be reached",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlatformLatestReleaseResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/plugins": {
             "get": {
                 "operationId": "get_api_v1_plugins",
@@ -23079,6 +23231,75 @@
                         "type": "integer"
                     }
                 }
+            },
+            "PlatformLatestReleaseResponse": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "up_to_date",
+                            "update_available",
+                            "ahead",
+                            "no_releases",
+                            "check_failed"
+                        ]
+                    },
+                    "update_available": {
+                        "type": "boolean"
+                    },
+                    "repository": {
+                        "type": "string"
+                    },
+                    "current_version": {
+                        "type": "string"
+                    },
+                    "latest_version": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "release_url": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "published_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "failure_reason": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "detail": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "status",
+                    "update_available",
+                    "repository",
+                    "current_version"
+                ]
+            },
+            "PlatformVersionResponse": {
+                "type": "object",
+                "properties": {
+                    "core_version": {
+                        "type": "string"
+                    },
+                    "sdk_version": {
+                        "type": "string"
+                    },
+                    "php_version": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "core_version",
+                    "sdk_version",
+                    "php_version"
+                ]
             },
             "PluginEntry": {
                 "type": "object",
