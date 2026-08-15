@@ -646,9 +646,29 @@ class UsersApiHandler
                     )->execute([$newEmail, $profileId]);
                 }
                 if ($passwordChanged && $newPasswordHash !== null) {
+                    // token_epoch is bumped WITH the hash, never separately.
+                    //
+                    // A password change is a credential change and must
+                    // invalidate every existing session — which is the whole
+                    // point when an administrator resets an account they
+                    // believe is compromised. Without the bump the attacker's
+                    // session survives the reset, and the administrator is left
+                    // believing they closed a door that is still open.
+                    //
+                    // PasswordResetService and AuthHandler::handleUpdateMe()
+                    // have always done this; this path did not, so it was the
+                    // one credential change that left sessions alive.
+                    //
+                    // Deliberately does NOT touch any two_factor_* column: an
+                    // administrator resetting a password must not silently
+                    // strip 2FA from an account that still has an authenticator
+                    // enrolled. Clearing 2FA is a separate, explicit action.
+                    //
                     // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
                     $this->db->prepare(
-                        'UPDATE profiles SET password_hash = ?, updated_at = NOW() WHERE id = ?'
+                        'UPDATE profiles
+                            SET password_hash = ?, token_epoch = token_epoch + 1, updated_at = NOW()
+                          WHERE id = ?'
                     )->execute([$newPasswordHash, $profileId]);
                 }
                 if ($accountStatusChanged && $newAccountStatus !== null) {
