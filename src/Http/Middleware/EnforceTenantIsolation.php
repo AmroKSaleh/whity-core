@@ -106,6 +106,13 @@ class EnforceTenantIsolation
         '/api/v1/auth/password/reset',
         '/api/v1/auth/2fa-recovery/request',
         '/api/v1/auth/2fa-recovery/confirm',
+        // WHIT-417: the public end of a tenant invitation. Unauthenticated by
+        // construction — the invitee has no session and, in the case this
+        // feature exists for, may have no account at all. The invitation names
+        // its own tenant, so there is nothing here for this middleware to
+        // resolve; InvitationAcceptHandler rate-limits per IP and answers one
+        // generic message for every way a token can fail.
+        '/api/v1/invitations/accept',
         // ADR 0005 §6: multi-membership tenant selection. Public like login/2fa —
         // the caller holds only the short-lived selection cookie (no session yet);
         // AuthHandler::handleSelectTenant re-validates membership before minting.

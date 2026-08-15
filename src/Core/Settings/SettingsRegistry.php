@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Settings;
 
 use DateTimeZone;
+use Whity\Core\Identity\InvitationService;
 
 /**
  * The code registry of known website-settings keys (Website Settings feature).
@@ -69,6 +70,15 @@ final class SettingsRegistry
     //     effect? Default 'false' (frictionless).
     public const SELF_PASSWORD_RESET_ENABLED = 'auth.self_password_reset_enabled';
     public const PASSWORD_RESET_APPROVAL_REQUIRED = 'auth.password_reset_approval_required';
+
+    // How long a tenant invitation stays usable (WHIT-417). Deliberately NOT
+    // global-only: a consultancy handing links to clients and a bank onboarding
+    // staff want different windows, and the tenant that issues the invitation is
+    // the one that knows which. Far longer than a password reset's hour because
+    // the two answer different questions — a reset is a recovery the requester
+    // is waiting on, an invitation is a decision the invitee may not act on
+    // until they are back at a desk.
+    public const INVITATION_TTL_DAYS = 'auth.invitation_ttl_days';
 
     // "I lost my 2FA device" recovery-REQUEST master switch
     // (WC-password-reset-2fa-recovery). Gates POST /api/v1/auth/2fa-recovery/request
@@ -529,6 +539,9 @@ final class SettingsRegistry
         // ENABLED by default: i18n already shipped, and an upgrade must not
         // switch a live feature off underneath a deployment using it.
         self::I18N_ENABLED => 'true',
+        // A week: long enough to survive a weekend and a missed inbox, short
+        // enough that a forwarded link does not stay live for a quarter.
+        self::INVITATION_TTL_DAYS => '7',
     ];
 
     /**
@@ -819,6 +832,7 @@ final class SettingsRegistry
             self::ERROR_TRACKING_ENVIRONMENT => null,
             self::ERROR_TRACKING_RETENTION_DAYS => self::validateRetentionDays($value),
             self::I18N_ENABLED => self::validateBoolean($value, self::I18N_ENABLED),
+            self::INVITATION_TTL_DAYS => self::validateInvitationTtlDays($value),
             default => "Unknown setting key: {$key}",
         };
     }
@@ -884,6 +898,27 @@ final class SettingsRegistry
         }
         if ($days > 3650) {
             return 'error_tracking.retention_days must be 3650 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Bounds mirror {@see \Whity\Core\Identity\InvitationService}'s clamp, so a
+     * value the settings API accepts is one the service will actually honour
+     * rather than silently narrow.
+     */
+    private static function validateInvitationTtlDays(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'auth.invitation_ttl_days must be a whole number of days.';
+        }
+        $days = (int) $value;
+        if ($days < InvitationService::MIN_TTL_DAYS) {
+            return 'auth.invitation_ttl_days must be at least ' . InvitationService::MIN_TTL_DAYS . '.';
+        }
+        if ($days > InvitationService::MAX_TTL_DAYS) {
+            return 'auth.invitation_ttl_days must be ' . InvitationService::MAX_TTL_DAYS . ' or fewer.';
         }
 
         return null;

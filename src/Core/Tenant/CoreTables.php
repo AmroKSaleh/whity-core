@@ -64,6 +64,7 @@ final class CoreTables
         'external_identities' => '047_create_external_identities.php',
         'health_samples' => '085_create_health_samples.php',
         'identity_providers' => '048_create_identity_providers.php',
+        'invitations' => '096_create_invitations.php',
         'jobs' => '065_create_jobs.php',
         'languages' => '081_create_language_tables.php',
         'mcp_tokens' => '033_create_mcp_tokens.php',

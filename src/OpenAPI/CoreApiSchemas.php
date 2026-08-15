@@ -110,6 +110,7 @@ final class CoreApiSchemas
             self::twoFactorPolicyRoutes(),
             self::tagRoutes(),
             self::passwordResetRoutes(),
+            self::invitationRoutes(),
             self::twoFactorRecoveryRoutes(),
             self::dataTypeRoutes()
         );
@@ -3436,6 +3437,68 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
             ], ['id', 'profile_id', 'email', 'display_name', 'created_at']),
             'PendingPasswordResetListResponse' => self::listEnvelope('PendingPasswordResetItem'),
+
+            // ── Tenant invitations (WHIT-417) ──
+
+            // POST /api/invitations — request body. `role` accepts a name and
+            // `role_id` an id; both resolve against the tenant's own roles plus
+            // the platform-global ones, and absent means the global `user` role.
+            'InvitationCreateRequest' => self::object([
+                'email' => self::str(),
+                'role' => self::str(),
+                'role_id' => self::int(),
+                'ou_id' => self::int(),
+            ], ['email']),
+            // One invitation as an administrator sees it. Deliberately carries
+            // NO profile id and no account-existence flag: a tenant admin may
+            // type any address here, so echoing back whether it already has an
+            // account would make this an enumeration oracle over the platform.
+            // `status` adds 'expired', which is DERIVED from expires_at rather
+            // than stored, so a client never has to compute it.
+            'InvitationItem' => self::object([
+                'id' => self::int(),
+                'email' => self::str(),
+                'role_id' => self::int(),
+                'role_name' => self::str(),
+                'ou_id' => self::int(true),
+                'status' => [
+                    'type' => 'string',
+                    'enum' => ['pending', 'accepted', 'revoked', 'superseded', 'expired'],
+                ],
+                'expires_at' => self::str(),
+                'created_at' => self::str(),
+                'invited_by' => self::int(true),
+            ], ['id', 'email', 'role_id', 'role_name', 'status', 'expires_at', 'created_at']),
+            'InvitationListResponse' => self::listEnvelope('InvitationItem'),
+            'InvitationItemResponse' => self::dataEnvelope(SchemaBuilder::ref('InvitationItem')),
+            'InvitationRevokedResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => ['revoked']],
+            ], ['id', 'status'])),
+
+            // GET /api/invitations/accept — what the token holder is shown.
+            // `requires_password` is the one place the platform reveals whether
+            // an address has an account, and only to somebody holding a valid
+            // single-use token mailed to that address.
+            'InvitationPreviewResponse' => self::dataEnvelope(self::object([
+                'email' => self::str(),
+                'tenant_name' => self::str(),
+                'requires_password' => self::bool(),
+            ], ['email', 'tenant_name', 'requires_password'])),
+            // POST /api/invitations/accept — `password` is required ONLY when
+            // the preview said so; supplied for an address that already has an
+            // account it is ignored, never applied.
+            'InvitationAcceptRequest' => self::object([
+                'token' => self::str(),
+                'password' => self::str(),
+            ], ['token']),
+            // 'joined' = a membership was created (or an invited one activated);
+            // 'already_member' = they were in this tenant already, so nothing
+            // was added and the token was burned.
+            'InvitationAcceptResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['joined', 'already_member']],
+                'message' => self::str(),
+            ], ['status', 'message'])),
             'PendingTwoFactorRecoveryItem' => self::object([
                 'id' => self::int(),
                 'profile_id' => self::int(),
@@ -4340,6 +4403,95 @@ final class CoreApiSchemas
                 'responses' => [
                     200 => self::jsonResponse('Rejected', 'ApprovalStatusResponse'),
                     404 => self::errorResponse('No pending password-reset request found for that id'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Tenant invitation routes (WHIT-417): the tenant administrator's surface,
+     * gated on the same users:read/users:write that adding a user by hand
+     * needs, plus the PUBLIC accept pair the emailed link lands on.
+     *
+     * The accept pair answers ONE generic 404/400 for unknown, expired,
+     * revoked, superseded and already-used tokens — documented that way here so
+     * a client never grows a branch on a distinction the server does not make.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function invitationRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/invitations/accept',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Describe an invitation token without consuming it (public, rate-limited)',
+                    'tags' => ['invitations'],
+                    'parameters' => [self::queryParam('token', 'string', 'The token from the invitation link')],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The invitation. `requires_password` is false when the address already has an account',
+                            'InvitationPreviewResponse'
+                        ),
+                        404 => self::errorResponse('The invitation link is invalid, expired, or already used'),
+                        429 => self::errorResponse('Too many attempts'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/invitations/accept',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Accept an invitation (public); a password is required only for a new address',
+                    'tags' => ['invitations'],
+                    'request' => 'InvitationAcceptRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('Membership granted — see `data.status`', 'InvitationAcceptResponse'),
+                        400 => self::errorResponse('The invitation link is invalid, expired, or already used'),
+                        409 => self::errorResponse('The invitee is suspended in this tenant'),
+                        422 => self::errorResponse('Missing token, or a password is required and was not supplied'),
+                        429 => self::errorResponse('Too many attempts'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/invitations', 'users:read', [
+                'summary' => "List the caller's own tenant's invitations",
+                'tags' => ['invitations'],
+                'responses' => [
+                    200 => self::jsonResponse('Invitations, newest first', 'InvitationListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/invitations', 'users:write', [
+                'summary' => 'Invite an address into the tenant (supersedes any invitation outstanding for it)',
+                'tags' => ['invitations'],
+                'request' => 'InvitationCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The invitation, identical whether or not the address has an account', 'InvitationItemResponse'),
+                    409 => self::errorResponse('That address is already an active member of this tenant'),
+                    422 => self::errorResponse('Invalid email address, role, or organizational unit'),
+                    429 => self::errorResponse('Too many invitations sent'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/invitations/{id:\d+}/resend', 'users:write', [
+                'summary' => 'Mint a fresh token and re-send it; the previous link stops working',
+                'tags' => ['invitations'],
+                'responses' => [
+                    200 => self::jsonResponse('The re-issued invitation', 'InvitationItemResponse'),
+                    404 => self::errorResponse('No pending invitation found for that id'),
+                    429 => self::errorResponse('Too many invitations sent'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/invitations/{id:\d+}', 'users:write', [
+                'summary' => 'Withdraw an outstanding invitation',
+                'tags' => ['invitations'],
+                'responses' => [
+                    200 => self::jsonResponse('Revoked', 'InvitationRevokedResponse'),
+                    404 => self::errorResponse('No pending invitation found for that id'),
                 ] + self::authErrors(),
             ]),
         ];
