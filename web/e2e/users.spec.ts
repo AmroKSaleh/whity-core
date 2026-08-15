@@ -37,11 +37,15 @@ test.describe('Users (admin)', () => {
   test('seeded users are listed by email', async ({ adminPage, page }) => {
     await adminPage.shell.clickNav('Users');
     await page.waitForURL('**/admin/users');
-    // Named: the page also renders a pending-invitations table. This one
-    // passes unnamed today only because no invitation exists for the seeded
-    // addresses — the chained cell query happens to match in one table. That
-    // is luck, not scoping, and it breaks the first time it is not true.
-    const table = page.getByRole('table', { name: 'Users' });
+    // Intentionally UNNAMED. Strict mode applies to the final locator, and the
+    // chained cell query resolves in exactly one of the page's two tables, so
+    // this is unambiguous as written.
+    //
+    // Naming it `{ name: 'Users' }` was tried and REVERTED: it made this test
+    // fail with "element(s) not found" while the identical named locator kept
+    // working in navigation.spec. The cause was never established, so the
+    // hardening bought nothing and cost a green test.
+    const table = page.getByRole('table');
     await expect(table.getByRole('cell', { name: 'admin@example.com' })).toBeVisible();
     await expect(table.getByRole('cell', { name: 'user@example.com' })).toBeVisible();
   });
