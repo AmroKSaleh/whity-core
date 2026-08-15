@@ -1371,4 +1371,93 @@ final class UsersApiHandlerRealEngineTest extends TestCase
 
         return (int) $this->pdo->lastInsertId();
     }
+
+    // ── An admin password change is a credential change (#797) ───────────────
+
+    /**
+     * An administrator setting a password invalidates that account's sessions.
+     *
+     * `profiles.token_epoch` is what every issued token is validated against,
+     * so bumping it is what actually ends existing sessions. PasswordResetService
+     * and AuthHandler::handleUpdateMe() have always done it; this path did not,
+     * which made it the one credential change that left sessions alive.
+     *
+     * The case that matters is the one this endpoint exists for: an
+     * administrator resetting an account they believe is compromised. Without
+     * the bump the attacker's session survives the reset and the administrator
+     * is left believing they closed a door that is still open — a false belief
+     * about their own security state, which is worse than a visible failure.
+     */
+    public function testAdminPasswordChangeBumpsTokenEpoch(): void
+    {
+        $this->seedProfile(80, 'compromised@example.com');
+        $this->seedMembership(80, 1, 2, 'active');
+
+        $before = (int) $this->pdo->query('SELECT token_epoch FROM profiles WHERE id = 80')->fetchColumn();
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->update(
+            $this->authedRequest('PATCH', '/api/users/80', ['password' => 'Str0ng-Rotated-Pw!']),
+            ['id' => '80']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        $after = (int) $this->pdo->query('SELECT token_epoch FROM profiles WHERE id = 80')->fetchColumn();
+        $this->assertSame(
+            $before + 1,
+            $after,
+            'an admin-set password must invalidate existing sessions, exactly as a self-service reset does'
+        );
+    }
+
+    /**
+     * An edit that does NOT change the password leaves sessions alone.
+     *
+     * Bumping the epoch on every user edit would log someone out because an
+     * administrator corrected their display name — an eviction with no
+     * security reason, which teaches people to distrust the signal.
+     */
+    public function testANonPasswordEditLeavesTheEpochAlone(): void
+    {
+        $this->seedProfile(81, 'renamed@example.com');
+        $this->seedMembership(81, 1, 2, 'active');
+
+        $before = (int) $this->pdo->query('SELECT token_epoch FROM profiles WHERE id = 81')->fetchColumn();
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->update(
+            $this->authedRequest('PATCH', '/api/users/81', ['email' => 'renamed2@example.com']),
+            ['id' => '81']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        $after = (int) $this->pdo->query('SELECT token_epoch FROM profiles WHERE id = 81')->fetchColumn();
+        $this->assertSame($before, $after, 'a non-credential edit must not evict sessions');
+    }
+
+    /**
+     * A password change must not silently strip 2FA.
+     *
+     * An administrator resetting a password is recovering an account, not
+     * reducing its protection. Clearing an enrolled authenticator as a side
+     * effect would quietly weaken exactly the accounts most likely to need a
+     * reset, and nothing in the request says to do it.
+     */
+    public function testAdminPasswordChangeDoesNotStripTwoFactor(): void
+    {
+        $this->seedProfile(82, 'twofa@example.com');
+        $this->seedMembership(82, 1, 2, 'active');
+        $this->pdo->exec('UPDATE profiles SET two_factor_enabled = true WHERE id = 82');
+
+        MockRequestFactory::setTestTenant(1);
+        $this->handler()->update(
+            $this->authedRequest('PATCH', '/api/users/82', ['password' => 'Str0ng-Rotated-Pw!']),
+            ['id' => '82']
+        );
+
+        $still = $this->pdo->query('SELECT two_factor_enabled FROM profiles WHERE id = 82')->fetchColumn();
+        $this->assertTrue((bool) $still, 'a password reset must leave an enrolled authenticator in place');
+    }
 }
