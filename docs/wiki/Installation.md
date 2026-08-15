@@ -38,6 +38,13 @@ Migrations are run via the CLI entry point in `public/index.php`:
 docker compose exec frankenphp php public/index.php migrate
 ```
 
+Migrating alone creates the **bootstrap administrator** — the system-tenant (id 0)
+account you first sign in with. Its address comes from `INITIAL_SYSTEM_ADMIN_EMAIL`
+and its password from `INITIAL_SYSTEM_ADMIN_PASSWORD`. Set both *before* this step:
+the default address, `system@whity.local`, is unroutable, so it can never receive a
+password reset. Once a named administrator exists, retire the bootstrap account —
+see the [Go-Live Checklist](Go-Live-Checklist.md).
+
 Other CLI commands: `seed`, `generate:openapi`, `revoked-tokens:cleanup`.
 
 ### 4. Web UI (optional)

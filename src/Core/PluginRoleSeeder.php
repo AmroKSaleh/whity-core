@@ -265,14 +265,27 @@ final class PluginRoleSeeder
             // is our sentinel for the system tenant. Store NULL for system tenant.
             $dbTenantId = $tenantId === self::SYSTEM_TENANT_ID ? null : $tenantId;
 
-            // Attempt INSERT … ON CONFLICT DO NOTHING. This is idempotent on the
-            // (name) UNIQUE constraint in the current schema. When a per-tenant
-            // UNIQUE(name, tenant_id) is ever added the ON CONFLICT clause will
-            // need updating — a TODO left for that schema revision.
+            // Attempt INSERT … ON CONFLICT DO NOTHING, so re-seeding an already
+            // seeded role is a no-op rather than a duplicate-key error.
+            //
+            // This used to infer the conflict on plain `(name)`, with a TODO
+            // noting it would need revisiting if role names ever became
+            // per-tenant. Migration 093 (#712) did exactly that: `roles_name_key`
+            // is gone, replaced by two PARTIAL unique indexes. A conflict target
+            // must match one of them INCLUDING its predicate — an unqualified
+            // `ON CONFLICT (name)` now matches no index at all and PostgreSQL
+            // rejects the statement outright, which would have made every plugin
+            // role seed fail at activation. Which index applies is decided by the
+            // row being written: a global (NULL-tenant) role conflicts within the
+            // global namespace, a tenant-owned one within its tenant's.
+            $conflictTarget = $dbTenantId === null
+                ? 'ON CONFLICT (name) WHERE tenant_id IS NULL DO NOTHING'
+                : 'ON CONFLICT (tenant_id, name) WHERE tenant_id IS NOT NULL DO NOTHING';
+
             $stmt = $this->pdo->prepare(
                 'INSERT INTO roles (name, description, parent_id, tenant_id, created_at)
                  VALUES (:name, :description, :parent_id, :tenant_id, CURRENT_TIMESTAMP)
-                 ON CONFLICT (name) DO NOTHING'
+                 ' . $conflictTarget
             );
 
             $stmt->execute([

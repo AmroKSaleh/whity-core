@@ -356,8 +356,19 @@ jobs:
           key: phpstan-${{ github.sha }}
           restore-keys: phpstan-
 
+      # 1G, not 512M. PHPStan runs parallel workers and each holds its own
+      # analysis state, so the ceiling is per-worker rather than total — 512M
+      # was enough until the suite grew past it, at which point a worker
+      # crashes and the whole job fails with "Result is incomplete because of
+      # severe errors" rather than with a real finding. That reads exactly like
+      # a code defect and is not one, which is the expensive part: the failure
+      # names a memory limit only if you open the log.
+      #
+      # The runner has ~7GB, so this is not near anything. It is also what the
+      # documented local invocation already uses, so a clean local run no
+      # longer disagrees with CI.
       - name: Run PHPStan
-        run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=512M
+        run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=1G
 
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
@@ -973,6 +984,20 @@ jobs:
         run: |
           npm run generate:api
           git diff --exit-code -- lib/api/schema.d.ts
+
+      # The SAME spec also generates the PUBLISHED @amroksaleh/api-client
+      # types, and that copy had no drift gate at all — it went ~4 weeks and
+      # 8,000 lines out of date while the web copy above stayed honest, because
+      # only the web one was checked. Downstream consumers install the package,
+      # not web/, so the unchecked copy was the one that mattered.
+      #
+      # `frontend` already filters on packages/** and public/openapi.json, so
+      # this job runs whenever either side can move.
+      - name: Typed-client schema drift check (@amroksaleh/api-client)
+        working-directory: packages/api-client
+        run: |
+          npm run generate
+          git diff --exit-code -- src/schema.d.ts
 
       # The committed design-token outputs must match the generator (base.json
       # is the single source of truth for styling variables).

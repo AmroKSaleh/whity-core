@@ -111,7 +111,7 @@ class AdminApiHandler
                 // count — a person with active memberships in N tenants counts N times
                 // (each tenant occupancy is one active membership, ADR 0005 §3).
                 // @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
-                $totalUsers = $pdo->query('SELECT COUNT(*) FROM memberships WHERE status = \'active\'')->fetchColumn();
+                $totalUsers = $pdo->query('SELECT COUNT(*) FROM memberships WHERE is_primary AND status = \'active\'')->fetchColumn();
                 $totalTenants = $pdo->query('SELECT COUNT(*) FROM tenants')->fetchColumn();
                 // @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
                 $totalRoles = $pdo->query('SELECT COUNT(*) FROM roles')->fetchColumn();
@@ -120,7 +120,7 @@ class AdminApiHandler
                 // ROLE data: role_id now lives on memberships (ADR 0005 §3).
                 // @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
                 $usersPerRole = $pdo->query('
-                    SELECT r.name, COUNT(m.id) as count
+                    SELECT r.name, COUNT(DISTINCT m.profile_id) as count
                     FROM roles r
                     LEFT JOIN memberships m ON m.role_id = r.id AND m.status = \'active\'
                     GROUP BY r.name
@@ -132,7 +132,8 @@ class AdminApiHandler
                 $userGrowth = $pdo->query("
                     SELECT DATE(created_at) as date, COUNT(*) as count
                     FROM memberships
-                    WHERE status = 'active' AND created_at >= NOW() - INTERVAL '7 days'
+                    WHERE status = 'active' AND is_primary
+                      AND created_at >= NOW() - INTERVAL '7 days'
                     GROUP BY DATE(created_at)
                     ORDER BY DATE(created_at)
                 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -150,7 +151,7 @@ class AdminApiHandler
                 // count never leaks.
                 // ROLE/TENANT data: active memberships are the authoritative tenant-scoped
                 // count (ADR 0005 §3 — memberships replace users.tenant_id).
-                $usersStmt = $pdo->prepare('SELECT COUNT(*) FROM memberships WHERE tenant_id = :tid AND status = \'active\'');
+                $usersStmt = $pdo->prepare('SELECT COUNT(*) FROM memberships WHERE is_primary AND tenant_id = :tid AND status = \'active\'');
                 $usersStmt->execute(['tid' => $tenantId]);
                 $totalUsers = $usersStmt->fetchColumn();
 
@@ -168,7 +169,7 @@ class AdminApiHandler
                 // the tenant's own memberships against them.
                 // ROLE data: role_id now lives on memberships (ADR 0005 §3).
                 $breakdownStmt = $pdo->prepare('
-                    SELECT r.name, COUNT(m.id) as count
+                    SELECT r.name, COUNT(DISTINCT m.profile_id) as count
                     FROM roles r
                     LEFT JOIN memberships m ON m.role_id = r.id AND m.tenant_id = :tid_m AND m.status = \'active\'
                     WHERE r.tenant_id = :tid_roles OR r.tenant_id IS NULL

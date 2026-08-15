@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Api;
 
 use PDO;
+use PDOStatement;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\UsersApiHandler;
@@ -250,6 +251,197 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         );
     }
 
+    // ==================== create: optional ou_id placement ====================
+    //
+    // POST /api/users used to hard-code `ou_id = NULL`, so placing a new user in
+    // an organizational unit needed a second PATCH. It now accepts an optional
+    // `ou_id` and validates it through the SAME gate update() uses.
+
+    /**
+     * A valid, own-tenant `ou_id` is persisted on the membership by the CREATE
+     * call itself — no follow-up PATCH — and is echoed in the response.
+     */
+    public function testCreateWithOwnTenantOuIdPersistsOnMembership(): void
+    {
+        $ouId = $this->seedOu(1, 'Provisioning');
+
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-with-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+            'ou_id' => $ouId,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        $profileId = (int) $this->pdo
+            ->query("SELECT profile_id FROM profile_emails WHERE email = 'create-with-ou@example.com'")
+            ->fetchColumn();
+        $this->assertSame(
+            $ouId,
+            (int) $this->pdo->query("SELECT ou_id FROM memberships WHERE profile_id = {$profileId} AND tenant_id = 1")->fetchColumn(),
+            'The submitted ou_id must be persisted by the create call itself.'
+        );
+
+        // toPublicUser() already returned ou_id, so the response shape is unchanged.
+        $this->assertSame($ouId, json_decode($response->getBody(), true)['data']['ou_id']);
+    }
+
+    /**
+     * SECURITY: an `ou_id` owned by ANOTHER tenant is refused with 403 and
+     * nothing is persisted — neither the membership nor the profile.
+     */
+    public function testCreateWithCrossTenantOuIdReturns403AndCreatesNothing(): void
+    {
+        $foreignOuId = $this->seedOu(2, 'Tenant2 Provisioning');
+
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-foreign-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+            'ou_id' => $foreignOuId,
+        ]));
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertStringContainsString(
+            'OU does not belong to current tenant',
+            json_decode($response->getBody(), true)['error']
+        );
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM profile_emails WHERE email = 'create-foreign-ou@example.com'")->fetchColumn(),
+            'A cross-tenant OU must be refused BEFORE any identity is written.'
+        );
+        $this->assertSame(
+            0,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE ou_id = ' . $foreignOuId),
+            'No membership may be planted across the tenant boundary.'
+        );
+    }
+
+    /**
+     * Omitting `ou_id` behaves exactly as before the field existed: the
+     * membership is created with a NULL ou_id, so no existing caller changes.
+     */
+    public function testCreateWithoutOuIdLeavesMembershipUnassigned(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-no-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        $profileId = (int) $this->pdo
+            ->query("SELECT profile_id FROM profile_emails WHERE email = 'create-no-ou@example.com'")
+            ->fetchColumn();
+        $this->assertNull(
+            $this->pdo->query("SELECT ou_id FROM memberships WHERE profile_id = {$profileId} AND tenant_id = 1")->fetchColumn() ?: null,
+            'An absent ou_id must still produce a NULL membership.ou_id.'
+        );
+        $this->assertNull(json_decode($response->getBody(), true)['data']['ou_id']);
+    }
+
+    /**
+     * An explicit `{"ou_id": null}` is the same as omitting it (no OU), not an
+     * error — mirroring update()'s "null clears the assignment" contract.
+     */
+    public function testCreateWithNullOuIdIsTreatedAsUnassigned(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-null-ou@example.com',
+            'password' => 'secret-123',
+            'ou_id' => null,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        $profileId = (int) $this->pdo
+            ->query("SELECT profile_id FROM profile_emails WHERE email = 'create-null-ou@example.com'")
+            ->fetchColumn();
+        $this->assertNull(
+            $this->pdo->query("SELECT ou_id FROM memberships WHERE profile_id = {$profileId} AND tenant_id = 1")->fetchColumn() ?: null
+        );
+    }
+
+    /**
+     * A non-numeric `ou_id` is a clean 400 rather than an opaque 500 from the
+     * driver rejecting the comparison against an integer column.
+     */
+    public function testCreateWithNonNumericOuIdReturns400(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-bad-ou@example.com',
+            'password' => 'secret-123',
+            'ou_id' => 'engineering',
+        ]));
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM profile_emails WHERE email = 'create-bad-ou@example.com'")->fetchColumn()
+        );
+    }
+
+    /**
+     * Re-adding a profile whose membership is non-active (invited/suspended)
+     * PROMOTES the existing row; a submitted ou_id is applied to it too.
+     */
+    public function testCreatePromotesInactiveMembershipAndAppliesOuId(): void
+    {
+        $this->seedProfile(510, 'promote-with-ou@example.com');
+        $this->seedMembership(510, 1, 2, 'invited');
+        $ouId = $this->seedOu(1, 'Promotions');
+
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'promote-with-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+            'ou_id' => $ouId,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        $membership = $this->pdo
+            ->query('SELECT status, role_id, ou_id FROM memberships WHERE profile_id = 510 AND tenant_id = 1')
+            ->fetch(PDO::FETCH_ASSOC);
+        $this->assertSame('active', (string) $membership['status']);
+        $this->assertSame(1, (int) $membership['role_id']);
+        $this->assertSame($ouId, (int) $membership['ou_id'], 'The promote path must honour the submitted ou_id.');
+    }
+
+    /**
+     * Promoting WITHOUT an `ou_id` must leave the OU the membership already had
+     * alone — an omitted field is not a request to blank it.
+     */
+    public function testCreatePromotionWithoutOuIdKeepsExistingOu(): void
+    {
+        $ouId = $this->seedOu(1, 'Retained');
+        $this->seedProfile(511, 'promote-keep-ou@example.com');
+        $this->seedMembershipWithOu(511, 1, 2, $ouId, 'suspended');
+
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'promote-keep-ou@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(
+            $ouId,
+            $this->countRows('SELECT ou_id FROM memberships WHERE profile_id = 511 AND tenant_id = 1'),
+            'An omitted ou_id must not clear an existing OU assignment.'
+        );
+    }
+
     // ==================== update: role via membership ====================
 
     /**
@@ -271,7 +463,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(
             1,
-            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 10 AND tenant_id = 1')->fetchColumn(),
+            $this->countRows('SELECT role_id FROM memberships WHERE profile_id = 10 AND tenant_id = 1'),
             'The new role must be written to memberships.role_id.'
         );
 
@@ -353,7 +545,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
         $this->assertSame('user', $data['role']);
-        $this->assertSame(2, (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 12')->fetchColumn());
+        $this->assertSame(2, $this->countRows('SELECT role_id FROM memberships WHERE profile_id = 12'));
     }
 
     // ==================== update/delete: tenant isolation ====================
@@ -378,7 +570,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(404, $response->getStatusCode());
         $this->assertSame(
             2,
-            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 20 AND tenant_id = 2')->fetchColumn(),
+            $this->countRows('SELECT role_id FROM memberships WHERE profile_id = 20 AND tenant_id = 2'),
             "Tenant 1 must not be able to change tenant 2's membership role."
         );
     }
@@ -402,7 +594,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(404, $response->getStatusCode(), "Tenant 1 must not assign tenant 2's private role.");
         $this->assertSame(
             2,
-            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 30 AND tenant_id = 1')->fetchColumn()
+            $this->countRows('SELECT role_id FROM memberships WHERE profile_id = 30 AND tenant_id = 1')
         );
     }
 
@@ -425,7 +617,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(
             1,
-            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 40 AND tenant_id = 2')->fetchColumn(),
+            $this->countRows('SELECT role_id FROM memberships WHERE profile_id = 40 AND tenant_id = 2'),
             'SYSTEM tenant must be able to change a cross-tenant membership role.'
         );
     }
@@ -445,12 +637,12 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(
             0,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM memberships WHERE profile_id = 80 AND tenant_id = 1')->fetchColumn(),
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 80 AND tenant_id = 1'),
             'The tenant membership must be removed.'
         );
         $this->assertSame(
             1,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM profiles WHERE id = 80')->fetchColumn(),
+            $this->countRows('SELECT COUNT(*) FROM profiles WHERE id = 80'),
             'The global profile must survive a membership removal.'
         );
     }
@@ -471,7 +663,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
 
         $this->assertSame(
             1,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM memberships WHERE profile_id = 81 AND tenant_id = 2')->fetchColumn(),
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 81 AND tenant_id = 2'),
             "Removing the tenant-1 membership must leave the tenant-2 membership intact."
         );
     }
@@ -741,7 +933,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(
             $ouId,
-            (int) $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 70 AND tenant_id = 1')->fetchColumn()
+            $this->countRows('SELECT ou_id FROM memberships WHERE profile_id = 70 AND tenant_id = 1')
         );
     }
 
@@ -827,6 +1019,28 @@ final class UsersApiHandlerRealEngineTest extends TestCase
     }
 
     /**
+     * A non-numeric `ou_id` is a clean 400 on UPDATE too — the shared gate used
+     * to hand the raw value to the driver, which on PostgreSQL raised "invalid
+     * input syntax for integer" and surfaced as an opaque 500.
+     */
+    public function testUpdateWithNonNumericOuIdReturns400(): void
+    {
+        $this->seedProfile(75, 'ou-nonnumeric@example.com');
+        $this->seedMembership(75, 1, 2);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/75', ['ou_id' => 'engineering']),
+            ['id' => '75']
+        );
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertNull(
+            $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 75 AND tenant_id = 1')->fetchColumn() ?: null
+        );
+    }
+
+    /**
      * A role NAME that is not visible to the tenant is rejected with 404 on
      * UPDATE (mirroring create's resolution guard) and nothing is persisted.
      */
@@ -844,7 +1058,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertSame(404, $response->getStatusCode());
         $this->assertSame(
             2,
-            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 74 AND tenant_id = 1')->fetchColumn(),
+            $this->countRows('SELECT role_id FROM memberships WHERE profile_id = 74 AND tenant_id = 1'),
             'An unresolvable role must not change the persisted role_id.'
         );
     }
@@ -883,6 +1097,157 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         return $request;
     }
 
+    // ── Secondary memberships (WC-712 §1) ────────────────────────────────────
+
+    /**
+     * Granting a second role writes a NON-primary row.
+     *
+     * The primary row is what answers "what is this person here?" for display
+     * and defaults, and migration 094's partial unique index permits exactly one
+     * per (profile, tenant) — so an additional role must never claim it.
+     */
+    public function testAddMembershipCreatesANonPrimaryRow(): void
+    {
+        $this->seedProfile(70, 'p70@example.com');
+        $this->seedMembership(70, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->addMembership(
+            $this->authedRequest('POST', '/api/users/70/memberships', ['role_id' => 1]),
+            ['id' => '70']
+        );
+
+        $this->assertSame(201, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+        $this->assertFalse($decoded['data']['isPrimary'], 'an additional role is never the primary row');
+        $this->assertTrue($decoded['data']['created']);
+
+        $primaries = $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 70 AND tenant_id = 1 AND is_primary');
+        $this->assertSame(1, $primaries, 'exactly one primary row survives');
+    }
+
+    /**
+     * Granting a role the profile already holds is a success, not a duplicate.
+     *
+     * There is no unique constraint on (profile, tenant, role) — a duplicate
+     * secondary row is meaningless rather than illegal — so idempotence is
+     * enforced in the handler and has to be pinned here.
+     */
+    public function testAddMembershipIsIdempotent(): void
+    {
+        $this->seedProfile(71, 'p71@example.com');
+        $this->seedMembership(71, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $first = $handler->addMembership(
+            $this->authedRequest('POST', '/api/users/71/memberships', ['role_id' => 1]),
+            ['id' => '71']
+        );
+        $second = $handler->addMembership(
+            $this->authedRequest('POST', '/api/users/71/memberships', ['role_id' => 1]),
+            ['id' => '71']
+        );
+
+        $this->assertSame(201, $first->getStatusCode());
+        $this->assertSame(200, $second->getStatusCode(), 'a repeat grant is a success, not a 409');
+        $this->assertFalse(json_decode($second->getBody(), true)['data']['created']);
+
+        $rows = $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 71 AND tenant_id = 1');
+        $this->assertSame(2, $rows, 'the repeat grant wrote no second row');
+    }
+
+    /**
+     * The primary membership cannot be revoked through this endpoint.
+     *
+     * Removing it would leave the profile holding secondary roles with no
+     * primary — a state every single-row read interprets as "no answer to what
+     * is this person here". Removing someone from a tenant is
+     * DELETE /api/users/{id}, which takes every row.
+     */
+    public function testRemoveMembershipRefusesThePrimaryRow(): void
+    {
+        $this->seedProfile(72, 'p72@example.com');
+        $this->seedMembership(72, 1, 2, 'active');
+
+        $primaryId = $this->countRows('SELECT id FROM memberships WHERE profile_id = 72 AND tenant_id = 1');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->removeMembership(
+            $this->authedRequest('DELETE', "/api/users/72/memberships/{$primaryId}"),
+            ['id' => '72', 'membershipId' => (string) $primaryId]
+        );
+
+        $this->assertSame(409, $response->getStatusCode());
+
+        $still = $this->countRows('SELECT COUNT(*) FROM memberships WHERE id = ' . $primaryId);
+        $this->assertSame(1, $still, 'the primary row is still there');
+    }
+
+    /** A secondary membership can be revoked, leaving the primary intact. */
+    public function testRemoveMembershipDropsASecondaryRow(): void
+    {
+        $this->seedProfile(73, 'p73@example.com');
+        $this->seedMembership(73, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $created = json_decode($handler->addMembership(
+            $this->authedRequest('POST', '/api/users/73/memberships', ['role_id' => 1]),
+            ['id' => '73']
+        )->getBody(), true);
+
+        $response = $handler->removeMembership(
+            $this->authedRequest('DELETE', '/api/users/73/memberships/' . $created['data']['id']),
+            ['id' => '73', 'membershipId' => (string) $created['data']['id']]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $rows = $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 73 AND tenant_id = 1');
+        $this->assertSame(1, $rows, 'only the primary remains');
+    }
+
+    /** Every role the profile holds is listed, primary first. */
+    public function testListMembershipsReturnsEveryRolePrimaryFirst(): void
+    {
+        $this->seedProfile(74, 'p74@example.com');
+        $this->seedMembership(74, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->addMembership(
+            $this->authedRequest('POST', '/api/users/74/memberships', ['role_id' => 1]),
+            ['id' => '74']
+        );
+
+        $response = $handler->listMemberships(
+            $this->authedRequest('GET', '/api/users/74/memberships'),
+            ['id' => '74']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $rows = json_decode($response->getBody(), true)['data'];
+        $this->assertCount(2, $rows);
+        $this->assertTrue($rows[0]['isPrimary'], 'the primary row is listed first');
+        $this->assertFalse($rows[1]['isPrimary']);
+    }
+
+    /**
+     * A single COUNT(*) as an int.
+     *
+     * PDO::query() returns PDOStatement|false, so chaining ->fetchColumn() onto
+     * it is a static-analysis error rather than a style nit. One guarded helper
+     * beats repeating the check at every call site.
+     */
+    private function countRows(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertInstanceOf(PDOStatement::class, $stmt);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     private function seedProfile(int $id, string $email, string $status = 'active'): void
     {
         $this->pdo->prepare(
@@ -895,6 +1260,47 @@ final class UsersApiHandlerRealEngineTest extends TestCase
             "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
              VALUES (?, ?, true, true, datetime('now'))"
         )->execute([$id, $email]);
+    }
+
+    /**
+     * A profile holding a SECOND membership in the same tenant must appear once.
+     *
+     * The list joins memberships, so without a predicate on the primary row a
+     * two-role person becomes two rows — and because the join is paginated with
+     * LIMIT/OFFSET, the page boundaries shift too. Nothing throws; the endpoint
+     * just reports a tenant with more people in it than it has, which is why
+     * this is pinned rather than left to review.
+     *
+     * `true`/`false` literals, not 1/0: SQLite accepts an integer for a boolean
+     * column and PostgreSQL does not, and this suite runs on both.
+     */
+    public function testASecondMembershipDoesNotDuplicateTheUserInTheList(): void
+    {
+        $this->seedProfile(95, 'p95@example.com');
+        $this->seedMembership(95, 1, 2, 'active');
+
+        // The same person, a second tenant-wide role (migration 094 permits it).
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, is_primary, status, created_at)
+             VALUES (?, ?, ?, NULL, false, 'active', datetime('now'))"
+        )->execute([95, 1, 1]);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->list($this->authedRequest('GET', '/api/users'));
+        $this->assertSame(200, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+
+        $ids = array_column($decoded['data'], 'id');
+        $this->assertSame(
+            [95],
+            $ids,
+            'a profile with two memberships must appear exactly once in the list'
+        );
+        $this->assertSame(
+            1,
+            $decoded['pagination']['total'],
+            'the paginated total must count people, not memberships — it drives LIMIT/OFFSET'
+        );
     }
 
     private function seedMembership(int $profileId, int $tenantId, int $roleId, string $status = 'active'): void

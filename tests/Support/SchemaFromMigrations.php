@@ -435,6 +435,11 @@ final class SchemaFromMigrations
      * test somebody else's hash and turn its 200 into a 401 — so these are part
      * of the key, and a test that varies one simply gets its own template.
      *
+     * INITIAL_SYSTEM_ADMIN_EMAIL (WC-779) is here for exactly the same reason:
+     * migration 095 writes it into the bootstrap administrator's
+     * profile_emails row, so a template built while it was unset would hand a
+     * test that sets it a schema still sitting at system@whity.local.
+     *
      * @var list<string>
      */
     private const PG_TEMPLATE_ENV_INPUTS = [
@@ -442,6 +447,7 @@ final class SchemaFromMigrations
         'INITIAL_ADMIN_PASSWORD',
         'INITIAL_USER_PASSWORD',
         'INITIAL_SUPERUSER_PASSWORD',
+        'INITIAL_SYSTEM_ADMIN_EMAIL',
     ];
 
     /** Content hash of database/migrations, computed once per process. */

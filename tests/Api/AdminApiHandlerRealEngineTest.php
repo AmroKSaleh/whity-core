@@ -244,6 +244,10 @@ final class AdminApiHandlerRealEngineTest extends TestCase
                 tenant_id INTEGER NOT NULL,
                 role_id INTEGER NOT NULL,
                 ou_id INTEGER,
+                -- mirrors migration 094; the counts here are per TENANT
+                -- OCCUPANCY and filter on it. This fixture is hand-built,
+                -- so it does not follow migrations automatically.
+                is_primary INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL DEFAULT \'active\',
                 created_at TEXT
             )

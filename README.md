@@ -81,6 +81,9 @@ cd web && npm install && npm run dev
 - Web UI: <http://localhost:3000>
 - Seeded accounts (dev): `admin@example.com` / `admin123`, `user@example.com` / `user123`
   (passwords are env-configurable; absent an env value a random one is generated and printed once — see Configuration).
+  These demo accounts exist **only under `APP_ENV=development`**. Every environment gets the
+  bootstrap administrator instead — `system@whity.local` by default, or whatever
+  `INITIAL_SYSTEM_ADMIN_EMAIL` names.
 
 ## Configuration
 
@@ -96,8 +99,9 @@ Environment variables (defaults shown are for development; **production fails fa
 | `FRANKENPHP_WORKERS` / `MAX_REQUESTS` | Worker pool size / requests before recycle | `8` / `500` |
 | `WORKER_MEMORY_LIMIT_MB` | Memory ceiling that triggers graceful worker recycling | `128` |
 | `DB_CONNECT_TIMEOUT` / `DB_MAX_LIFETIME` / `DB_PING_INTERVAL` | Connection-pool tuning (seconds) | `5` / `1800` / `5` |
-| `INITIAL_ADMIN_PASSWORD` / `INITIAL_USER_PASSWORD` / `INITIAL_SYSTEM_ADMIN_PASSWORD` | Seed passwords (random if unset) | — |
+| `INITIAL_ADMIN_PASSWORD` / `INITIAL_USER_PASSWORD` / `INITIAL_SYSTEM_ADMIN_PASSWORD` | Seed passwords (random if unset). Applied only when the account is created — an existing password is never rewritten | — |
 | `INITIAL_SUPERUSER_PASSWORD` | Seeds the system-tenant (id 0) superuser `superuser@example.com`, which can manage global base roles and every tenant (random if unset) | — |
+| `INITIAL_SYSTEM_ADMIN_EMAIL` | Address of the bootstrap (system-tenant) administrator. Set it to a mailbox you control — the default is unroutable, so it can never receive a password reset | `system@whity.local` |
 
 See [.env.example](.env.example).
 
@@ -108,10 +112,11 @@ Run inside the FrankenPHP container (`docker exec whity_frankenphp php …`):
 ```bash
 php public/index.php migrate run        # run pending migrations
 php public/index.php migrate rollback   # roll back the last migration
-php public/index.php seed               # seed default tenant/roles/users
+php public/index.php seed               # seed default tenant/roles/bootstrap admin
+php public/index.php seed --with-fixtures  # …plus the *@example.com demo logins
 php public/index.php generate:openapi   # regenerate public/openapi.json
 
-php bin/whity-cli migrate|plugin|tenant # status/manage migrations, plugins, tenants
+php bin/whity-cli migrate|seed|plugin|tenant # status/manage migrations, seeding, plugins, tenants
 ```
 
 ## Project structure

@@ -282,7 +282,7 @@ final class TwoFactorPoliciesApiHandler
      */
     private function activeMemberships(int $tenantId, ?array $ouIds = null, ?array $profileIds = null): array
     {
-        $sql = "SELECT profile_id, ou_id FROM memberships WHERE tenant_id = ? AND status = 'active'";
+        $sql = "SELECT profile_id, ou_id FROM memberships WHERE is_primary AND tenant_id = ? AND status = 'active'";
         $params = [$tenantId];
 
         if ($ouIds !== null) {

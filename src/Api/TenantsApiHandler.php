@@ -8,6 +8,8 @@ use Whity\Api\Exception\SystemTenantProtectedException;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Identity\ProfileProvisioner;
+use Whity\Core\PasswordPolicy;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
@@ -101,7 +103,7 @@ class TenantsApiHandler
                 // @tenant-guard-ignore: system-tenant (isSystemUser) lists all real tenants; memberships LEFT JOIN is unscoped by design — each row is a distinct tenant
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
-                           COUNT(m.id) as userCount
+                           COUNT(DISTINCT m.profile_id) as userCount
                     FROM tenants t
                     LEFT JOIN memberships m ON t.id = m.tenant_id AND m.status = \'active\'
                     WHERE t.id != 0
@@ -127,7 +129,7 @@ class TenantsApiHandler
                 // @tenant-guard-ignore: caller's own tenant; WHERE t.id = :tenant_id on tenants constrains the memberships LEFT JOIN to one tenant's rows
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
-                           COUNT(m.id) as userCount
+                           COUNT(DISTINCT m.profile_id) as userCount
                     FROM tenants t
                     LEFT JOIN memberships m ON t.id = m.tenant_id AND m.status = \'active\'
                     WHERE t.id = :tenant_id
@@ -241,6 +243,19 @@ class TenantsApiHandler
                 return Response::error('Slug must contain only lowercase letters, numbers, and hyphens', 400);
             }
 
+            // The optional initial administrator is validated HERE, before any
+            // write, so a rejected administrator cannot leave a tenant behind
+            // (#779). The transaction below is the backstop for engine-level
+            // failures; this is the cheaper guarantee, and it also means the
+            // caller gets the real reason rather than a generic 500.
+            $admin = null;
+            if (array_key_exists('admin', $body) && $body['admin'] !== null) {
+                $admin = $this->validateInitialAdmin($body['admin']);
+                if ($admin instanceof Response) {
+                    return $admin;
+                }
+            }
+
             // Check if name already exists
             $checkStmt = $this->db->prepare('SELECT id FROM tenants WHERE name = ?');
             $checkStmt->execute([$name]);
@@ -265,20 +280,55 @@ class TenantsApiHandler
             $name = $tenantData['name'];
             $slug = $tenantData['slug'];
 
-            // Insert tenant
-            $stmt = $this->db->prepare('
-                INSERT INTO tenants (name, slug, created_at)
-                VALUES (?, ?, NOW())
-            ');
-            $stmt->execute([$name, $slug]);
-            $tenantId = $this->db->lastInsertId();
+            // The tenant and its first administrator are ONE unit of work. A
+            // tenant that could not get an administrator must not be left
+            // behind: it would be invisible to every API path that requires a
+            // membership, and the only way to finish or remove it would be the
+            // direct SQL this endpoint exists to eliminate.
+            $ownTx = !$this->db->inTransaction();
+            if ($ownTx) {
+                $this->db->beginTransaction();
+            }
 
-            // Dispatch synchronous hook after tenant is created
-            $this->hookManager->dispatch('tenant.created', [
-                'id' => (int)$tenantId,
-                'name' => $name,
-                'slug' => $slug,
-            ]);
+            try {
+                // Insert tenant
+                $stmt = $this->db->prepare('
+                    INSERT INTO tenants (name, slug, created_at)
+                    VALUES (?, ?, NOW())
+                ');
+                $stmt->execute([$name, $slug]);
+                $tenantId = $this->db->lastInsertId();
+
+                // Dispatch synchronous hook after tenant is created. This runs
+                // BEFORE the administrator is provisioned so a listener that
+                // seeds tenant-scoped roles has done so by the time the initial
+                // role is resolved.
+                $this->hookManager->dispatch('tenant.created', [
+                    'id' => (int)$tenantId,
+                    'name' => $name,
+                    'slug' => $slug,
+                ]);
+
+                $adminSummary = null;
+                if ($admin !== null) {
+                    $adminSummary = $this->provisionInitialAdmin((int)$tenantId, $admin);
+                    if ($adminSummary instanceof Response) {
+                        if ($ownTx && $this->db->inTransaction()) {
+                            $this->db->rollBack();
+                        }
+                        return $adminSummary;
+                    }
+                }
+
+                if ($ownTx) {
+                    $this->db->commit();
+                }
+            } catch (\Throwable $e) {
+                if ($ownTx && $this->db->inTransaction()) {
+                    $this->db->rollBack();
+                }
+                throw $e;
+            }
 
             // Dispatch asynchronous hook for background tasks
             $this->hookManager->dispatchAsync('tenant.created.async', [
@@ -286,15 +336,20 @@ class TenantsApiHandler
                 'name' => $name,
             ]);
 
-            return Response::json([
-                'data' => $this->toPublicTenant([
-                    'id' => (int)$tenantId,
-                    'name' => $name,
-                    'slug' => $slug,
-                    'userCount' => 0,
-                    'created_at' => date('Y-m-d H:i:s'),
-                ])
-            ], 201);
+            $payload = $this->toPublicTenant([
+                'id' => (int)$tenantId,
+                'name' => $name,
+                'slug' => $slug,
+                // A provisioned administrator is the tenant's first member, so
+                // the count the list endpoint would report is already 1.
+                'userCount' => $adminSummary === null ? 0 : 1,
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+            if ($adminSummary !== null) {
+                $payload['admin'] = $adminSummary;
+            }
+
+            return Response::json(['data' => $payload], 201);
         } catch (\Exception $e) {
             error_log('[TenantsApiHandler] create failed: ' . $e->getMessage());
             return Response::error('Failed to create tenant', 500);
@@ -437,7 +492,7 @@ class TenantsApiHandler
             // active memberships block deletion — a tenant whose only memberships are
             // invited/suspended has no active occupants and can be deleted.
             $checkStmt = $this->db->prepare(
-                "SELECT COUNT(*) as count FROM memberships WHERE tenant_id = ? AND status = 'active'"
+                "SELECT COUNT(DISTINCT profile_id) as count FROM memberships WHERE tenant_id = ? AND status = 'active'"
             );
             $checkStmt->execute([$id]);
             $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
@@ -522,6 +577,122 @@ class TenantsApiHandler
             error_log('[TenantsApiHandler] delete failed: ' . $e->getMessage());
             return Response::error('Failed to delete tenant', 500);
         }
+    }
+
+    /**
+     * Validate the optional `admin` block of a create request.
+     *
+     * Runs before any write. Everything checkable without touching the database
+     * is checked here so that a bad administrator is a clean 4xx describing the
+     * actual problem, rather than a rollback reported as a generic failure.
+     *
+     * @param mixed $raw The submitted `admin` value, of unknown shape.
+     * @return array{email: string, password: string, role: string}|Response
+     *         The normalised block, or the error response to return.
+     */
+    private function validateInitialAdmin(mixed $raw): array|Response
+    {
+        if (!is_array($raw)) {
+            return Response::error('admin must be an object with email and password', 400);
+        }
+
+        $email = trim((string) ($raw['email'] ?? ''));
+        $password = (string) ($raw['password'] ?? '');
+
+        if ($email === '' || $password === '') {
+            return Response::error('admin.email and admin.password are required', 400);
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return Response::error('admin.email is not a valid email address', 400);
+        }
+
+        // Bound before any DB write so an over-long value is a clean 422 rather
+        // than a Postgres 22001 surfacing as a 500.
+        if ($tooLong = InputLimits::firstViolation(['admin.email' => [$email, InputLimits::NAME_MAX]])) {
+            return $tooLong;
+        }
+
+        // The same policy every other credential clears. A bootstrap account is
+        // the LAST one that should get a weaker rule: it is the most privileged
+        // account in the tenant and the one most likely to be created quickly
+        // and then forgotten.
+        try {
+            PasswordPolicy::validate($password);
+        } catch (\InvalidArgumentException $e) {
+            // Bound to a named local first, as the same PasswordPolicy call in
+            // UsersApiHandler::create() does. The message is authored BY the
+            // policy FOR the person typing the password ("must be at least N
+            // characters"), so surfacing it is the point — telling someone their
+            // password was rejected without saying why is a dead end. The naming
+            // is what distinguishes that from forwarding an engine error, which
+            // ExceptionLeakageTest exists to stop.
+            $policyViolation = $e->getMessage();
+
+            return Response::error($policyViolation, 400);
+        }
+
+        $role = trim((string) ($raw['role'] ?? 'admin'));
+
+        return ['email' => $email, 'password' => $password, 'role' => $role === '' ? 'admin' : $role];
+    }
+
+    /**
+     * Create the tenant's first administrator, inside the caller's transaction.
+     *
+     * @param int $tenantId The tenant just inserted.
+     * @param array{email: string, password: string, role: string} $admin
+     * @return array{id: int, email: string, role: string}|Response
+     *         A summary for the response, or the error response to return.
+     */
+    private function provisionInitialAdmin(int $tenantId, array $admin): array|Response
+    {
+        // A brand-new tenant has no roles of its own unless a `tenant.created`
+        // listener just seeded some, so both scopes are consulted — tenant-owned
+        // first, so a seeded role wins over the global one of the same name.
+        $roleId = $this->resolveRoleForTenant($admin['role'], $tenantId);
+        if ($roleId === null) {
+            return Response::error(sprintf('Role "%s" not found', $admin['role']), 404);
+        }
+
+        $profileId = (new ProfileProvisioner($this->db))->findOrCreate(
+            $admin['email'],
+            password_hash($admin['password'], PASSWORD_BCRYPT)
+        );
+
+        // is_primary: this is the tenant's first membership for this profile and
+        // the row that answers "what is this person here?" (migration 094).
+        // Written as a boolean literal, not 1 — PostgreSQL rejects the integer.
+        $this->db->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
+             VALUES (?, ?, ?, true, 'active', NOW())"
+        )->execute([$profileId, $tenantId, $roleId]);
+
+        return ['id' => $profileId, 'email' => $admin['email'], 'role' => $admin['role']];
+    }
+
+    /**
+     * A role id visible to `$tenantId`, preferring one the tenant owns.
+     *
+     * Two queries rather than one ordered query: expressing "tenant-owned first,
+     * then global" in a single statement needs NULL ordering that SQLite and
+     * PostgreSQL spell differently, and this path runs on both.
+     */
+    private function resolveRoleForTenant(string $roleName, int $tenantId): ?int
+    {
+        $owned = $this->db->prepare('SELECT id FROM roles WHERE name = ? AND tenant_id = ? LIMIT 1');
+        $owned->execute([$roleName, $tenantId]);
+        $id = $owned->fetchColumn();
+        if ($id !== false) {
+            return (int) $id;
+        }
+
+        // @tenant-guard-ignore: global roles are tenant-independent by definition (tenant_id IS NULL)
+        $global = $this->db->prepare('SELECT id FROM roles WHERE name = ? AND tenant_id IS NULL LIMIT 1');
+        $global->execute([$roleName]);
+        $id = $global->fetchColumn();
+
+        return $id === false ? null : (int) $id;
     }
 
     /**

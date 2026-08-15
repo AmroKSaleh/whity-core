@@ -64,6 +64,32 @@ use PDO;
  * the deletion guard counted that very seed assignment; that hack has been
  * removed in favour of the explicit owning column.)
  *
+ * Name uniqueness is PER TENANT (#712, migration 093)
+ * ---------------------------------------------------
+ * `roles.name` used to be UNIQUE platform-wide, which meant the first tenant to
+ * name a role "Supervisor" denied that word to every other tenant on the install.
+ * Migration 093 replaced that with two partial unique indexes — one over
+ * `(tenant_id, name)` for owned roles, one over `(name)` for GLOBAL (NULL-tenant)
+ * roles — so the two namespaces are independent and neither leaks into the other.
+ *
+ * The 409 this handler raises is the same rule read from the CALLER's side: a
+ * name is taken when it is already used by a role the caller can SEE in the
+ * namespace it is writing into — its own tenant's roles PLUS the global base
+ * roles, whose names every tenant inherits and so cannot shadow. Another
+ * tenant's role never enters the comparison, and is never named in the response.
+ * The scope is the OWNING tenant of the row being written (the acting tenant on
+ * create), not the acting tenant, so a SYSTEM-tenant edit of tenant 5's role is
+ * checked against tenant 5's namespace rather than the system tenant's.
+ *
+ * Additive permission changes
+ * ---------------------------
+ * {@see self::grantPermissions()} / {@see self::revokePermissions()} add and
+ * remove individual grants without sending the whole set, so two admins editing
+ * one role no longer clobber each other through the read-modify-write that
+ * `PATCH {permissions: [...]}` requires. Both are idempotent and emit the same
+ * `role.updating`/`role.updated` hooks — and therefore the same `role.updated`
+ * audit record — as the full replace.
+ *
  * Cache coherence
  * ---------------
  * Mutating writes (create/update/delete) invalidate the worker-level
@@ -286,11 +312,11 @@ class RolesApiHandler
             /** @var array<int, string|int> $permissions */
             $permissions = $this->extractPermissionList($body);
 
-            // Role names are globally unique at the database layer.
-            // @tenant-guard-ignore: role-name uniqueness check is intentionally platform-global (role names are globally unique)
-            $checkStmt = $this->db->prepare('SELECT id FROM roles WHERE name = ?');
-            $checkStmt->execute([$name]);
-            if ($checkStmt->fetch()) {
+            // Role names are unique PER TENANT (migration 093). The new role will
+            // be owned by the acting tenant, so that is the namespace it must be
+            // unique within — plus the global base roles it inherits. Another
+            // tenant's identically-named role is irrelevant and invisible here.
+            if ($this->roleNameTaken($name, $tenantId)) {
                 return Response::error('Role already exists', 409);
             }
 
@@ -424,10 +450,12 @@ class RolesApiHandler
             }
 
             if (isset($body['name']) && $body['name'] !== $role['name']) {
-                // @tenant-guard-ignore: role-name uniqueness check is intentionally platform-global (role names are globally unique)
-                $checkStmt = $this->db->prepare('SELECT id FROM roles WHERE name = ? AND id != ?');
-                $checkStmt->execute([$body['name'], $id]);
-                if ($checkStmt->fetch()) {
+                // Per-tenant uniqueness (migration 093), checked in the namespace
+                // of the role's OWNING tenant — which is not necessarily the
+                // acting one: the SYSTEM tenant may rename another tenant's role,
+                // and that rename must be unique THERE, not under tenant 0.
+                $ownerTenantId = isset($role['tenant_id']) ? (int)$role['tenant_id'] : null;
+                if ($this->roleNameTaken((string)$body['name'], $ownerTenantId, (int)$id)) {
                     return Response::error('Role name already exists', 409);
                 }
                 $updates[] = 'name = ?';
@@ -644,6 +672,157 @@ class RolesApiHandler
     }
 
     /**
+     * POST /api/roles/{id}/permissions - ADD permissions to a role (#712).
+     *
+     * The additive half of the pair that removes the read-modify-write race
+     * `PATCH {permissions: [...]}` forces on callers: to add one grant through
+     * the full replace, a client must first read the role's current set and send
+     * it back with the addition, so two admins doing that concurrently each
+     * write a set computed before the other's change — and the loser's edit
+     * disappears with no error. Sending only the DELTA has nothing to lose.
+     *
+     * Accepts `{permissions: [...]}` in the same mixed id/name notation the
+     * create and update endpoints take. IDEMPOTENT: granting a permission the
+     * role already holds is a success, not a 409 — the point of the endpoint is
+     * that a caller can assert "this role has X" without first knowing whether
+     * it does. Unknown ids/names are dropped, never fabricated, exactly as in
+     * create/update; `granted` reports what actually changed.
+     *
+     * Gated and scoped identically to PATCH /api/roles/{id}: only the OWNING
+     * tenant (or SYSTEM) may write, and a global base role is 404 for a tenant.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @return Response JSON grant summary under the `data` key (200) or an error.
+     */
+    public function grantPermissions(Request $request, array $params): Response
+    {
+        return $this->changePermissions($request, $params, grant: true);
+    }
+
+    /**
+     * DELETE /api/roles/{id}/permissions - REMOVE permissions from a role (#712).
+     *
+     * The subtractive counterpart of {@see self::grantPermissions()}, with the
+     * same body, gate and tenant scoping. IDEMPOTENT: revoking a permission the
+     * role does not hold is a success — the caller asked for an end state, and
+     * that end state already holds.
+     *
+     * The permission list travels in the request BODY rather than the query
+     * string because it is a list of arbitrary length whose entries may be
+     * `resource:action` strings; DELETE-with-a-body is well-defined for a
+     * same-origin JSON API and keeps the grant/revoke contract symmetrical.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @return Response JSON revocation summary under the `data` key (200) or an error.
+     */
+    public function revokePermissions(Request $request, array $params): Response
+    {
+        return $this->changePermissions($request, $params, grant: false);
+    }
+
+    /**
+     * Shared body of the additive/subtractive permission endpoints.
+     *
+     * Grant and revoke differ only in the junction-table statement they run:
+     * everything around it — id validation, the write-manageability gate, body
+     * parsing, reference resolution, hooks, cache invalidation, logging — is the
+     * same contract and is written once so the two cannot drift apart.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @param bool                 $grant   True to add grants, false to remove them.
+     * @return Response The JSON response.
+     */
+    private function changePermissions(Request $request, array $params, bool $grant): Response
+    {
+        $action = $grant ? 'grant' : 'revoke';
+
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('Role ID is required', 400);
+            }
+
+            $tenantId = TenantContext::getTenantId();
+
+            // Same write boundary as update/delete: a tenant may only touch its
+            // OWN roles, a global (NULL-tenant) base role is 404 for it, and only
+            // the SYSTEM tenant may manage global roles (WC-110).
+            if (!$this->roleManageableByTenant((int)$id, $tenantId)) {
+                return Response::error('Role not found', 404);
+            }
+
+            $body = JsonBody::parsed($request);
+
+            if (!array_key_exists('permissions', $body) || !is_array($body['permissions'])) {
+                return Response::error('permissions must be an array of permission ids or names', 400);
+            }
+
+            /** @var array<int, string|int> $refs */
+            $refs = $this->normalizePermissionRefs($body['permissions']);
+            $permissionIds = $this->resolvePermissionIds($refs);
+
+            // Filter hook before the write, mirroring update() so a plugin
+            // observing role changes sees this one too.
+            $this->hookManager->dispatch('role.updating', [
+                'id' => (int)$id,
+                'changes' => ['permissions' => $refs, 'permissionsChange' => $action],
+                'tenant_id' => $tenantId,
+            ]);
+
+            $changed = $grant
+                ? $this->grantRolePermissions((int)$id, $permissionIds)
+                : $this->revokeRolePermissionsScoped((int)$id, $permissionIds, $tenantId);
+
+            // Post-write hook. Deliberately `role.updated` rather than a new
+            // event name: AuditLogger maps that event to the `role.updated`
+            // audit action, so an additive change lands in audit_log looking
+            // exactly like the full replace it substitutes for, and no audit
+            // consumer needs to learn a second event to keep seeing role edits.
+            $this->hookManager->dispatch('role.updated', [
+                'id' => (int)$id,
+                'changes' => ['permissions' => $refs, 'permissionsChange' => $action],
+                'tenant_id' => $tenantId,
+            ]);
+
+            // The role's effective permission set has changed; invalidate the
+            // worker-level cache so RBAC checks are not stale.
+            RoleChecker::clearCache();
+
+            $this->log('info', $grant ? 'Role permissions granted' : 'Role permissions revoked', [
+                'event' => 'roles.update',
+                'tenant_id' => $tenantId,
+                'role_id' => (int)$id,
+                'permissions_change' => $action,
+                'permission_count' => $changed,
+            ]);
+
+            return Response::json([
+                'data' => [
+                    'id' => (int)$id,
+                    'message' => $grant ? 'Permissions granted' : 'Permissions revoked',
+                    // What this call actually changed (already-held grants and
+                    // not-held revocations count as 0 — that is the idempotency).
+                    ($grant ? 'granted' : 'revoked') => $changed,
+                    // The role's resulting grants, so a caller that needs the new
+                    // state does not have to follow up with a GET.
+                    'permissions' => $this->fetchRolePermissions((int)$id),
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            $this->log('error', 'Failed to change role permissions', [
+                'event' => 'roles.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'permissions_change' => $action,
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to change role permissions', 500);
+        }
+    }
+
+    /**
      * Whether a role is READ-visible to the given tenant.
      *
      * The SYSTEM tenant (id 0) sees every role. For any other tenant, a role is
@@ -714,6 +893,183 @@ class RolesApiHandler
         ');
         $stmt->execute([$roleId, $tenantId]);
         return $stmt->fetch() !== false;
+    }
+
+    /**
+     * Whether a role name is already taken in the namespace a write would land in.
+     *
+     * The namespace is the OWNING tenant of the row being written — the acting
+     * tenant on create, the role's own `tenant_id` on rename — because that is
+     * what migration 093's partial unique indexes are keyed on. Two cases:
+     *
+     *  - Owned role (`$ownerTenantId` non-null): taken when that tenant already
+     *    has the name, OR a GLOBAL (NULL-tenant) base role does. Globals are
+     *    inherited by every tenant, so allowing a tenant role to shadow one would
+     *    put two same-named roles in that tenant's own list. The DB does not (and
+     *    with plain unique indexes cannot) forbid it; this is where that rule lives.
+     *  - Global role (`$ownerTenantId` null — only reachable for the SYSTEM tenant
+     *    renaming a base role): taken only within the global namespace. A tenant's
+     *    private role name must NOT block the operator from naming a base role.
+     *
+     * A tenant's roles are never compared against another tenant's, which is the
+     * whole point of #712 — and also means a 409 can never reveal that another
+     * tenant exists, let alone what it called something.
+     *
+     * @param string   $name          The candidate role name.
+     * @param int|null $ownerTenantId Owning tenant of the row being written (null = global).
+     * @param int|null $excludeRoleId Role id to ignore (the row being renamed).
+     * @return bool True when the name is already in use in that namespace.
+     */
+    private function roleNameTaken(string $name, ?int $ownerTenantId, ?int $excludeRoleId = null): bool
+    {
+        if ($ownerTenantId === null) {
+            // GLOBAL namespace only.
+            $sql = 'SELECT 1 FROM roles WHERE name = ? AND tenant_id IS NULL';
+            $params = [$name];
+        } else {
+            // The tenant's own roles PLUS the global base roles it inherits.
+            $sql = 'SELECT 1 FROM roles WHERE name = ? AND (tenant_id = ? OR tenant_id IS NULL)';
+            $params = [$name, $ownerTenantId];
+        }
+
+        if ($excludeRoleId !== null) {
+            $sql .= ' AND id != ?';
+            $params[] = $excludeRoleId;
+        }
+
+        $stmt = $this->db->prepare($sql . ' LIMIT 1');
+        $stmt->execute($params);
+
+        return $stmt->fetch() !== false;
+    }
+
+    /**
+     * Link permission ids to a role, skipping any it already holds.
+     *
+     * Idempotency is enforced TWICE, deliberately. The pre-filter makes the
+     * common case cheap and makes the reported count an accurate description of
+     * what changed; `ON CONFLICT DO NOTHING` then covers the window between that
+     * read and the write, where a concurrent grant of the same permission would
+     * otherwise violate `role_permissions`' `UNIQUE(role_id, permission_id)` and
+     * turn a successful concurrent edit into a 500. Two admins granting the same
+     * permission at the same instant is precisely the scenario this endpoint
+     * exists for, so the race is not hypothetical.
+     *
+     * Like {@see self::assignPermissions()} the INSERT carries no tenant
+     * predicate of its own: `role_permissions` has no `tenant_id`, an INSERT
+     * names columns as VALUES rather than as a row filter, and the row it writes
+     * is bound to a `role_id` the caller's manageability gate has already
+     * confirmed. The predicates in {@see self::deleteRolePermissionsScoped()} and
+     * {@see self::revokeRolePermissionsScoped()} exist because a DELETE without
+     * one can reach rows the caller never named; an INSERT cannot.
+     *
+     * @param int             $roleId        The role id.
+     * @param array<int, int> $permissionIds Resolved, validated permission ids.
+     * @return int The number of grants actually added.
+     */
+    private function grantRolePermissions(int $roleId, array $permissionIds): int
+    {
+        if ($permissionIds === []) {
+            return 0;
+        }
+
+        $existing = $this->linkedPermissionIds($roleId);
+        $missing = array_values(array_filter(
+            $permissionIds,
+            static fn (int $permissionId): bool => !isset($existing[$permissionId])
+        ));
+
+        if ($missing === []) {
+            return 0;
+        }
+
+        $added = 0;
+        foreach (array_chunk($missing, 500) as $chunk) {
+            $placeholders = implode(', ', array_fill(0, count($chunk), '(?, ?, NOW())'));
+
+            $params = [];
+            foreach ($chunk as $permissionId) {
+                $params[] = $roleId;
+                $params[] = $permissionId;
+            }
+
+            $stmt = $this->db->prepare(
+                'INSERT INTO role_permissions (role_id, permission_id, created_at)
+                 VALUES ' . $placeholders . '
+                 ON CONFLICT DO NOTHING'
+            );
+            $stmt->execute($params);
+            $added += $stmt->rowCount();
+        }
+
+        return $added;
+    }
+
+    /**
+     * Unlink a SUBSET of a role's permission grants (WC-190 scoped).
+     *
+     * Unlike {@see self::deleteRolePermissionsScoped()}, which clears the role's
+     * whole set for the full-replace path, this removes only the ids named — and
+     * silently removes nothing for ids the role never held, which is what makes
+     * revoke idempotent.
+     *
+     * @param int             $roleId        The role id.
+     * @param array<int, int> $permissionIds Resolved permission ids to remove.
+     * @param int|null        $tenantId      The acting tenant (0 = SYSTEM).
+     * @return int The number of grants actually removed.
+     */
+    private function revokeRolePermissionsScoped(int $roleId, array $permissionIds, ?int $tenantId): int
+    {
+        if ($permissionIds === [] || $tenantId === null) {
+            return 0;
+        }
+
+        $removed = 0;
+        foreach (array_chunk($permissionIds, 500) as $chunk) {
+            $placeholders = implode(', ', array_fill(0, count($chunk), '?'));
+
+            if ($tenantId === 0) {
+                $stmt = $this->db->prepare(
+                    'DELETE FROM role_permissions
+                     WHERE role_id = ? AND permission_id IN (' . $placeholders . ')'
+                );
+                $stmt->execute(array_merge([$roleId], $chunk));
+            } else {
+                $stmt = $this->db->prepare(
+                    'DELETE FROM role_permissions
+                     WHERE role_id = ?
+                       AND permission_id IN (' . $placeholders . ')
+                       AND EXISTS (
+                           SELECT 1 FROM roles r
+                           WHERE r.id = role_permissions.role_id AND r.tenant_id = ?
+                       )'
+                );
+                $stmt->execute(array_merge([$roleId], $chunk, [$tenantId]));
+            }
+
+            $removed += $stmt->rowCount();
+        }
+
+        return $removed;
+    }
+
+    /**
+     * The permission ids a role currently holds, as a set for O(1) lookup.
+     *
+     * @param int $roleId The role id.
+     * @return array<int, true> Set keyed by permission id.
+     */
+    private function linkedPermissionIds(int $roleId): array
+    {
+        $stmt = $this->db->prepare('SELECT permission_id FROM role_permissions WHERE role_id = ?');
+        $stmt->execute([$roleId]);
+
+        $set = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $permissionId) {
+            $set[(int)$permissionId] = true;
+        }
+
+        return $set;
     }
 
     /**
