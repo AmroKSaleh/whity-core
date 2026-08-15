@@ -1,6 +1,7 @@
 import * as React from "react"
 import type { Preview, Decorator } from "@storybook/nextjs-vite"
-import { initialize, mswLoader } from "msw-storybook-addon"
+import { setupWorker } from "msw/browser"
+import { mswLoader } from "msw-storybook-addon/csf3"
 
 // The app's real Tailwind entry + design tokens. Resolves `@source
 // "../packages/ui/src"` relative to the web/ root, exactly as `next dev` does.
@@ -16,8 +17,16 @@ import { ToastContainer } from "@/components/ui/toast-container"
 import { CapabilitiesProvider } from "@/lib/capabilities-context"
 import { defaultHandlers, MOCK_BRANDING } from "./mocks"
 
-// Start the MSW worker. Unhandled requests pass through (harmless in SB).
-initialize({ onUnhandledRequest: "bypass" })
+// The addon no longer starts the worker for us (`initialize()` is gone in v3) —
+// `mswLoader` owns its lifecycle and takes an optional setup override. One is
+// supplied only to keep unhandled requests silent: the gallery runs with no
+// backend, so requests no story mocks are expected, whereas the addon's default
+// setup warns on each of them.
+const startMockServiceWorker = async () => {
+  const worker = setupWorker()
+  await worker.start({ onUnhandledRequest: "bypass" })
+  return worker
+}
 
 /**
  * Wrap every story in the real provider stack the app mounts in its root
@@ -73,7 +82,7 @@ const preview: Preview = {
       },
     },
   },
-  loaders: [mswLoader],
+  loaders: [mswLoader(startMockServiceWorker)],
   decorators: [withProviders],
 }
 
