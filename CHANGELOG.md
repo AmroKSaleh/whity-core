@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-15
+
 ### Added
 - **The bootstrap administrator's address is configurable, and the demo accounts are development-only.** Migrations 010 and 036 created a profile at `system@whity.local` with a tenant-0 administrator membership and a credential from `INITIAL_SYSTEM_ADMIN_PASSWORD`. Because it arrived with the **schema** rather than from a seeder, every install — production ones included — got a live administrator credential at a hardcoded `.local` address that no operator could rename without editing core, that can never receive a password reset or a verification mail, and that names the vendor on an install fronted by a real organisation. `INITIAL_SYSTEM_ADMIN_EMAIL` now names it, defaulting to today's value so an install that never sets it is unaffected.
   - **Applied by a new migration (095), not by editing 010/036.** Those two have already run on every existing database and will never run there again, so an edit would move nothing for any real install while changing a migration set that the schema fingerprint is pinned to. 095 instead reconciles forward — which is what makes `migrate run` **alone** honour the variable, and `migrate run` alone is exactly the path that produces the bootstrap administrator (`seed` is a separate, optional step). The rename **moves the existing row**: same profile, same credential, same tenant-0 admin membership, never a second account. Unset variable ⇒ strict no-op. An address another identity already holds ⇒ reported and skipped, because colliding two accounts to honour an environment variable is worse than leaving the rename undone.
