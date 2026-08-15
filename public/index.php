@@ -1151,6 +1151,46 @@ $router->register('POST', '/api/2fa-recovery/{id:\d+}/reject',   [$twoFactorReco
 // receive email and reaches an admin out-of-band.
 $router->register('POST', '/api/2fa-recovery/force-reset',       [$twoFactorRecoveryApprovalsHandler, 'forceReset'],  null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
 
+// 10d. Tenant invitations (WHIT-417 / #797 item 3) — how a tenant administrator
+// onboards somebody without an operator typing a password. The admin surface is
+// tenant-scoped and gated on the SAME users:read/users:write a role needs to add
+// a user by hand; the accept pair is public and unauthenticated, because the
+// invitee has no session and may have no account at all.
+$invitationService = new \Whity\Core\Identity\InvitationService(
+    $db->getPdo(),
+    new \Whity\Core\Identity\ProfileProvisioner($db->getPdo())
+);
+$invitationUrlBase = (string) ($_ENV['INVITATION_ACCEPT_URL'] ?? getenv('INVITATION_ACCEPT_URL')
+    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/accept-invitation'));
+$invitationMailer = new \Whity\Core\Identity\InvitationMailer(
+    $mailer,
+    $invitationUrlBase,
+    new \Whity\Core\Mail\EmailLayout(),
+    $settingsService
+);
+$invitationsHandler = new \Whity\Api\InvitationsApiHandler(
+    $db->getPdo(),
+    $invitationService,
+    $roleChecker,
+    $auditLogger,
+    new DatabaseSharedStore($db->getPdo()),
+    $settingsService,
+    $invitationMailer
+);
+$invitationAcceptHandler = new \Whity\Api\InvitationAcceptHandler(
+    $invitationService,
+    new DatabaseSharedStore($db->getPdo()),
+    $auditLogger
+);
+// The public pair is registered FIRST so `/invitations/accept` can never be
+// shadowed by a future `/invitations/{something}` route.
+$router->register('GET',  '/api/invitations/accept', [$invitationAcceptHandler, 'preview'], null);
+$router->register('POST', '/api/invitations/accept', [$invitationAcceptHandler, 'accept'], null);
+$router->register('GET',    '/api/invitations',                  [$invitationsHandler, 'list'],   null, null, CorePermissions::USERS_READ);
+$router->register('POST',   '/api/invitations',                  [$invitationsHandler, 'create'], null, null, CorePermissions::USERS_WRITE);
+$router->register('POST',   '/api/invitations/{id:\d+}/resend',  [$invitationsHandler, 'resend'], null, null, CorePermissions::USERS_WRITE);
+$router->register('DELETE', '/api/invitations/{id:\d+}',         [$invitationsHandler, 'revoke'], null, null, CorePermissions::USERS_WRITE);
+
 // 11. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
 // WC-203: gate users routes on fine-grained permission grants instead of the
