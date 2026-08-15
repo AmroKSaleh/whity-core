@@ -444,6 +444,180 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
         self::assertSame(404, $response->getStatusCode());
     }
 
+    // ==================== revoke all: the record-delete cleanup ====================
+
+    /**
+     * The cleanup an owner runs when it deletes the record itself: every grant
+     * at one resource, in ONE call.
+     *
+     * Without it the first consumer to delete a record with grants attached
+     * hand-rolls list-then-revoke-each — the loop this whole area exists to
+     * remove, and one that leaves the resource half-cleaned if it dies midway.
+     */
+    public function testRevokeAllRemovesEveryGrantAtTheResourceAndReportsTheCount(): void
+    {
+        $roleId = $this->roleId('editor');
+        $this->createGrant(ResourceTypeRegistry::TYPE_OU, $this->ouA, $roleId, null);
+        $this->createGrant(ResourceTypeRegistry::TYPE_OU, $this->ouA, $roleId, $this->memberProfileId);
+
+        // A second resource in the same tenant: the blast radius must be ONE
+        // record, not the tenant's grants.
+        $otherOu = $this->seedOu('a-support', self::TENANT_A);
+        $this->createGrant(ResourceTypeRegistry::TYPE_OU, $otherOu, $roleId, null);
+
+        $response = $this->revokeAll(ResourceTypeRegistry::TYPE_OU, $this->ouA);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $data = $this->data($response);
+        self::assertSame(2, $data['revoked'], 'The count must say what the cleanup actually removed');
+        self::assertSame([], $this->listGrants(ResourceTypeRegistry::TYPE_OU, $this->ouA));
+        self::assertCount(
+            1,
+            $this->listGrants(ResourceTypeRegistry::TYPE_OU, $otherOu),
+            'Another resource in the same tenant must be untouched'
+        );
+    }
+
+    /**
+     * `resource_type` is part of the match, not decoration: two types can carry
+     * the same numeric id, so wiping by id alone would delete a live plugin
+     * record's grants when an OU was deleted.
+     */
+    public function testRevokeAllIsScopedToTheResourceTypeToo(): void
+    {
+        $roleId = $this->roleId('editor');
+        $this->createGrant(ResourceTypeRegistry::TYPE_OU, $this->ouA, $roleId, null);
+
+        $this->vouchForDocument($this->ouA, self::TENANT_A);
+        $this->createGrant(self::TYPE_DOCUMENT, $this->ouA, $roleId, null);
+
+        $response = $this->revokeAll(ResourceTypeRegistry::TYPE_OU, $this->ouA);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(1, $this->data($response)['revoked']);
+        self::assertCount(
+            1,
+            $this->listGrants(self::TYPE_DOCUMENT, $this->ouA),
+            'A different resource TYPE at the same numeric id must survive'
+        );
+    }
+
+    /**
+     * The property that makes this safe to call unconditionally from a delete
+     * path: a resource that never had grants is a SUCCESS, not a 404. The caller
+     * is deleting a record and does not know — and must not have to find out —
+     * whether it carried any.
+     */
+    public function testRevokeAllOnAResourceWithNoGrantsIsASuccessfulNoOp(): void
+    {
+        $response = $this->revokeAll(ResourceTypeRegistry::TYPE_OU, $this->ouA);
+
+        self::assertSame(200, $response->getStatusCode(), 'Nothing to clean is not an error');
+        self::assertSame(0, $this->data($response)['revoked']);
+    }
+
+    /**
+     * The same property under a retry: a delete path that runs twice (or is
+     * retried after a timeout) must not start failing on the second pass.
+     */
+    public function testRevokeAllIsIdempotent(): void
+    {
+        $this->createGrant(ResourceTypeRegistry::TYPE_OU, $this->ouA, $this->roleId('editor'), null);
+
+        self::assertSame(1, $this->data($this->revokeAll(ResourceTypeRegistry::TYPE_OU, $this->ouA))['revoked']);
+
+        $second = $this->revokeAll(ResourceTypeRegistry::TYPE_OU, $this->ouA);
+        self::assertSame(200, $second->getStatusCode(), 'A repeat cleanup must stay a success');
+        self::assertSame(0, $this->data($second)['revoked']);
+    }
+
+    /**
+     * THE decision this route turns on. {@see ResourceRoleGrantsApiHandler::create()}
+     * makes the owning plugin vouch for the resource and fails CLOSED when
+     * nobody does — but by the time cleanup runs the record is usually already
+     * deleted, so nobody CAN vouch. Requiring it here would make cleanup
+     * impossible in exactly the case it exists for, stranding the grants at an
+     * id a later record will reuse.
+     *
+     * Modelled end-to-end: the owner vouches while the record lives and the
+     * grants are written through the API, then the listener goes away — the
+     * record has been deleted — and the cleanup must still work.
+     */
+    public function testRevokeAllDoesNotRequireTheOwnerToVouchForTheResource(): void
+    {
+        $this->vouchForDocument(self::DOC_ID, self::TENANT_A);
+        $this->createGrant(self::TYPE_DOCUMENT, self::DOC_ID, $this->roleId('editor'), null);
+        $this->createGrant(self::TYPE_DOCUMENT, self::DOC_ID, $this->roleId('editor'), $this->memberProfileId);
+
+        // The record is gone: nothing vouches for its id any more.
+        $this->hooks = new HookManager();
+
+        $response = $this->revokeAll(self::TYPE_DOCUMENT, self::DOC_ID);
+
+        self::assertSame(
+            200,
+            $response->getStatusCode(),
+            'Cleanup must not depend on a record that is already deleted'
+        );
+        self::assertSame(2, $this->data($response)['revoked']);
+        self::assertSame(0, $this->countGrants());
+    }
+
+    /**
+     * `resource_type` IS still checked, unlike ownership — and for the opposite
+     * reason. A typo on a cleanup call would otherwise answer `revoked: 0`,
+     * which is indistinguishable from "that record had no grants": the caller
+     * logs a successful cleanup that removed nothing and the real rows survive
+     * for the next record to inherit. The registry is the only thing that can
+     * turn that silent no-op into a loud error.
+     *
+     * It also keeps this route's parameters and validation identical to the
+     * list route's, so `GET` and `DELETE .../all` always address the same rows.
+     */
+    public function testRevokeAllRejectsAnUnregisteredResourceTypeAndKeepsTheRows(): void
+    {
+        $this->createGrant(ResourceTypeRegistry::TYPE_OU, $this->ouA, $this->roleId('editor'), null);
+
+        $response = $this->revokeAll('not_registered', $this->ouA);
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(1, $this->countGrants(), 'A rejected cleanup must not remove anything');
+    }
+
+    public function testRevokeAllRequiresResourceTypeAndId(): void
+    {
+        $response = $this->handler()->revokeAll($this->req('DELETE', '/api/resource-role-grants/all'));
+
+        self::assertSame(422, $response->getStatusCode());
+    }
+
+    /**
+     * The worst thing this route could do. `resource_id` carries no foreign key,
+     * so ids collide across tenants in normal use; the tenant predicate — not
+     * the ownership check this route deliberately skips — is what keeps a
+     * cleanup inside the caller's tenant.
+     */
+    public function testRevokeAllLeavesAnotherTenantsGrantsAtTheSameResourceId(): void
+    {
+        $this->createGrant(ResourceTypeRegistry::TYPE_OU, $this->ouA, $this->roleId('editor'), null);
+
+        $this->pdo->prepare(
+            'INSERT INTO resource_role_assignments
+                 (tenant_id, resource_type, resource_id, role_id, profile_id, created_at)
+             VALUES (?, ?, ?, ?, NULL, NOW())'
+        )->execute([self::TENANT_B, ResourceTypeRegistry::TYPE_OU, $this->ouA, $this->roleId('viewer')]);
+
+        $response = $this->revokeAll(ResourceTypeRegistry::TYPE_OU, $this->ouA);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(1, $this->data($response)['revoked'], 'Only the caller tenant\'s row may be counted');
+        self::assertSame(
+            1,
+            $this->countGrants(),
+            "Tenant B's grant at the same resource id must survive Tenant A's cleanup"
+        );
+    }
+
     // ==================== the design rule: never a substitute for membership ====================
 
     /**
@@ -545,6 +719,21 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
         self::assertSame(1, $this->countGrants());
     }
 
+    /**
+     * Bulk cleanup carries the same gate as a single revoke: it removes strictly
+     * more, so anything weaker would make `roles:manage` avoidable by asking for
+     * everything at once.
+     */
+    public function testRevokeAllWithoutRolesManageIsForbiddenAndTheRowsSurvive(): void
+    {
+        $this->createGrant(ResourceTypeRegistry::TYPE_OU, $this->ouA, $this->roleId('editor'), null);
+
+        $response = $this->revokeAll(ResourceTypeRegistry::TYPE_OU, $this->ouA, $this->memberProfileId);
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame(1, $this->countGrants());
+    }
+
     public function testListWithoutRolesReadIsForbidden(): void
     {
         $response = $this->handler()->list($this->req(
@@ -611,6 +800,18 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
         );
 
         return $this->data($response)['id'];
+    }
+
+    /** Wipe every grant at one resource through the HANDLER. */
+    private function revokeAll(string $resourceType, int $resourceId, ?int $actor = null): Response
+    {
+        return $this->handler()->revokeAll($this->req(
+            'DELETE',
+            '/api/resource-role-grants/all?resource_type=' . rawurlencode($resourceType)
+                . '&resource_id=' . $resourceId,
+            null,
+            $actor
+        ));
     }
 
     /**

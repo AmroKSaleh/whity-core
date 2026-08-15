@@ -2170,6 +2170,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/resource-role-grants/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke every role grant at one resource */
+        delete: operations["delete_api_v1_resource_role_grants_all"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/resource-role-grants/{id}": {
         parameters: {
             query?: never;
@@ -3922,6 +3939,14 @@ export interface components {
                 profile_id: number | null;
                 created: boolean;
             };
+        };
+        ResourceRoleGrantRevokeAllResponse: {
+            data: components["schemas"]["ResourceRoleGrantRevokeAllResult"];
+        };
+        ResourceRoleGrantRevokeAllResult: {
+            resource_type: string;
+            resource_id: number;
+            revoked: number;
         };
         Role: {
             id: number;
@@ -16711,6 +16736,85 @@ export interface operations {
                 };
             };
             /** @description Validation failed, or resource_type is unregistered */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_resource_role_grants_all: {
+        parameters: {
+            query: {
+                /** @description A registered resource type (e.g. `ou`, `acme:record`) */
+                resource_type: string;
+                /** @description The record whose grants are removed */
+                resource_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The grants removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceRoleGrantRevokeAllResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description resource_type is unregistered, or resource_id is missing/invalid */
             422: {
                 headers: {
                     [name: string]: unknown;

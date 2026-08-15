@@ -2743,6 +2743,16 @@ final class CoreApiSchemas
                 'profile_id' => self::int(true),
                 'created' => self::bool(),
             ], ['id', 'tenant_id', 'resource_type', 'resource_id', 'role_id', 'profile_id', 'created'])),
+            // The record-delete cleanup: which resource was cleaned and how many
+            // grants that removed. The count is what makes the call verifiable —
+            // 0 is a success, so without it a caller cannot tell "that record had
+            // no grants" from "I addressed the wrong record".
+            'ResourceRoleGrantRevokeAllResult' => self::object([
+                'resource_type' => self::str(),
+                'resource_id' => self::int(),
+                'revoked' => self::int(),
+            ], ['resource_type', 'resource_id', 'revoked']),
+            'ResourceRoleGrantRevokeAllResponse' => self::dataEnvelope(SchemaBuilder::ref('ResourceRoleGrantRevokeAllResult')),
 
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
@@ -5163,6 +5173,27 @@ final class CoreApiSchemas
                 'responses' => [
                     204 => ['description' => 'Grant revoked'],
                     404 => self::errorResponse('No such grant in the caller\'s tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/resource-role-grants/all', 'roles:manage', [
+                'summary' => 'Revoke every role grant at one resource',
+                'description' => 'The cleanup an owner runs when it deletes the record itself. '
+                    . '`resource_id` carries no foreign key, so core is never told a record disappeared and its '
+                    . 'grants outlive it — a later record reusing that id would silently inherit them. Takes the '
+                    . 'SAME parameters as the list route, so a caller can GET exactly what this removes. Returns '
+                    . 'the number of grants revoked; 0 is a successful no-op, never a 404, so the call is safe to '
+                    . 'make unconditionally from a delete path and safe to retry. Unlike the create route this '
+                    . 'does NOT ask the owning plugin to vouch for the resource: by cleanup time the record is '
+                    . 'usually already deleted, so a fails-closed check would refuse exactly the calls that '
+                    . 'matter. The tenant predicate still confines it to the caller\'s own grants.',
+                'tags' => ['rbac'],
+                'parameters' => [
+                    self::queryParam('resource_type', 'string', 'A registered resource type (e.g. `ou`, `acme:record`)', true),
+                    self::queryParam('resource_id', 'integer', 'The record whose grants are removed', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The grants removed', 'ResourceRoleGrantRevokeAllResponse'),
+                    422 => self::errorResponse('resource_type is unregistered, or resource_id is missing/invalid'),
                 ] + self::authErrors(),
             ]),
         ];
