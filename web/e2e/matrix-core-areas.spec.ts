@@ -30,7 +30,8 @@ test.describe('Core admin areas (role matrix)', () => {
       await expect(
         page.getByRole('button', { name: 'Create User' })
       ).toBeVisible();
-      await expect(page.getByRole('table')).toBeVisible();
+      // Named: the users page also renders a pending-invitations table.
+      await expect(page.getByRole('table', { name: 'Users' })).toBeVisible();
     } else {
       // requiredRole 'admin' — the link is filtered out server-side.
       await expect(roleSession.shell.navLink('Users')).toHaveCount(0);

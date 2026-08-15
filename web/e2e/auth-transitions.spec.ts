@@ -105,7 +105,8 @@ test.describe('Auth transitions', () => {
     // The session re-hydrates from the httpOnly cookie and stays put.
     await expect(page).toHaveURL(/\/admin\/users$/);
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
-    await expect(page.getByRole('table')).toBeVisible();
+    // Named: the users page also renders a pending-invitations table.
+    await expect(page.getByRole('table', { name: 'Users' })).toBeVisible();
     await new AppShell(page).expectLoggedInAs(ADMIN.email);
   });
 });

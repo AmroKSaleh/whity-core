@@ -37,7 +37,11 @@ test.describe('Users (admin)', () => {
   test('seeded users are listed by email', async ({ adminPage, page }) => {
     await adminPage.shell.clickNav('Users');
     await page.waitForURL('**/admin/users');
-    const table = page.getByRole('table');
+    // Named: the page also renders a pending-invitations table. This one
+    // passes unnamed today only because no invitation exists for the seeded
+    // addresses — the chained cell query happens to match in one table. That
+    // is luck, not scoping, and it breaks the first time it is not true.
+    const table = page.getByRole('table', { name: 'Users' });
     await expect(table.getByRole('cell', { name: 'admin@example.com' })).toBeVisible();
     await expect(table.getByRole('cell', { name: 'user@example.com' })).toBeVisible();
   });
