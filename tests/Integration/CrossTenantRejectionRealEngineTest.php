@@ -287,6 +287,118 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ── memberships: the explicit cross-tenant grant (#797 §2) ──────────────
+    //
+    // POST /api/users/{id}/memberships takes an optional `tenant_id`, which is
+    // the ONLY write path in the platform that names a tenant other than the
+    // caller's. Three things have to hold: a tenant cannot use it at all, the
+    // system tenant's write lands in the TARGET tenant rather than tenant 0, and
+    // it cannot carry a role across the boundary with it.
+
+    /**
+     * A tenant naming another tenant is refused, and the refusal writes nothing.
+     *
+     * Profile 102 (Bob) lives in Tenant B. Tenant A asking to grant him a role
+     * "in tenant 2" would otherwise be a membership Tenant A had no authority to
+     * create — the single most direct way to breach isolation through this API.
+     */
+    public function testTenantCannotUseTenantIdToGrantMembershipInAnotherTenant(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $before = $this->countRows('SELECT COUNT(*) FROM memberships WHERE tenant_id = 2');
+
+        $response = $this->usersHandler()->addMembership(
+            $this->req('POST', '/api/users/102/memberships', ['role_id' => 2, 'tenant_id' => self::TENANT_B]),
+            ['id' => '102']
+        );
+
+        $this->assertSame(403, $response->getStatusCode(), 'only the system tenant may name a target tenant');
+        $this->assertSame(
+            $before,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE tenant_id = 2'),
+            'the refused grant left Tenant B exactly as it was'
+        );
+    }
+
+    /**
+     * The system tenant's grant is stamped with the TARGET tenant.
+     *
+     * A system caller holds tenant 0 in its context, so the failure mode this
+     * pins is writing 0 into `memberships.tenant_id` — which would silently make
+     * the grantee a platform administrator instead of a member of Tenant A.
+     */
+    public function testSystemTenantGrantWritesTheTargetTenantNotZero(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->usersHandler()->addMembership(
+            $this->req('POST', '/api/users/102/memberships', ['role_id' => 2, 'tenant_id' => self::TENANT_A], self::SYSTEM_TENANT),
+            ['id' => '102']
+        );
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(
+            1,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 102 AND tenant_id = 1'),
+            'the membership belongs to Tenant A'
+        );
+        $this->assertSame(
+            0,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 102 AND tenant_id = 0'),
+            'the system tenant acts across tenants; it does not absorb the membership'
+        );
+    }
+
+    /**
+     * A role private to Tenant A cannot be attached to a membership in Tenant B.
+     *
+     * The system tenant resolves roles unscoped everywhere else, which is safe
+     * while it is acting AS the owning tenant. Here the caller names the target
+     * tenant, so an unscoped lookup would let Tenant A's private permission set
+     * take effect inside Tenant B.
+     */
+    public function testSystemTenantGrantCannotPlantAForeignPrivateRole(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->usersHandler()->addMembership(
+            $this->req('POST', '/api/users/102/memberships', ['role_id' => 100, 'tenant_id' => self::TENANT_B], self::SYSTEM_TENANT),
+            ['id' => '102']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), "Tenant A's private role is not visible in Tenant B");
+        $this->assertSame(
+            0,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE role_id = 100 AND tenant_id = 2'),
+            "no Tenant-B membership may carry Tenant A's private role"
+        );
+    }
+
+    /**
+     * The system tenant's membership LIST spans every tenant the profile is in.
+     * Alice (101) is in both tenants by fixture.
+     */
+    public function testMembershipListSpansTenantsForTheSystemTenant(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $rows = $this->listData($this->usersHandler()->listMemberships(
+            $this->req('GET', '/api/users/101/memberships', null, self::SYSTEM_TENANT),
+            ['id' => '101']
+        ));
+
+        $this->assertSame([1, 2], array_column($rows, 'tenantId'));
+    }
+
+    /** A tenant's membership list still stops at its own boundary. */
+    public function testMembershipListStaysScopedForATenant(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $rows = $this->listData($this->usersHandler()->listMemberships(
+            $this->req('GET', '/api/users/101/memberships'),
+            ['id' => '101']
+        ));
+
+        $this->assertSame([1], array_column($rows, 'tenantId'), 'Tenant A must not see the Tenant-B membership');
+    }
+
     // ==================== users: 2FA reads/writes (WC-191) ====================
 
     /**
@@ -1792,6 +1904,22 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $request->user = (object) ['profile_id' => 99, 'active_tenant_id' => $tenantId];
 
         return $request;
+    }
+
+    /**
+     * A single COUNT(*) as an int.
+     *
+     * PDO::query() returns PDOStatement|false, so chaining ->fetchColumn() onto
+     * it is a static-analysis error rather than a style nit. The older
+     * assertions in this file carry that in the PHPStan baseline; new ones go
+     * through here instead of growing it.
+     */
+    private function countRows(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertInstanceOf(\PDOStatement::class, $stmt);
+
+        return (int) $stmt->fetchColumn();
     }
 
     /**

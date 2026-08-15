@@ -1233,6 +1233,217 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertFalse($rows[1]['isPrimary']);
     }
 
+    // ── Cross-tenant memberships (#797 §2) ───────────────────────────────────
+
+    /**
+     * The system tenant may attach an EXISTING profile to a tenant it is not in.
+     *
+     * The gap this closes: every write path derived the tenant from the caller's
+     * own context, so putting one person in two tenants meant an INSERT by hand.
+     * The row must land in the TARGET tenant — writing tenant 0 would make the
+     * grantee a platform administrator instead of a member of tenant 2.
+     */
+    public function testSystemTenantAddsAProfileToATenantItIsNotYetIn(): void
+    {
+        $this->seedProfile(90, 'p90@example.com');
+        $this->seedMembership(90, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->addMembership(
+            $this->authedRequest('POST', '/api/users/90/memberships', ['role_id' => 1, 'tenant_id' => 2], 0),
+            ['id' => '90']
+        );
+
+        $this->assertSame(201, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+        $this->assertSame(2, $decoded['data']['tenantId'], 'the row belongs to the TARGET tenant, never the caller');
+
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM memberships
+                  WHERE profile_id = 90 AND tenant_id = 2 AND role_id = 1 AND status = 'active'"
+            ),
+            'an active membership carrying the requested role was written in tenant 2'
+        );
+        $this->assertSame(
+            1,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 90 AND tenant_id = 2 AND is_primary'),
+            "the first membership in a tenant answers 'what is this person here?' and must be primary"
+        );
+
+        $this->assertSame(
+            0,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 90 AND tenant_id = 0'),
+            'no membership may be created in the system tenant as a side effect'
+        );
+    }
+
+    /**
+     * A tenant administrator cannot reach another tenant by naming it.
+     *
+     * `tenant_id` is honoured for tenant-0 callers only. A refusal rather than a
+     * silent ignore: a field that is accepted and discarded teaches the caller it
+     * worked.
+     */
+    public function testAddMembershipRefusesAnExplicitTenantIdFromANonSystemCaller(): void
+    {
+        $this->seedProfile(91, 'p91@example.com');
+        $this->seedMembership(91, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->addMembership(
+            $this->authedRequest('POST', '/api/users/91/memberships', ['role_id' => 1, 'tenant_id' => 2]),
+            ['id' => '91']
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 91 AND tenant_id = 2'),
+            'the refused call wrote nothing into the target tenant'
+        );
+    }
+
+    /**
+     * Reaching a tenant the profile is ALREADY in is an additional role, so the
+     * row is secondary — migration 094's partial unique index permits exactly one
+     * primary per (profile, tenant) and this must not collide with it.
+     */
+    public function testCrossTenantGrantIsSecondaryWhenTheProfileIsAlreadyInThatTenant(): void
+    {
+        $this->seedProfile(92, 'p92@example.com');
+        $this->seedMembership(92, 2, 2, 'active');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->addMembership(
+            $this->authedRequest('POST', '/api/users/92/memberships', ['role_id' => 1, 'tenant_id' => 2], 0),
+            ['id' => '92']
+        );
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertFalse(json_decode($response->getBody(), true)['data']['isPrimary']);
+        $this->assertSame(
+            1,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 92 AND tenant_id = 2 AND is_primary'),
+            'exactly one primary row survives in the target tenant'
+        );
+    }
+
+    /**
+     * A role private to one tenant cannot be planted on a membership in another.
+     *
+     * The system tenant assigns roles unscoped elsewhere, which is harmless while
+     * the acting tenant IS the owning tenant. Here the caller names both, so the
+     * role is resolved against the TARGET tenant: otherwise tenant A's private
+     * permission set would take effect inside tenant B.
+     */
+    public function testCrossTenantGrantRejectsARolePrivateToAnotherTenant(): void
+    {
+        $this->seedProfile(93, 'p93@example.com');
+        $this->seedMembership(93, 1, 2, 'active');
+        $this->seedRole(50, 'tenant-a-private', 1);
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->addMembership(
+            $this->authedRequest('POST', '/api/users/93/memberships', ['role_id' => 50, 'tenant_id' => 2], 0),
+            ['id' => '93']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 93 AND tenant_id = 2'),
+            'the rejected grant wrote nothing'
+        );
+    }
+
+    /** A tenant that does not exist is a 404, not a foreign-key crash. */
+    public function testCrossTenantGrantRejectsAnUnknownTenant(): void
+    {
+        $this->seedProfile(94, 'p94@example.com');
+        $this->seedMembership(94, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->addMembership(
+            $this->authedRequest('POST', '/api/users/94/memberships', ['role_id' => 1, 'tenant_id' => 4242], 0),
+            ['id' => '94']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
+     * For a tenant-0 caller the list spans every tenant the profile belongs to —
+     * the "which tenants is this person in?" view that had no API at all.
+     */
+    public function testListMembershipsForSystemCallerSpansEveryTenant(): void
+    {
+        $this->seedProfile(96, 'p96@example.com');
+        $this->seedMembership(96, 1, 2, 'active');
+        $this->seedMembership(96, 2, 1, 'active');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->listMemberships(
+            $this->authedRequest('GET', '/api/users/96/memberships', null, 0),
+            ['id' => '96']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $rows = json_decode($response->getBody(), true)['data'];
+        $this->assertSame([1, 2], array_column($rows, 'tenantId'));
+        $this->assertSame(['tenant-a', 'tenant-b'], array_column($rows, 'tenantName'));
+    }
+
+    /** Anyone else still sees only the tenant they are calling from. */
+    public function testListMembershipsForATenantCallerStaysScoped(): void
+    {
+        $this->seedProfile(97, 'p97@example.com');
+        $this->seedMembership(97, 1, 2, 'active');
+        $this->seedMembership(97, 2, 1, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->listMemberships(
+            $this->authedRequest('GET', '/api/users/97/memberships'),
+            ['id' => '97']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $rows = json_decode($response->getBody(), true)['data'];
+        $this->assertSame([1], array_column($rows, 'tenantId'), 'tenant 2 must not appear');
+    }
+
+    /**
+     * A cross-tenant grant is revocable in-product, so a mis-click is not a
+     * database job. Only the extra role: the primary row is still refused here,
+     * because dropping it would leave a person in a tenant with no answer to
+     * "what are they here".
+     */
+    public function testSystemTenantRevokesASecondaryMembershipInAnotherTenant(): void
+    {
+        $this->seedProfile(98, 'p98@example.com');
+        $this->seedMembership(98, 2, 2, 'active');
+
+        MockRequestFactory::setTestTenant(0);
+        $handler = $this->handler();
+        $created = json_decode($handler->addMembership(
+            $this->authedRequest('POST', '/api/users/98/memberships', ['role_id' => 1, 'tenant_id' => 2], 0),
+            ['id' => '98']
+        )->getBody(), true);
+
+        $response = $handler->removeMembership(
+            $this->authedRequest('DELETE', '/api/users/98/memberships/' . $created['data']['id'], null, 0),
+            ['id' => '98', 'membershipId' => (string) $created['data']['id']]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            1,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 98 AND tenant_id = 2'),
+            'only the primary remains in the target tenant'
+        );
+    }
+
     /**
      * A single COUNT(*) as an int.
      *

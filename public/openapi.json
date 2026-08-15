@@ -19350,7 +19350,7 @@
         "/api/v1/users/{id}/memberships": {
             "get": {
                 "operationId": "get_api_v1_users_id_memberships",
-                "summary": "List every role a user holds in this tenant",
+                "summary": "List the roles a user holds (every tenant for a system-tenant caller)",
                 "tags": [
                     "users"
                 ],
@@ -19434,7 +19434,7 @@
             },
             "post": {
                 "operationId": "post_api_v1_users_id_memberships",
-                "summary": "Grant a user an additional role in this tenant",
+                "summary": "Grant a user a role, optionally in another tenant (system tenant only)",
                 "tags": [
                     "users"
                 ],
@@ -19500,7 +19500,7 @@
                         }
                     },
                     "403": {
-                        "description": "Insufficient permissions",
+                        "description": "Insufficient permissions, or a non-system caller named a target tenant",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -19510,7 +19510,7 @@
                         }
                     },
                     "404": {
-                        "description": "User or role not found",
+                        "description": "User, tenant or role not found",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -22301,6 +22301,12 @@
                     "id": {
                         "type": "integer"
                     },
+                    "tenantId": {
+                        "type": "integer"
+                    },
+                    "tenantName": {
+                        "type": "string"
+                    },
                     "roleId": {
                         "type": "integer"
                     },
@@ -22325,6 +22331,8 @@
                 },
                 "required": [
                     "id",
+                    "tenantId",
+                    "tenantName",
                     "roleId",
                     "role",
                     "isPrimary",
@@ -22343,6 +22351,9 @@
                     "ou_id": {
                         "type": "integer",
                         "nullable": true
+                    },
+                    "tenant_id": {
+                        "type": "integer"
                     }
                 }
             },
@@ -22369,6 +22380,9 @@
                             "id": {
                                 "type": "integer"
                             },
+                            "tenantId": {
+                                "type": "integer"
+                            },
                             "roleId": {
                                 "type": "integer"
                             },
@@ -22385,6 +22399,7 @@
                         },
                         "required": [
                             "id",
+                            "tenantId",
                             "roleId",
                             "isPrimary",
                             "created"
