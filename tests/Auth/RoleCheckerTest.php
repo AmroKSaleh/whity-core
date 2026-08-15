@@ -319,6 +319,77 @@ class RoleCheckerTest extends TestCase
         );
     }
 
+    /**
+     * The doctor: attending in Emergency, part-timing in Family Medicine.
+     *
+     * Both memberships grant their role. Before #712 §1 the second row could not
+     * exist; after phase 1 it could exist but only the primary was read.
+     */
+    public function testEveryActiveMembershipContributesItsRole(): void
+    {
+        $profileId = $this->seedProfile('doctor@example.com', 'user');
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
+             VALUES (?, ?, ?, false, 'active', datetime('now'))"
+        )->execute([$profileId, self::TENANT, $this->roleId('editor')]);
+
+        self::assertTrue(
+            $this->roleChecker->hasRoleForProfile($profileId, 'user', self::TENANT),
+            'the primary role still applies'
+        );
+        self::assertTrue(
+            $this->roleChecker->hasRoleForProfile($profileId, 'editor', self::TENANT),
+            'the secondary role applies too'
+        );
+    }
+
+    /**
+     * A suspended SECOND role stops granting without disturbing the primary.
+     *
+     * Status is per row. Reading only the primary row would have made this
+     * unrepresentable; reading any row without checking status would have made
+     * suspension meaningless for secondary roles.
+     */
+    public function testASuspendedSecondaryMembershipGrantsNothing(): void
+    {
+        $profileId = $this->seedProfile('suspended-second@example.com', 'user');
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
+             VALUES (?, ?, ?, false, 'suspended', datetime('now'))"
+        )->execute([$profileId, self::TENANT, $this->roleId('editor')]);
+
+        self::assertTrue(
+            $this->roleChecker->hasRoleForProfile($profileId, 'user', self::TENANT),
+            'the active primary is unaffected'
+        );
+        self::assertFalse(
+            $this->roleChecker->hasRoleForProfile($profileId, 'editor', self::TENANT),
+            'a suspended membership grants nothing'
+        );
+    }
+
+    /**
+     * No ACTIVE row anywhere means no membership — the gate a resource grant
+     * must never bypass. A suspended primary plus an active secondary still
+     * counts as membership, because one active row is one active row.
+     */
+    public function testAProfileWithNoActiveMembershipResolvesToNothing(): void
+    {
+        $profileId = $this->seedProfile('all-suspended@example.com', 'user');
+
+        $this->pdo->prepare(
+            "UPDATE memberships SET status = 'suspended' WHERE profile_id = ?"
+        )->execute([$profileId]);
+
+        self::assertSame(
+            [],
+            $this->roleChecker->getEffectiveRolesForProfile($profileId, self::TENANT),
+            'no active membership resolves to no roles at all'
+        );
+    }
+
     private function seedProfile(string $email, string $roleName): int
     {
         $stmt = $this->pdo->prepare(

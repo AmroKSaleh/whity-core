@@ -145,6 +145,27 @@ final class SettingsService
     }
 
     /**
+     * The globals an operator has EXPLICITLY stored, WITHOUT registry defaults.
+     *
+     * {@see getGlobal()} answers "what is this setting's value?" and so fills
+     * every unset key from the registry — the right answer almost everywhere,
+     * and the reason it is the default accessor.
+     *
+     * This answers a different question: "did an operator actually choose
+     * this?" A caller that treats an absent key as a decision cannot use the
+     * merged view, because there the registry default is indistinguishable from
+     * a deliberate one. {@see \Whity\Storage\StorageDriverFactory} needs the
+     * difference: it falls back to the environment ONLY when nothing was
+     * chosen, and against the merged view that fallback silently never fires.
+     *
+     * @return array<string, string> Stored keys only.
+     */
+    public function storedGlobals(): array
+    {
+        return $this->globals->all();
+    }
+
+    /**
      * Set (or clear) a single GLOBAL default, registry-validated.
      *
      * A null value clears the global default (it falls back to the registry

@@ -41,6 +41,39 @@ Manage database migrations.
 
 ---
 
+## Seeding
+
+Insert the default tenant, the notification-template baseline, and the accounts
+an install needs to be usable. Idempotent: re-running creates nothing twice and
+never rewrites an existing account's password.
+
+```bash
+whity-cli seed
+whity-cli seed --with-fixtures
+```
+
+`migrate run` **already** creates the bootstrap administrator, so `seed` is not
+required for a working install.
+
+| Account | Seeded when |
+|---------|-------------|
+| Bootstrap administrator (system tenant, admin role) — address from `INITIAL_SYSTEM_ADMIN_EMAIL`, default `system@whity.local` | always |
+| `admin@example.com`, `user@example.com`, `superuser@example.com` | `APP_ENV=development`, or `--with-fixtures` |
+
+Passwords come from `INITIAL_SYSTEM_ADMIN_PASSWORD`, `INITIAL_ADMIN_PASSWORD`,
+`INITIAL_USER_PASSWORD` and `INITIAL_SUPERUSER_PASSWORD`; an unset one is
+generated at random and printed once. Those variables apply **only when the
+account is created** — if one is set for an account that already exists and the
+stored password does not match it, the seeder reports that the value is inert
+rather than resetting a live credential behind your back.
+
+Seeding also reconciles the bootstrap administrator's address with
+`INITIAL_SYSTEM_ADMIN_EMAIL`, so an operator who decides to rename it after
+`migrate run` has already happened can set the variable and re-seed. See the
+[Go-Live Checklist](Go-Live-Checklist.md) for retiring the account afterwards.
+
+---
+
 ## Plugin Management
 
 Manage system plugins.

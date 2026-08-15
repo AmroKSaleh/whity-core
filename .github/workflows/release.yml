@@ -8,12 +8,15 @@
 #      pass, migrations + seed must run on real PostgreSQL, and the frontend
 #      types/tests/generated-artifact drift checks must pass on the tagged
 #      commit. A release is never gated weaker than a PR.
-#   2. image — build the production container image (the Dockerfile `release`
-#      stage: code + no-dev vendor baked in) and push it to GHCR as
-#      ghcr.io/<repo>:vX.Y.Z and :latest.
+#   2. image — build BOTH production container images and push them to GHCR
+#      under the same tags (vX.Y.Z and latest): the backend
+#      (`ghcr.io/<repo>`, root Dockerfile `release` stage — code + no-dev
+#      vendor baked in) and the frontend (`ghcr.io/<repo>/web`, web/Dockerfile
+#      `runtime` stage — the built Next app). A deployment is not the product
+#      without both, so they ship together or not at all.
 #   3. release — create the GitHub Release with auto-generated notes (the
 #      source archives GitHub attaches are the deploy artifact for
-#      checkout-based hosts; the GHCR image serves container-based ones).
+#      checkout-based hosts; the GHCR images serve container-based ones).
 #
 # Consumers check for updates with `php public/index.php update:check` and
 # apply them via docs/wiki/Core-Update.md.
@@ -21,13 +24,82 @@ name: Release
 
 on:
   push:
+    # Two entry points, one pipeline.
+    #
+    #   branches: [main]  the NORMAL path. Merging the develop -> main release
+    #                     PR publishes the release; the tag is created here,
+    #                     after the gates pass, rather than by a human beforehand.
+    #   tags: ['v*']      the ESCAPE HATCH. Pushing a tag by hand still works,
+    #                     for re-running a release whose publish step failed or
+    #                     for tagging a commit that is already on main.
+    #
+    # Both converge on the `resolve` job below, which is the only place that
+    # decides what is being released.
+    branches:
+      - main
     tags:
       - 'v*'
 
 jobs:
+  resolve:
+    name: Resolve the release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      # The tag being released, WITH the leading v (e.g. v0.2.2). Every job that
+      # names an image or the release uses this rather than github.ref_name,
+      # because on the branch-push path there is no tag ref to read.
+      tag: ${{ steps.r.outputs.tag }}
+      version: ${{ steps.r.outputs.version }}
+      # false = this push to main was not a release (no version bump), so every
+      # downstream job skips. Ordinary fixes can land on main freely.
+      go: ${{ steps.r.outputs.go }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide what is being released
+        id: r
+        run: |
+          VERSION=$(grep -oE "VERSION = '[^']+'" src/Core/CoreVersion.php | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+          echo "CoreVersion::VERSION = ${VERSION}"
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # Hand-pushed tag: it is authoritative, but it must agree with the
+            # constant or the release would ship a version that lies.
+            TAG="${GITHUB_REF_NAME}"
+            if [ "${TAG}" != "v${VERSION}" ]; then
+              echo "::error::Tag ${TAG} does not match CoreVersion::VERSION (${VERSION}). Bump src/Core/CoreVersion.php first, then tag."
+              exit 1
+            fi
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            # Push to main. Release only if this version has never been tagged;
+            # otherwise this is an ordinary commit and must not re-publish.
+            TAG="v${VERSION}"
+            if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+              echo "::notice::${TAG} already exists — this push to main is not a release. Skipping."
+              echo "go=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::main is at ${VERSION} with no ${TAG} tag — releasing."
+              echo "go=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
   verify:
     name: Verify tag + full suite
     runs-on: ubuntu-latest
+    needs: [resolve]
+    if: needs.resolve.outputs.go == 'true'
 
     permissions:
       contents: read
@@ -53,11 +125,22 @@ jobs:
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
-      - name: Tag must match CoreVersion::VERSION
+      - name: The release must match CoreVersion::VERSION
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         run: |
+          # `resolve` read the constant with grep; this reads it through the
+          # autoloader. Two independent mechanisms agreeing is the point - the
+          # failure guarded here is a release that ships a version different
+          # from the one it claims, and grep alone could be fooled by a comment
+          # or a second constant.
+          #
+          # Compared against RELEASE_TAG, not the git ref: on the normal path
+          # this workflow is triggered by a push to main, where the ref name is
+          # "main" and there is no tag to read yet.
           VERSION=$(php -r "require 'vendor/autoload.php'; echo \Whity\Core\CoreVersion::VERSION;")
-          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match CoreVersion::VERSION (${VERSION}). Bump src/Core/CoreVersion.php in a PR first, then tag the merge commit v${VERSION}."
+          if [ "${RELEASE_TAG}" != "v${VERSION}" ]; then
+            echo "::error::Releasing ${RELEASE_TAG} but CoreVersion::VERSION is ${VERSION}. Bump src/Core/CoreVersion.php first."
             exit 1
           fi
           echo "Releasing version ${VERSION}"
@@ -74,6 +157,8 @@ jobs:
   postgres-integration:
     name: Migrations + seed on real PostgreSQL
     runs-on: ubuntu-latest
+    needs: [resolve]
+    if: needs.resolve.outputs.go == 'true'
 
     permissions:
       contents: read
@@ -150,6 +235,8 @@ jobs:
   web:
     name: Frontend types, tests & generated-artifact drift
     runs-on: ubuntu-latest
+    needs: [resolve]
+    if: needs.resolve.outputs.go == 'true'
 
     permissions:
       contents: read
@@ -211,21 +298,50 @@ jobs:
         run: npx jest
 
   image:
-    name: Build + push container image
+    name: Build + push ${{ matrix.image }} image
     runs-on: ubuntu-latest
-    needs: [verify, postgres-integration, web]
+    needs: [resolve, verify, postgres-integration, web]
+    if: needs.resolve.outputs.go == 'true'
 
     permissions:
       contents: read
       packages: write
       security-events: write   # WC-d: upload the Trivy image-scan SARIF
 
+    # BOTH tiers of the product are published here, by ONE matrixed job, so they
+    # can never drift apart: identical gates, identical tags, identical scan.
+    # A release that shipped only the PHP image left deployments assembled from
+    # published artifacts with an API and no user interface (WHIT-588) — the
+    # frontend was validated by the `web` job above and then thrown away.
+    #
+    #   app — PHP/FrankenPHP backend, root Dockerfile, `release` stage.
+    #   web — Next.js frontend, web/Dockerfile, `runtime` stage.
+    #
+    # `app` keeps the unsuffixed repository path it has always published under,
+    # because existing deployments already pin `ghcr.io/<repo>:vX.Y.Z`; the
+    # frontend takes the `/web` sub-path beside it.
+    strategy:
+      # Do not cancel the sibling when one leg fails: a broken release wants
+      # both build logs in the same run. Either leg failing still fails every
+      # job that `needs: [image]`, so this weakens no gate.
+      fail-fast: false
+      matrix:
+        include:
+          - image: app
+            dockerfile: Dockerfile
+            target: release
+            suffix: ''
+          - image: web
+            dockerfile: web/Dockerfile
+            target: runtime
+            suffix: /web
+
     steps:
       - name: Checkout tag
         uses: actions/checkout@v7
 
       - name: Login to GHCR
-        uses: docker/login-action@v4.5.2
+        uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -234,16 +350,19 @@ jobs:
       # GHCR requires a lowercase repository path; github.repository may not be.
       - name: Resolve image name
         id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        env:
+          SUFFIX: ${{ matrix.suffix }}
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}${SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
-          target: release
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: true
           tags: |
-            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.name }}:${{ needs.resolve.outputs.tag }}
             ${{ steps.image.outputs.name }}:latest
 
       # WC-d: scan the just-pushed release image for OS/library CVEs. REPORT-ONLY
@@ -254,36 +373,45 @@ jobs:
       - name: Trivy image vulnerability scan (report)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+          image-ref: ${{ steps.image.outputs.name }}:${{ needs.resolve.outputs.tag }}
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: '0'
 
+      # One category per image: code scanning REPLACES the previous results for a
+      # category, so a shared one would leave whichever leg finished last as the
+      # only findings in the Security tab.
       - name: Upload Trivy SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v4.37.3
+        uses: github/codeql-action/upload-sarif@v4.37.6
         with:
           sarif_file: trivy-results.sarif
-          category: trivy
+          category: trivy-${{ matrix.image }}
 
   smoke:
-    # WC-2990117b: Boot the GHCR image that was just pushed and confirm it serves
-    # a real HTTP 200 from GET /api/health before the GitHub Release is created.
-    # This closes the gap where a broken image (bad migration, missing extension,
-    # wrong Caddyfile, boot crash) would become a published Release and be picked
-    # up by every sovereign deployment running `update:check`.
+    # WC-2990117b: Boot the GHCR images that were just pushed and confirm they
+    # serve a real HTTP 200 before the GitHub Release is created. This closes the
+    # gap where a broken image (bad migration, missing extension, wrong
+    # Caddyfile, boot crash) would become a published Release and be picked up by
+    # every sovereign deployment running `update:check`.
+    #
+    # WHIT-588: the frontend is gated the same way, and for the same reason. A
+    # release whose UI does not boot is as broken as one whose API does not, and
+    # a green /api/health is exactly what hid the missing frontend last time —
+    # so the UI is proven by fetching a real page (/login) off the published web
+    # image, wired to the app container the way a deployment wires it.
     #
     # Networking approach: GitHub Actions `services:` containers live on a
     # separate Docker-managed bridge that job-level `docker run` containers
     # CANNOT reach by container name — only the runner host can. To mirror a
-    # real docker-compose deploy (app → postgres by DNS name) we create a
-    # user-defined bridge network and run BOTH the Postgres container AND the
-    # release image on it, so the app reaches Postgres as `postgres:5432`.
-    name: Smoke-test the release image
+    # real docker-compose deploy (app → postgres, web → app, all by DNS name) we
+    # create a user-defined bridge network and run every container on it.
+    name: Smoke-test the release images
     runs-on: ubuntu-latest
-    needs: [image]
+    needs: [resolve, image]
+    if: needs.resolve.outputs.go == 'true'
 
     permissions:
       contents: read
@@ -291,17 +419,21 @@ jobs:
 
     steps:
       - name: Login to GHCR
-        uses: docker/login-action@v4.5.2
+        uses: docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Resolve the image name the same way the `image` job does: lowercase the
+      # Resolve the image names the same way the `image` job does: lowercase the
       # repository path because GHCR requires it and github.repository may not be.
-      - name: Resolve image name
+      - name: Resolve image names
         id: image
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "name=ghcr.io/${GITHUB_REPOSITORY,,}"
+            echo "web=ghcr.io/${GITHUB_REPOSITORY,,}/web"
+          } >> "$GITHUB_OUTPUT"
 
       # Isolated bridge so the app reaches Postgres by the container name
       # `postgres` — same topology as docker-compose.yml (DB_HOST: postgres).
@@ -332,8 +464,10 @@ jobs:
           done
           docker exec postgres pg_isready -U whity -d whity_core
 
-      - name: Pull release image
-        run: docker pull "${{ steps.image.outputs.name }}:${{ github.ref_name }}"
+      - name: Pull release images
+        run: |
+          docker pull "${{ steps.image.outputs.name }}:${{ needs.resolve.outputs.tag }}"
+          docker pull "${{ steps.image.outputs.web }}:${{ needs.resolve.outputs.tag }}"
 
       # Run migrations and seed inside the release image on the same network so
       # the app can reach Postgres by the container name `postgres`. APP_ENV is
@@ -357,7 +491,7 @@ jobs:
             -e INITIAL_USER_PASSWORD=smoke_user_password_1234 \
             -e INITIAL_SYSTEM_ADMIN_PASSWORD=smoke_sysadmin_password_12 \
             -e INITIAL_SUPERUSER_PASSWORD=smoke_superuser_password_12 \
-            "${{ steps.image.outputs.name }}:${{ github.ref_name }}" \
+            "${{ steps.image.outputs.name }}:${{ needs.resolve.outputs.tag }}" \
             php public/index.php migrate run
 
       - name: Run seed
@@ -376,7 +510,7 @@ jobs:
             -e INITIAL_USER_PASSWORD=smoke_user_password_1234 \
             -e INITIAL_SYSTEM_ADMIN_PASSWORD=smoke_sysadmin_password_12 \
             -e INITIAL_SUPERUSER_PASSWORD=smoke_superuser_password_12 \
-            "${{ steps.image.outputs.name }}:${{ github.ref_name }}" \
+            "${{ steps.image.outputs.name }}:${{ needs.resolve.outputs.tag }}" \
             php public/index.php seed
 
       # Start the app detached. Caddy needs auto_https off and an explicit
@@ -407,7 +541,7 @@ jobs:
             -e SERVER_NAME=":80" \
             -e SERVER_ROOT="public/" \
             -e FRANKENPHP_CONFIG="worker /app/public/index.php 4" \
-            "${{ steps.image.outputs.name }}:${{ github.ref_name }}"
+            "${{ steps.image.outputs.name }}:${{ needs.resolve.outputs.tag }}"
 
       # Poll GET /api/health until HTTP 200. A fresh FrankenPHP worker pool
       # (8 workers by default) takes a couple of seconds to boot, so we allow
@@ -430,34 +564,142 @@ jobs:
           docker ps -a
           exit 1
 
+      # Start the frontend on the same bridge, pointed at the app container by
+      # its DNS name — the topology docker-compose.staging-remote.yml deploys.
+      # WHITY_BACKEND_URL is read from the process environment per request
+      # (web/lib/backend-url.ts), so this is pure runtime config: the same
+      # published image takes a different origin in every deployment.
+      - name: Start web container
+        run: |
+          docker run -d \
+            --name whity-web \
+            --network whity-smoke \
+            -p 3000:3000 \
+            -e WHITY_BACKEND_URL=http://whity-app \
+            "${{ steps.image.outputs.web }}:${{ needs.resolve.outputs.tag }}"
+
+      # Poll GET /login until HTTP 200 — a real rendered page, not a liveness
+      # ping, so a frontend that boots but cannot render fails the release.
+      - name: Wait for the UI to serve /login
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/login || true)
+            echo "Attempt $i/30 — HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "UI check passed."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::GET /login did not return 200 within 60 seconds."
+          docker logs whity-web
+          docker ps -a
+          exit 1
+
       # Always clean up the containers and network, even on failure, so the
       # runner is left in a clean state for any subsequent jobs.
       - name: Tear down
         if: always()
         run: |
-          docker rm -f whity-app postgres 2>/dev/null || true
+          docker rm -f whity-web whity-app postgres 2>/dev/null || true
           docker network rm whity-smoke 2>/dev/null || true
 
   release:
-    name: Create GitHub Release
+    name: Tag and create the GitHub Release
     runs-on: ubuntu-latest
     # smoke is now a gate: a release image that does not boot and serve /api/health
     # can never become a published GitHub Release (and thus never be picked up by
     # sovereign deployments running `update:check`).
-    needs: [verify, postgres-integration, web, image, smoke]
+    needs: [resolve, verify, postgres-integration, web, image, smoke]
+    if: needs.resolve.outputs.go == 'true'
 
     permissions:
       contents: write
 
     steps:
-      - name: Checkout tag
+      - name: Checkout the commit being released
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Tag the release
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          # Deliberately LAST - after the suite, both image builds, and the
+          # smoke test against the PUBLISHED images.
+          #
+          # A tag created up front and then orphaned by a failed build is the
+          # worst outcome available here: releases are immutable, so the tag
+          # cannot be moved, and the next attempt would need a brand-new
+          # version number for a failure that had nothing to do with the code.
+          # Creating it here means a failed run is simply re-runnable.
+          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            echo "::notice::${RELEASE_TAG} already exists (hand-pushed tag path) - not recreating."
+            exit 0
+          fi
+
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "${RELEASE_TAG}" -m "${RELEASE_TAG}"
+          git push origin "${RELEASE_TAG}"
 
       - name: Create release with generated notes
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
+          gh release create "${RELEASE_TAG}" \
+            --title "${RELEASE_TAG}" \
             --generate-notes \
             --verify-tag
+
+  back-merge:
+    name: Open the back-merge PR
+    runs-on: ubuntu-latest
+    # Only once the release actually published. A back-merge for a release
+    # that failed to ship would carry a version bump onto develop describing
+    # a release nobody can install.
+    needs: [resolve, release]
+    if: needs.resolve.outputs.go == 'true'
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Open develop <- main if they have diverged
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          git fetch --quiet origin develop main
+
+          # The release merge commit lives only on main, so develop reads as
+          # "behind" the moment a release ships even though the trees are
+          # identical. Left alone across several releases, main accumulates
+          # merge commits develop has never seen and "is main ahead?" stops
+          # being answerable at a glance. Closing that loop here is what makes
+          # it a step nobody has to remember.
+          BEHIND=$(git rev-list --count origin/develop..origin/main)
+          if [ "$BEHIND" = "0" ]; then
+            echo "::notice::develop already contains main. Nothing to back-merge."
+            exit 0
+          fi
+
+          EXISTING=$(gh pr list --base develop --head main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "::notice::PR #${EXISTING} already back-merges main into develop."
+            exit 0
+          fi
+
+          gh pr create \n            --base develop \n            --head main \n            --title "chore: back-merge main into develop after ${RELEASE_TAG}" \n            --body "Opened automatically after **${RELEASE_TAG}** published.
+
+          Expect **zero file changes** - this carries main's release merge commit back onto develop so the two branches stop diverging in history. Without it develop reads as behind main after every release, and the gap compounds.
+
+          Safe to merge as-is; the trees are identical."

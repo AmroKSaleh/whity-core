@@ -10,6 +10,7 @@ use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
@@ -835,6 +836,258 @@ class UsersApiHandler
     }
 
     /**
+     * GET /api/users/{id}/memberships — every role this profile holds here.
+     *
+     * The user LIST deliberately shows one row per person carrying their PRIMARY
+     * role (#780), so a second role is invisible there by design. This is where
+     * it becomes visible.
+     *
+     * @param array<string, mixed> $params  Route params (expects `id` = profile_id).
+     */
+    public function listMemberships(Request $request, array $params): Response
+    {
+        try {
+            $profileId = (int) ($params['id'] ?? 0);
+            if ($profileId <= 0) {
+                return Response::error('User ID is required', 400);
+            }
+
+            $currentTenantId = TenantContext::getTenantId();
+            if ($currentTenantId === null) {
+                return Response::error('Tenant context required', 400);
+            }
+
+            $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
+            if ($membership === null) {
+                return Response::error('User not found', 404);
+            }
+            $ownerTenantId = (int) $membership['tenant_id'];
+
+            $stmt = $this->db->prepare(
+                'SELECT m.id, m.role_id, r.name AS role, m.ou_id, m.is_primary, m.status
+                   FROM memberships m
+                   JOIN roles r ON r.id = m.role_id
+                  WHERE m.profile_id = ? AND m.tenant_id = ?
+                  ORDER BY m.is_primary DESC, m.id ASC'
+            );
+            $stmt->execute([$profileId, $ownerTenantId]);
+
+            $rows = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $rows[] = [
+                    'id'        => (int) $row['id'],
+                    'roleId'    => (int) $row['role_id'],
+                    'role'      => (string) $row['role'],
+                    'ou_id'     => $row['ou_id'] !== null ? (int) $row['ou_id'] : null,
+                    'isPrimary' => (bool) $row['is_primary'],
+                    'status'    => (string) $row['status'],
+                ];
+            }
+
+            return Response::json(['data' => $rows]);
+        } catch (\Throwable $e) {
+            $this->log('error', 'Failed to fetch memberships', [
+                'event' => 'users.memberships.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to fetch memberships', 500);
+        }
+    }
+
+    /**
+     * POST /api/users/{id}/memberships — grant an ADDITIONAL role in this tenant.
+     *
+     * The doctor attending in Emergency who also part-times in Family Medicine:
+     * a second membership, its own role, its own OU. The row is written
+     * `is_primary = false`, because the primary row is what answers "what is this
+     * person here?" for display and defaults, and there must stay exactly one of
+     * those — migration 094's partial unique index enforces it.
+     *
+     * Idempotent: granting a role the profile already holds with the same OU
+     * returns the existing membership instead of creating a duplicate. There is
+     * no unique constraint on (profile, tenant, role) — a duplicate secondary row
+     * would be meaningless rather than illegal — so this is enforced here.
+     *
+     * @param array<string, mixed> $params  Route params (expects `id` = profile_id).
+     */
+    public function addMembership(Request $request, array $params): Response
+    {
+        try {
+            $profileId = (int) ($params['id'] ?? 0);
+            if ($profileId <= 0) {
+                return Response::error('User ID is required', 400);
+            }
+
+            $currentTenantId = TenantContext::getTenantId();
+            if ($currentTenantId === null) {
+                return Response::error('Tenant context required', 400);
+            }
+
+            $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
+            if ($membership === null) {
+                return Response::error('User not found', 404);
+            }
+            $ownerTenantId = (int) $membership['tenant_id'];
+
+            $body = json_decode($request->getBody(), true);
+            if (!is_array($body)) {
+                return Response::error('Invalid request body', 400);
+            }
+
+            $roleRef = $body['role_id'] ?? $body['role'] ?? null;
+            if ($roleRef === null || $roleRef === '') {
+                return Response::error('role_id is required', 400);
+            }
+
+            // Same visibility rule as create/update: a tenant may grant only its
+            // own roles or a global one, so this cannot become a way to attach
+            // another tenant's role.
+            $roleId = $this->resolveVisibleRoleId($roleRef, $currentTenantId, $ownerTenantId);
+            if ($roleId === null) {
+                return Response::error('Role not found', 404);
+            }
+
+            // Reuses the create/update gate, so a foreign OU is a 403 here too.
+            $ouId = $this->resolveOuIdForTenant($body['ou_id'] ?? null, $ownerTenantId);
+            if ($ouId instanceof Response) {
+                return $ouId;
+            }
+
+            // Null-safe comparison written longhand: SQLite has no
+            // IS NOT DISTINCT FROM, and this suite runs on both engines.
+            //
+            // The CASTs are load-bearing on PostgreSQL. A bare placeholder in
+            // `? IS NULL` gives the planner nothing to infer a type from and it
+            // refuses the statement outright (42P18, "could not determine data
+            // type of parameter") — so without them every grant answered 500 on
+            // PostgreSQL while passing on SQLite, which infers happily.
+            $existing = $this->db->prepare(
+                'SELECT id, is_primary FROM memberships
+                  WHERE profile_id = ? AND tenant_id = ? AND role_id = ?
+                    AND ((ou_id IS NULL AND CAST(? AS INTEGER) IS NULL)
+                          OR ou_id = CAST(? AS INTEGER))
+                  LIMIT 1'
+            );
+            $existing->execute([$profileId, $ownerTenantId, $roleId, $ouId, $ouId]);
+            $found = $existing->fetch(PDO::FETCH_ASSOC);
+
+            if ($found !== false) {
+                return Response::json([
+                    'data' => [
+                        'id'        => (int) $found['id'],
+                        'roleId'    => $roleId,
+                        'ou_id'     => $ouId,
+                        'isPrimary' => (bool) $found['is_primary'],
+                        'created'   => false,
+                    ],
+                ]);
+            }
+
+            $insert = $this->db->prepare(
+                "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, is_primary, status, created_at)
+                 VALUES (?, ?, ?, ?, false, 'active', NOW())"
+            );
+            $insert->execute([$profileId, $ownerTenantId, $roleId, $ouId]);
+            $newId = (int) $this->db->lastInsertId();
+
+            // A new role changes effective access, so the worker-level permission
+            // cache must not keep serving the old answer (#701/#727: a stale grant
+            // on seven of eight workers reads as test flakiness).
+            $this->hookManager->dispatch('user.membership.added', [
+                'profile_id' => $profileId,
+                'tenant_id'  => $ownerTenantId,
+                'role_id'    => $roleId,
+            ]);
+
+            return Response::json([
+                'data' => [
+                    'id'        => $newId,
+                    'roleId'    => $roleId,
+                    'ou_id'     => $ouId,
+                    'isPrimary' => false,
+                    'created'   => true,
+                ],
+            ], 201);
+        } catch (\Throwable $e) {
+            $this->log('error', 'Failed to add membership', [
+                'event' => 'users.memberships.add.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to add membership', 500);
+        }
+    }
+
+    /**
+     * DELETE /api/users/{id}/memberships/{membershipId} — revoke an extra role.
+     *
+     * Refuses to remove the PRIMARY membership. That row is the person's presence
+     * in the tenant: removing it here would leave them holding secondary roles
+     * with no primary, which every single-row read interprets as "no answer to
+     * what is this person here". Removing someone from a tenant is
+     * DELETE /api/users/{id}, which takes every row.
+     *
+     * @param array<string, mixed> $params  Route params (`id` = profile_id, `membershipId`).
+     */
+    public function removeMembership(Request $request, array $params): Response
+    {
+        try {
+            $profileId    = (int) ($params['id'] ?? 0);
+            $membershipId = (int) ($params['membershipId'] ?? 0);
+            if ($profileId <= 0 || $membershipId <= 0) {
+                return Response::error('User ID and membership ID are required', 400);
+            }
+
+            $currentTenantId = TenantContext::getTenantId();
+            if ($currentTenantId === null) {
+                return Response::error('Tenant context required', 400);
+            }
+
+            $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
+            if ($membership === null) {
+                return Response::error('User not found', 404);
+            }
+            $ownerTenantId = (int) $membership['tenant_id'];
+
+            $stmt = $this->db->prepare(
+                'SELECT id, is_primary FROM memberships
+                  WHERE id = ? AND profile_id = ? AND tenant_id = ? LIMIT 1'
+            );
+            $stmt->execute([$membershipId, $profileId, $ownerTenantId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($row === false) {
+                return Response::error('Membership not found', 404);
+            }
+
+            if ((bool) $row['is_primary']) {
+                return Response::error(
+                    'Cannot remove the primary membership; use DELETE /api/users/{id} to remove the user from this tenant',
+                    409
+                );
+            }
+
+            $del = $this->db->prepare('DELETE FROM memberships WHERE id = ? AND profile_id = ? AND tenant_id = ?');
+            $del->execute([$membershipId, $profileId, $ownerTenantId]);
+
+            $this->hookManager->dispatch('user.membership.removed', [
+                'profile_id' => $profileId,
+                'tenant_id'  => $ownerTenantId,
+            ]);
+
+            return Response::json(['data' => ['id' => $membershipId, 'removed' => true]]);
+        } catch (\Throwable $e) {
+            $this->log('error', 'Failed to remove membership', [
+                'event' => 'users.memberships.remove.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to remove membership', 500);
+        }
+    }
+
+    /**
      * Fetch a single membership row (joined to its profile's primary email and
      * role) for a profile in a tenant, in the public row shape used by
      * {@see self::toPublicUser()}.
@@ -953,39 +1206,11 @@ class UsersApiHandler
      */
     private function findOrCreateProfile(string $email, string $passwordHash): int
     {
-        // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
-        $peStmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
-        $peStmt->execute([$email]);
-        $existingProfileId = $peStmt->fetchColumn();
-
-        if ($existingProfileId !== false) {
-            return (int)$existingProfileId;
-        }
-
-        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-        $profStmt = $this->db->prepare(
-            'INSERT INTO profiles
-                 (display_name, password_hash, two_factor_enabled,
-                  two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, ?, false, 0, 0, NOW(), NOW())'
-        );
-        $profStmt->execute([$this->localPart($email), $passwordHash]);
-        $profileId = (int)$this->db->lastInsertId();
-
-        // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2)
-        $this->db->prepare(
-            'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (?, ?, true, true, NOW())'
-        )->execute([$profileId, $email]);
-
-        return $profileId;
-    }
-
-    /** Local-part (before @) of an email, used as the profile display name. */
-    private function localPart(string $email): string
-    {
-        $at = strrpos($email, '@');
-        return $at !== false ? substr($email, 0, $at) : $email;
+        // Shared with tenant provisioning (#779), which needs exactly this to
+        // give a new tenant its first administrator. Kept as one implementation
+        // rather than two: an identity written two slightly different ways is an
+        // identity that eventually diverges.
+        return (new ProfileProvisioner($this->db))->findOrCreate($email, $passwordHash);
     }
 
     /**
