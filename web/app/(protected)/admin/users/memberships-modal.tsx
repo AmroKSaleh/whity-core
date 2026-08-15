@@ -150,18 +150,24 @@ export function MembershipsModal({
     void fetchTenants();
   }, [isOpen, isSystemAdmin, apiClient, addToast, t]);
 
+  // A system administrator MUST name the tenant. Omitting `tenant_id` means "the
+  // caller's tenant", which for them resolves to whichever membership the server
+  // reaches first — a grant landing in a tenant nobody chose. Requiring the
+  // picker keeps that path out of the UI entirely.
+  const canSubmitGrant =
+    selectedRole !== '' && (!isSystemAdmin || selectedTenantId !== '');
+
   const handleGrant = async (): Promise<void> => {
-    if (selectedRole === '') {
+    if (!canSubmitGrant) {
       return;
     }
 
     setIsSubmitting(true);
     try {
-      // `tenant_id` is sent ONLY by a system administrator who picked one. A
-      // tenant administrator sending it at all is a 403 server-side — the field
-      // is refused rather than ignored — so it must stay absent here.
-      const targetTenantId =
-        isSystemAdmin && selectedTenantId !== '' ? Number(selectedTenantId) : undefined;
+      // `tenant_id` is sent ONLY by a system administrator. A tenant
+      // administrator sending it at all is a 403 server-side — the field is
+      // refused rather than ignored — so it must stay absent for them.
+      const targetTenantId = isSystemAdmin ? Number(selectedTenantId) : undefined;
 
       const { error, response } = await api.POST('/api/v1/users/{id}/memberships', {
         params: { path: { id: user.id } },
@@ -362,7 +368,7 @@ export function MembershipsModal({
 
               <Button
                 type="button"
-                disabled={isSubmitting || selectedRole === ''}
+                disabled={isSubmitting || !canSubmitGrant}
                 onClick={() => void handleGrant()}
               >
                 {isSubmitting

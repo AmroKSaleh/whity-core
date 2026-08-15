@@ -255,6 +255,24 @@ describe('MembershipsModal', () => {
     expect(mockApiPost.mock.calls[0][1].body).toEqual({ role: 'admin' });
   });
 
+  it('will not let a system administrator grant without naming a tenant', async () => {
+    renderModal();
+    await screen.findByText('Acme');
+
+    // Omitting tenant_id means "the caller's tenant", which for tenant 0
+    // resolves to whichever membership the server reaches first — a grant
+    // landing somewhere nobody chose. The button stays disabled instead.
+    const selects = await waitFor(() => {
+      const found = screen.getAllByTestId('select');
+      expect(found).toHaveLength(2);
+      expect(found[1].querySelectorAll('option')).toHaveLength(3);
+      return found;
+    });
+
+    fireEvent.change(selects[1], { target: { value: 'user' } });
+    expect(screen.getByText('Grant')).toBeDisabled();
+  });
+
   it('offers Revoke only on the non-primary membership', async () => {
     renderModal();
     await screen.findByText('Acme');
