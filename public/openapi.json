@@ -14857,6 +14857,112 @@
                 ]
             }
         },
+        "/api/v1/resource-role-grants/all": {
+            "delete": {
+                "operationId": "delete_api_v1_resource_role_grants_all",
+                "summary": "Revoke every role grant at one resource",
+                "tags": [
+                    "rbac"
+                ],
+                "parameters": [
+                    {
+                        "name": "resource_type",
+                        "in": "query",
+                        "required": true,
+                        "description": "A registered resource type (e.g. `ou`, `acme:record`)",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "resource_id",
+                        "in": "query",
+                        "required": true,
+                        "description": "The record whose grants are removed",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The grants removed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ResourceRoleGrantRevokeAllResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "resource_type is unregistered, or resource_id is missing/invalid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/resource-role-grants/{id}": {
             "delete": {
                 "operationId": "delete_api_v1_resource_role_grants_id",
@@ -25038,6 +25144,36 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "ResourceRoleGrantRevokeAllResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ResourceRoleGrantRevokeAllResult"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "ResourceRoleGrantRevokeAllResult": {
+                "type": "object",
+                "properties": {
+                    "resource_type": {
+                        "type": "string"
+                    },
+                    "resource_id": {
+                        "type": "integer"
+                    },
+                    "revoked": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "resource_type",
+                    "resource_id",
+                    "revoked"
                 ]
             },
             "Role": {

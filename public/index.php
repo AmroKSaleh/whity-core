@@ -1756,6 +1756,12 @@ $resourceRoleGrantsHandler = new \Whity\Api\ResourceRoleGrantsApiHandler(
 $router->register('GET',    '/api/resource-role-grants',          [$resourceRoleGrantsHandler, 'list'],   null, null, CorePermissions::ROLES_READ);
 $router->register('POST',   '/api/resource-role-grants',          [$resourceRoleGrantsHandler, 'create'], null, null, CorePermissions::ROLES_MANAGE);
 $router->register('DELETE', '/api/resource-role-grants/{id:\d+}', [$resourceRoleGrantsHandler, 'revoke'], null, null, CorePermissions::ROLES_MANAGE);
+// WC-712 §4: the record-delete cleanup an owner runs when it deletes the record
+// itself, mirroring DELETE /api/entity-tags/all. A distinct `/all` path (never
+// `\d+`, so it cannot collide with the by-id revoke above) rather than an
+// argument-shape variant, so a malformed single-revoke can never degrade into
+// "remove everything".
+$router->register('DELETE', '/api/resource-role-grants/all', [$resourceRoleGrantsHandler, 'revokeAll'], null, null, CorePermissions::ROLES_MANAGE);
 
 // 13b-ter. Generated lifecycle surface for plugin-declared data types
 // (WC-723 Door 2). One handler serves EVERY registered type: the shape of a

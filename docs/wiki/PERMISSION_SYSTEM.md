@@ -256,6 +256,7 @@ Resolution shipped before any way to *create* what it resolves, so a consumer co
 | `POST /api/resource-role-grants` | `roles:manage` | `{resource_type, resource_id, role_id, profile_id?}` |
 | `GET /api/resource-role-grants?resource_type=T&resource_id=N` | `roles:read` | both shapes in one list |
 | `DELETE /api/resource-role-grants/{id}` | `roles:manage` | id comes from the list route |
+| `DELETE /api/resource-role-grants/all?resource_type=T&resource_id=N` | `roles:manage` | the record-delete cleanup |
 
 - **`profile_id` nullability is the meaning.** Omitted or `null` grants to *everyone at this resource*; a value grants to *that one profile here*. Both are creatable, both list, and the two partial unique indexes keep them independent — repeating the everyone-grant is not satisfied by an existing profile-grant for the same role.
 - **Idempotent, never `409`.** A repeat grant answers `200` with `created: false` and the id of the row that already says it, mirroring `POST /api/users/{id}/memberships`. A conflict would force every caller to treat "already true" as an error and hand-roll a read-before-write that races anyway.
@@ -264,6 +265,15 @@ Resolution shipped before any way to *create* what it resolves, so a consumer co
 - **Only the tenant's own roles and globals are grantable**, so a resource grant cannot attach another tenant's private role. A role outside that set is `404`, never `403`, so cross-tenant role existence is never disclosed.
 - **Gated on the existing `roles:read` / `roles:manage`.** A new permission would need a grant migration, and such a migration reaches the `admin` role only — so operators running a custom administrative role would silently lose a capability their plugins depend on.
 - **No UI ships with this.** It is a platform capability consumed by plugins over HTTP, like `/api/entity-tags`: a core screen would have to render a record picker per resource type, which only the owning plugin can do.
+
+#### Cleaning up when the record is deleted
+
+`resource_id` carries no foreign key, so core is never told a record disappeared and its grants outlive it — to be inherited by whatever record reuses that id. `DELETE /api/resource-role-grants/all?resource_type=T&resource_id=N` is how an owner closes that hole in **one** call, mirroring `DELETE /api/entity-tags/all`. Without it the first consumer to delete such a record hand-rolls list-then-revoke-each: the loop this surface exists to eliminate, and one that leaves the resource half-cleaned if it dies midway.
+
+- **Returns the number of grants revoked.** Since 0 is a success, a bare `204` would leave the caller unable to tell "wiped 7 grants" from "wiped nothing because I addressed the wrong record" — the one distinction a cleanup log needs, and what makes the call verifiable.
+- **Idempotent: no grants is `200` / `revoked: 0`, never `404`.** The caller is deleting a record and neither knows nor cares whether it carried grants, so the call must be safe to make unconditionally and safe to retry. That is the property the whole route exists for.
+- **It does NOT ask the owning plugin to vouch for the resource**, and this is the one place that check is deliberately absent. `POST` fails *closed* when nobody vouches, because writing a grant at an unvalidated id is the hazard it exists to prevent. Cleanup is the mirror image: by then the record is usually **already deleted**, so nobody *can* vouch — a fails-closed check would refuse precisely the calls that matter, and would also make cleanup impossible while the owning plugin is disabled. Nothing is granted by skipping it: the `DELETE` is tenant-scoped, so the blast radius is rows the caller could already have listed and revoked one id at a time, and a delete can only ever *remove* authority.
+- **`resource_type` IS still validated**, for the opposite reason. An unregistered type would answer `revoked: 0`, which is indistinguishable from "that record had no grants": the caller logs a successful cleanup that removed nothing while the real rows survive. The registry is the only thing that turns that silent no-op into a loud error. It also keeps this route's parameters identical to the list route's, so `GET` and `DELETE .../all` always address the same rows.
 
 ### Host-wired services (`Whity\Core\Container\HostWiredService`)
 
