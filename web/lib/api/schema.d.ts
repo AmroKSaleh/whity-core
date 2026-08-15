@@ -2607,10 +2607,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List every role a user holds in this tenant */
+        /** List the roles a user holds (every tenant for a system-tenant caller) */
         get: operations["get_api_v1_users_id_memberships"];
         put?: never;
-        /** Grant a user an additional role in this tenant */
+        /** Grant a user a role, optionally in another tenant (system tenant only) */
         post: operations["post_api_v1_users_id_memberships"];
         delete?: never;
         options?: never;
@@ -3294,6 +3294,8 @@ export interface components {
         };
         Membership: {
             id: number;
+            tenantId: number;
+            tenantName: string;
             roleId: number;
             role: string;
             ou_id?: number | null;
@@ -3305,6 +3307,7 @@ export interface components {
             role_id?: number;
             role?: string;
             ou_id?: number | null;
+            tenant_id?: number;
         };
         MembershipListResponse: {
             data: components["schemas"]["Membership"][];
@@ -3312,6 +3315,7 @@ export interface components {
         MembershipResponse: {
             data: {
                 id: number;
+                tenantId: number;
                 roleId: number;
                 ou_id?: number | null;
                 isPrimary: boolean;
@@ -20187,7 +20191,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Insufficient permissions */
+            /** @description Insufficient permissions, or a non-system caller named a target tenant */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -20196,7 +20200,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description User or role not found */
+            /** @description User, tenant or role not found */
             404: {
                 headers: {
                     [name: string]: unknown;

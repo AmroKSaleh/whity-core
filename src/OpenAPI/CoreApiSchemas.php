@@ -494,8 +494,11 @@ final class CoreApiSchemas
             // WC-712 §1: a profile may hold more than one role in a tenant. The
             // user list carries only the PRIMARY one (one row per person), so
             // these are where an additional role is seen, granted and revoked.
+            // #797 §2: they are also where a profile is attached to a tenant it
+            // is not yet in — the only write path that names a tenant other than
+            // the caller's, and only a tenant-0 caller may use it.
             self::adminRoute('GET', '/api/users/{id:\d+}/memberships', [
-                'summary' => 'List every role a user holds in this tenant',
+                'summary' => 'List the roles a user holds (every tenant for a system-tenant caller)',
                 'tags' => ['users'],
                 'responses' => [
                     200 => self::jsonResponse('The user\'s memberships, primary first', 'MembershipListResponse'),
@@ -503,7 +506,7 @@ final class CoreApiSchemas
                 ] + self::authErrors(),
             ]),
             self::adminRoute('POST', '/api/users/{id:\d+}/memberships', [
-                'summary' => 'Grant a user an additional role in this tenant',
+                'summary' => 'Grant a user a role, optionally in another tenant (system tenant only)',
                 'tags' => ['users'],
                 'request' => 'MembershipCreateRequest',
                 'responses' => [
@@ -512,7 +515,11 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('The membership already existed', 'MembershipResponse'),
                     201 => self::jsonResponse('The membership that was created', 'MembershipResponse'),
                     400 => self::errorResponse('Validation failed'),
-                    404 => self::errorResponse('User or role not found'),
+                    // Overrides the generic authErrors() 403 so the tenant-naming
+                    // refusal is discoverable from the contract rather than only
+                    // from the response body.
+                    403 => self::errorResponse('Insufficient permissions, or a non-system caller named a target tenant'),
+                    404 => self::errorResponse('User, tenant or role not found'),
                 ] + self::authErrors(),
             ]),
             self::adminRoute('DELETE', '/api/users/{id:\d+}/memberships/{membershipId:\d+}', [
@@ -2712,18 +2719,23 @@ final class CoreApiSchemas
             // NOTE: no tenantId field — the handler always creates the user in
             // the caller's TenantContext (a declared field with zero runtime
             // effect would be a contract lie).
-            // WC-712 §1: one row per role the profile holds in this tenant.
+            // WC-712 §1: one row per role the profile holds in a tenant.
             // `isPrimary` marks the row that answers "what is this person here?"
             // for display and defaults — exactly one per (profile, tenant),
             // enforced by migration 094's partial unique index.
+            // #797 §2: every row names its tenant. For a tenant caller that is a
+            // constant; for a tenant-0 caller the list spans tenants and this is
+            // the only thing distinguishing the rows.
             'Membership' => self::object([
                 'id' => self::int(),
+                'tenantId' => self::int(),
+                'tenantName' => self::str(),
                 'roleId' => self::int(),
                 'role' => self::str(),
                 'ou_id' => self::int(true),
                 'isPrimary' => ['type' => 'boolean'],
                 'status' => ['type' => 'string', 'enum' => ['active', 'invited', 'suspended']],
-            ], ['id', 'roleId', 'role', 'isPrimary', 'status']),
+            ], ['id', 'tenantId', 'tenantName', 'roleId', 'role', 'isPrimary', 'status']),
             'MembershipListResponse' => self::dataEnvelope([
                 'type' => 'array',
                 'items' => SchemaBuilder::ref('Membership'),
@@ -2733,19 +2745,26 @@ final class CoreApiSchemas
             // somebody already has is not an error.
             'MembershipResponse' => self::dataEnvelope(self::object([
                 'id' => self::int(),
+                'tenantId' => self::int(),
                 'roleId' => self::int(),
                 'ou_id' => self::int(true),
                 'isPrimary' => ['type' => 'boolean'],
                 'created' => ['type' => 'boolean'],
-            ], ['id', 'roleId', 'isPrimary', 'created'])),
+            ], ['id', 'tenantId', 'roleId', 'isPrimary', 'created'])),
             // No required list: the caller supplies role_id OR role (a name),
             // which OpenAPI cannot express as "exactly one of these two" without
             // a oneOf the generator does not emit. The handler enforces it and
             // answers 400 when neither is present.
+            //
+            // `tenant_id` (#797 §2) names the tenant to grant IN and is honoured
+            // ONLY for a tenant-0 caller — anyone else sending it gets a 403
+            // rather than a silent ignore. Omitted, the tenant is the caller's
+            // and the endpoint behaves exactly as it did.
             'MembershipCreateRequest' => self::object([
                 'role_id' => self::int(),
                 'role' => self::str(),
                 'ou_id' => self::int(true),
+                'tenant_id' => self::int(),
             ], []),
             'UserCreateRequest' => self::object([
                 'email' => self::str(),
