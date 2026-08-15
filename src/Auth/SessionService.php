@@ -102,6 +102,67 @@ final class SessionService
     }
 
     /**
+     * Resolve the session/family id CURRENTLY carrying $jti as its live access
+     * OR refresh jti, or null when no active row matches. Used to capture a
+     * family's id at the moment of a legitimate rotation — BEFORE {@see rotate()}
+     * moves the row past $jti — so that a later replay of that now-superseded
+     * jti can still be traced back to the family it belonged to (WC-refresh-reuse-family).
+     */
+    public function sessionIdForJti(string $jti): ?int
+    {
+        // @tenant-guard-ignore: matched by the caller's own current jti (access OR refresh) — each is a platform-wide UNIQUE handle, so it cannot resolve another tenant's session row (same reasoning as rotate() above).
+        $stmt = $this->db->prepare(
+            'SELECT id FROM sessions WHERE (refresh_jti = ? OR access_jti = ?) AND revoked_at IS NULL LIMIT 1'
+        );
+        $stmt->execute([$jti, $jti]);
+        $id = $stmt->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Revoke an ENTIRE token family by its session id — the refresh-token
+     * reuse-detection response (WC-refresh-reuse-family): when an
+     * already-superseded refresh jti is presented again, that is a compromise
+     * signal, and the correct response is to kill the whole lineage, including
+     * whatever token is CURRENTLY live in it, not just reject the one replayed
+     * request. Blacklists the family's current access + refresh jti (via the
+     * same {@see blacklistAndStamp()} path revokeById/revokeAllExcept use) and
+     * stamps revoked_at.
+     *
+     * Deliberately NOT ownership-gated (unlike revokeById): the caller already
+     * resolved $sessionId server-side from its own revoked_tokens bookkeeping,
+     * not from untrusted input, so no profile/tenant predicate is needed here.
+     *
+     * Returns false when the family is already revoked (or the id does not
+     * exist) — nothing further to do, e.g. a second replay after the first
+     * already killed it.
+     */
+    public function revokeFamily(int $sessionId): bool
+    {
+        // @tenant-guard-ignore: $sessionId is resolved server-side from revoked_tokens.session_id (WC-refresh-reuse-family), never from caller input — an internal security response, not a user-facing lookup.
+        $stmt = $this->db->prepare(
+            'SELECT access_jti, refresh_jti, expires_at FROM sessions
+             WHERE id = ? AND revoked_at IS NULL
+             LIMIT 1'
+        );
+        $stmt->execute([$sessionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return false;
+        }
+
+        $this->blacklistAndStamp(
+            $sessionId,
+            $row['access_jti'] !== null ? (string) $row['access_jti'] : null,
+            (string) $row['refresh_jti'],
+            (string) $row['expires_at']
+        );
+
+        return true;
+    }
+
+    /**
      * List a profile+tenant's active (non-revoked, non-expired) sessions, newest
      * first, flagging the caller's own current session (matched by access jti).
      *
@@ -216,7 +277,7 @@ final class SessionService
         }
         $ins->execute([$refreshJti, $expiresAt]);
 
-        // @tenant-guard-ignore: $id was resolved from a profile_id+tenant_id-scoped SELECT by the caller (revokeById / revokeAllExcept), so this by-id update is already tenant-bounded.
+        // @tenant-guard-ignore: $id was resolved by the caller from either a profile_id+tenant_id-scoped SELECT (revokeById / revokeAllExcept) or, for revokeFamily(), a jti-keyed lookup in the platform-wide-unique revoked_tokens/sessions keyspace (WC-refresh-reuse-family) — never from raw caller input — so this by-id update is already safely bounded.
         $this->db->prepare('UPDATE sessions SET revoked_at = NOW() WHERE id = ?')->execute([$id]);
     }
 }

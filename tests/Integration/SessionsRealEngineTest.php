@@ -78,6 +78,42 @@ final class SessionsRealEngineTest extends TestCase
         self::assertTrue($sessions[0]['current']);
     }
 
+    public function testReplayingASupersededRefreshTokenRevokesTheWholeFamily(): void
+    {
+        // Refresh-token reuse detection (RFC 6819 rotation reuse detection):
+        // rotating A -> B is a normal, legitimate refresh and must keep working.
+        // But presenting A again afterwards is a strong compromise signal (a
+        // legitimate client never re-presents a token it already rotated away
+        // from) — the correct response is to kill the WHOLE family, including
+        // whatever token (B) is currently live, not just reject the replay.
+        $this->seedProfile('a@example.com');
+        [, $refreshA] = $this->login('a@example.com');
+
+        // Legitimate rotation: A -> B.
+        $rotate = $this->authHandler()->handleRefresh(
+            new Request('POST', '/api/auth/refresh', ['Authorization' => 'Bearer ' . $refreshA, 'X-Auth-Mode' => 'token'])
+        );
+        self::assertSame(200, $rotate->getStatusCode(), $rotate->getBody());
+        $refreshB = (string) json_decode($rotate->getBody(), true)['refresh_token'];
+
+        // Replay the OLD, already-superseded token A — rejected, as today.
+        $replay = $this->authHandler()->handleRefresh(
+            new Request('POST', '/api/auth/refresh', ['Authorization' => 'Bearer ' . $refreshA, 'X-Auth-Mode' => 'token'])
+        );
+        self::assertSame(401, $replay->getStatusCode(), 'Replaying the superseded token must still be rejected.');
+
+        // The family is now dead: B — the token that WAS still legitimately
+        // live — must ALSO be revoked, not just the replay request rejected.
+        $useB = $this->authHandler()->handleRefresh(
+            new Request('POST', '/api/auth/refresh', ['Authorization' => 'Bearer ' . $refreshB, 'X-Auth-Mode' => 'token'])
+        );
+        self::assertSame(
+            401,
+            $useB->getStatusCode(),
+            'Reuse of a superseded refresh token must revoke the whole family, killing the currently-live token too.'
+        );
+    }
+
     public function testRevokingASessionRejectsItsLiveAccessToken(): void
     {
         $this->seedProfile('a@example.com');

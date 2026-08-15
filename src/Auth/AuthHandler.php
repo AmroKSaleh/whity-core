@@ -1810,8 +1810,24 @@ class AuthHandler
                     $activeTenantId = $parsedToken['active_tenant_id'];
                     if (is_string($jti) && is_int($profileId) && is_int($activeTenantId)) {
                         if ($this->isJtiRevoked($jti)) {
+                            // WC-refresh-reuse-family: a superseded refresh jti being
+                            // presented AGAIN is a strong compromise signal — a
+                            // legitimate client never re-presents a token it already
+                            // rotated away from. The correct response is not just to
+                            // reject this one request but to revoke the WHOLE token
+                            // family (every jti descended from the same login),
+                            // including whatever token is CURRENTLY live in it (RFC
+                            // 6819 §5.2.2.3). Best-effort: a lookup/revoke failure
+                            // must not change the 401 the caller already gets.
+                            $familySessionId = $this->revokedTokenSessionId($jti);
+                            $familyRevoked = $familySessionId !== null
+                                && $this->sessions()->revokeFamily($familySessionId);
+
                             // This token has been reused → log security event
-                            $this->audit('auth.refresh_token_reuse_detected', $request, $activeTenantId, $profileId);
+                            $this->audit('auth.refresh_token_reuse_detected', $request, $activeTenantId, $profileId, [
+                                'family_revoked' => $familyRevoked,
+                                'session_id'     => $familySessionId,
+                            ]);
                         }
                     }
                 }
@@ -1871,12 +1887,20 @@ class AuthHandler
         // jti this call presented, so the family stays one row across rotations.
         $oldRefreshJti = isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : null;
         if ($oldRefreshJti !== null) {
+            // WC-refresh-reuse-family: capture the family's session id BEFORE
+            // rotating — recordSession() below moves the row past $oldRefreshJti,
+            // after which nothing can trace that (about-to-be-superseded) jti
+            // back to its family. Stamping it onto the revoked_tokens row lets a
+            // LATER replay of $oldRefreshJti revoke this same family (see the
+            // reuse-detection branch above).
+            $familySessionId = $this->sessions()->sessionIdForJti($oldRefreshJti);
+
             $this->recordSession($accessToken, $newRefreshToken, $profileId, $activeTenantId, $request, false, $oldRefreshJti);
 
             // WC-refresh-reuse: revoke the old refresh token to prevent reuse.
             // On next use of this token, it will be detected as revoked and logged
             // as a security incident (auth.refresh_token_reuse_detected).
-            $this->revokeRefreshToken($oldRefreshJti);
+            $this->revokeRefreshToken($oldRefreshJti, $familySessionId);
         }
 
         // WC-525: same grace-period nag as issueSessionForProfile() — the
@@ -2396,23 +2420,52 @@ class AuthHandler
     }
 
     /**
+     * Resolve the `sessions` family id a REVOKED jti was blacklisted with, if any
+     * (WC-refresh-reuse-family). Populated by {@see revokeRefreshToken()} at the
+     * moment a refresh jti is superseded; used by the reuse-detection branch of
+     * {@see handleRefresh()} to trace a replayed, already-rotated jti back to the
+     * family it belongs to so the whole family can be revoked. Returns null when
+     * the jti is not revoked, carries no session_id (e.g. revoked by an unrelated
+     * path such as logout/password-change), or on any lookup failure.
+     *
+     * @param string $jti The (already confirmed revoked) refresh jti.
+     * @return int|null The family's `sessions.id`, or null.
+     */
+    private function revokedTokenSessionId(string $jti): ?int
+    {
+        try {
+            $stmt = $this->db->prepare('SELECT session_id FROM revoked_tokens WHERE jti = ? LIMIT 1');
+            $stmt->execute([$jti]);
+            $sessionId = $stmt->fetchColumn();
+            return ($sessionId === false || $sessionId === null) ? null : (int) $sessionId;
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
+    /**
      * Revoke a refresh token by adding its jti to revoked_tokens.
      *
      * Used after a successful refresh to prevent reuse of the old refresh token.
      * On the next presentation of this token, it will be rejected and the incident
      * logged as a security event (WC-refresh-reuse).
      *
-     * @param string $jti The JWT ID to revoke
+     * @param string   $jti       The JWT ID to revoke.
+     * @param int|null $sessionId The `sessions` family id this jti was rotated
+     *     FROM, if resolved (WC-refresh-reuse-family) — stamped alongside the jti
+     *     so a later replay can be traced back to its family. Null when no
+     *     session row was tracking this jti (e.g. a session-table write failure,
+     *     or a pre-existing session predating the feature).
      */
-    private function revokeRefreshToken(string $jti): void
+    private function revokeRefreshToken(string $jti, ?int $sessionId = null): void
     {
         try {
             // Calculate expiration time (604800 seconds = 7 days from now)
             $expiresAt = date('Y-m-d H:i:s', time() + 604800);
             $stmt = $this->db->prepare(
-                'INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING'
+                'INSERT INTO revoked_tokens (jti, expires_at, session_id) VALUES (?, ?, ?) ON CONFLICT (jti) DO NOTHING'
             );
-            $stmt->execute([$jti, $expiresAt]);
+            $stmt->execute([$jti, $expiresAt, $sessionId]);
         } catch (\Exception $e) {
             // Best-effort: if revocation fails, log and continue
             error_log('[refresh-token-revoke] failed: ' . $e->getMessage());
