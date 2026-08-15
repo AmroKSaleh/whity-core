@@ -94,6 +94,12 @@ final class MeEmailsApiHandlerRealEngineTest extends TestCase
                 return $this->counts[$key];
             }
 
+            public function decrement(string $key): int
+            {
+                $this->counts[$key] = max(0, ($this->counts[$key] ?? 0) - 1);
+                return $this->counts[$key];
+            }
+
             public function count(string $key): int
             {
                 return $this->counts[$key] ?? 0;

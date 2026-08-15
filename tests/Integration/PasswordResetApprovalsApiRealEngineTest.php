@@ -38,9 +38,12 @@ final class PasswordResetApprovalsApiRealEngineTest extends TestCase
     private const TENANT_A = 1;
     private const TENANT_B = 2;
 
+    private const SYSTEM_TENANT = 0;
+
     private const ADMIN_A = 10; // tenant-A admin (holds password_resets:approve via the seeded admin role)
     private const ADMIN_B = 11; // tenant-B admin
     private const NOPERM_A = 12; // tenant-A member without the admin role
+    private const ADMIN_SYS = 13; // system-tenant (id 0) operator — the break-glass approver
 
     private PDO $pdo;
     private PasswordResetService $service;
@@ -155,6 +158,84 @@ final class PasswordResetApprovalsApiRealEngineTest extends TestCase
         ));
     }
 
+    // ========== system-tenant break-glass (WC-797 §4d) ==========
+
+    public function testSystemTenantOperatorSeesPendingRequestsFromEveryTenant(): void
+    {
+        $requesterA = $this->seedProfile('sysA@acme.test', self::TENANT_A);
+        $requesterB = $this->seedProfile('sysB@acme.test', self::TENANT_B);
+        $this->stageRequest($requesterA);
+        $this->stageRequest($requesterB);
+
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $res = $this->handler->listPending($this->req(self::ADMIN_SYS, self::SYSTEM_TENANT));
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+
+        $emails = array_column($this->decode($res)['data'], 'email');
+        sort($emails);
+        self::assertSame(['sysA@acme.test', 'sysB@acme.test'], $emails);
+    }
+
+    public function testSystemTenantOperatorCanApproveAnotherTenantsPendingReset(): void
+    {
+        // The deadlock this exists to break: tenant A's ONLY approver is the
+        // very person whose reset is parked.
+        $requester = $this->seedProfile('stranded@acme.test', self::TENANT_A);
+        $requestId = $this->stageRequest($requester, 'break-glass-password');
+
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $res = $this->handler->approve($this->req(self::ADMIN_SYS, self::SYSTEM_TENANT), ['id' => (string) $requestId]);
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+
+        self::assertTrue(password_verify(
+            'break-glass-password',
+            (string) $this->col("SELECT password_hash FROM profiles WHERE id = {$requester}")
+        ));
+        self::assertSame(1, $this->epochOf($requester));
+    }
+
+    public function testSystemTenantOperatorCanRejectAnotherTenantsPendingReset(): void
+    {
+        $requester = $this->seedProfile('sysreject@acme.test', self::TENANT_B);
+        $originalHash = (string) $this->col("SELECT password_hash FROM profiles WHERE id = {$requester}");
+        $requestId = $this->stageRequest($requester, 'never-applied');
+
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $res = $this->handler->reject($this->req(self::ADMIN_SYS, self::SYSTEM_TENANT), ['id' => (string) $requestId]);
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+
+        self::assertSame($originalHash, (string) $this->col("SELECT password_hash FROM profiles WHERE id = {$requester}"));
+        self::assertSame('rejected', (string) $this->col("SELECT status FROM password_resets WHERE id = {$requestId}"));
+    }
+
+    public function testSystemTenantBreakGlassDoesNotWidenATenantAdminsReach(): void
+    {
+        $requesterB = $this->seedProfile('untouchable@acme.test', self::TENANT_B);
+        $requestId = $this->stageRequest($requesterB, 'must-not-apply');
+
+        // Tenant A's admin holds the SAME permission and must still see nothing
+        // and be able to do nothing outside tenant A.
+        TenantContext::setTenantId(self::TENANT_A);
+        $list = $this->handler->listPending($this->req(self::ADMIN_A, self::TENANT_A));
+        self::assertSame([], $this->decode($list)['data']);
+
+        $approve = $this->handler->approve($this->req(self::ADMIN_A, self::TENANT_A), ['id' => (string) $requestId]);
+        self::assertSame(404, $approve->getStatusCode());
+        self::assertSame(0, $this->epochOf($requesterB));
+    }
+
+    public function testSystemTenantOperatorStillNeedsThePermission(): void
+    {
+        $requester = $this->seedProfile('gated-sys@acme.test', self::TENANT_A);
+        $requestId = $this->stageRequest($requester);
+
+        // NOPERM_A holds no membership in tenant 0 at all, so the permission
+        // check must refuse it even while it acts in the system tenant.
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $res = $this->handler->approve($this->req(self::NOPERM_A, self::SYSTEM_TENANT), ['id' => (string) $requestId]);
+        self::assertSame(403, $res->getStatusCode());
+    }
+
     // ==================== helpers ====================
 
     private function stageRequest(int $profileId, string $password = 'a-staged-password-1'): int
@@ -258,14 +339,16 @@ final class PasswordResetApprovalsApiRealEngineTest extends TestCase
             INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
                 (" . self::ADMIN_A . ", 'admin-a', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
                 (" . self::ADMIN_B . ", 'admin-b', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-                (" . self::NOPERM_A . ", 'noperm-a', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                (" . self::NOPERM_A . ", 'noperm-a', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (" . self::ADMIN_SYS . ", 'admin-sys', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ");
 
         $pdo->exec("
             INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at) VALUES
                 (" . self::ADMIN_A . ", " . self::TENANT_A . ", 1,   'active', datetime('now')),
                 (" . self::ADMIN_B . ", " . self::TENANT_B . ", 1,   'active', datetime('now')),
-                (" . self::NOPERM_A . ", " . self::TENANT_A . ", 101, 'active', datetime('now'))
+                (" . self::NOPERM_A . ", " . self::TENANT_A . ", 101, 'active', datetime('now')),
+                (" . self::ADMIN_SYS . ", " . self::SYSTEM_TENANT . ", 1, 'active', datetime('now'))
         ");
 
         return $pdo;

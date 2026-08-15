@@ -3452,6 +3452,27 @@ final class CoreApiSchemas
                 'status' => ['type' => 'string', 'enum' => ['approved', 'rejected']],
             ], ['id', 'status'])),
 
+            // POST /api/users/{id}/password-reset — the admin-triggered LINK.
+            // Deliberately carries no token and no password: the raw token
+            // exists only inside the mail sent to the user.
+            'AdminPasswordResetSentResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['sent']],
+                'profile_id' => self::int(),
+            ], ['status', 'profile_id'])),
+
+            // GET /api/password-resets/approver-coverage — drives the "this
+            // change can strand the tenant" warning on the approval-gate toggle
+            // and on user removal/demotion.
+            'PasswordResetApproverCoverageResponse' => self::dataEnvelope(self::object([
+                'tenant_id' => self::int(),
+                'minimum_recommended' => self::int(),
+                'approval_required' => self::bool(),
+                'approver_count' => self::int(),
+                'approver_profile_ids' => ['type' => 'array', 'items' => self::int()],
+                'approver_role_names' => ['type' => 'array', 'items' => self::str()],
+                'below_minimum' => self::bool(),
+            ], ['tenant_id', 'minimum_recommended', 'approval_required', 'approver_count', 'approver_profile_ids', 'approver_role_names', 'below_minimum'])),
+
             // POST /api/2fa-recovery/force-reset — the secondary admin-direct
             // fallback (no prior request): request body + 200 response.
             'ForceResetRequest' => self::object(['profile_id' => self::int()], ['profile_id']),
@@ -4340,6 +4361,23 @@ final class CoreApiSchemas
                 'responses' => [
                     200 => self::jsonResponse('Rejected', 'ApprovalStatusResponse'),
                     404 => self::errorResponse('No pending password-reset request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/users/{id:\d+}/password-reset', 'users:write', [
+                'summary' => 'Send this user a password-reset link (never returns a credential)',
+                'tags' => ['users'],
+                'responses' => [
+                    202 => self::jsonResponse('A reset link has been mailed to the user', 'AdminPasswordResetSentResponse'),
+                    404 => self::errorResponse('User not found in this tenant'),
+                    409 => self::errorResponse('Password-reset emails are disabled for this instance'),
+                    422 => self::errorResponse('Invalid user id, or the user has no email address'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/password-resets/approver-coverage', 'users:read', [
+                'summary' => 'How many accounts in this tenant can approve a parked password reset',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Approver coverage for the calling tenant', 'PasswordResetApproverCoverageResponse'),
                 ] + self::authErrors(),
             ]),
         ];

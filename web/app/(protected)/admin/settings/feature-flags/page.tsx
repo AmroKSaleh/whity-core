@@ -7,6 +7,7 @@ import { useToast } from '@/lib/toast-context';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
+import { useApproverCoverage } from '@/hooks/useApproverCoverage';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
@@ -107,8 +108,20 @@ export default function FeatureFlagsSettingsPage() {
   );
 }
 
+/**
+ * The one flag on this page that can produce a state the product cannot leave:
+ * with approval required, a tenant whose only approver is the person whose reset
+ * is parked has no way to approve it (WC-797 §4). Every other flag here only
+ * turns a capability on or off, so this is the only place the deliberately
+ * generic renderer above is joined by flag-specific copy — a registry entry has
+ * nowhere to declare "this toggle has a precondition", and inventing that
+ * mechanism for a single flag would be the larger change.
+ */
+const PASSWORD_RESET_APPROVAL_REQUIRED = 'auth.password_reset_approval_required';
+
 function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
   const t = useTranslation('admin');
+  const { coverage } = useApproverCoverage(true);
 
   const { data, loading, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
@@ -224,14 +237,38 @@ function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
             </p>
           ) : (
             flags.map((entry) => (
-              <RegistrySettingControl
-                key={entry.key}
-                entry={entry}
-                idPrefix="feature-flags"
-                value={valueOf(entry)}
-                error={fieldErrors[entry.key]}
-                onChange={(value) => setField(entry.key, value)}
-              />
+              <div key={entry.key} className="space-y-2">
+                <RegistrySettingControl
+                  entry={entry}
+                  idPrefix="feature-flags"
+                  value={valueOf(entry)}
+                  error={fieldErrors[entry.key]}
+                  onChange={(value) => setField(entry.key, value)}
+                />
+                {entry.key === PASSWORD_RESET_APPROVAL_REQUIRED &&
+                  valueOf(entry) === 'true' && (
+                    <p
+                      role="alert"
+                      data-testid="feature-flags-approval-gate-warning"
+                      className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400"
+                    >
+                      {t(
+                        'settings.featureFlags.passwordResetApproval.warning',
+                        'This applies to every tenant. A tenant where only one account can approve a password reset cannot approve that account’s own reset, so give each tenant at least two accounts holding the password-reset approval permission before relying on this. A system-tenant operator can approve a reset in any tenant, which is the way out if one does get stuck.'
+                      )}
+                      {coverage?.belowMinimum === true && (
+                        <>
+                          {' '}
+                          {t(
+                            'settings.featureFlags.passwordResetApproval.belowMinimum',
+                            'The system tenant itself is currently below that: {count} account(s) here can approve.',
+                            { count: coverage.approverCount }
+                          )}
+                        </>
+                      )}
+                    </p>
+                  )}
+              </div>
             ))
           )}
         </CardContent>

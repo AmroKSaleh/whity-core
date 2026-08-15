@@ -41,6 +41,7 @@ final class PasswordResetHandlerRealEngineTest extends TestCase
     private SettingsService $settings;
     /** @var Mailer&object{sent: list<array{to: string, subject: string, body: string}>} */
     private Mailer $mailer;
+    private DatabaseSharedStore $store;
     private PasswordResetHandler $handler;
 
     protected function setUp(): void
@@ -70,11 +71,13 @@ final class PasswordResetHandlerRealEngineTest extends TestCase
 
         $mailer = new PasswordResetMailer($this->mailer, 'https://app.test/reset-password', new EmailLayout(), $this->settings);
 
+        $this->store = new DatabaseSharedStore($this->pdo);
+
         $this->handler = new PasswordResetHandler(
             $this->service,
             $this->emails,
             $mailer,
-            new DatabaseSharedStore($this->pdo),
+            $this->store,
             new AuditLogger($this->pdo, new NullLogger()),
             $this->settings
         );
@@ -144,6 +147,103 @@ final class PasswordResetHandlerRealEngineTest extends TestCase
         $throttled = $this->forgot('flood@acme.test');
         self::assertSame(429, $throttled->getStatusCode());
         self::assertArrayHasKey('retry-after', array_change_key_case($throttled->getHeaders()));
+    }
+
+    // ========== forgot while a reset is parked for approval (WC-797 §4b/§4c) ==========
+
+    public function testForgotWhileParkedSendsTheAwaitingApprovalNoticeNotANewLink(): void
+    {
+        $profileId = $this->seedProfile('parked@acme.test', 'still-the-live-password');
+        $this->parkAReset($profileId);
+        $sentBefore = count($this->mailer->sent);
+
+        $res = $this->forgot('parked@acme.test');
+        self::assertSame(202, $res->getStatusCode(), $res->getBody());
+
+        self::assertCount($sentBefore + 1, $this->mailer->sent);
+        $body = $this->mailer->sent[$sentBefore]['body'];
+        self::assertStringNotContainsString(
+            'reset-password?token=',
+            $body,
+            'a parked request must not be superseded by a fresh link'
+        );
+        self::assertStringContainsString('approval', strtolower($body));
+        self::assertStringContainsString('current password', strtolower($body));
+        self::assertSame(1, $this->auditCount('auth.password_reset.awaiting_approval_notified'));
+    }
+
+    public function testForgotWhileParkedLeavesTheParkedRequestStanding(): void
+    {
+        $profileId = $this->seedProfile('idempotent@acme.test', 'unchanged');
+
+        $requestId = $this->parkAReset($profileId);
+        $this->forgot('idempotent@acme.test');
+        $this->forgot('idempotent@acme.test');
+
+        // Exactly one row, still the SAME one, still awaiting approval: a repeat
+        // must not mint a second token nor re-open the parked request.
+        self::assertSame(1, (int) $this->col(
+            "SELECT COUNT(*) FROM password_resets WHERE profile_id = {$profileId}"
+        ));
+        self::assertSame('awaiting_approval', (string) $this->col(
+            "SELECT status FROM password_resets WHERE id = {$requestId}"
+        ));
+    }
+
+    public function testForgotWhileParkedConsumesNoAdditionalRateLimitBudget(): void
+    {
+        $profileId = $this->seedProfile('nolockout@acme.test', 'unchanged');
+        $this->parkAReset($profileId);
+
+        // Well past EMAIL_MAX: a user who keeps retrying while parked must never
+        // be locked out on top of being locked out.
+        for ($i = 0; $i < 9; $i++) {
+            self::assertSame(202, $this->forgot('nolockout@acme.test')->getStatusCode(), "request {$i}");
+        }
+    }
+
+    public function testFirstForgotOfAWindowIsStillCountedWhileParked(): void
+    {
+        $profileId = $this->seedProfile('counted@acme.test', 'unchanged');
+        $this->parkAReset($profileId);
+
+        $key = 'pwreset:req:email:' . hash('sha256', 'counted@acme.test');
+        self::assertSame(0, $this->store->count($key));
+
+        $this->forgot('counted@acme.test');
+        self::assertSame(1, $this->store->count($key), 'the first request of a window is counted for everyone');
+
+        $this->forgot('counted@acme.test');
+        $this->forgot('counted@acme.test');
+        self::assertSame(1, $this->store->count($key), 'only repeats-while-pending are released');
+    }
+
+    public function testForgotResponseIsIdenticalWhetherOrNotARequestIsParked(): void
+    {
+        $profileId = $this->seedProfile('same@acme.test', 'unchanged');
+        $plain = $this->forgot('same@acme.test');
+
+        $this->parkAReset($profileId);
+        $parked = $this->forgot('same@acme.test');
+
+        self::assertSame($plain->getStatusCode(), $parked->getStatusCode());
+        self::assertSame($plain->getBody(), $parked->getBody(), 'the parked state must never be observable in the response');
+    }
+
+    public function testForgotAfterTheParkedRequestIsResolvedIssuesAFreshLinkAgain(): void
+    {
+        $profileId = $this->seedProfile('resolved@acme.test', 'unchanged');
+        $requestId = $this->parkAReset($profileId);
+        $this->pdo->exec("UPDATE password_resets SET status = 'approved' WHERE id = {$requestId}");
+        $sentBefore = count($this->mailer->sent);
+
+        $this->forgot('resolved@acme.test');
+
+        self::assertCount($sentBefore + 1, $this->mailer->sent);
+        self::assertStringContainsString(
+            'https://app.test/reset-password?token=',
+            $this->mailer->sent[$sentBefore]['body']
+        );
     }
 
     // ==================== reset (confirm) ====================
@@ -230,6 +330,25 @@ final class PasswordResetHandlerRealEngineTest extends TestCase
     }
 
     // ==================== helpers ====================
+
+    /**
+     * Drive a profile into the parked ('awaiting_approval') state through the
+     * real flow — issue a token, confirm it with approval required — and leave
+     * the approval gate ON, which is the operator state §4b/§4c are about.
+     *
+     * @return int The parked password_resets.id.
+     */
+    private function parkAReset(int $profileId): int
+    {
+        $this->settings->setGlobal(SettingsRegistry::PASSWORD_RESET_APPROVAL_REQUIRED, 'true');
+        $token = $this->service->issue($profileId);
+        $res = $this->reset($token, 'a-staged-password-1');
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+
+        return (int) $this->col(
+            "SELECT id FROM password_resets WHERE profile_id = {$profileId} AND status = 'awaiting_approval'"
+        );
+    }
 
     private function assertTwoFactorUntouched(int $profileId): void
     {

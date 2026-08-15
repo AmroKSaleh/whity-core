@@ -14,6 +14,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import type { User } from './page';
+import { useApproverCoverage, wouldStrandTenant } from '@/hooks/useApproverCoverage';
 
 interface DeleteUserModalProps {
   isOpen: boolean;
@@ -31,6 +32,10 @@ export function DeleteUserModal({
   const { addToast } = useToast();
   const t = useTranslation('admin');
   const [isDeleting, setIsDeleting] = useState(false);
+  // WC-797 §4a: removal reaches the same unrecoverable state the approval-gate
+  // toggle does, and does it looking like an unrelated edit.
+  const { coverage } = useApproverCoverage(isOpen);
+  const removalWouldStrandTenant = wouldStrandTenant(coverage, user.id, null);
 
   const handleDelete = async () => {
     try {
@@ -77,6 +82,19 @@ export function DeleteUserModal({
               {user.email}
             </div>
           </div>
+
+          {removalWouldStrandTenant && (
+            <p
+              role="alert"
+              data-testid="delete-user-approver-warning"
+              className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive"
+            >
+              {t(
+                'users.delete.approverWarning',
+                'This is one of the few accounts here that can approve a password reset. Removing it can leave this tenant unable to approve any reset — including its remaining administrator’s own, which nobody could then recover from inside the product.'
+              )}
+            </p>
+          )}
         </div>
 
         <DialogFooter>
