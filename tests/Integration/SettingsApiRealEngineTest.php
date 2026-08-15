@@ -86,11 +86,13 @@ final class SettingsApiRealEngineTest extends TestCase
         // render batch limits (documents.render_max_rows/_max_pages/
         // _max_template_bytes — ADR 0012, meaningfully per-tenant) and
         // data_types.bulk_max_ids (WC-746, the bulk lifecycle batch ceiling —
-        // per-tenant for the same reason: one tenant's trash is not another's).
+        // per-tenant for the same reason: one tenant's trash is not another's)
+        // and auth.invitation_ttl_days (WHIT-417 — how long an invitation stays
+        // valid is a tenant's own onboarding policy, not a platform constant).
         // The instance-governance / storage / mail / billing keys — and the
         // documents.render_enabled MASTER SWITCH itself — are GLOBAL-ONLY
         // (WC-696206d8) and excluded from the per-tenant surface.
-        self::assertCount(10, $data['registry']);
+        self::assertCount(11, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

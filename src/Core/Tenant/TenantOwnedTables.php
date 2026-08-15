@@ -217,6 +217,15 @@ final class TenantOwnedTables
         // accessing tenant overrides binds tenant_id so a tenant only sees/edits
         // its own customizations; system defaults are accessible globally.
         'translations' => '081_create_language_tables.php',
+
+        // WHIT-417 — pending invitations into a tenant (migration 096). Unlike
+        // `password_resets`, which is global because a credential belongs to a
+        // person, an invitation is the ISSUING TENANT'S decision to extend
+        // access and carries that tenant's role and OU — so it is tenant-owned
+        // and every administrator-facing read/write binds tenant_id. The two
+        // token-driven statements run on the public accept endpoint, where
+        // there is no tenant context, and carry an explicit guard annotation.
+        'invitations' => '096_create_invitations.php',
     ];
 
     /**

@@ -2434,6 +2434,86 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertNotNull($bCreate, "Tenant B's own override for the same key must be independent of Tenant A's");
     }
 
+    // ==================== invitations (WHIT-417) ====================
+    //
+    // An invitation belongs to the tenant that issued it and carries that
+    // tenant's role and OU, so every administrator-facing read and write binds
+    // tenant_id. The token-driven lookups deliberately do NOT — they run on the
+    // public accept endpoint, where the token is the only authority — which is
+    // why the tenant boundary has to hold on the id-addressed operations here.
+
+    public function testInvitationListIsTenantScoped(): void
+    {
+        $service = $this->invitationService();
+        $service->invite(self::TENANT_A, 'a-invitee@t1.example', 2);
+        $service->invite(self::TENANT_B, 'b-invitee@t2.example', 2);
+
+        $emailsA = array_column($service->listForTenant(self::TENANT_A), 'email');
+        $emailsB = array_column($service->listForTenant(self::TENANT_B), 'email');
+
+        self::assertSame(['a-invitee@t1.example'], $emailsA);
+        self::assertSame(['b-invitee@t2.example'], $emailsB, "Tenant A's invitation must be invisible to Tenant B");
+    }
+
+    public function testTenantCannotRevokeForeignInvitationAndItStillWorks(): void
+    {
+        $service = $this->invitationService();
+        $invite = $service->invite(self::TENANT_B, 'b-invitee@t2.example', 2);
+
+        self::assertFalse(
+            $service->revoke($invite['id'], self::TENANT_A),
+            'A cross-tenant revoke must touch zero rows.'
+        );
+        self::assertNotNull(
+            $service->preview($invite['token']),
+            "Tenant B's invitation must still be usable after Tenant A's rejected revoke."
+        );
+        self::assertSame(
+            'pending',
+            $service->listForTenant(self::TENANT_B)[0]['status'],
+            "Tenant B's row must be byte-for-byte untouched."
+        );
+    }
+
+    public function testTenantCannotResendForeignInvitationAndItsTokenSurvives(): void
+    {
+        $service = $this->invitationService();
+        $invite = $service->invite(self::TENANT_B, 'b-invitee@t2.example', 2);
+
+        self::assertNull(
+            $service->resend($invite['id'], self::TENANT_A),
+            'A cross-tenant resend must find nothing.'
+        );
+        self::assertNotNull(
+            $service->preview($invite['token']),
+            "Tenant B's original token must not be rotated out from under it by another tenant."
+        );
+    }
+
+    public function testInvitingTheSameAddressInTwoTenantsKeepsTheRowsIndependent(): void
+    {
+        $service = $this->invitationService();
+        $a = $service->invite(self::TENANT_A, 'shared@example.test', 2);
+        $b = $service->invite(self::TENANT_B, 'shared@example.test', 2);
+
+        // Tenant A supersedes only its OWN outstanding invitation.
+        $service->invite(self::TENANT_A, 'shared@example.test', 2);
+
+        self::assertNull($service->preview($a['token']));
+        self::assertNotNull(
+            $service->preview($b['token']),
+            "Tenant B's invitation must survive Tenant A re-inviting the same address."
+        );
+    }
+
+    private function invitationService(): \Whity\Core\Identity\InvitationService
+    {
+        return new \Whity\Core\Identity\InvitationService(
+            $this->pdo,
+            new \Whity\Core\Identity\ProfileProvisioner($this->pdo)
+        );
+    }
+
     /** The 'en' language id seeded by migration 082 (SeedBaseLanguages). */
     private function englishLanguageId(): int
     {
