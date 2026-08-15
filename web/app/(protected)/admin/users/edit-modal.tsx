@@ -35,6 +35,7 @@ import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import type { User } from './page';
 import { useRoleOptions } from './use-role-options';
 import { useOuOptions } from './use-ou-options';
+import { useApproverCoverage, wouldStrandTenant } from '@/hooks/useApproverCoverage';
 
 // Only `role` and `ou_id` are editable on this endpoint (WC-113/WC-205). `name`
 // is derived from the email local-part (no users.name column) and `tenant` moves
@@ -69,6 +70,9 @@ export function EditUserModal({
   const { addToast } = useToast();
   const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  // Drives the "this demotion can strand the tenant" warning below (WC-797 §4a).
+  const { coverage } = useApproverCoverage(isOpen);
   // Role dropdown options come from the live tenant-visible role list, so only
   // roles that actually exist (and resolve server-side) are offered. This
   // removes the phantom "Moderator" option that 404'd on save (WC-121).
@@ -136,6 +140,46 @@ export function EditUserModal({
     }
   };
 
+  // A LINK, not a password field. The link path runs through
+  // PasswordResetService, which already invalidates every existing session on
+  // the change, already rate-limits and already audits — and it never puts a
+  // plaintext password in an administrator's hands, or in whatever support
+  // channel they would read it out over. An admin-typed password control here
+  // would have to reproduce all of that a second time.
+  const handleSendResetLink = async () => {
+    try {
+      setIsSendingReset(true);
+      const { error, response } = await api.POST('/api/v1/users/{id}/password-reset', {
+        params: { path: { id: user.id } },
+      });
+
+      if (error !== undefined || !response.ok) {
+        throw new Error(
+          error?.error ??
+            t('users.edit.passwordReset.error', 'Failed to send the password-reset link')
+        );
+      }
+
+      addToast(
+        t('users.edit.passwordReset.success', 'A password-reset link has been sent to {email}', {
+          email: user.email,
+        }),
+        'success'
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : t('users.edit.passwordReset.error', 'Failed to send the password-reset link');
+      addToast(message, 'error');
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
+
+  const selectedRole = form.watch('role');
+  const demotionWouldStrandTenant = wouldStrandTenant(coverage, user.id, selectedRole);
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -183,6 +227,31 @@ export function EditUserModal({
               </p>
             </div>
 
+            <div className="space-y-2">
+              <span className="text-sm font-medium leading-none">
+                {t('users.edit.passwordReset.label', 'Password')}
+              </span>
+              <div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-testid="edit-user-send-reset-link"
+                  onClick={() => void handleSendResetLink()}
+                  disabled={isSendingReset}
+                >
+                  {isSendingReset
+                    ? t('users.edit.passwordReset.sending', 'Sending…')
+                    : t('users.edit.passwordReset.action', 'Send reset link')}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'users.edit.passwordReset.hint',
+                  'The user receives a one-time link by email and chooses their own password. No password is ever shown to you, and using the link signs the account out of every existing session.'
+                )}
+              </p>
+            </div>
+
             <FormField
               control={form.control}
               name="role"
@@ -213,6 +282,19 @@ export function EditUserModal({
                 </FormItem>
               )}
             />
+
+            {demotionWouldStrandTenant && (
+              <p
+                role="alert"
+                data-testid="edit-user-approver-warning"
+                className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive"
+              >
+                {t(
+                  'users.edit.approverWarning',
+                  'This is one of the few accounts here that can approve a password reset. Moving it to a role without that permission can leave this tenant unable to approve any reset — including this administrator’s own, which nobody could then recover from inside the product.'
+                )}
+              </p>
+            )}
 
             <FormField
               control={form.control}

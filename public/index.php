@@ -1095,6 +1095,24 @@ $router->register('GET',  '/api/password-resets/pending',      [$passwordResetAp
 $router->register('POST', '/api/password-resets/{id:\d+}/approve', [$passwordResetApprovalsHandler, 'approve'], null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
 $router->register('POST', '/api/password-resets/{id:\d+}/reject',  [$passwordResetApprovalsHandler, 'reject'],  null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
 
+// WC-797: the administrator-facing half of the same domain. "Send this user a
+// reset link" reuses the service and mailer built above rather than adding a
+// second way to change someone's password; the coverage endpoint answers
+// "would this change leave the tenant with nobody able to approve a reset?".
+// Coverage is gated on USERS_READ, not PASSWORD_RESETS_APPROVE — the whole point
+// is to warn an administrator who is NOT an approver.
+$adminPasswordResetHandler = new \Whity\Api\AdminPasswordResetApiHandler(
+    $db->getPdo(),
+    $passwordResetService,
+    $passwordResetMailer,
+    $profileEmailRepository,
+    $auditLogger,
+    $settingsService,
+    $roleChecker
+);
+$router->register('POST', '/api/users/{id:\d+}/password-reset',      [$adminPasswordResetHandler, 'sendResetLink'],     null, null, CorePermissions::USERS_WRITE);
+$router->register('GET',  '/api/password-resets/approver-coverage',  [$adminPasswordResetHandler, 'approverCoverage'], null, null, CorePermissions::USERS_READ);
+
 $twoFactorRecoveryService = new \Whity\Core\Identity\TwoFactorRecoveryService(
     $db->getPdo(),
     $passwordResetService,

@@ -39,6 +39,24 @@ interface SharedStoreInterface
     public function increment(string $key, int $ttlSeconds): int;
 
     /**
+     * Atomically release ONE unit previously counted against $key.
+     *
+     * The mirror of {@see increment()} for a caller that has to count an event
+     * BEFORE it knows whether the event was chargeable — a rate limiter whose
+     * increment ordering is itself a security property cannot postpone the
+     * count, so it refunds instead. The window is not otherwise disturbed: the
+     * expiry is left exactly as the creating increment set it, so a refund is a
+     * correction inside the current window and never opens a new one.
+     *
+     * Floors at zero and is a no-op for a missing or expired key — releasing
+     * more than was counted must never leave a negative budget that a later
+     * increment has to climb out of.
+     *
+     * @return int The counter value after the release (0 when missing/expired).
+     */
+    public function decrement(string $key): int;
+
+    /**
      * Return the current counter value for $key.
      *
      * Returns 0 if the key does not exist or has expired. Does NOT modify
