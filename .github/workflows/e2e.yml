@@ -8,18 +8,10 @@ on:
     branches:
       - main
       - develop
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'LICENSE'
   pull_request:
     branches:
       - main
       - develop
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'LICENSE'
 
 # A newer push to the same ref obsoletes the in-flight run; never queue two.
 concurrency:
@@ -27,11 +19,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Path filtering lives HERE rather than on the workflow triggers.
+  #
+  # `paths-ignore` at the trigger level means a docs-only PR produces no check
+  # runs at all — and a required check that never reports blocks the PR
+  # forever. Filtering per job keeps the shards cheap on a docs-only change
+  # while still reporting a verdict branch protection can require.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            app:
+              - '!(docs/**|**/*.md|LICENSE)'
+
   e2e:
     # Keep this `/4`, the matrix below and the `--shard=` flag at the bottom in
     # step with each other — Playwright derives the split from the flag, the
     # other two only label it.
     name: Playwright shard ${{ matrix.shard }}/4
+    needs: [changes]
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -175,3 +192,59 @@ jobs:
             web/test-results
           retention-days: 7
           if-no-files-found: ignore
+
+  # ONE verdict branch protection can require, mirroring `CI gate` in
+  # automated-tests.yml.
+  #
+  # The four shards are a matrix, so their check names carry the shard number,
+  # and a docs-only PR skips them entirely — neither is something a required
+  # check can name reliably. This job always runs, depends on all of them, and
+  # reports once. A SKIPPED shard is a pass; that is the path filter working.
+  #
+  # Adding a job above? Add it to `needs` here, or it is not covered.
+  e2e-gate:
+    name: E2E gate
+    if: always()
+    needs:
+      - changes
+      - e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Without this, adding a job above and forgetting to list it in `needs`
+      # silently drops it from the protected gate: it still runs, still goes
+      # red, and merging is no longer blocked by it. That is the failure this
+      # job exists to prevent, so it is checked rather than trusted.
+      - name: The gate must cover every job in this workflow
+        run: |
+          python3 - <<'PYEOF'
+          import sys, yaml
+          d = yaml.safe_load(open('.github/workflows/e2e.yml'))
+          jobs = set(d['jobs']) - {'e2e-gate'}
+          needs = set(d['jobs']['e2e-gate']['needs'])
+          missing = sorted(jobs - needs)
+          if missing:
+              for j in missing:
+                  print(f"::error::job '{j}' is not in the E2E gate's `needs`, so branch protection does not cover it")
+              sys.exit(1)
+          print(f"gate covers all {len(jobs)} job(s)")
+          PYEOF
+
+      - name: Every required job succeeded or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, sys
+          results = json.loads(os.environ['RESULTS'])
+          bad = sorted(n for n, v in results.items() if v['result'] not in ('success', 'skipped'))
+          for n, v in sorted(results.items()):
+              print(f"  {n}: {v['result']}")
+          if bad:
+              print("::error::E2E gate failed — these jobs did not pass:")
+              for n in bad:
+                  print(f"::error::  {n}")
+              sys.exit(1)
+          print("E2E gate passed.")
+          PYEOF
