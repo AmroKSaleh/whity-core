@@ -38,11 +38,12 @@ npm run tauri dev
 ```
 
 This opens a desktop window with a sidebar (Home / Demo Catalog / Printer
-demo / PHP plugin host). The Demo Catalog list/create/edit flow persists to a
+demo / Plugins). The Demo Catalog list/create/edit flow persists to a
 real SQLite file in your OS's per-app data directory (see `src-tauri/src/db.rs`)
-— close the app and reopen it, your data is still there. The PHP plugin host
-screen exercises the offline FrankenPHP process described below, including a
-real native-print round trip through a whity plugin.
+— close the app and reopen it, your data is still there. The Plugins screen
+reports on the offline FrankenPHP process described below — what's actually
+loaded from the last automatic server sync, not a manual install control (see
+[The offline PHP plugin host](#the-offline-php-plugin-host)).
 
 ## Project layout
 
@@ -172,21 +173,36 @@ Rust (src-tauri/src/php_host/) ──spawns──▶ FrankenPHP ──serves─�
                               plugin code calls back into Rust ◀────┘  for native hardware
 ```
 
-**Four real plugins ship today**, proving this works for arbitrary plugins,
-not just a hand-built demo: `DemoCatalog` and `HelloWorld` (vendored
-byte-for-byte from the main repo's `plugins/`), `UiKitShowcase` (same), and
-`PrintDemo` (new, ~40 lines — the one plugin that calls back into Rust to
-print, via `Whity\Native\NativeBridgeClient`).
+**`php-host/plugins/` ships empty.** Earlier revisions of this template
+vendored four example plugins (`DemoCatalog`, `HelloWorld`, `UiKitShowcase`,
+`PrintDemo`) here to prove the loader works for arbitrary plugin code before
+real sync existed. They're gone now that plugin sync is real and mandatory
+(see below) — a bundled example plugin would always load regardless of what
+the connected tenant's actual catalog says, which is exactly the divergence
+mandatory sync exists to prevent. `php-host/plugins/` remains the *bundled,
+read-only* root (`PLUGINS_ROOT`) for a fork that genuinely wants an
+always-on local plugin shipped in the installer; it's just empty by default.
 
-**The host is a real, generic loader, not a fixed two-plugin allowlist**:
+**Real plugins arrive via mandatory server sync, not this bundled root.**
+Every successful login reconciles this device's plugins to exactly match the
+connected backend's catalog — installing what's missing, updating what's
+stale, removing what's revoked — into a second, writable root
+(`WHITY_DOWNLOADED_PLUGINS_ROOT`) that the Rust sidecar sets automatically.
+There is no manual install control anywhere in the UI; see
+`src-tauri/src/plugins/reconcile.rs` and `src-tauri/src/commands/post_login.rs`.
+The `/plugins` screen only reports the outcome of the last sync and what's
+currently loaded.
 
-- **Discovery.** `php-host/plugins/` is scanned at boot and any class
-  implementing `PluginInterface` is picked up automatically — drop a new
-  plugin directory in and it loads with zero config (set `WHITY_PLUGINS` to
-  an explicit comma-separated FQCN list instead, if you want to pin exactly
-  what ships). A plugin declaring an incompatible `PluginRequirementsInterface`
-  constraint is quarantined (logged, skipped) rather than crashing the whole
-  host — check `GET /__whity/plugins` for the loaded/quarantined list.
+**The host is a real, generic loader, not a fixed allowlist**:
+
+- **Discovery.** Both plugin roots are scanned at boot and any class
+  implementing `PluginInterface` is picked up automatically — bundled first,
+  then downloaded, so a downloaded plugin can never shadow a bundled one (set
+  `WHITY_PLUGINS` to an explicit comma-separated FQCN list instead, if you
+  want to pin exactly what ships). A plugin declaring an incompatible
+  `PluginRequirementsInterface` constraint is quarantined (logged, skipped)
+  rather than crashing the whole host — check `GET /__whity/plugins` for the
+  loaded/quarantined list.
 - **Hooks.** `getHooks()` subscriptions really fire, with the same
   priority-ordered dispatch and per-plugin error boundary as the real server
   (a generic exception is swallowed and logged; `HookVetoException` is the

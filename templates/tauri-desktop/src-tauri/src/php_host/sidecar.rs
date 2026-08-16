@@ -1,6 +1,7 @@
 //! Spawns and supervises the FrankenPHP child process serving the offline
-//! PHP plugin host (the vendored `php-host/` app — DemoCatalog + PrintDemo
-//! running unmodified against local SQLite).
+//! PHP plugin host (the vendored `php-host/` app — real whity plugins,
+//! synced from the connected backend, running unmodified against local
+//! SQLite; see `plugins::reconcile`).
 //!
 //! Uses `Shell::command()` with an absolute, resource-resolved path to
 //! `frankenphp.exe` rather than `Shell::sidecar()` + `bundle.externalBin`.

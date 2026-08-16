@@ -94,6 +94,15 @@ final class PluginRuntimeLoader
      * discovered independently, then every candidate is merged into ONE
      * `instantiateAndGate()` call so cross-root duplicate names are caught by
      * the existing gate rather than needing bespoke merge logic here.
+     *
+     * A directory name already seen in an earlier (bundled-first) root is
+     * passed to PluginDiscovery::discover() to skip entirely — same
+     * first-root-wins rule registerPluginNamespaces() already applies to the
+     * PSR-4 mapping, extended here to the require_once step itself. Without
+     * this, two roots that legitimately ship a same-named plugin (e.g. a
+     * bundled copy and that same plugin also present in the connected
+     * server's catalog) would both get require_once'd and PHP would fatal
+     * with "Cannot redeclare class" instead of quarantining the shadowed one.
      */
     public function loadDiscovered(): void
     {
@@ -101,11 +110,40 @@ final class PluginRuntimeLoader
         $this->registerAutoloader();
 
         $fqcns = [];
+        $claimedDirectoryNames = [];
         foreach ($this->pluginsRoots as $root) {
-            array_push($fqcns, ...PluginDiscovery::discover($root));
+            array_push($fqcns, ...PluginDiscovery::discover($root, $claimedDirectoryNames));
+            array_push($claimedDirectoryNames, ...self::directoryNamesUnder($root));
         }
 
         $this->instantiateAndGate($fqcns);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function directoryNamesUnder(string $root): array
+    {
+        if (!is_dir($root)) {
+            return [];
+        }
+
+        $items = scandir($root);
+        if ($items === false) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($items as $item) {
+            if (str_starts_with($item, '.')) {
+                continue;
+            }
+            if (is_dir($root . '/' . $item)) {
+                $names[] = $item;
+            }
+        }
+
+        return $names;
     }
 
     /**
