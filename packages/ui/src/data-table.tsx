@@ -92,6 +92,16 @@ export interface DataTableProps<TData> {
   /** Header text for the row-actions column. Defaults to "Actions". */
   rowActionsLabel?: string
   /**
+   * Accessible name for the table element.
+   *
+   * A page with two DataTables gives assistive technology — and any test
+   * selecting by role — two identical, unnamed `table` landmarks with no way to
+   * tell them apart. Naming them is the a11y answer and it is what makes
+   * `getByRole('table', { name })` a stable selector instead of a positional
+   * guess that breaks the next time a panel is added.
+   */
+  ariaLabel?: string
+  /**
    * Title shown when there are no rows and the caller passed no `emptyState`.
    * `emptyState` still wins — this only replaces the built-in English default,
    * so a caller translating just this string does not have to reconstruct the
@@ -147,6 +157,7 @@ export function DataTable<TData>({
   enableGlobalFilter = false,
   globalFilterPlaceholder = "Search…",
   rowActionsLabel = "Actions",
+  ariaLabel,
   emptyStateTitle = "No data available",
   columnFilterPlaceholder = "Filter…",
   columnsMenuLabel = "Columns",
@@ -264,7 +275,7 @@ export function DataTable<TData>({
     const visibleCount = table.getVisibleLeafColumns().length
     return (
       <div className={cn("rounded-lg border border-border", className)}>
-        <Table>
+        <Table aria-label={ariaLabel}>
           <TableHeader>
             <TableRow>
               {columns.map((column, index) => (

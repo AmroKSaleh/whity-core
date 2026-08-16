@@ -1,0 +1,213 @@
+# Step 1 of the release pipeline: prepare the version bump.
+#
+# THE PIPELINE, END TO END
+#
+#   feature/… ──PR──▶ develop
+#                        │
+#      (1) you run this workflow with a version
+#                        │
+#                        ▼
+#            release/X.Y.Z ──PR──▶ develop     ← you merge
+#                                     │
+#      (2) release-promote.yml sees the bump land
+#                                     ▼
+#                         develop ──PR──▶ main ← you merge
+#                                            │
+#      (3) release.yml sees main move, tags it,
+#          builds both images, publishes the Release,
+#          and opens the back-merge PR
+#
+# Two merges by a human; everything else is automatic. The merges stay manual on
+# purpose: `main` and `develop` refuse direct pushes from everyone including
+# admins, and a release pipeline that needs that protection relaxed to function
+# would trade a real safety property for two clicks.
+#
+# This workflow only ever writes to a NEW `release/X.Y.Z` branch. It cannot move
+# develop or main, so the worst a mistaken run can do is leave an unmerged branch
+# and a PR you close.
+name: Release — prepare
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, without the leading v (e.g. 0.2.2)'
+        required: true
+        type: string
+      ref:
+        description: 'Commit or branch to cut from (default: develop)'
+        required: false
+        default: 'develop'
+        type: string
+
+jobs:
+  prepare:
+    name: Bump version and open the release PR
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout the commit being released
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          # The CHANGELOG edit and the version comparison both need history.
+          fetch-depth: 0
+
+      - name: Validate the requested version
+        id: check
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          # Reject a leading v rather than silently accepting it: the tag is
+          # built as v$VERSION later, and "vv0.2.2" would fail much further
+          # along, after a branch and a PR already existed.
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Version must be MAJOR.MINOR.PATCH with no leading 'v' (got '${VERSION}')."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag v${VERSION} already exists. Releases are immutable — pick a new version."
+            exit 1
+          fi
+
+          CURRENT=$(grep -oE "VERSION = '[^']+'" src/Core/CoreVersion.php | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+          echo "Current: ${CURRENT} → requested: ${VERSION}"
+
+          # Strictly increasing, compared numerically per component. A version
+          # that goes backwards would make `update:check` tell every deployment
+          # it is ahead of the latest release.
+          if [ "$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)" != "$VERSION" ] || [ "$CURRENT" = "$VERSION" ]; then
+            echo "::error::Requested version ${VERSION} is not greater than the current ${CURRENT}."
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "branch=release/${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_sqlite
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Bump CoreVersion and date the CHANGELOG
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          # `php --`, not `php -`: PHP has no "-" convention for stdin and
+          # treats it as a filename ("Could not open input file: -"). With no
+          # file argument it reads the script from stdin, and `--` separates
+          # that from the arguments that become $argv.
+          php -- "$VERSION" <<'PHP'
+          <?php
+          $version = $argv[1];
+
+          $path = 'src/Core/CoreVersion.php';
+          $src  = file_get_contents($path);
+          $out  = preg_replace("/VERSION = '[^']+'/", "VERSION = '{$version}'", $src, 1, $n);
+          if ($n !== 1) {
+              fwrite(STDERR, "::error::Could not find the VERSION constant in {$path}\n");
+              exit(1);
+          }
+          file_put_contents($path, $out);
+
+          // Close [Unreleased] into a dated section and leave a fresh heading
+          // behind, so the next cycle has somewhere to write without anyone
+          // having to remember to re-open it.
+          $path = 'CHANGELOG.md';
+          $log  = file_get_contents($path);
+          if (substr_count($log, '## [Unreleased]') !== 1) {
+              fwrite(STDERR, "::error::Expected exactly one '## [Unreleased]' heading in CHANGELOG.md\n");
+              exit(1);
+          }
+          $today = gmdate('Y-m-d');
+          $log = str_replace(
+              '## [Unreleased]',
+              "## [Unreleased]\n\n## [{$version}] - {$today}",
+              $log
+          );
+          file_put_contents($path, $log);
+          PHP
+
+      - name: Regenerate the OpenAPI spec and typed clients
+        run: |
+          # The spec embeds the version, and both typed clients are generated
+          # from the spec, so all three drift gates fail unless they are
+          # regenerated here.
+          #
+          # Doing this in CI rather than on a laptop is deliberate: the
+          # generator runs the LIVE router, so a locally-installed plugin would
+          # publish its routes into core's public contract. A clean checkout has
+          # only the in-tree plugins, which is exactly what the spec should
+          # describe.
+          php public/index.php generate:openapi
+          npx openapi-typescript public/openapi.json -o web/lib/api/schema.d.ts
+          npx openapi-typescript public/openapi.json -o packages/api-client/src/schema.d.ts
+
+      - name: Verify the version is consistent everywhere
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          SPEC=$(php -r 'echo json_decode(file_get_contents("public/openapi.json"), true)["info"]["version"];')
+          CORE=$(php -r "require 'vendor/autoload.php'; echo \Whity\Core\CoreVersion::VERSION;")
+          if [ "$CORE" != "$VERSION" ] || [ "$SPEC" != "$VERSION" ]; then
+            echo "::error::Version mismatch after bump — CoreVersion=${CORE}, openapi=${SPEC}, expected ${VERSION}."
+            exit 1
+          fi
+
+      - name: Commit and push the release branch
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          BRANCH="${{ steps.check.outputs.branch }}"
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "release: ${VERSION}
+
+          Bumps CoreVersion and dates the CHANGELOG section. The release
+          workflow refuses any tag whose name is not v + this constant, so this
+          has to land before the tag.
+
+          public/openapi.json carries the version, and both typed clients are
+          generated from it, so all three are regenerated here."
+          git push origin "$BRANCH"
+
+      - name: Open the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          gh pr create \
+            --base develop \
+            --head "${{ steps.check.outputs.branch }}" \
+            --title "release: ${VERSION}" \
+            --body "Prepared by **Release — prepare** from \`${{ inputs.ref }}\`.
+
+          Bumps \`CoreVersion::VERSION\` to \`${VERSION}\`, dates the CHANGELOG section, and regenerates \`public/openapi.json\` plus both typed clients (the spec embeds the version and the clients are generated from it, so the drift gates fail otherwise).
+
+          ### What happens when you merge this
+
+          1. \`release-promote.yml\` notices the bump landed on \`develop\` and opens a **develop → main** PR.
+          2. Merging that one makes \`release.yml\` tag \`main\` as \`v${VERSION}\`, build and push both images, smoke-test them, publish the GitHub Release, and open the back-merge PR.
+
+          Nothing is tagged or published until **main** moves, so closing this PR cancels the release cleanly.
+
+          ### Before merging
+
+          Read the CHANGELOG section this dated. It is the release notes."

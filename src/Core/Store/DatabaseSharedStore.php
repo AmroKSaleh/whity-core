@@ -57,6 +57,29 @@ final class DatabaseSharedStore implements SharedStoreInterface
         return (int) ($row[0] ?? 1);
     }
 
+    public function decrement(string $key): int
+    {
+        // Single atomic statement, like increment(): the CASE floors the counter
+        // at zero in the same round trip, so two concurrent releases can never
+        // drive the window negative. `expires_at` is deliberately NOT touched —
+        // a refund belongs to the window that charged the unit.
+        $stmt = $this->pdo->prepare("
+            UPDATE shared_store
+               SET counter    = CASE WHEN counter > 0 THEN counter - 1 ELSE 0 END,
+                   updated_at = CURRENT_TIMESTAMP
+             WHERE store_key = :key
+               AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+            RETURNING counter
+        ");
+        $stmt->execute([':key' => $key]);
+
+        $row = $stmt->fetch(PDO::FETCH_NUM);
+
+        // No row matched: the key is missing or its window already elapsed —
+        // nothing to refund, and resurrecting it would be worse than a no-op.
+        return $row === false ? 0 : (int) $row[0];
+    }
+
     public function count(string $key): int
     {
         $stmt = $this->pdo->prepare("

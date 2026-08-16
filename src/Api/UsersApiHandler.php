@@ -77,6 +77,13 @@ use PDO;
  * cross-tenant authority: it lists/reads across ALL tenants (unscoped, with a
  * `@tenant-guard-ignore:` annotation) and may target any tenant's membership on
  * write, per the pre-cutover contract.
+ *
+ * That authority is IMPLICIT everywhere above — the target tenant is inferred
+ * from an existing membership — which is why none of it could attach a profile
+ * to a tenant it was not already in (#797 §2). {@see self::addMembership()} is
+ * the one place it becomes EXPLICIT: a `tenant_id` in the body, honoured for a
+ * tenant-0 caller and refused for anyone else. The write still stamps the TARGET
+ * tenant; acting across tenants never means writing tenant 0.
  */
 class UsersApiHandler
 {
@@ -646,9 +653,29 @@ class UsersApiHandler
                     )->execute([$newEmail, $profileId]);
                 }
                 if ($passwordChanged && $newPasswordHash !== null) {
+                    // token_epoch is bumped WITH the hash, never separately.
+                    //
+                    // A password change is a credential change and must
+                    // invalidate every existing session — which is the whole
+                    // point when an administrator resets an account they
+                    // believe is compromised. Without the bump the attacker's
+                    // session survives the reset, and the administrator is left
+                    // believing they closed a door that is still open.
+                    //
+                    // PasswordResetService and AuthHandler::handleUpdateMe()
+                    // have always done this; this path did not, so it was the
+                    // one credential change that left sessions alive.
+                    //
+                    // Deliberately does NOT touch any two_factor_* column: an
+                    // administrator resetting a password must not silently
+                    // strip 2FA from an account that still has an authenticator
+                    // enrolled. Clearing 2FA is a separate, explicit action.
+                    //
                     // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
                     $this->db->prepare(
-                        'UPDATE profiles SET password_hash = ?, updated_at = NOW() WHERE id = ?'
+                        'UPDATE profiles
+                            SET password_hash = ?, token_epoch = token_epoch + 1, updated_at = NOW()
+                          WHERE id = ?'
                     )->execute([$newPasswordHash, $profileId]);
                 }
                 if ($accountStatusChanged && $newAccountStatus !== null) {
@@ -836,11 +863,17 @@ class UsersApiHandler
     }
 
     /**
-     * GET /api/users/{id}/memberships — every role this profile holds here.
+     * GET /api/users/{id}/memberships — every role this profile holds.
      *
      * The user LIST deliberately shows one row per person carrying their PRIMARY
      * role (#780), so a second role is invisible there by design. This is where
      * it becomes visible.
+     *
+     * SCOPE (#797 §2): a tenant sees its OWN memberships and nothing else. The
+     * SYSTEM tenant (0) sees EVERY tenant the profile belongs to — the "which
+     * tenants is this person in?" question, which had no API at all and was
+     * answered by reading the table by hand. Each row therefore names its tenant;
+     * for a tenant caller that is a constant, for tenant 0 it is the point.
      *
      * @param array<string, mixed> $params  Route params (expects `id` = profile_id).
      */
@@ -857,30 +890,59 @@ class UsersApiHandler
                 return Response::error('Tenant context required', 400);
             }
 
-            $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
-            if ($membership === null) {
-                return Response::error('User not found', 404);
-            }
-            $ownerTenantId = (int) $membership['tenant_id'];
+            // The two statements are written out in full rather than sharing a
+            // SELECT fragment: the tenant predicate is the security boundary and
+            // the CI guard reads these literals, so a query assembled from parts
+            // hides the very thing both a reviewer and the guard are looking for.
+            if ($currentTenantId === self::SYSTEM_TENANT_ID) {
+                // A profile with no membership anywhere is an empty list, not a
+                // 404: "this person is in no tenant" is an answer the operator
+                // needs, and it is exactly the state a repair leaves behind.
+                if (!$this->profileExists($profileId)) {
+                    return Response::error('User not found', 404);
+                }
 
-            $stmt = $this->db->prepare(
-                'SELECT m.id, m.role_id, r.name AS role, m.ou_id, m.is_primary, m.status
-                   FROM memberships m
-                   JOIN roles r ON r.id = m.role_id
-                  WHERE m.profile_id = ? AND m.tenant_id = ?
-                  ORDER BY m.is_primary DESC, m.id ASC'
-            );
-            $stmt->execute([$profileId, $ownerTenantId]);
+                // @tenant-guard-ignore: system-tenant (id 0) lists a profile's memberships across all tenants; scoped else-branch binds m.tenant_id = ?
+                $stmt = $this->db->prepare(
+                    'SELECT m.id, m.tenant_id, t.name AS tenant_name, m.role_id, r.name AS role,
+                            m.ou_id, m.is_primary, m.status
+                       FROM memberships m
+                       JOIN roles r ON r.id = m.role_id
+                       LEFT JOIN tenants t ON t.id = m.tenant_id
+                      WHERE m.profile_id = ?
+                      ORDER BY m.tenant_id ASC, m.is_primary DESC, m.id ASC'
+                );
+                $stmt->execute([$profileId]);
+            } else {
+                $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
+                if ($membership === null) {
+                    return Response::error('User not found', 404);
+                }
+                $ownerTenantId = (int) $membership['tenant_id'];
+
+                $stmt = $this->db->prepare(
+                    'SELECT m.id, m.tenant_id, t.name AS tenant_name, m.role_id, r.name AS role,
+                            m.ou_id, m.is_primary, m.status
+                       FROM memberships m
+                       JOIN roles r ON r.id = m.role_id
+                       LEFT JOIN tenants t ON t.id = m.tenant_id
+                      WHERE m.profile_id = ? AND m.tenant_id = ?
+                      ORDER BY m.is_primary DESC, m.id ASC'
+                );
+                $stmt->execute([$profileId, $ownerTenantId]);
+            }
 
             $rows = [];
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $rows[] = [
-                    'id'        => (int) $row['id'],
-                    'roleId'    => (int) $row['role_id'],
-                    'role'      => (string) $row['role'],
-                    'ou_id'     => $row['ou_id'] !== null ? (int) $row['ou_id'] : null,
-                    'isPrimary' => (bool) $row['is_primary'],
-                    'status'    => (string) $row['status'],
+                    'id'         => (int) $row['id'],
+                    'tenantId'   => (int) $row['tenant_id'],
+                    'tenantName' => (string) ($row['tenant_name'] ?? ''),
+                    'roleId'     => (int) $row['role_id'],
+                    'role'       => (string) $row['role'],
+                    'ou_id'      => $row['ou_id'] !== null ? (int) $row['ou_id'] : null,
+                    'isPrimary'  => (bool) $row['is_primary'],
+                    'status'     => (string) $row['status'],
                 ];
             }
 
@@ -896,10 +958,10 @@ class UsersApiHandler
     }
 
     /**
-     * POST /api/users/{id}/memberships — grant an ADDITIONAL role in this tenant.
+     * POST /api/users/{id}/memberships — grant a role in a tenant.
      *
      * The doctor attending in Emergency who also part-times in Family Medicine:
-     * a second membership, its own role, its own OU. The row is written
+     * a second membership, its own role, its own OU. Such a row is written
      * `is_primary = false`, because the primary row is what answers "what is this
      * person here?" for display and defaults, and there must stay exactly one of
      * those — migration 094's partial unique index enforces it.
@@ -908,6 +970,23 @@ class UsersApiHandler
      * returns the existing membership instead of creating a duplicate. There is
      * no unique constraint on (profile, tenant, role) — a duplicate secondary row
      * would be meaningless rather than illegal — so this is enforced here.
+     *
+     * CROSS-TENANT (#797 §2)
+     * ----------------------
+     * An optional `tenant_id` names the tenant to grant IN, honoured only for a
+     * SYSTEM-tenant (0) caller. It is what closes the reported gap: until now
+     * every write path derived the tenant from the caller's own context, so
+     * putting one profile in two tenants meant an INSERT by hand. When the
+     * profile has no membership in the target yet, THAT row is the target
+     * tenant's primary — it is the answer to "what is this person here".
+     *
+     * Widening this endpoint rather than POST /api/users is deliberate: that
+     * endpoint's contract is "create a person HERE", and a second, cross-tenant
+     * mode bolted onto it is how an endpoint acquires two meanings. Memberships
+     * are already the thing being manipulated.
+     *
+     * An explicit `tenant_id` from a non-system caller is REFUSED, not ignored: a
+     * field that is accepted and silently discarded teaches the caller it worked.
      *
      * @param array<string, mixed> $params  Route params (expects `id` = profile_id).
      */
@@ -924,13 +1003,52 @@ class UsersApiHandler
                 return Response::error('Tenant context required', 400);
             }
 
-            $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
-            if ($membership === null) {
-                return Response::error('User not found', 404);
-            }
-            $ownerTenantId = (int) $membership['tenant_id'];
-
             $body = json_decode($request->getBody(), true);
+            // Read the target BEFORE the body is validated as a whole, so the two
+            // branches below can keep their own error ordering. A malformed body
+            // carries no `tenant_id` by definition and therefore takes the
+            // unchanged branch, which still answers 404-before-400 as it always
+            // did.
+            $requestedTenantId = is_array($body) ? ($body['tenant_id'] ?? null) : null;
+
+            if ($requestedTenantId === null || $requestedTenantId === '') {
+                // Unchanged: the tenant is the caller's, and the profile must
+                // already be in it.
+                $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
+                if ($membership === null) {
+                    return Response::error('User not found', 404);
+                }
+                $ownerTenantId = (int) $membership['tenant_id'];
+                $isCrossTenant = false;
+            } else {
+                if ($currentTenantId !== self::SYSTEM_TENANT_ID) {
+                    return Response::error('Only the system tenant may name a target tenant', 403);
+                }
+
+                // Rejecting a non-integer HERE keeps `{"tenant_id": "sales"}` a
+                // clean 400 rather than an "invalid input syntax for integer"
+                // driver error surfacing as an opaque 500 on PostgreSQL.
+                if (!is_int($requestedTenantId)
+                    && !(is_string($requestedTenantId) && ctype_digit($requestedTenantId))
+                ) {
+                    return Response::error('Invalid tenant_id', 400);
+                }
+
+                $ownerTenantId = (int) $requestedTenantId;
+                if (!$this->tenantExists($ownerTenantId)) {
+                    return Response::error('Tenant not found', 404);
+                }
+
+                // The profile need NOT be in the target tenant — that is the
+                // whole point — so its existence is checked against the global
+                // identity table instead of a membership.
+                if (!$this->profileExists($profileId)) {
+                    return Response::error('User not found', 404);
+                }
+
+                $isCrossTenant = true;
+            }
+
             if (!is_array($body)) {
                 return Response::error('Invalid request body', 400);
             }
@@ -943,7 +1061,16 @@ class UsersApiHandler
             // Same visibility rule as create/update: a tenant may grant only its
             // own roles or a global one, so this cannot become a way to attach
             // another tenant's role.
-            $roleId = $this->resolveVisibleRoleId($roleRef, $currentTenantId, $ownerTenantId);
+            //
+            // The cross-tenant branch resolves against the TARGET tenant rather
+            // than through the system tenant's usual unscoped lookup. The system
+            // tenant assigning any role is harmless while it is acting AS the
+            // owning tenant; here the caller names both, so an unscoped lookup
+            // would let tenant A's private permission set take effect inside
+            // tenant B — a cross-tenant leak written one role id at a time.
+            $roleId = $isCrossTenant
+                ? $this->resolveRoleIdVisibleToTenant($roleRef, $ownerTenantId)
+                : $this->resolveVisibleRoleId($roleRef, $currentTenantId, $ownerTenantId);
             if ($roleId === null) {
                 return Response::error('Role not found', 404);
             }
@@ -976,6 +1103,7 @@ class UsersApiHandler
                 return Response::json([
                     'data' => [
                         'id'        => (int) $found['id'],
+                        'tenantId'  => $ownerTenantId,
                         'roleId'    => $roleId,
                         'ou_id'     => $ouId,
                         'isPrimary' => (bool) $found['is_primary'],
@@ -984,9 +1112,21 @@ class UsersApiHandler
                 ]);
             }
 
+            // The FIRST membership in a tenant is that tenant's primary row —
+            // without one, every single-row read ("what is this person here?")
+            // has no answer. Only reachable cross-tenant: the unchanged branch
+            // requires an existing membership, so it is always an extra role.
+            $isPrimary = $isCrossTenant
+                && $this->fetchMembershipInTenant($profileId, $ownerTenantId) === null;
+
+            // A literal, not a placeholder: PostgreSQL rejects the integer 1/0 a
+            // bound PHP bool becomes for a BOOLEAN column, which SQLite accepts
+            // happily — the class of divergence that only shows up in CI's
+            // PostgreSQL shard.
+            $primaryLiteral = $isPrimary ? 'true' : 'false';
             $insert = $this->db->prepare(
                 "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, is_primary, status, created_at)
-                 VALUES (?, ?, ?, ?, false, 'active', NOW())"
+                 VALUES (?, ?, ?, ?, {$primaryLiteral}, 'active', NOW())"
             );
             $insert->execute([$profileId, $ownerTenantId, $roleId, $ouId]);
             $newId = (int) $this->db->lastInsertId();
@@ -1003,9 +1143,10 @@ class UsersApiHandler
             return Response::json([
                 'data' => [
                     'id'        => $newId,
+                    'tenantId'  => $ownerTenantId,
                     'roleId'    => $roleId,
                     'ou_id'     => $ouId,
-                    'isPrimary' => false,
+                    'isPrimary' => $isPrimary,
                     'created'   => true,
                 ],
             ], 201);
@@ -1028,6 +1169,13 @@ class UsersApiHandler
      * what is this person here". Removing someone from a tenant is
      * DELETE /api/users/{id}, which takes every row.
      *
+     * The SYSTEM tenant (0) resolves the tenant from the MEMBERSHIP ROW rather
+     * than from its own context, so a grant it just made in another tenant (#797
+     * §2) is revocable in-product instead of by hand. The row's id already names
+     * exactly one tenant, so nothing is being guessed — and every statement below
+     * still binds THAT tenant_id, never 0. Previously this branch resolved some
+     * arbitrary tenant of the profile's, which could only delete by luck.
+     *
      * @param array<string, mixed> $params  Route params (`id` = profile_id, `membershipId`).
      */
     public function removeMembership(Request $request, array $params): Response
@@ -1044,11 +1192,18 @@ class UsersApiHandler
                 return Response::error('Tenant context required', 400);
             }
 
-            $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
-            if ($membership === null) {
-                return Response::error('User not found', 404);
+            if ($currentTenantId === self::SYSTEM_TENANT_ID) {
+                $ownerTenantId = $this->tenantOfMembership($membershipId, $profileId);
+                if ($ownerTenantId === null) {
+                    return Response::error('Membership not found', 404);
+                }
+            } else {
+                $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
+                if ($membership === null) {
+                    return Response::error('User not found', 404);
+                }
+                $ownerTenantId = (int) $membership['tenant_id'];
             }
-            $ownerTenantId = (int) $membership['tenant_id'];
 
             $stmt = $this->db->prepare(
                 'SELECT id, is_primary FROM memberships
@@ -1247,12 +1402,43 @@ class UsersApiHandler
             // @tenant-guard-ignore: system-tenant role resolution; scoped else-branch binds (tenant_id = ? OR tenant_id IS NULL)
             $stmt = $this->db->prepare("SELECT id FROM roles WHERE {$column} = ? LIMIT 1");
             $stmt->execute([$value]);
-        } else {
-            $stmt = $this->db->prepare(
-                "SELECT id FROM roles WHERE {$column} = ? AND (tenant_id = ? OR tenant_id IS NULL) LIMIT 1"
-            );
-            $stmt->execute([$value, $scopeTenantId]);
+
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row === false || !isset($row['id'])) {
+                return null;
+            }
+
+            return (int)$row['id'];
         }
+
+        return $this->resolveRoleIdVisibleToTenant($roleRef, $scopeTenantId);
+    }
+
+    /**
+     * Resolve a role reference to a role id VISIBLE to one named tenant: owned by
+     * it (`roles.tenant_id = ?`) or GLOBAL (`roles.tenant_id IS NULL`).
+     *
+     * Split out of {@see self::resolveVisibleRoleId()} because the cross-tenant
+     * membership grant (#797 §2) names its target tenant explicitly and must be
+     * scoped to THAT tenant, not to the acting one — a system caller granting in
+     * tenant B must not be able to reach tenant A's private roles.
+     *
+     * @param mixed    $roleRef  Role name string or numeric role id.
+     * @param int|null $tenantId The tenant whose visibility applies. Null (no
+     *                           resolvable acting tenant) matches GLOBAL roles
+     *                           only, which is what the predicate already did.
+     * @return int|null The resolved, visible role id, or null when not found.
+     */
+    private function resolveRoleIdVisibleToTenant(mixed $roleRef, ?int $tenantId): ?int
+    {
+        $byId = is_int($roleRef) || (is_string($roleRef) && $roleRef !== '' && ctype_digit($roleRef));
+        $column = $byId ? 'id' : 'name';
+        $value = $byId ? (int) $roleRef : (string) $roleRef;
+
+        $stmt = $this->db->prepare(
+            "SELECT id FROM roles WHERE {$column} = ? AND (tenant_id = ? OR tenant_id IS NULL) LIMIT 1"
+        );
+        $stmt->execute([$value, $tenantId]);
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false || !isset($row['id'])) {
@@ -1260,6 +1446,58 @@ class UsersApiHandler
         }
 
         return (int)$row['id'];
+    }
+
+    /**
+     * Whether the global profile exists at all.
+     *
+     * The cross-tenant grant (#797 §2) cannot ask "is this profile a member
+     * here?" — the answer is no by construction, that being the request — so
+     * existence is checked against the identity table itself.
+     */
+    private function profileExists(int $profileId): bool
+    {
+        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+        $stmt = $this->db->prepare('SELECT 1 FROM profiles WHERE id = ? LIMIT 1');
+        $stmt->execute([$profileId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Whether the named tenant exists.
+     *
+     * Checked before the INSERT so a mistyped `tenant_id` is a 404 rather than a
+     * foreign-key violation surfacing as an opaque 500.
+     */
+    private function tenantExists(int $tenantId): bool
+    {
+        $stmt = $this->db->prepare('SELECT 1 FROM tenants WHERE id = ? LIMIT 1');
+        $stmt->execute([$tenantId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * The tenant a membership row belongs to, for the SYSTEM-tenant delete path.
+     *
+     * `memberships.id` is a primary key, so this identifies exactly one tenant —
+     * the caller is not choosing it, the row is. Pairing it with the profile id
+     * from the route keeps a membership id belonging to somebody else from being
+     * deleted through another profile's URL.
+     *
+     * @return int|null The owning tenant id, or null when there is no such row.
+     */
+    private function tenantOfMembership(int $membershipId, int $profileId): ?int
+    {
+        // @tenant-guard-ignore: system-tenant (id 0) resolves a membership's OWN tenant from its primary key; every statement that follows binds that tenant_id
+        $stmt = $this->db->prepare(
+            'SELECT tenant_id FROM memberships WHERE id = ? AND profile_id = ? LIMIT 1'
+        );
+        $stmt->execute([$membershipId, $profileId]);
+        $tenantId = $stmt->fetchColumn();
+
+        return $tenantId === false ? null : (int) $tenantId;
     }
 
     /**

@@ -95,6 +95,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'error_tracking.notify_admins',
             'error_tracking.retention_days',
             'i18n.enabled',
+            'auth.invitation_ttl_days',
         ];
     }
 
@@ -196,6 +197,10 @@ final class SettingsRegistryCorePinTest extends TestCase
             // shipped before its flag did, so defaulting it off would switch a
             // live feature off on every existing deployment at upgrade time.
             'i18n.enabled' => 'true',
+            // WHIT-417. Tenant-overridable rather than global-only: the tenant
+            // issuing an invitation is the one that knows how long its own
+            // people need to act on it.
+            'auth.invitation_ttl_days' => '7',
         ];
     }
 
@@ -279,6 +284,15 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['i18n.enabled', 'false', true],
             ['i18n.enabled', '1', false],
             ['i18n.enabled', 'off', false],
+            // The invitation lifetime is bounded at both ends, mirroring
+            // InvitationService's clamp — a value the API accepts must be one
+            // the service honours rather than silently narrows.
+            ['auth.invitation_ttl_days', '7', true],
+            ['auth.invitation_ttl_days', '1', true],
+            ['auth.invitation_ttl_days', '90', true],
+            ['auth.invitation_ttl_days', '0', false],
+            ['auth.invitation_ttl_days', '91', false],
+            ['auth.invitation_ttl_days', 'a week', false],
             ['branding_favicon', 'anything', false],
             ['not_a_setting_at_all', 'x', false],
         ];

@@ -120,6 +120,59 @@ final class SharedStoreContractTest extends TestCase
         self::assertSame(1, $this->store->count('k1'));
     }
 
+    // ── decrement ────────────────────────────────────────────────────────────
+
+    public function testDecrementReleasesASingleUnit(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->increment('k1', 60);
+        self::assertSame(1, $this->store->decrement('k1'));
+        self::assertSame(1, $this->store->count('k1'));
+    }
+
+    public function testDecrementFloorsAtZero(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->decrement('k1');
+        self::assertSame(0, $this->store->decrement('k1'));
+        self::assertSame(0, $this->store->count('k1'));
+    }
+
+    public function testDecrementOnMissingKeyIsANoOp(): void
+    {
+        self::assertSame(0, $this->store->decrement('ghost'));
+        self::assertSame(0, $this->store->count('ghost'));
+    }
+
+    public function testDecrementDoesNotResurrectAnExpiredWindow(): void
+    {
+        $this->store->increment('k1', -1); // already expired
+        self::assertSame(0, $this->store->decrement('k1'));
+        self::assertSame(0, $this->store->count('k1'));
+    }
+
+    public function testDecrementKeepsTheWindowAliveSoTheNextIncrementDoesNotResetIt(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->increment('k1', 60);
+        $this->store->decrement('k1');
+
+        // The expiry must be the ORIGINAL one — a released unit is a refund
+        // inside the current window, not a new window.
+        self::assertGreaterThan(0, $this->store->ttl('k1'));
+        self::assertSame(2, $this->store->increment('k1', 60));
+    }
+
+    public function testDecrementOnlyTouchesTargetKey(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->increment('k2', 60);
+        $this->store->decrement('k1');
+
+        self::assertSame(0, $this->store->count('k1'));
+        self::assertSame(1, $this->store->count('k2'));
+    }
+
     // ── delete ───────────────────────────────────────────────────────────────
 
     public function testDeleteEvictsKey(): void

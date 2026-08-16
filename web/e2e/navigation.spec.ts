@@ -17,8 +17,14 @@ test.describe('Sidebar navigation (admin)', () => {
     await adminPage.shell.clickNav('Users');
     await page.waitForURL('**/admin/users');
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
-    await expect(page.getByRole('table')).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Email' })).toBeVisible();
+    // The page renders TWO tables (users, and pending invitations), and both
+    // have an Email column — so every query here has to be scoped to one of
+    // them, not just the query for the table element itself. Naming the table
+    // and then searching the whole page again would fix the first strict-mode
+    // violation and leave the second.
+    const usersTable = page.getByRole('table', { name: 'Users' });
+    await expect(usersTable).toBeVisible();
+    await expect(usersTable.getByRole('columnheader', { name: 'Email' })).toBeVisible();
   });
 
   test('Roles section loads its page with heading, table and Create button', async ({

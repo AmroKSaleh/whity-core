@@ -186,9 +186,9 @@ feature/… ──▶ develop ──▶ main ──▶ tag v0.x.y
 - **`main` receives `develop`** when a release is being cut, plus direct
   bug-fix PRs for anything that must ship without waiting for the rest of
   `develop`.
-- **Tags are cut on `main`.** The release workflow refuses a tag whose name is
-  not `v` + `CoreVersion::VERSION`, so the version bump lands in a normal PR
-  first (see [`Core-Update.md`](docs/wiki/Core-Update.md)).
+- **Releases are cut by the pipeline, not by hand.** You run one workflow and
+  merge two PRs; the tag, both images, the GitHub Release and the back-merge are
+  automatic. See [Cutting a release](#cutting-a-release) below.
 
 Both branches are protected identically: a PR is required, and `CI gate`,
 `CodeQL` and `Semgrep SAST (PHP + JS/TS)` must pass. Neither accepts a direct
@@ -196,6 +196,58 @@ push, force-push or deletion — including from admins. `CI gate` is one job tha
 depends on every other job in `automated-tests.yml` and reports a single
 verdict, because the individual jobs are path-filtered and a required check that
 never reports would block a PR forever.
+
+### Cutting a release
+
+Run **Actions → Release — prepare**, give it a version (`0.2.2`, no leading `v`),
+and merge the two PRs it produces. Nothing else is manual.
+
+```
+  you: run "Release — prepare" with a version
+        │
+        ▼
+  release/X.Y.Z ──PR──▶ develop          ← you merge  (1)
+        │
+        │  bumps CoreVersion, dates the CHANGELOG,
+        │  regenerates openapi.json + both typed clients
+        ▼
+  release-promote.yml sees the bump land on develop
+        │
+        ▼
+  develop ──PR──▶ main                    ← you merge  (2)
+        │
+        ▼
+  release.yml sees main move and:
+    · runs the full gate suite
+    · builds + pushes BOTH images
+    · smoke-tests the PUBLISHED images (/login 200, /api/health ok)
+    · tags main as vX.Y.Z            ← only now, after everything passed
+    · creates the GitHub Release
+    · opens the back-merge PR         ← you merge  (3, zero file changes)
+```
+
+Why it is shaped this way:
+
+- **The two merges stay human.** `main` and `develop` refuse direct pushes from
+  everyone, admins included. A pipeline that needed that relaxed to run would
+  trade a real safety property for two clicks.
+- **The tag is created last**, after the suite, both image builds and the smoke
+  test. Releases are immutable, so a tag orphaned by a failed build cannot be
+  moved — the next attempt would need a new version number for a failure that
+  had nothing to do with the code. Creating it at the end makes a failed run
+  simply re-runnable.
+- **Pushing to `main` does not always release.** `release.yml` only proceeds
+  when `v` + `CoreVersion::VERSION` has no tag yet, so ordinary fixes can land
+  on `main` without publishing anything.
+- **Merge the develop → main PR with a merge commit, never a squash.** A squash
+  creates a commit that exists nowhere on `develop`, leaving the branches
+  permanently divergent and turning every later release into a conflict.
+- **Regeneration happens in CI, not on a laptop.** `generate:openapi` runs the
+  live router, so a locally-installed plugin publishes its routes into core's
+  public contract. A clean CI checkout has only the in-tree plugins.
+
+Pushing a `vX.Y.Z` tag by hand still works, as an escape hatch for re-running a
+release whose publish step failed.
 
 ### Branch naming
 

@@ -287,6 +287,118 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ── memberships: the explicit cross-tenant grant (#797 §2) ──────────────
+    //
+    // POST /api/users/{id}/memberships takes an optional `tenant_id`, which is
+    // the ONLY write path in the platform that names a tenant other than the
+    // caller's. Three things have to hold: a tenant cannot use it at all, the
+    // system tenant's write lands in the TARGET tenant rather than tenant 0, and
+    // it cannot carry a role across the boundary with it.
+
+    /**
+     * A tenant naming another tenant is refused, and the refusal writes nothing.
+     *
+     * Profile 102 (Bob) lives in Tenant B. Tenant A asking to grant him a role
+     * "in tenant 2" would otherwise be a membership Tenant A had no authority to
+     * create — the single most direct way to breach isolation through this API.
+     */
+    public function testTenantCannotUseTenantIdToGrantMembershipInAnotherTenant(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $before = $this->countRows('SELECT COUNT(*) FROM memberships WHERE tenant_id = 2');
+
+        $response = $this->usersHandler()->addMembership(
+            $this->req('POST', '/api/users/102/memberships', ['role_id' => 2, 'tenant_id' => self::TENANT_B]),
+            ['id' => '102']
+        );
+
+        $this->assertSame(403, $response->getStatusCode(), 'only the system tenant may name a target tenant');
+        $this->assertSame(
+            $before,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE tenant_id = 2'),
+            'the refused grant left Tenant B exactly as it was'
+        );
+    }
+
+    /**
+     * The system tenant's grant is stamped with the TARGET tenant.
+     *
+     * A system caller holds tenant 0 in its context, so the failure mode this
+     * pins is writing 0 into `memberships.tenant_id` — which would silently make
+     * the grantee a platform administrator instead of a member of Tenant A.
+     */
+    public function testSystemTenantGrantWritesTheTargetTenantNotZero(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->usersHandler()->addMembership(
+            $this->req('POST', '/api/users/102/memberships', ['role_id' => 2, 'tenant_id' => self::TENANT_A], self::SYSTEM_TENANT),
+            ['id' => '102']
+        );
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(
+            1,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 102 AND tenant_id = 1'),
+            'the membership belongs to Tenant A'
+        );
+        $this->assertSame(
+            0,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 102 AND tenant_id = 0'),
+            'the system tenant acts across tenants; it does not absorb the membership'
+        );
+    }
+
+    /**
+     * A role private to Tenant A cannot be attached to a membership in Tenant B.
+     *
+     * The system tenant resolves roles unscoped everywhere else, which is safe
+     * while it is acting AS the owning tenant. Here the caller names the target
+     * tenant, so an unscoped lookup would let Tenant A's private permission set
+     * take effect inside Tenant B.
+     */
+    public function testSystemTenantGrantCannotPlantAForeignPrivateRole(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->usersHandler()->addMembership(
+            $this->req('POST', '/api/users/102/memberships', ['role_id' => 100, 'tenant_id' => self::TENANT_B], self::SYSTEM_TENANT),
+            ['id' => '102']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), "Tenant A's private role is not visible in Tenant B");
+        $this->assertSame(
+            0,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE role_id = 100 AND tenant_id = 2'),
+            "no Tenant-B membership may carry Tenant A's private role"
+        );
+    }
+
+    /**
+     * The system tenant's membership LIST spans every tenant the profile is in.
+     * Alice (101) is in both tenants by fixture.
+     */
+    public function testMembershipListSpansTenantsForTheSystemTenant(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $rows = $this->listData($this->usersHandler()->listMemberships(
+            $this->req('GET', '/api/users/101/memberships', null, self::SYSTEM_TENANT),
+            ['id' => '101']
+        ));
+
+        $this->assertSame([1, 2], array_column($rows, 'tenantId'));
+    }
+
+    /** A tenant's membership list still stops at its own boundary. */
+    public function testMembershipListStaysScopedForATenant(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $rows = $this->listData($this->usersHandler()->listMemberships(
+            $this->req('GET', '/api/users/101/memberships'),
+            ['id' => '101']
+        ));
+
+        $this->assertSame([1], array_column($rows, 'tenantId'), 'Tenant A must not see the Tenant-B membership');
+    }
+
     // ==================== users: 2FA reads/writes (WC-191) ====================
 
     /**
@@ -1343,6 +1455,222 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ==================== resource_role_assignments ====================
+
+    /**
+     * WC-712 §3: listing the grants at a resource is scoped by `tenant_id`, not
+     * inferred from the resource.
+     *
+     * The fixture seeds a Tenant B row at resource_id 10 — Tenant A's OU. That
+     * row could not be written through the API (the create path rejects a
+     * foreign resource), and that is the point: this proves the READ predicate
+     * on its own, rather than relying on the write guard to keep the table
+     * clean. `resource_id` carries no foreign key, so ids DO collide across
+     * tenants in normal use and the predicate is the only thing separating them.
+     */
+    public function testResourceRoleGrantListIsTenantScoped(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->list(
+            $this->req('GET', '/api/resource-role-grants?resource_type=ou&resource_id=10')
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true);
+        $roleIds = array_column($data['data'], 'role_id');
+        $this->assertContains(100, $roleIds, "Tenant A must see its own grant at its own resource");
+        $this->assertNotContains(
+            200,
+            $roleIds,
+            "Tenant B's grant at the same resource id must never appear in Tenant A's list"
+        );
+    }
+
+    /**
+     * WC-712 §3: Tenant A cannot address a grant at Tenant B's OU — the resource
+     * is not found for Tenant A (404) and no row is written.
+     */
+    public function testTenantCannotGrantAtForeignResourceAndRowStaysAbsent(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->create($this->req(
+            'POST',
+            '/api/resource-role-grants',
+            ['resource_type' => 'ou', 'resource_id' => 20, 'role_id' => 100]
+        ));
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign resource must report not-found');
+        $this->assertSame(
+            0,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments
+                  WHERE resource_type = 'ou' AND resource_id = 20 AND role_id = 100"
+            ),
+            'No spurious cross-tenant resource_role_assignments row may exist after the rejected grant'
+        );
+    }
+
+    /**
+     * WC-712 §3: a resource grant must not become a way to attach another
+     * tenant's PRIVATE role to your own record — the leak would be written one
+     * role id at a time. Reported as not-found so the role's existence is never
+     * disclosed.
+     */
+    public function testTenantCannotAttachForeignPrivateRoleToItsOwnResource(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->create($this->req(
+            'POST',
+            '/api/resource-role-grants',
+            ['resource_type' => 'ou', 'resource_id' => 10, 'role_id' => 200]
+        ));
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign role must be not-found, never forbidden');
+        $this->assertStringNotContainsString(
+            'tenant-b-private',
+            $response->getBody(),
+            'The refusal must not leak the Tenant B role name'
+        );
+        $this->assertSame(
+            0,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments
+                  WHERE tenant_id = 1 AND resource_id = 10 AND role_id = 200"
+            ),
+            "Tenant B's private role must not be attached to Tenant A's resource"
+        );
+    }
+
+    /**
+     * WC-712 §3: revoking is by grant id, so the tenant predicate on the DELETE
+     * is what stops a caller walking ids into another tenant's rows.
+     */
+    public function testTenantCannotRevokeForeignGrantAndRowSurvives(): void
+    {
+        $foreignId = $this->grantId(self::TENANT_B, 20);
+        $this->assertGreaterThan(0, $foreignId, 'Fixture: Tenant B must hold a grant at its own OU');
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->revoke(
+            $this->req('DELETE', '/api/resource-role-grants/' . $foreignId),
+            ['id' => (string) $foreignId]
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign grant revoke must report not-found');
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE id = {$foreignId}"
+            ),
+            "Tenant B's grant must survive a cross-tenant revoke attempt"
+        );
+    }
+
+    /**
+     * WC-712 §3 (positive control): Tenant A revokes its OWN grant and the row
+     * is gone, while Tenant B's row is untouched — so the test above is proving
+     * the predicate, not a revoke path that never works.
+     */
+    public function testOwnResourceGrantRevokeSucceedsAndLeavesForeignRowIntact(): void
+    {
+        $ownId = $this->grantId(self::TENANT_A, 10);
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->revoke(
+            $this->req('DELETE', '/api/resource-role-grants/' . $ownId),
+            ['id' => (string) $ownId]
+        );
+
+        $this->assertSame(204, $response->getStatusCode(), "Tenant A's own grant revoke must succeed");
+        $this->assertSame(
+            0,
+            $this->countRows("SELECT COUNT(*) FROM resource_role_assignments WHERE id = {$ownId}"),
+            "Tenant A's own grant must be gone"
+        );
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 2 AND resource_id = 20"
+            ),
+            "Tenant B's grant must be untouched by Tenant A's own-grant revoke"
+        );
+    }
+
+    /**
+     * WC-712 §4: the bulk cleanup is the single worst thing this surface could
+     * get wrong — one call that removes rows in bulk, addressed by a
+     * `resource_id` that carries no foreign key and therefore COLLIDES across
+     * tenants in normal use.
+     *
+     * The fixture's third row is Tenant B's grant at resource_id 10, which is
+     * Tenant A's OU. Tenant A wiping its own resource must leave it standing.
+     * That route deliberately does not ask the owning plugin to vouch for the
+     * resource (the record is usually already deleted by then), so the
+     * `tenant_id` predicate is the ONLY thing keeping the cleanup inside the
+     * caller's tenant — which is exactly what this pins.
+     */
+    public function testResourceGrantRevokeAllDoesNotTouchForeignRowsAtTheSameResourceId(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->revokeAll(
+            $this->req('DELETE', '/api/resource-role-grants/all?resource_type=ou&resource_id=10')
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $data = json_decode($response->getBody(), true);
+        $this->assertSame(1, $data['data']['revoked'], "Only Tenant A's row may be counted as revoked");
+
+        $this->assertSame(
+            0,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 1 AND resource_id = 10"
+            ),
+            "Tenant A's own grant must be gone"
+        );
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 2 AND resource_id = 10"
+            ),
+            "Tenant B's grant at the SAME resource id must survive Tenant A's cleanup"
+        );
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 2 AND resource_id = 20"
+            ),
+            "Tenant B's grant at its own resource must be untouched"
+        );
+    }
+
+    /**
+     * WC-712 §4: aiming the cleanup at ANOTHER tenant's resource removes
+     * nothing and reports a plain, successful zero.
+     *
+     * Not a 404 on purpose: the caller is deleting a record and a cleanup that
+     * had nothing to clean is a normal outcome. Answering "not found" for a
+     * foreign id would also confirm the id is not the caller's — a probe. The
+     * count is what tells the truth: zero rows, zero disclosure.
+     */
+    public function testResourceGrantRevokeAllAtAForeignResourceRemovesNothing(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->resourceRoleGrantsHandler()->revokeAll(
+            $this->req('DELETE', '/api/resource-role-grants/all?resource_type=ou&resource_id=20')
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $data = json_decode($response->getBody(), true);
+        $this->assertSame(0, $data['data']['revoked'], "A foreign resource must yield an empty cleanup");
+        $this->assertSame(
+            1,
+            $this->countRows(
+                "SELECT COUNT(*) FROM resource_role_assignments WHERE tenant_id = 2 AND resource_id = 20"
+            ),
+            "Tenant B's grant must survive Tenant A aiming a cleanup at Tenant B's resource"
+        );
+    }
+
     // ==================== role_permissions (tenant-scoped via parent role) ====================
 
     /**
@@ -1775,6 +2103,44 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    /**
+     * The id of the resource_role_assignments row a tenant holds at a resource.
+     *
+     * Fetched rather than hardcoded: the fixture inserts without explicit ids so
+     * the sequence assigns them, and PostgreSQL and SQLite need not agree.
+     */
+    private function grantId(int $tenantId, int $resourceId): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id FROM resource_role_assignments
+              WHERE tenant_id = ? AND resource_type = ? AND resource_id = ?'
+        );
+        $stmt->execute([$tenantId, 'ou', $resourceId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * The RoleChecker is mocked permissive on purpose: this suite proves TENANT
+     * isolation, so the handler must be shown to refuse a cross-tenant row even
+     * when the caller's permissions are not in question.
+     */
+    private function resourceRoleGrantsHandler(): \Whity\Api\ResourceRoleGrantsApiHandler
+    {
+        $roleChecker = $this->createMock(RoleChecker::class);
+        $roleChecker->method('hasPermissionForProfile')->willReturn(true);
+
+        $resourceTypes = new \Whity\Core\RBAC\ResourceTypeRegistry();
+
+        return new \Whity\Api\ResourceRoleGrantsApiHandler(
+            $this->pdo,
+            new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($this->pdo, $resourceTypes),
+            $resourceTypes,
+            $roleChecker,
+            $this->hooks()
+        );
+    }
+
     private function hooks(): HookManager
     {
         $hooks = $this->createMock(HookManager::class);
@@ -1792,6 +2158,22 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $request->user = (object) ['profile_id' => 99, 'active_tenant_id' => $tenantId];
 
         return $request;
+    }
+
+    /**
+     * A single COUNT(*) as an int.
+     *
+     * PDO::query() returns PDOStatement|false, so chaining ->fetchColumn() onto
+     * it is a static-analysis error rather than a style nit. The older
+     * assertions in this file carry that in the PHPStan baseline; new ones go
+     * through here instead of growing it.
+     */
+    private function countRows(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertInstanceOf(\PDOStatement::class, $stmt);
+
+        return (int) $stmt->fetchColumn();
     }
 
     /**
@@ -2127,6 +2509,86 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertNotNull($bCreate, "Tenant B's own override for the same key must be independent of Tenant A's");
     }
 
+    // ==================== invitations (WHIT-417) ====================
+    //
+    // An invitation belongs to the tenant that issued it and carries that
+    // tenant's role and OU, so every administrator-facing read and write binds
+    // tenant_id. The token-driven lookups deliberately do NOT — they run on the
+    // public accept endpoint, where the token is the only authority — which is
+    // why the tenant boundary has to hold on the id-addressed operations here.
+
+    public function testInvitationListIsTenantScoped(): void
+    {
+        $service = $this->invitationService();
+        $service->invite(self::TENANT_A, 'a-invitee@t1.example', 2);
+        $service->invite(self::TENANT_B, 'b-invitee@t2.example', 2);
+
+        $emailsA = array_column($service->listForTenant(self::TENANT_A), 'email');
+        $emailsB = array_column($service->listForTenant(self::TENANT_B), 'email');
+
+        self::assertSame(['a-invitee@t1.example'], $emailsA);
+        self::assertSame(['b-invitee@t2.example'], $emailsB, "Tenant A's invitation must be invisible to Tenant B");
+    }
+
+    public function testTenantCannotRevokeForeignInvitationAndItStillWorks(): void
+    {
+        $service = $this->invitationService();
+        $invite = $service->invite(self::TENANT_B, 'b-invitee@t2.example', 2);
+
+        self::assertFalse(
+            $service->revoke($invite['id'], self::TENANT_A),
+            'A cross-tenant revoke must touch zero rows.'
+        );
+        self::assertNotNull(
+            $service->preview($invite['token']),
+            "Tenant B's invitation must still be usable after Tenant A's rejected revoke."
+        );
+        self::assertSame(
+            'pending',
+            $service->listForTenant(self::TENANT_B)[0]['status'],
+            "Tenant B's row must be byte-for-byte untouched."
+        );
+    }
+
+    public function testTenantCannotResendForeignInvitationAndItsTokenSurvives(): void
+    {
+        $service = $this->invitationService();
+        $invite = $service->invite(self::TENANT_B, 'b-invitee@t2.example', 2);
+
+        self::assertNull(
+            $service->resend($invite['id'], self::TENANT_A),
+            'A cross-tenant resend must find nothing.'
+        );
+        self::assertNotNull(
+            $service->preview($invite['token']),
+            "Tenant B's original token must not be rotated out from under it by another tenant."
+        );
+    }
+
+    public function testInvitingTheSameAddressInTwoTenantsKeepsTheRowsIndependent(): void
+    {
+        $service = $this->invitationService();
+        $a = $service->invite(self::TENANT_A, 'shared@example.test', 2);
+        $b = $service->invite(self::TENANT_B, 'shared@example.test', 2);
+
+        // Tenant A supersedes only its OWN outstanding invitation.
+        $service->invite(self::TENANT_A, 'shared@example.test', 2);
+
+        self::assertNull($service->preview($a['token']));
+        self::assertNotNull(
+            $service->preview($b['token']),
+            "Tenant B's invitation must survive Tenant A re-inviting the same address."
+        );
+    }
+
+    private function invitationService(): \Whity\Core\Identity\InvitationService
+    {
+        return new \Whity\Core\Identity\InvitationService(
+            $this->pdo,
+            new \Whity\Core\Identity\ProfileProvisioner($this->pdo)
+        );
+    }
+
     /** The 'en' language id seeded by migration 082 (SeedBaseLanguages). */
     private function englishLanguageId(): int
     {
@@ -2275,6 +2737,22 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             INSERT INTO ou_role_assignments (tenant_id, ou_id, role_id, created_at) VALUES
                 (1, 10, 100, datetime('now')),
                 (2, 20, 200, datetime('now'))
+        ");
+
+        // resource_role_assignments (migration 088): the polymorphic grant table.
+        // Tenant A holds role 100 at its own OU 10; Tenant B holds role 200 at its
+        // own OU 20. The THIRD row is the important one — Tenant B claiming a
+        // grant at resource_id 10, which is Tenant A's OU. The API would refuse to
+        // write it, and seeding it by hand is deliberate: `resource_id` carries no
+        // foreign key, so ids collide across tenants in normal use and the
+        // tenant_id predicate is the only thing that separates them. A read test
+        // that never sees a colliding id proves nothing.
+        $pdo->exec("
+            INSERT INTO resource_role_assignments
+                (tenant_id, resource_type, resource_id, role_id, profile_id, created_at) VALUES
+                (1, 'ou', 10, 100, NULL, datetime('now')),
+                (2, 'ou', 20, 200, NULL, datetime('now')),
+                (2, 'ou', 10, 200, NULL, datetime('now'))
         ");
 
         // persons: two standalone (non-profile-linked) persons, one per tenant, so

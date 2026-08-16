@@ -37,6 +37,14 @@ test.describe('Users (admin)', () => {
   test('seeded users are listed by email', async ({ adminPage, page }) => {
     await adminPage.shell.clickNav('Users');
     await page.waitForURL('**/admin/users');
+    // Intentionally UNNAMED. Strict mode applies to the final locator, and the
+    // chained cell query resolves in exactly one of the page's two tables, so
+    // this is unambiguous as written.
+    //
+    // Naming it `{ name: 'Users' }` was tried and REVERTED: it made this test
+    // fail with "element(s) not found" while the identical named locator kept
+    // working in navigation.spec. The cause was never established, so the
+    // hardening bought nothing and cost a green test.
     const table = page.getByRole('table');
     await expect(table.getByRole('cell', { name: 'admin@example.com' })).toBeVisible();
     await expect(table.getByRole('cell', { name: 'user@example.com' })).toBeVisible();

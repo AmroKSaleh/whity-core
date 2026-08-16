@@ -1095,6 +1095,24 @@ $router->register('GET',  '/api/password-resets/pending',      [$passwordResetAp
 $router->register('POST', '/api/password-resets/{id:\d+}/approve', [$passwordResetApprovalsHandler, 'approve'], null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
 $router->register('POST', '/api/password-resets/{id:\d+}/reject',  [$passwordResetApprovalsHandler, 'reject'],  null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
 
+// WC-797: the administrator-facing half of the same domain. "Send this user a
+// reset link" reuses the service and mailer built above rather than adding a
+// second way to change someone's password; the coverage endpoint answers
+// "would this change leave the tenant with nobody able to approve a reset?".
+// Coverage is gated on USERS_READ, not PASSWORD_RESETS_APPROVE — the whole point
+// is to warn an administrator who is NOT an approver.
+$adminPasswordResetHandler = new \Whity\Api\AdminPasswordResetApiHandler(
+    $db->getPdo(),
+    $passwordResetService,
+    $passwordResetMailer,
+    $profileEmailRepository,
+    $auditLogger,
+    $settingsService,
+    $roleChecker
+);
+$router->register('POST', '/api/users/{id:\d+}/password-reset',      [$adminPasswordResetHandler, 'sendResetLink'],     null, null, CorePermissions::USERS_WRITE);
+$router->register('GET',  '/api/password-resets/approver-coverage',  [$adminPasswordResetHandler, 'approverCoverage'], null, null, CorePermissions::USERS_READ);
+
 $twoFactorRecoveryService = new \Whity\Core\Identity\TwoFactorRecoveryService(
     $db->getPdo(),
     $passwordResetService,
@@ -1132,6 +1150,46 @@ $router->register('POST', '/api/2fa-recovery/{id:\d+}/reject',   [$twoFactorReco
 // directly onto a named profile, e.g. when the locked-out user cannot even
 // receive email and reaches an admin out-of-band.
 $router->register('POST', '/api/2fa-recovery/force-reset',       [$twoFactorRecoveryApprovalsHandler, 'forceReset'],  null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
+
+// 10d. Tenant invitations (WHIT-417 / #797 item 3) — how a tenant administrator
+// onboards somebody without an operator typing a password. The admin surface is
+// tenant-scoped and gated on the SAME users:read/users:write a role needs to add
+// a user by hand; the accept pair is public and unauthenticated, because the
+// invitee has no session and may have no account at all.
+$invitationService = new \Whity\Core\Identity\InvitationService(
+    $db->getPdo(),
+    new \Whity\Core\Identity\ProfileProvisioner($db->getPdo())
+);
+$invitationUrlBase = (string) ($_ENV['INVITATION_ACCEPT_URL'] ?? getenv('INVITATION_ACCEPT_URL')
+    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/accept-invitation'));
+$invitationMailer = new \Whity\Core\Identity\InvitationMailer(
+    $mailer,
+    $invitationUrlBase,
+    new \Whity\Core\Mail\EmailLayout(),
+    $settingsService
+);
+$invitationsHandler = new \Whity\Api\InvitationsApiHandler(
+    $db->getPdo(),
+    $invitationService,
+    $roleChecker,
+    $auditLogger,
+    new DatabaseSharedStore($db->getPdo()),
+    $settingsService,
+    $invitationMailer
+);
+$invitationAcceptHandler = new \Whity\Api\InvitationAcceptHandler(
+    $invitationService,
+    new DatabaseSharedStore($db->getPdo()),
+    $auditLogger
+);
+// The public pair is registered FIRST so `/invitations/accept` can never be
+// shadowed by a future `/invitations/{something}` route.
+$router->register('GET',  '/api/invitations/accept', [$invitationAcceptHandler, 'preview'], null);
+$router->register('POST', '/api/invitations/accept', [$invitationAcceptHandler, 'accept'], null);
+$router->register('GET',    '/api/invitations',                  [$invitationsHandler, 'list'],   null, null, CorePermissions::USERS_READ);
+$router->register('POST',   '/api/invitations',                  [$invitationsHandler, 'create'], null, null, CorePermissions::USERS_WRITE);
+$router->register('POST',   '/api/invitations/{id:\d+}/resend',  [$invitationsHandler, 'resend'], null, null, CorePermissions::USERS_WRITE);
+$router->register('DELETE', '/api/invitations/{id:\d+}',         [$invitationsHandler, 'revoke'], null, null, CorePermissions::USERS_WRITE);
 
 // 11. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
@@ -1675,6 +1733,35 @@ $router->register('DELETE', '/api/entity-tags', [$entityTagsHandler, 'detach'], 
 // WC-714 §6: a plugin's record-delete cleanup hook. Distinct path so a
 // malformed single-detach body can never degrade into "remove everything".
 $router->register('DELETE', '/api/entity-tags/all', [$entityTagsHandler, 'detachAll'], null, null, CorePermissions::TAGS_MANAGE);
+
+// 13b-quater. Resource-scoped role grants (WC-712 §3) — the WRITE path for
+// `resource_role_assignments`.
+//
+// §2 shipped resolution but no way to create what it resolves, so a consumer
+// could ask the platform "does this profile hold this role at this record?"
+// while still having to store that authority in its own table — two sources of
+// truth for one question, which is what resource-scoped grants exist to remove.
+//
+// Gated on the EXISTING roles:read / roles:manage rather than a new permission.
+// A new one needs a grant migration, and such a migration reaches the `admin`
+// role only: every operator running a custom administrative role would silently
+// not have the feature.
+$resourceRoleGrantsHandler = new \Whity\Api\ResourceRoleGrantsApiHandler(
+    $db->getPdo(),
+    new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($db->getPdo(), $resourceTypeRegistry),
+    $resourceTypeRegistry,
+    $roleChecker,
+    $hookManager
+);
+$router->register('GET',    '/api/resource-role-grants',          [$resourceRoleGrantsHandler, 'list'],   null, null, CorePermissions::ROLES_READ);
+$router->register('POST',   '/api/resource-role-grants',          [$resourceRoleGrantsHandler, 'create'], null, null, CorePermissions::ROLES_MANAGE);
+$router->register('DELETE', '/api/resource-role-grants/{id:\d+}', [$resourceRoleGrantsHandler, 'revoke'], null, null, CorePermissions::ROLES_MANAGE);
+// WC-712 §4: the record-delete cleanup an owner runs when it deletes the record
+// itself, mirroring DELETE /api/entity-tags/all. A distinct `/all` path (never
+// `\d+`, so it cannot collide with the by-id revoke above) rather than an
+// argument-shape variant, so a malformed single-revoke can never degrade into
+// "remove everything".
+$router->register('DELETE', '/api/resource-role-grants/all', [$resourceRoleGrantsHandler, 'revokeAll'], null, null, CorePermissions::ROLES_MANAGE);
 
 // 13b-ter. Generated lifecycle surface for plugin-declared data types
 // (WC-723 Door 2). One handler serves EVERY registered type: the shape of a

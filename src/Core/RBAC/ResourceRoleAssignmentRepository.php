@@ -113,6 +113,54 @@ class ResourceRoleAssignmentRepository
     }
 
     /**
+     * Revoke ONE grant by its own id, tenant scoped.
+     *
+     * The id-addressed counterpart of {@see revoke()}. An id names exactly one
+     * row, so nothing has to re-encode "everyone here" versus "this profile
+     * here" — the distinction {@see revoke()} must carry through a nullable
+     * argument, and the one an HTTP caller cannot express unambiguously because
+     * an omitted query parameter and an explicit null look identical.
+     *
+     * The `tenant_id` predicate is what makes an id safe to accept from a
+     * client: another tenant's grant id matches nothing, so a caller probing
+     * ids can neither delete nor detect a row that is not its own.
+     */
+    public function revokeById(int $tenantId, int $id): bool
+    {
+        $statement = $this->db->prepare(
+            'DELETE FROM resource_role_assignments WHERE id = ? AND tenant_id = ?'
+        );
+        $statement->execute([$id, $tenantId]);
+
+        $removed = $statement->rowCount() > 0;
+        if ($removed) {
+            \Whity\Auth\RoleChecker::clearCache();
+        }
+
+        return $removed;
+    }
+
+    /**
+     * The id of an existing grant, or null.
+     *
+     * Exists so an idempotent caller can answer "which row already says this?"
+     * — {@see grant()} reports only THAT the grant existed, and a caller that
+     * has to return the row's id would otherwise re-derive this query, taking
+     * the nullable-profile_id match with it.
+     */
+    public function findGrantId(
+        int $tenantId,
+        string $resourceType,
+        int $resourceId,
+        int $roleId,
+        ?int $profileId = null
+    ): ?int {
+        $row = $this->find($tenantId, $resourceType, $resourceId, $roleId, $profileId);
+
+        return $row === null ? null : (int) $row['id'];
+    }
+
+    /**
      * Every grant at one resource, tenant scoped.
      *
      * @return list<array{id: int, role_id: int, profile_id: int|null}>

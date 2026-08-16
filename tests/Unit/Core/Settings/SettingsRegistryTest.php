@@ -48,7 +48,8 @@ final class SettingsRegistryTest extends TestCase
              'error_tracking.retention_days',
              // WC-i18n-feature-flag. The master switch for the whole interface
              // language surface; ENABLED by default (see SettingsRegistry).
-             'i18n.enabled'],
+             'i18n.enabled',
+             'auth.invitation_ttl_days'],
             SettingsRegistry::keys()
         );
     }
@@ -81,12 +82,14 @@ final class SettingsRegistryTest extends TestCase
         // Only the genuinely tenant-overridable text keys remain: site_name,
         // timezone, locale, support_email, mcp.enabled, the desktop login TTL,
         // the three render batch limits (ADR 0012 — a per-tenant ceiling is
-        // meaningful, unlike the render_enabled master switch itself) and the
-        // bulk lifecycle batch ceiling (WC-746, per-tenant for the same reason).
+        // meaningful, unlike the render_enabled master switch itself), the
+        // bulk lifecycle batch ceiling (WC-746, per-tenant for the same reason)
+        // and the invitation TTL (WHIT-417 — how long an invite stays valid is
+        // a tenant's own onboarding policy, not a platform constant).
         self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
         self::assertContains('data_types.bulk_max_ids', SettingsRegistry::tenantTextKeys());
         self::assertFalse(SettingsRegistry::isGlobalOnly('data_types.bulk_max_ids'));
-        self::assertCount(10, SettingsRegistry::tenantTextKeys());
+        self::assertCount(11, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -209,7 +212,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(52, $describe);
+        self::assertCount(53, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

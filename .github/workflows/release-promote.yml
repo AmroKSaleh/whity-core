@@ -1,0 +1,94 @@
+# Step 2 of the release pipeline: promote a landed version bump to `main`.
+#
+# Fires when a commit touching src/Core/CoreVersion.php lands on `develop` —
+# i.e. the `release: X.Y.Z` PR was merged. It opens the develop → main PR and
+# stops there; a human merges it, because `main` refuses direct pushes and that
+# protection is worth more than the click it costs.
+#
+# WHY THE TRIGGER IS THE FILE, NOT A TAG OR A LABEL
+#
+# CoreVersion::VERSION is the single value the whole release is keyed on — the
+# tag must equal `v` + it, and the published spec embeds it. Watching the file
+# that holds it means the pipeline cannot be started by anything OTHER than a
+# real version bump, and cannot be missed by someone who forgot a label.
+#
+# It is a no-op when the version did not actually change (a comment edit in that
+# file) or when the tag already exists, so re-running it is harmless.
+name: Release — promote to main
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'src/Core/CoreVersion.php'
+
+jobs:
+  promote:
+    name: Open the develop → main release PR
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether this is a release
+        id: decide
+        run: |
+          VERSION=$(grep -oE "VERSION = '[^']+'" src/Core/CoreVersion.php | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+          echo "Version on develop: ${VERSION}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "::notice::v${VERSION} is already tagged — this push changed CoreVersion.php without changing the version. Nothing to promote."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Nothing to promote when main already carries this version: the
+          # release is mid-flight (or done) and re-opening the PR would just
+          # create a duplicate.
+          git fetch --quiet origin main
+          MAIN_VERSION=$(git show origin/main:src/Core/CoreVersion.php | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+          if [ "$MAIN_VERSION" = "$VERSION" ]; then
+            echo "::notice::main is already at ${VERSION}. Nothing to promote."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "go=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open the release PR to main
+        if: steps.decide.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.decide.outputs.version }}"
+
+          # Reuse an open develop → main PR rather than stacking a second one.
+          EXISTING=$(gh pr list --base main --head develop --state open --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "::notice::PR #${EXISTING} already promotes develop to main; leaving it alone."
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head develop \
+            --title "release: ${VERSION} to main" \
+            --body "Opened automatically because \`release: ${VERSION}\` landed on \`develop\`.
+
+          ### Merging this publishes the release
+
+          \`release.yml\` watches \`main\`. When this merges it will, in order: run the full gate suite, tag \`main\` as \`v${VERSION}\`, build and push **both** images under that tag, smoke-test the published images (\`GET /login\` → 200 and \`/api/health\` → ok), create the GitHub Release, and open the back-merge PR.
+
+          The tag is created **after** the gates pass and the images are proven to boot, so a failed run leaves no tag behind and can simply be re-run.
+
+          ### Merge with a MERGE COMMIT, not a squash
+
+          Squashing would collapse this into one commit that exists nowhere on \`develop\`, leaving the two branches permanently divergent and turning every future release into a conflict."

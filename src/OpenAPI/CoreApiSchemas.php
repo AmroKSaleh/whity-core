@@ -110,8 +110,10 @@ final class CoreApiSchemas
             self::twoFactorPolicyRoutes(),
             self::tagRoutes(),
             self::passwordResetRoutes(),
+            self::invitationRoutes(),
             self::twoFactorRecoveryRoutes(),
-            self::dataTypeRoutes()
+            self::dataTypeRoutes(),
+            self::resourceRoleGrantRoutes()
         );
     }
 
@@ -494,8 +496,11 @@ final class CoreApiSchemas
             // WC-712 §1: a profile may hold more than one role in a tenant. The
             // user list carries only the PRIMARY one (one row per person), so
             // these are where an additional role is seen, granted and revoked.
+            // #797 §2: they are also where a profile is attached to a tenant it
+            // is not yet in — the only write path that names a tenant other than
+            // the caller's, and only a tenant-0 caller may use it.
             self::adminRoute('GET', '/api/users/{id:\d+}/memberships', [
-                'summary' => 'List every role a user holds in this tenant',
+                'summary' => 'List the roles a user holds (every tenant for a system-tenant caller)',
                 'tags' => ['users'],
                 'responses' => [
                     200 => self::jsonResponse('The user\'s memberships, primary first', 'MembershipListResponse'),
@@ -503,7 +508,7 @@ final class CoreApiSchemas
                 ] + self::authErrors(),
             ]),
             self::adminRoute('POST', '/api/users/{id:\d+}/memberships', [
-                'summary' => 'Grant a user an additional role in this tenant',
+                'summary' => 'Grant a user a role, optionally in another tenant (system tenant only)',
                 'tags' => ['users'],
                 'request' => 'MembershipCreateRequest',
                 'responses' => [
@@ -512,7 +517,11 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('The membership already existed', 'MembershipResponse'),
                     201 => self::jsonResponse('The membership that was created', 'MembershipResponse'),
                     400 => self::errorResponse('Validation failed'),
-                    404 => self::errorResponse('User or role not found'),
+                    // Overrides the generic authErrors() 403 so the tenant-naming
+                    // refusal is discoverable from the contract rather than only
+                    // from the response body.
+                    403 => self::errorResponse('Insufficient permissions, or a non-system caller named a target tenant'),
+                    404 => self::errorResponse('User, tenant or role not found'),
                 ] + self::authErrors(),
             ]),
             self::adminRoute('DELETE', '/api/users/{id:\d+}/memberships/{membershipId:\d+}', [
@@ -2706,24 +2715,68 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
             ], []),
 
+            // ── Resource-scoped role grants (WC-712 §3) ───────────────────────
+            // `profile_id` nullability carries the meaning, so it is nullable
+            // here and NOT in the required list of the create request: null (or
+            // omitted) is the "everyone at this resource" grant, a value is the
+            // "this profile at this resource" grant.
+            'ResourceRoleGrant' => self::object([
+                'id' => self::int(),
+                'role_id' => self::int(),
+                'profile_id' => self::int(true),
+            ], ['id', 'role_id', 'profile_id']),
+            'ResourceRoleGrantListResponse' => self::listEnvelope('ResourceRoleGrant'),
+            'ResourceRoleGrantCreateRequest' => self::object([
+                'resource_type' => self::str(),
+                'resource_id' => self::int(),
+                'role_id' => self::int(),
+                'profile_id' => self::int(true),
+            ], ['resource_type', 'resource_id', 'role_id']),
+            // `created` distinguishes a fresh grant from an idempotent repeat,
+            // so a caller can tell the two apart without comparing status codes.
+            'ResourceRoleGrantResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'resource_type' => self::str(),
+                'resource_id' => self::int(),
+                'role_id' => self::int(),
+                'profile_id' => self::int(true),
+                'created' => self::bool(),
+            ], ['id', 'tenant_id', 'resource_type', 'resource_id', 'role_id', 'profile_id', 'created'])),
+            // The record-delete cleanup: which resource was cleaned and how many
+            // grants that removed. The count is what makes the call verifiable —
+            // 0 is a success, so without it a caller cannot tell "that record had
+            // no grants" from "I addressed the wrong record".
+            'ResourceRoleGrantRevokeAllResult' => self::object([
+                'resource_type' => self::str(),
+                'resource_id' => self::int(),
+                'revoked' => self::int(),
+            ], ['resource_type', 'resource_id', 'revoked']),
+            'ResourceRoleGrantRevokeAllResponse' => self::dataEnvelope(SchemaBuilder::ref('ResourceRoleGrantRevokeAllResult')),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
             // NOTE: no tenantId field — the handler always creates the user in
             // the caller's TenantContext (a declared field with zero runtime
             // effect would be a contract lie).
-            // WC-712 §1: one row per role the profile holds in this tenant.
+            // WC-712 §1: one row per role the profile holds in a tenant.
             // `isPrimary` marks the row that answers "what is this person here?"
             // for display and defaults — exactly one per (profile, tenant),
             // enforced by migration 094's partial unique index.
+            // #797 §2: every row names its tenant. For a tenant caller that is a
+            // constant; for a tenant-0 caller the list spans tenants and this is
+            // the only thing distinguishing the rows.
             'Membership' => self::object([
                 'id' => self::int(),
+                'tenantId' => self::int(),
+                'tenantName' => self::str(),
                 'roleId' => self::int(),
                 'role' => self::str(),
                 'ou_id' => self::int(true),
                 'isPrimary' => ['type' => 'boolean'],
                 'status' => ['type' => 'string', 'enum' => ['active', 'invited', 'suspended']],
-            ], ['id', 'roleId', 'role', 'isPrimary', 'status']),
+            ], ['id', 'tenantId', 'tenantName', 'roleId', 'role', 'isPrimary', 'status']),
             'MembershipListResponse' => self::dataEnvelope([
                 'type' => 'array',
                 'items' => SchemaBuilder::ref('Membership'),
@@ -2733,19 +2786,26 @@ final class CoreApiSchemas
             // somebody already has is not an error.
             'MembershipResponse' => self::dataEnvelope(self::object([
                 'id' => self::int(),
+                'tenantId' => self::int(),
                 'roleId' => self::int(),
                 'ou_id' => self::int(true),
                 'isPrimary' => ['type' => 'boolean'],
                 'created' => ['type' => 'boolean'],
-            ], ['id', 'roleId', 'isPrimary', 'created'])),
+            ], ['id', 'tenantId', 'roleId', 'isPrimary', 'created'])),
             // No required list: the caller supplies role_id OR role (a name),
             // which OpenAPI cannot express as "exactly one of these two" without
             // a oneOf the generator does not emit. The handler enforces it and
             // answers 400 when neither is present.
+            //
+            // `tenant_id` (#797 §2) names the tenant to grant IN and is honoured
+            // ONLY for a tenant-0 caller — anyone else sending it gets a 403
+            // rather than a silent ignore. Omitted, the tenant is the caller's
+            // and the endpoint behaves exactly as it did.
             'MembershipCreateRequest' => self::object([
                 'role_id' => self::int(),
                 'role' => self::str(),
                 'ou_id' => self::int(true),
+                'tenant_id' => self::int(),
             ], []),
             'UserCreateRequest' => self::object([
                 'email' => self::str(),
@@ -3436,6 +3496,68 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
             ], ['id', 'profile_id', 'email', 'display_name', 'created_at']),
             'PendingPasswordResetListResponse' => self::listEnvelope('PendingPasswordResetItem'),
+
+            // ── Tenant invitations (WHIT-417) ──
+
+            // POST /api/invitations — request body. `role` accepts a name and
+            // `role_id` an id; both resolve against the tenant's own roles plus
+            // the platform-global ones, and absent means the global `user` role.
+            'InvitationCreateRequest' => self::object([
+                'email' => self::str(),
+                'role' => self::str(),
+                'role_id' => self::int(),
+                'ou_id' => self::int(),
+            ], ['email']),
+            // One invitation as an administrator sees it. Deliberately carries
+            // NO profile id and no account-existence flag: a tenant admin may
+            // type any address here, so echoing back whether it already has an
+            // account would make this an enumeration oracle over the platform.
+            // `status` adds 'expired', which is DERIVED from expires_at rather
+            // than stored, so a client never has to compute it.
+            'InvitationItem' => self::object([
+                'id' => self::int(),
+                'email' => self::str(),
+                'role_id' => self::int(),
+                'role_name' => self::str(),
+                'ou_id' => self::int(true),
+                'status' => [
+                    'type' => 'string',
+                    'enum' => ['pending', 'accepted', 'revoked', 'superseded', 'expired'],
+                ],
+                'expires_at' => self::str(),
+                'created_at' => self::str(),
+                'invited_by' => self::int(true),
+            ], ['id', 'email', 'role_id', 'role_name', 'status', 'expires_at', 'created_at']),
+            'InvitationListResponse' => self::listEnvelope('InvitationItem'),
+            'InvitationItemResponse' => self::dataEnvelope(SchemaBuilder::ref('InvitationItem')),
+            'InvitationRevokedResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => ['revoked']],
+            ], ['id', 'status'])),
+
+            // GET /api/invitations/accept — what the token holder is shown.
+            // `requires_password` is the one place the platform reveals whether
+            // an address has an account, and only to somebody holding a valid
+            // single-use token mailed to that address.
+            'InvitationPreviewResponse' => self::dataEnvelope(self::object([
+                'email' => self::str(),
+                'tenant_name' => self::str(),
+                'requires_password' => self::bool(),
+            ], ['email', 'tenant_name', 'requires_password'])),
+            // POST /api/invitations/accept — `password` is required ONLY when
+            // the preview said so; supplied for an address that already has an
+            // account it is ignored, never applied.
+            'InvitationAcceptRequest' => self::object([
+                'token' => self::str(),
+                'password' => self::str(),
+            ], ['token']),
+            // 'joined' = a membership was created (or an invited one activated);
+            // 'already_member' = they were in this tenant already, so nothing
+            // was added and the token was burned.
+            'InvitationAcceptResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['joined', 'already_member']],
+                'message' => self::str(),
+            ], ['status', 'message'])),
             'PendingTwoFactorRecoveryItem' => self::object([
                 'id' => self::int(),
                 'profile_id' => self::int(),
@@ -3451,6 +3573,27 @@ final class CoreApiSchemas
                 'id' => self::int(),
                 'status' => ['type' => 'string', 'enum' => ['approved', 'rejected']],
             ], ['id', 'status'])),
+
+            // POST /api/users/{id}/password-reset — the admin-triggered LINK.
+            // Deliberately carries no token and no password: the raw token
+            // exists only inside the mail sent to the user.
+            'AdminPasswordResetSentResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['sent']],
+                'profile_id' => self::int(),
+            ], ['status', 'profile_id'])),
+
+            // GET /api/password-resets/approver-coverage — drives the "this
+            // change can strand the tenant" warning on the approval-gate toggle
+            // and on user removal/demotion.
+            'PasswordResetApproverCoverageResponse' => self::dataEnvelope(self::object([
+                'tenant_id' => self::int(),
+                'minimum_recommended' => self::int(),
+                'approval_required' => self::bool(),
+                'approver_count' => self::int(),
+                'approver_profile_ids' => ['type' => 'array', 'items' => self::int()],
+                'approver_role_names' => ['type' => 'array', 'items' => self::str()],
+                'below_minimum' => self::bool(),
+            ], ['tenant_id', 'minimum_recommended', 'approval_required', 'approver_count', 'approver_profile_ids', 'approver_role_names', 'below_minimum'])),
 
             // POST /api/2fa-recovery/force-reset — the secondary admin-direct
             // fallback (no prior request): request body + 200 response.
@@ -4342,6 +4485,112 @@ final class CoreApiSchemas
                     404 => self::errorResponse('No pending password-reset request found for that id'),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute('POST', '/api/users/{id:\d+}/password-reset', 'users:write', [
+                'summary' => 'Send this user a password-reset link (never returns a credential)',
+                'tags' => ['users'],
+                'responses' => [
+                    202 => self::jsonResponse('A reset link has been mailed to the user', 'AdminPasswordResetSentResponse'),
+                    404 => self::errorResponse('User not found in this tenant'),
+                    409 => self::errorResponse('Password-reset emails are disabled for this instance'),
+                    422 => self::errorResponse('Invalid user id, or the user has no email address'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/password-resets/approver-coverage', 'users:read', [
+                'summary' => 'How many accounts in this tenant can approve a parked password reset',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Approver coverage for the calling tenant', 'PasswordResetApproverCoverageResponse'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Tenant invitation routes (WHIT-417): the tenant administrator's surface,
+     * gated on the same users:read/users:write that adding a user by hand
+     * needs, plus the PUBLIC accept pair the emailed link lands on.
+     *
+     * The accept pair answers ONE generic 404/400 for unknown, expired,
+     * revoked, superseded and already-used tokens — documented that way here so
+     * a client never grows a branch on a distinction the server does not make.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function invitationRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/invitations/accept',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Describe an invitation token without consuming it (public, rate-limited)',
+                    'tags' => ['invitations'],
+                    'parameters' => [self::queryParam('token', 'string', 'The token from the invitation link')],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The invitation. `requires_password` is false when the address already has an account',
+                            'InvitationPreviewResponse'
+                        ),
+                        404 => self::errorResponse('The invitation link is invalid, expired, or already used'),
+                        429 => self::errorResponse('Too many attempts'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/invitations/accept',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Accept an invitation (public); a password is required only for a new address',
+                    'tags' => ['invitations'],
+                    'request' => 'InvitationAcceptRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('Membership granted — see `data.status`', 'InvitationAcceptResponse'),
+                        400 => self::errorResponse('The invitation link is invalid, expired, or already used'),
+                        409 => self::errorResponse('The invitee is suspended in this tenant'),
+                        422 => self::errorResponse('Missing token, or a password is required and was not supplied'),
+                        429 => self::errorResponse('Too many attempts'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/invitations', 'users:read', [
+                'summary' => "List the caller's own tenant's invitations",
+                'tags' => ['invitations'],
+                'responses' => [
+                    200 => self::jsonResponse('Invitations, newest first', 'InvitationListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/invitations', 'users:write', [
+                'summary' => 'Invite an address into the tenant (supersedes any invitation outstanding for it)',
+                'tags' => ['invitations'],
+                'request' => 'InvitationCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The invitation, identical whether or not the address has an account', 'InvitationItemResponse'),
+                    409 => self::errorResponse('That address is already an active member of this tenant'),
+                    422 => self::errorResponse('Invalid email address, role, or organizational unit'),
+                    429 => self::errorResponse('Too many invitations sent'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/invitations/{id:\d+}/resend', 'users:write', [
+                'summary' => 'Mint a fresh token and re-send it; the previous link stops working',
+                'tags' => ['invitations'],
+                'responses' => [
+                    200 => self::jsonResponse('The re-issued invitation', 'InvitationItemResponse'),
+                    404 => self::errorResponse('No pending invitation found for that id'),
+                    429 => self::errorResponse('Too many invitations sent'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/invitations/{id:\d+}', 'users:write', [
+                'summary' => 'Withdraw an outstanding invitation',
+                'tags' => ['invitations'],
+                'responses' => [
+                    200 => self::jsonResponse('Revoked', 'InvitationRevokedResponse'),
+                    404 => self::errorResponse('No pending invitation found for that id'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -4868,6 +5117,88 @@ final class CoreApiSchemas
         ];
     }
 
+    /**
+     * Resource-scoped role grants (WC-712 §3) — the write path for
+     * `resource_role_assignments`.
+     *
+     * Gated on the EXISTING roles:read / roles:manage. A new permission would
+     * need a grant migration, and such a migration reaches the `admin` role
+     * only, so operators running a custom administrative role would silently
+     * lose a capability their plugins depend on.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function resourceRoleGrantRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/resource-role-grants', 'roles:read', [
+                'summary' => 'List the role grants addressed at one resource',
+                'description' => 'Returns both grant shapes: a null `profile_id` is the '
+                    . '"everyone at this resource" grant, a set `profile_id` grants to that one profile. '
+                    . 'Always scoped to the caller\'s tenant, so a resource belonging to another tenant '
+                    . 'yields an empty list rather than an error.',
+                'tags' => ['rbac'],
+                'parameters' => [
+                    self::queryParam('resource_type', 'string', 'A registered resource type (e.g. `ou`, `acme:record`)', true),
+                    self::queryParam('resource_id', 'integer', 'The record the grants are addressed at', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The grants at this resource', 'ResourceRoleGrantListResponse'),
+                    422 => self::errorResponse('resource_type is unregistered, or resource_id is missing/invalid'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/resource-role-grants', 'roles:manage', [
+                'summary' => 'Grant a role at one resource (idempotent)',
+                'description' => 'Granting a role that is already granted at that resource is a SUCCESS '
+                    . '(200 with `created: false` and the existing grant id), not a conflict — mirroring '
+                    . 'POST /api/users/{id}/memberships. A grant WIDENS authority at one resource and is '
+                    . 'never a substitute for tenant membership: resolution still requires an active '
+                    . 'membership in the tenant.',
+                'tags' => ['rbac'],
+                'request' => 'ResourceRoleGrantCreateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The grant already existed', 'ResourceRoleGrantResponse'),
+                    201 => self::jsonResponse('The grant was created', 'ResourceRoleGrantResponse'),
+                    404 => self::errorResponse('The resource, role or profile is not the caller tenant\'s'),
+                    422 => self::errorResponse('Validation failed, or resource_type is unregistered'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/resource-role-grants/{id:\d+}', 'roles:manage', [
+                'summary' => 'Revoke one resource role grant by its id',
+                'description' => 'By id rather than by (resource, role, profile): over HTTP an omitted '
+                    . '`profile_id` and an explicit null are indistinguishable, so a tuple-addressed revoke '
+                    . 'would let a dropped parameter silently revoke the everyone-grant instead of one '
+                    . 'profile\'s. The ids come from the list route.',
+                'tags' => ['rbac'],
+                'responses' => [
+                    204 => ['description' => 'Grant revoked'],
+                    404 => self::errorResponse('No such grant in the caller\'s tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/resource-role-grants/all', 'roles:manage', [
+                'summary' => 'Revoke every role grant at one resource',
+                'description' => 'The cleanup an owner runs when it deletes the record itself. '
+                    . '`resource_id` carries no foreign key, so core is never told a record disappeared and its '
+                    . 'grants outlive it — a later record reusing that id would silently inherit them. Takes the '
+                    . 'SAME parameters as the list route, so a caller can GET exactly what this removes. Returns '
+                    . 'the number of grants revoked; 0 is a successful no-op, never a 404, so the call is safe to '
+                    . 'make unconditionally from a delete path and safe to retry. Unlike the create route this '
+                    . 'does NOT ask the owning plugin to vouch for the resource: by cleanup time the record is '
+                    . 'usually already deleted, so a fails-closed check would refuse exactly the calls that '
+                    . 'matter. The tenant predicate still confines it to the caller\'s own grants.',
+                'tags' => ['rbac'],
+                'parameters' => [
+                    self::queryParam('resource_type', 'string', 'A registered resource type (e.g. `ou`, `acme:record`)', true),
+                    self::queryParam('resource_id', 'integer', 'The record whose grants are removed', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The grants removed', 'ResourceRoleGrantRevokeAllResponse'),
+                    422 => self::errorResponse('resource_type is unregistered, or resource_id is missing/invalid'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
     // ==================== declaration helpers ====================
 
     /**
@@ -4941,12 +5272,16 @@ final class CoreApiSchemas
     /**
      * @return array<string, mixed>
      */
-    private static function queryParam(string $name, string $type, string $description): array
-    {
+    private static function queryParam(
+        string $name,
+        string $type,
+        string $description,
+        bool $required = false
+    ): array {
         return [
             'name' => $name,
             'in' => 'query',
-            'required' => false,
+            'required' => $required,
             'description' => $description,
             'schema' => ['type' => $type],
         ];
