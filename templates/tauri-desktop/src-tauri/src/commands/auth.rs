@@ -76,8 +76,9 @@ fn finish_enroll(
     auth.set_access(session.access_token);
 
     let conn = db.0.lock().map_err(lock_err)?;
-    // Persist the backend URL only on SUCCESSFUL enrollment — a typed-but-
-    // unsubmitted Server field value never becomes "the" server.
+    // Records which backend this device enrolled against — informational
+    // only (shown in the account footer); the backend itself is fixed for
+    // the whole build (see config.rs), never chosen per device.
     auth_repo::set_enrolled(&conn, device.id, email, None, &device.expires_at, &cfg.backend_url)
         .map_err(|e| e.to_string())?;
     auth_repo::record_online_auth(&conn, now_epoch(), session.desktop_login_max_seconds)
@@ -127,21 +128,6 @@ pub fn auth_logout(db: State<'_, Db>, auth: State<'_, AuthManager>) -> Result<()
     credential_store::clear()?;
     let conn = db.0.lock().map_err(lock_err)?;
     auth_repo::clear(&conn).map_err(|e| e.to_string())
-}
-
-/// The backend URL currently in effect (compile-time default, or a previously
-/// stored/just-picked server) — pre-fills the login screen's Server field.
-#[tauri::command]
-pub fn get_backend_url(auth: State<'_, AuthManager>) -> String {
-    auth.config().backend_url
-}
-
-/// Point subsequent backend calls (enroll, login, sync) at a new server. Takes
-/// effect immediately for this process; only persisted to `auth_state` on a
-/// SUCCESSFUL `auth_enroll` (see `finish_enroll`).
-#[tauri::command]
-pub fn set_backend_url(auth: State<'_, AuthManager>, url: String) -> Result<String, String> {
-    auth.set_backend_url(url)
 }
 
 /// The current enrollment/session snapshot (drives the UI + the offline lock).

@@ -18,19 +18,20 @@
 //! channel with `recv_timeout` for the interval — no async runtime.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::blocking::Client;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::auth::{api, credential_store, lock};
 use crate::config::Config;
 use crate::db::auth_repo;
-use crate::sync::{engine, DEMO_CATALOG_RESOURCE};
+use crate::php_host::PhpHostHandle;
+use crate::sync::{bridge, engine, resource};
 
 /// What wakes the sync loop (beyond the interval tick + the startup cycle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,10 +80,11 @@ struct SyncStatusEvent {
     last_error: Option<String>,
 }
 
-/// Spawn the background sync loop; returns a handle for triggering it. `cfg` is
-/// SHARED with `AuthManager` (see `lib.rs`) so a `set_backend_url` call is
-/// picked up here too, not just by the next `auth_enroll`.
-pub fn spawn(app: AppHandle, cfg: Arc<RwLock<Config>>, conn: Connection) -> Result<SyncHandle, String> {
+/// Spawn the background sync loop; returns a handle for triggering it. `cfg`
+/// is SHARED with `AuthManager` (see `lib.rs`) purely so both read the exact
+/// same resolved value — the backend URL is fixed for the process lifetime
+/// (see `config.rs`), neither side ever mutates it.
+pub fn spawn(app: AppHandle, cfg: Arc<Config>, conn: Connection) -> Result<SyncHandle, String> {
     let client = api::build_client()?;
     let (tx, rx) = mpsc::channel::<Trigger>();
     thread::Builder::new()
@@ -92,10 +94,10 @@ pub fn spawn(app: AppHandle, cfg: Arc<RwLock<Config>>, conn: Connection) -> Resu
     Ok(SyncHandle { tx: Mutex::new(tx) })
 }
 
-fn run_loop(app: AppHandle, cfg: Arc<RwLock<Config>>, client: Client, conn: Connection, rx: Receiver<Trigger>) {
+fn run_loop(app: AppHandle, cfg: Arc<Config>, client: Client, conn: Connection, rx: Receiver<Trigger>) {
     let mut online = true;
     // Initial paint + a startup cycle.
-    run_cycle(&app, &current_config(&cfg), &client, &conn, &mut online);
+    run_cycle(&app, &cfg, &client, &conn, &mut online);
 
     loop {
         let interval = if online { IDLE_INTERVAL } else { OFFLINE_INTERVAL };
@@ -104,21 +106,14 @@ fn run_loop(app: AppHandle, cfg: Arc<RwLock<Config>>, client: Client, conn: Conn
                 // Coalesce a burst of writes into a single cycle.
                 thread::sleep(WRITE_DEBOUNCE);
                 while rx.try_recv().is_ok() {}
-                run_cycle(&app, &current_config(&cfg), &client, &conn, &mut online);
+                run_cycle(&app, &cfg, &client, &conn, &mut online);
             }
-            Ok(Trigger::Manual) => run_cycle(&app, &current_config(&cfg), &client, &conn, &mut online),
-            Err(RecvTimeoutError::Timeout) => run_cycle(&app, &current_config(&cfg), &client, &conn, &mut online),
+            Ok(Trigger::Manual) => run_cycle(&app, &cfg, &client, &conn, &mut online),
+            Err(RecvTimeoutError::Timeout) => run_cycle(&app, &cfg, &client, &conn, &mut online),
             // Every Sender dropped → the app is shutting down.
             Err(RecvTimeoutError::Disconnected) => return,
         }
     }
-}
-
-/// Fresh clone taken at the top of every cycle (not held across the cycle's
-/// blocking network I/O) so a `set_backend_url` call takes effect on the very
-/// next tick.
-fn current_config(cfg: &Arc<RwLock<Config>>) -> Config {
-    cfg.read().expect("config lock poisoned").clone()
 }
 
 fn run_cycle(app: &AppHandle, cfg: &Config, client: &Client, conn: &Connection, online: &mut bool) {
@@ -166,6 +161,19 @@ fn run_cycle(app: &AppHandle, cfg: &Config, client: &Client, conn: &Connection, 
     // exchange already proved we can reach the server.
     let last_error = engine::sync_cycle(conn, client, &cfg.api_base(), &session.access_token).err();
     emit_status(app, conn, *online, false, last_error);
+
+    // Relay the PHP plugin host's own local data against the same server
+    // (WC-plugin-data-bridge) — `try_state`, not `state`: this loop can start
+    // before `php_host::init()` finishes in lib.rs's `setup()`, and a relay is
+    // meaningless before FrankenPHP is actually ready to serve local requests.
+    // Never affects `sync:status` — this is a second, independent concern from
+    // the device's own item sync above; a relay failure is only logged.
+    if let Some(php_host) = app.try_state::<PhpHostHandle>() {
+        if php_host.is_ready() {
+            let php_host_base = format!("http://127.0.0.1:{}", php_host.sidecar.port());
+            let _ = bridge::relay_cycle(conn, client, &php_host_base, &cfg.api_base(), &session.access_token, bridge::BRIDGE_RESOURCES);
+        }
+    }
 }
 
 fn emit_status(
@@ -194,32 +202,12 @@ fn emit_status(
     );
 }
 
-/// (unsynced, conflicts, last_pull_at, last_push_at) — mirrors `get_sync_status`.
+/// (unsynced, conflicts, last_pull_at, last_push_at) — shares its query logic
+/// with `commands::sync::get_sync_status` via `engine::read_status` (WC-sync-
+/// generalize; this used to be an independent, hardcoded-to-DemoCatalog copy).
 fn read_counts(conn: &Connection) -> (usize, usize, Option<String>, Option<String>) {
-    let unsynced: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM demo_catalog_items WHERE sync_state <> 'synced'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    let conflicts: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM demo_catalog_items WHERE sync_state = 'conflict'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    let stamps: Option<(Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT last_pull_at, last_push_at FROM sync_state_kv WHERE resource = ?1",
-            [DEMO_CATALOG_RESOURCE],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()
-        .unwrap_or(None);
-    let (last_pull_at, last_push_at) = stamps.unwrap_or((None, None));
-    (unsynced as usize, conflicts as usize, last_pull_at, last_push_at)
+    let status = engine::read_status(conn, resource::RESOURCES).unwrap_or_default();
+    (status.unsynced_count, status.conflict_count, status.last_pull_at, status.last_push_at)
 }
 
 /// Classify an exchange error as a connectivity failure vs. a server/auth one

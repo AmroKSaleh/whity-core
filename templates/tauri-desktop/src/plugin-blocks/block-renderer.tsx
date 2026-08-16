@@ -1,0 +1,820 @@
+/**
+ * Desktop renderer for the SDK's declare-once block contract
+ * (`sdk/src/Frontend/Blocks/BlockContract.php`) — the desktop twin of
+ * `web/components/plugin/blocks/block-renderer.tsx`. Maps each block `type`
+ * to an `@amroksaleh/ui` primitive via a switch/registry, exactly like the
+ * web version; data-bound blocks fetch/submit through the PHP host proxy
+ * (`use-plugin-data.ts`/`submit-plugin-action.ts`) instead of a browser
+ * fetch. Never throws: an unknown or malformed node renders
+ * `UnsupportedBlock` rather than crashing the whole feature.
+ */
+import * as React from "react"
+
+import { Alert, AlertDescription, AlertTitle } from "@amroksaleh/ui/alert"
+import { Badge } from "@amroksaleh/ui/badge"
+import { BilingualInput, type BilingualValue } from "@amroksaleh/ui/bilingual-input"
+import { Button } from "@amroksaleh/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@amroksaleh/ui/card"
+import { Chart } from "@amroksaleh/ui/chart"
+import { Checkbox } from "@amroksaleh/ui/checkbox"
+import { DatePicker } from "@amroksaleh/ui/date-picker"
+import { EmptyState, ErrorState } from "@amroksaleh/ui/empty-state"
+import { Input } from "@amroksaleh/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@amroksaleh/ui/select"
+import { Skeleton } from "@amroksaleh/ui/skeleton"
+import { Slider } from "@amroksaleh/ui/slider"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@amroksaleh/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@amroksaleh/ui/tabs"
+import { Textarea } from "@amroksaleh/ui/textarea"
+
+import { resolveTablerIcon } from "./resolve-tabler-icon"
+import { submitPluginAction } from "./submit-plugin-action"
+import type {
+  Block,
+  ChartBlock,
+  DataListBlock,
+  DataStatBlock,
+  DataTableBlock,
+  FieldArrayBlock,
+  FormBlock,
+  PluginFeature,
+  RowAction,
+  SelectorBlock,
+  SourceParam,
+  VisibleWhen,
+} from "./types"
+import { usePluginData } from "./use-plugin-data"
+
+type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "destructive"
+
+function toButtonVariant(v?: ButtonVariant): "default" | "secondary" | "outline" | "ghost" | "destructive-solid" {
+  switch (v) {
+    case "secondary":
+      return "secondary"
+    case "outline":
+      return "outline"
+    case "ghost":
+      return "ghost"
+    case "destructive":
+      return "destructive-solid"
+    default:
+      return "default"
+  }
+}
+
+function toBadgeVariant(v: "neutral" | "info" | "success" | "warning" | "danger"): "secondary" | "info" | "success" | "warning" | "destructive" {
+  return v === "neutral" ? "secondary" : v === "danger" ? "destructive" : v
+}
+
+function toAlertVariant(v: "info" | "success" | "warning" | "danger"): "info" | "success" | "warning" | "destructive" {
+  return v === "danger" ? "destructive" : v
+}
+
+// ---------------------------------------------------------------- master-detail
+
+interface MasterDetailContextValue {
+  selections: Record<string, string>
+  setSelection: (name: string, value: string) => void
+}
+const MasterDetailContext = React.createContext<MasterDetailContextValue>({ selections: {}, setSelection: () => {} })
+
+function MasterDetailProvider({ children }: { children: React.ReactNode }) {
+  const [selections, setSelections] = React.useState<Record<string, string>>({})
+  const setSelection = React.useCallback((name: string, value: string) => {
+    setSelections((prev) => ({ ...prev, [name]: value }))
+  }, [])
+  const value = React.useMemo(() => ({ selections, setSelection }), [selections, setSelection])
+  return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>
+}
+
+/** Applies a data-bound block's `params` (master-detail query params) on top
+ * of its `source`, same as the web renderer's `useEffectiveSource`. */
+function useEffectiveSource(source: string, params?: SourceParam[]): string {
+  const { selections } = React.useContext(MasterDetailContext)
+  return React.useMemo(() => {
+    if (!params || params.length === 0) return source
+    const pairs = params
+      .map((p) => {
+        const value = selections[p.from]
+        return value === undefined ? null : `${encodeURIComponent(p.param)}=${encodeURIComponent(value)}`
+      })
+      .filter((p): p is string => p !== null)
+    if (pairs.length === 0) return source
+    return `${source}${source.includes("?") ? "&" : "?"}${pairs.join("&")}`
+  }, [source, params, selections])
+}
+
+// ---------------------------------------------------------------- form scope
+
+interface FormScope {
+  values: Record<string, unknown>
+  setValue: (name: string, value: unknown) => void
+}
+const FormScopeContext = React.createContext<FormScope | null>(null)
+
+function isVisible(visibleWhen: VisibleWhen | undefined, values: Record<string, unknown>): boolean {
+  if (!visibleWhen) return true
+  const current = values[visibleWhen.field]
+  if (visibleWhen.equals !== undefined) return current === visibleWhen.equals
+  if (visibleWhen.in !== undefined) return visibleWhen.in.includes(current as never)
+  return true
+}
+
+// ---------------------------------------------------------------- public entry
+
+export function BlockRenderer({ feature }: { feature: PluginFeature }) {
+  const blocks = feature.blocks
+  if (!Array.isArray(blocks)) {
+    return <ErrorState title="No content" description="This feature declared no renderable blocks." />
+  }
+  return (
+    <MasterDetailProvider>
+      <BlockList blocks={blocks} />
+    </MasterDetailProvider>
+  )
+}
+
+function BlockList({ blocks }: { blocks: Block[] }) {
+  return (
+    <div className="space-y-4">
+      {blocks.map((block, i) => (
+        <BlockNode key={i} block={block} />
+      ))}
+    </div>
+  )
+}
+
+function UnsupportedBlock({ reason }: { reason: string }) {
+  return <p className="text-xs text-muted-foreground italic">Unsupported block: {reason}</p>
+}
+
+// ---------------------------------------------------------------- dispatch
+
+function BlockNode({ block }: { block: Block }) {
+  const form = React.useContext(FormScopeContext)
+
+  switch (block.type) {
+    case "section": {
+      if (!isVisible(block.visibleWhen, form?.values ?? {})) return null
+      return (
+        <div className="space-y-3">
+          {block.title && <h3 className="text-sm font-semibold">{block.title}</h3>}
+          <BlockList blocks={block.children} />
+        </div>
+      )
+    }
+    case "card": {
+      if (!isVisible(block.visibleWhen, form?.values ?? {})) return null
+      return (
+        <Card>
+          {(block.title || block.description) && (
+            <CardHeader>
+              {block.title && <CardTitle className="text-sm">{block.title}</CardTitle>}
+              {block.description && <CardDescription>{block.description}</CardDescription>}
+            </CardHeader>
+          )}
+          <CardContent className="space-y-3">
+            <BlockList blocks={block.children} />
+          </CardContent>
+        </Card>
+      )
+    }
+    case "grid":
+      return (
+        <div className={`grid gap-4 sm:grid-cols-${block.columns}`}>
+          {block.children.map((child, i) => (
+            <BlockNode key={i} block={child} />
+          ))}
+        </div>
+      )
+    case "row": {
+      const justify = { start: "justify-start", center: "justify-center", end: "justify-end", between: "justify-between" }[block.align ?? "start"]
+      return (
+        <div className={`flex flex-wrap items-center gap-3 ${justify}`}>
+          {block.children.map((child, i) => (
+            <BlockNode key={i} block={child} />
+          ))}
+        </div>
+      )
+    }
+    case "tabs": {
+      const first = block.children[0]?.label
+      if (!first) return null
+      return (
+        <Tabs defaultValue={first}>
+          <TabsList>
+            {block.children.map((tab) => (
+              <TabsTrigger key={tab.label} value={tab.label}>
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {block.children.map((tab) => (
+            <TabsContent key={tab.label} value={tab.label} className="pt-3">
+              <BlockList blocks={tab.children} />
+            </TabsContent>
+          ))}
+        </Tabs>
+      )
+    }
+    case "tab":
+      // Only meaningful as a direct child of `tabs`, handled above.
+      return <BlockList blocks={block.children} />
+    case "divider":
+      return <hr className="border-border" />
+    case "heading": {
+      const Tag = (`h${block.level}` as const) as "h1" | "h2" | "h3" | "h4"
+      const size = { 1: "text-xl", 2: "text-lg", 3: "text-base", 4: "text-sm" }[block.level]
+      return <Tag className={`font-semibold ${size}`}>{block.text}</Tag>
+    }
+    case "text":
+      return <p className={`text-sm ${block.tone === "muted" ? "text-muted-foreground" : ""}`}>{block.value}</p>
+    case "alert":
+      return (
+        <Alert variant={toAlertVariant(block.variant)}>
+          {block.title && <AlertTitle>{block.title}</AlertTitle>}
+          <AlertDescription>{block.body}</AlertDescription>
+        </Alert>
+      )
+    case "badge":
+      return <Badge variant={toBadgeVariant(block.variant)}>{block.label}</Badge>
+    case "stat": {
+      const trendIcons: Record<"up" | "down" | "flat", string> = { up: "↑", down: "↓", flat: "→" }
+      const trendIcon = block.trend ? trendIcons[block.trend] : null
+      return (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="text-xs text-muted-foreground">{block.label}</p>
+          <p className="text-2xl font-semibold">
+            {block.value} {trendIcon && <span className="text-sm text-muted-foreground">{trendIcon}</span>}
+          </p>
+          {block.hint && <p className="text-xs text-muted-foreground">{block.hint}</p>}
+        </div>
+      )
+    }
+    case "keyValue":
+      return (
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+          {block.items.map((item, i) => (
+            <React.Fragment key={i}>
+              <dt className="text-muted-foreground">{item.label}</dt>
+              <dd>{item.value}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      )
+    case "list": {
+      const Tag = block.ordered ? "ol" : "ul"
+      return (
+        <Tag className={`space-y-1 text-sm ${block.ordered ? "list-decimal" : "list-disc"} ps-5`}>
+          {block.items.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
+        </Tag>
+      )
+    }
+    case "table":
+      return (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {block.columns.map((c) => (
+                <TableHead key={c.key}>{c.label}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {block.rows.map((row, i) => (
+              <TableRow key={i}>
+                {block.columns.map((c) => (
+                  <TableCell key={c.key}>{row[c.key] ?? ""}</TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )
+    case "button":
+      return (
+        <Button variant={toButtonVariant(block.variant)} onClick={() => (window.location.hash = block.href)}>
+          {block.label}
+        </Button>
+      )
+    case "icon": {
+      const Icon = resolveTablerIcon(block.name)
+      return <Icon className={`size-5 ${block.tone === "muted" ? "text-muted-foreground" : ""}`} />
+    }
+    case "code":
+      return <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">{block.content}</pre>
+    case "math":
+      // No KaTeX dependency on desktop yet — render the literal source rather
+      // than silently dropping the block.
+      return block.block ? (
+        <pre className="overflow-x-auto rounded-lg bg-muted p-3 text-xs">{block.expression}</pre>
+      ) : (
+        <code className="rounded bg-muted px-1 py-0.5 text-xs">{block.expression}</code>
+      )
+    case "markdown":
+      // No Markdown renderer on desktop yet — preformatted source is safe
+      // (never dangerouslySetInnerHTML) and still legible.
+      return <pre className="whitespace-pre-wrap text-sm">{block.content}</pre>
+    case "dataTable":
+      return <DataTableRenderer block={block} />
+    case "dataStat":
+      return <DataStatRenderer block={block} />
+    case "dataList":
+      return <DataListRenderer block={block} />
+    case "chart":
+      return <ChartRenderer block={block} />
+    case "selector":
+      return <SelectorRenderer block={block} />
+    case "form":
+      return <FormRenderer block={block} />
+    case "fieldArray":
+      return <FieldArrayRenderer block={block} />
+    case "submitButton":
+      return <SubmitButtonRenderer label={block.label} variant={block.variant} />
+    case "actionButton":
+      return <ActionButtonRenderer block={block} />
+    // ---- form-only inputs ----
+    case "textInput":
+    case "textArea":
+    case "richTextInput":
+    case "numberInput":
+    case "select":
+    case "checkbox":
+    case "slider":
+    case "dateInput":
+    case "fileInput":
+    case "colorInput":
+    case "bilingualText":
+    case "referenceSelect":
+      if (!form) return <UnsupportedBlock reason={`${block.type} outside a form`} />
+      if ("visibleWhen" in block && !isVisible(block.visibleWhen, form.values)) return null
+      return <FormInput block={block} form={form} />
+    default:
+      return <UnsupportedBlock reason={(block as { type?: string }).type ?? "unknown"} />
+  }
+}
+
+// ---------------------------------------------------------------- data-bound blocks
+
+function DataTableRenderer({ block }: { block: DataTableBlock }) {
+  const source = useEffectiveSource(block.source, block.params)
+  const state = usePluginData<Record<string, unknown>[]>(source, (data) => (Array.isArray(data) && data.length > 0 ? data : Array.isArray(data) ? [] : null))
+
+  if (state.status === "loading") return <Skeleton className="h-24 w-full" />
+  if (state.status === "error") return <ErrorState title="Couldn't load this table" action={<Button onClick={state.retry}>Retry</Button>} />
+  if (state.status === "empty") return <EmptyState title={block.emptyText ?? "Nothing here yet"} />
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          {block.columns.map((c) => (
+            <TableHead key={c.key}>{c.label}</TableHead>
+          ))}
+          {block.rowActions && block.rowActions.length > 0 && <TableHead>Actions</TableHead>}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {state.data.map((row, i) => (
+          <TableRow key={i}>
+            {block.columns.map((c) => (
+              <TableCell key={c.key}>{String(row[c.key] ?? "")}</TableCell>
+            ))}
+            {block.rowActions && block.rowActions.length > 0 && (
+              <TableCell>
+                <RowActions actions={block.rowActions} row={row} onDone={state.refresh} />
+              </TableCell>
+            )}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
+function RowActions({ actions, row, onDone }: { actions: RowAction[]; row: Record<string, unknown>; onDone: () => void }) {
+  const fill = (template: string) => template.replace(/\{(\w+)\}/g, (_, key: string) => String(row[key] ?? ""))
+  return (
+    <div className="flex gap-2">
+      {actions.map((action, i) =>
+        "href" in action ? (
+          <Button key={i} variant="ghost" onClick={() => (window.location.hash = fill(action.href))}>
+            {action.label}
+          </Button>
+        ) : (
+          <Button
+            key={i}
+            variant="ghost"
+            onClick={async () => {
+              if (action.confirm && !window.confirm(action.confirm)) return
+              await submitPluginAction(fill(action.endpoint), action.method, {})
+              onDone()
+            }}
+          >
+            {action.label}
+          </Button>
+        ),
+      )}
+    </div>
+  )
+}
+
+function DataStatRenderer({ block }: { block: DataStatBlock }) {
+  const source = useEffectiveSource(block.source, block.params)
+  const state = usePluginData<Record<string, unknown>>(source, (data) => (data && typeof data === "object" ? (data as Record<string, unknown>) : null))
+
+  if (state.status === "loading") return <Skeleton className="h-20 w-full" />
+  if (state.status === "error") return <ErrorState title="Couldn't load this stat" action={<Button onClick={state.retry}>Retry</Button>} />
+  if (state.status === "empty") return <EmptyState title={block.emptyText ?? "No data"} />
+
+  const value = state.data[block.valueField]
+  const hint = block.hintField ? state.data[block.hintField] : undefined
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <p className="text-xs text-muted-foreground">{block.label}</p>
+      <p className="text-2xl font-semibold">{String(value ?? "")}</p>
+      {hint !== undefined && <p className="text-xs text-muted-foreground">{String(hint)}</p>}
+    </div>
+  )
+}
+
+function DataListRenderer({ block }: { block: DataListBlock }) {
+  const source = useEffectiveSource(block.source, block.params)
+  const state = usePluginData<Record<string, unknown>[]>(source, (data) => (Array.isArray(data) && data.length > 0 ? data : Array.isArray(data) ? [] : null))
+
+  if (state.status === "loading") return <Skeleton className="h-16 w-full" />
+  if (state.status === "error") return <ErrorState title="Couldn't load this list" action={<Button onClick={state.retry}>Retry</Button>} />
+  if (state.status === "empty") return <EmptyState title={block.emptyText ?? "Nothing here yet"} />
+
+  const Tag = block.ordered ? "ol" : "ul"
+  return (
+    <Tag className={`space-y-1 text-sm ${block.ordered ? "list-decimal" : "list-disc"} ps-5`}>
+      {state.data.map((row, i) => (
+        <li key={i}>{String(row[block.itemField] ?? "")}</li>
+      ))}
+    </Tag>
+  )
+}
+
+function ChartRenderer({ block }: { block: ChartBlock }) {
+  const source = useEffectiveSource(block.source, block.params)
+  const state = usePluginData<Record<string, string | number>[]>(source, (data) => (Array.isArray(data) && data.length > 0 ? (data as Record<string, string | number>[]) : Array.isArray(data) ? [] : null))
+
+  if (state.status === "loading") return <Skeleton className="h-48 w-full" />
+  if (state.status === "error") return <ErrorState title="Couldn't load this chart" action={<Button onClick={state.retry}>Retry</Button>} />
+  if (state.status === "empty") return <EmptyState title={block.emptyText ?? "No data"} />
+
+  return <Chart type={block.chartType} data={state.data} series={block.series} xKey={block.xField} height={240} />
+}
+
+function SelectorRenderer({ block }: { block: SelectorBlock }) {
+  const { selections, setSelection } = React.useContext(MasterDetailContext)
+  const state = usePluginData<Record<string, unknown>[]>(block.source, (data) => (Array.isArray(data) && data.length > 0 ? data : null))
+
+  if (state.status !== "ready") {
+    return (
+      <div className="space-y-1">
+        <label className="text-sm font-medium">{block.label}</label>
+        <Select disabled>
+          <SelectTrigger>
+            <SelectValue placeholder={state.status === "loading" ? "Loading…" : "No options"} />
+          </SelectTrigger>
+        </Select>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-1">
+      <label className="text-sm font-medium">{block.label}</label>
+      <Select value={selections[block.name] ?? ""} onValueChange={(v) => setSelection(block.name, v)}>
+        <SelectTrigger>
+          <SelectValue placeholder={block.placeholder ?? "Select…"} />
+        </SelectTrigger>
+        <SelectContent>
+          {state.data.map((row, i) => {
+            const value = String(row[block.valueField] ?? "")
+            return (
+              <SelectItem key={i} value={value}>
+                {String(row[block.labelField] ?? value)}
+              </SelectItem>
+            )
+          })}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- form + inputs
+
+function FormRenderer({ block }: { block: FormBlock }) {
+  const [values, setValues] = React.useState<Record<string, unknown>>({})
+  const [submitting, setSubmitting] = React.useState(false)
+  const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null)
+  const preload = usePluginData<Record<string, unknown>>(block.dataSource?.path ?? "__no_data_source__", (data) =>
+    block.dataSource && data && typeof data === "object" ? (data as Record<string, unknown>) : null,
+  )
+
+  React.useEffect(() => {
+    if (block.dataSource && preload.status === "ready") {
+      setValues((prev) => ({ ...preload.data, ...prev }))
+    }
+    // Only re-seed when the preload data itself changes, not on every local edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [block.dataSource, preload.status === "ready" ? preload.data : null])
+
+  const setValue = React.useCallback((name: string, value: unknown) => {
+    setValues((prev) => ({ ...prev, [name]: value }))
+  }, [])
+  const scope = React.useMemo<FormScope>(() => ({ values, setValue }), [values, setValue])
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setSubmitting(true)
+    setResult(null)
+    try {
+      const outcome = await submitPluginAction(block.submit.endpoint, block.submit.method, values)
+      setResult(outcome.ok ? { ok: true } : { ok: false, message: outcome.error ?? outcome.issues?.map((i) => i.message).join(", ") ?? "Submission failed" })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <FormScopeContext.Provider value={scope}>
+      <fieldset disabled={submitting} className="space-y-4">
+        <form onSubmit={submit} className="space-y-4">
+          {result?.ok === false && (
+            <Alert variant="destructive">
+              <AlertDescription>{result.message}</AlertDescription>
+            </Alert>
+          )}
+          {result?.ok === true && (
+            <Alert variant="success">
+              <AlertDescription>Submitted.</AlertDescription>
+            </Alert>
+          )}
+          <BlockList blocks={block.children} />
+        </form>
+      </fieldset>
+    </FormScopeContext.Provider>
+  )
+}
+
+function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
+  const parent = React.useContext(FormScopeContext)
+  const rows = (parent?.values[block.name] as Record<string, unknown>[] | undefined) ?? []
+
+  const setRows = (next: Record<string, unknown>[]) => parent?.setValue(block.name, next)
+  const addRow = () => setRows([...rows, {}])
+  const removeRow = (index: number) => setRows(rows.filter((_, i) => i !== index))
+
+  const min = block.min ?? 0
+  const max = block.max ?? Infinity
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">{block.label}</span>
+        <Button type="button" variant="outline" disabled={rows.length >= max} onClick={addRow}>
+          Add {block.itemLabel ?? "item"}
+        </Button>
+      </div>
+      {rows.map((row, index) => {
+        const rowScope: FormScope = {
+          values: row,
+          setValue: (name, value) => {
+            const next = [...rows]
+            next[index] = { ...next[index], [name]: value }
+            setRows(next)
+          },
+        }
+        return (
+          <div key={index} className="space-y-2 rounded-md bg-muted/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {block.itemLabel ?? "Item"} {index + 1}
+              </span>
+              <Button type="button" variant="ghost" disabled={rows.length <= min} onClick={() => removeRow(index)}>
+                Remove
+              </Button>
+            </div>
+            <FormScopeContext.Provider value={rowScope}>
+              <BlockList blocks={block.children} />
+            </FormScopeContext.Provider>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function SubmitButtonRenderer({ label, variant }: { label: string; variant?: ButtonVariant }) {
+  return (
+    <Button type="submit" variant={toButtonVariant(variant)}>
+      {label}
+    </Button>
+  )
+}
+
+function ActionButtonRenderer({ block }: { block: { label: string; action: { method: "POST" | "PUT"; endpoint: string }; confirm?: string; variant?: ButtonVariant } }) {
+  const [busy, setBusy] = React.useState(false)
+  return (
+    <Button
+      variant={toButtonVariant(block.variant)}
+      disabled={busy}
+      onClick={async () => {
+        if (block.confirm && !window.confirm(block.confirm)) return
+        setBusy(true)
+        try {
+          await submitPluginAction(block.action.endpoint, block.action.method, {})
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {busy ? "Working…" : block.label}
+    </Button>
+  )
+}
+
+/** Every form-only input type, dispatched by a single component so
+ * `BlockNode` doesn't need a case per input. */
+function FormInput({ block, form }: { block: Extract<Block, { type: string }>; form: FormScope }) {
+  switch (block.type) {
+    case "textInput":
+      return (
+        <Input
+          label={block.label}
+          required={block.required}
+          type={block.sensitive ? "password" : "text"}
+          placeholder={block.placeholder}
+          value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+          onChange={(e) => form.setValue(block.name, e.target.value)}
+        />
+      )
+    case "textArea":
+    case "richTextInput":
+      return (
+        <div className="space-y-1">
+          <label className="text-sm font-medium">{block.label}</label>
+          <Textarea
+            required={block.required}
+            rows={block.rows}
+            value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+            onChange={(e) => form.setValue(block.name, e.target.value)}
+          />
+        </div>
+      )
+    case "numberInput":
+      return (
+        <Input
+          label={block.label}
+          type="number"
+          required={block.required}
+          min={block.min}
+          max={block.max}
+          step={block.step}
+          value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+          onChange={(e) => form.setValue(block.name, e.target.value === "" ? "" : Number(e.target.value))}
+        />
+      )
+    case "select":
+      return (
+        <div className="space-y-1">
+          <label className="text-sm font-medium">{block.label}</label>
+          <Select
+            value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+            onValueChange={(v) => form.setValue(block.name, v)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {block.options.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )
+    case "checkbox":
+      return (
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={Boolean(form.values[block.name] ?? block.default ?? false)}
+            onCheckedChange={(checked) => form.setValue(block.name, checked === true)}
+          />
+          {block.label}
+        </label>
+      )
+    case "slider": {
+      const current = (form.values[block.name] as number | undefined) ?? Number(block.default ?? block.min)
+      return (
+        <Slider label={block.label} min={block.min} max={block.max} step={block.step} value={[current]} onValueChange={([v]) => form.setValue(block.name, v)} />
+      )
+    }
+    case "dateInput": {
+      const current = (form.values[block.name] as string | undefined) ?? block.default
+      return (
+        <DatePicker
+          label={block.label}
+          required={block.required}
+          value={current}
+          onChange={(date) => form.setValue(block.name, date ? date.toISOString().slice(0, 10) : "")}
+        />
+      )
+    }
+    case "fileInput":
+      return (
+        <div className="space-y-1">
+          <label className="text-sm font-medium">{block.label}</label>
+          <input
+            type="file"
+            accept={block.accept}
+            required={block.required}
+            className="block w-full text-sm"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              if (block.encoding === "base64") {
+                const reader = new FileReader()
+                reader.onload = () => form.setValue(block.name, reader.result)
+                reader.readAsDataURL(file)
+              } else {
+                void file.text().then((text) => form.setValue(block.name, text))
+              }
+            }}
+          />
+        </div>
+      )
+    case "colorInput":
+      return (
+        <div className="space-y-1">
+          <label className="text-sm font-medium">{block.label}</label>
+          <input
+            type="color"
+            className="h-8 w-16 rounded border border-input"
+            value={(form.values[block.name] as string | undefined) ?? block.default ?? "#000000"}
+            onChange={(e) => form.setValue(block.name, e.target.value)}
+          />
+        </div>
+      )
+    case "bilingualText": {
+      const value = (form.values[block.name] as BilingualValue | undefined) ?? {}
+      return (
+        <BilingualInput
+          label={block.label}
+          required={block.required}
+          arLabel={block.arLabel}
+          enLabel={block.enLabel}
+          value={value}
+          onChange={(next) => form.setValue(block.name, next)}
+        />
+      )
+    }
+    case "referenceSelect":
+      return <ReferenceSelectInput block={block} form={form} />
+    default:
+      return <UnsupportedBlock reason={block.type} />
+  }
+}
+
+function ReferenceSelectInput({
+  block,
+  form,
+}: {
+  block: { type: "referenceSelect"; name: string; label: string; source: string; valueField: string; labelField: string; required?: boolean; placeholder?: string; default?: string }
+  form: FormScope
+}) {
+  const state = usePluginData<Record<string, unknown>[]>(block.source, (data) => (Array.isArray(data) ? data : null))
+  const options = state.status === "ready" ? state.data : []
+  return (
+    <div className="space-y-1">
+      <label className="text-sm font-medium">{block.label}</label>
+      <Select
+        value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+        onValueChange={(v) => form.setValue(block.name, v)}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder={state.status === "loading" ? "Loading…" : (block.placeholder ?? "Select…")} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((row, i) => {
+            const value = String(row[block.valueField] ?? "")
+            return (
+              <SelectItem key={i} value={value}>
+                {String(row[block.labelField] ?? value)}
+              </SelectItem>
+            )
+          })}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
