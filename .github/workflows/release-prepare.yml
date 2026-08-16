@@ -110,7 +110,11 @@ jobs:
       - name: Bump CoreVersion and date the CHANGELOG
         run: |
           VERSION="${{ steps.check.outputs.version }}"
-          php - "$VERSION" <<'PHP'
+          # `php --`, not `php -`: PHP has no "-" convention for stdin and
+          # treats it as a filename ("Could not open input file: -"). With no
+          # file argument it reads the script from stdin, and `--` separates
+          # that from the arguments that become $argv.
+          php -- "$VERSION" <<'PHP'
           <?php
           $version = $argv[1];
 
