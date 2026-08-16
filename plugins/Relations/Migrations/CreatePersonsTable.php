@@ -20,9 +20,12 @@ use Whity\Sdk\Schema\MigrationSchema;
  * ({@see \Whity\Sdk\Sync\SyncController}). This is what lets the plugin take over
  * the live table at cutover without moving a single row.
  *
- * `profile_id` is declared (nullable, no FK here — the offline host keeps the
- * column decoupled from core identity) but the plugin's PersonResource does not
- * write it; a profile-linked person is a server/cutover concern.
+ * `profile_id` is intentionally NOT built here. On the server the column is
+ * core-owned (migration 041 rekeyed persons to profiles and owns its unique
+ * constraint), so this migration never touches it; on the offline host there is
+ * no `profiles` table to reference, and slice 1's PersonResource neither reads
+ * nor writes it. The profile-linkage slice adds the column offline — with the
+ * correct declared reference — when it is actually used.
  */
 final class CreatePersonsTable implements MigrationInterface
 {
@@ -52,7 +55,6 @@ final class CreatePersonsTable implements MigrationInterface
                 id SERIAL PRIMARY KEY,
                 tenant_id INTEGER NOT NULL,
                 display_name VARCHAR(255) NOT NULL,
-                profile_id INTEGER NULL,
                 birth_date DATE NULL,
                 deceased BOOLEAN NOT NULL DEFAULT false,
                 notes TEXT NULL,

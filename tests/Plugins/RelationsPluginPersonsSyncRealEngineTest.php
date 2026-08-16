@@ -34,6 +34,10 @@ final class RelationsPluginPersonsSyncRealEngineTest extends TestCase
     protected function setUp(): void
     {
         $this->pdo = SchemaFromMigrations::make();
+        // Core's `persons.tenant_id` carries a real FK to `tenants` (migration
+        // 018). On PostgreSQL that FK is enforced, so the tenants a person is
+        // inserted under must exist first; SQLite let the unseeded insert slide.
+        $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a'), (2, 'b', 'b')");
         // Adopt-and-augment: core already created `persons`; add the sync columns.
         (new CreatePersonsTable())->up($this->pdo);
 
