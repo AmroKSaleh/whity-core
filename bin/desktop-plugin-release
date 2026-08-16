@@ -1,0 +1,228 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Desktop-plugin release pipeline (WC-desktop-plugins).
+ *
+ * Obfuscates a plugin's PHP source, packages it as a zip with the single
+ * top-level-directory-matches-name convention the desktop installer requires,
+ * computes the SHA-256 + size from the final zip, writes it under the handler's
+ * storage directory as {name}/{version}/package.zip, and inserts the
+ * `desktop_plugin_releases` row that GET /api/desktop-plugins then serves.
+ *
+ * Usage:
+ *   php bin/desktop-plugin-release --source <dir> --version <x.y.z> [options]
+ *
+ * Options:
+ *   --source <dir>       Plugin source directory (required).
+ *   --version <ver>      Release version, e.g. 1.2.0 (required).
+ *   --name <name>        Plugin name; defaults to the source directory's
+ *                        basename. Must equal the plugin's namespace root.
+ *   --storage <dir>      Storage root. Default: <project>/storage/desktop-plugins
+ *                        (the path public/index.php wires into the handler).
+ *   --encode-strings     Also base64-encode string literals (default: off).
+ *   --no-rename-locals   Do not rename local variables (default: rename).
+ *   --force              Replace an existing (name, version) release.
+ *   --no-db              Build + store the package only; do NOT insert a row.
+ *   --db-dsn <dsn>       PDO DSN (e.g. pgsql:host=...;dbname=...). Default: the
+ *                        DB_* environment the app itself uses.
+ *   --db-user <user>     DB user (with --db-dsn).
+ *   --db-password <pw>   DB password (with --db-dsn).
+ *   -h, --help           Show this help.
+ */
+
+declare(strict_types=1);
+
+use Whity\Core\DesktopPlugins\DesktopPluginPackager;
+use Whity\Core\DesktopPlugins\DesktopPluginReleaseException;
+use Whity\Core\DesktopPlugins\DesktopPluginReleaseService;
+use Whity\Core\DesktopPlugins\ObfuscationException;
+use Whity\Core\DesktopPlugins\PluginObfuscator;
+use Whity\Database\Database;
+
+if (php_sapi_name() !== 'cli') {
+    fwrite(STDERR, "This script must be run from the command line.\n");
+    exit(1);
+}
+
+$projectRoot = dirname(__DIR__);
+
+// Load .env (only for values not already in the environment), like bin/whity-cli.
+$envFile = $projectRoot . '/.env';
+if (is_file($envFile)) {
+    foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || str_starts_with($trimmed, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        [$key, $value] = explode('=', $line, 2);
+        $key = trim($key);
+        if (($_ENV[$key] ?? '') === '' && getenv($key) === false) {
+            $_ENV[$key] = trim($value);
+            putenv($key . '=' . trim($value));
+        }
+    }
+}
+
+$autoloader = null;
+foreach ([$projectRoot . '/vendor/autoload.php', dirname($projectRoot, 3) . '/vendor/autoload.php'] as $candidate) {
+    if (is_file($candidate)) {
+        $autoloader = $candidate;
+        break;
+    }
+}
+if ($autoloader === null) {
+    fwrite(STDERR, "Composer autoloader not found. Run 'composer install'.\n");
+    exit(1);
+}
+require $autoloader;
+require $projectRoot . '/src/helpers.php';
+
+/**
+ * @param list<string> $argv
+ * @return array<string, string|bool>
+ */
+function parse_options(array $argv): array
+{
+    $flags = ['--encode-strings', '--no-rename-locals', '--force', '--no-db', '--help', '-h'];
+    $options = [];
+    $count = count($argv);
+    for ($i = 1; $i < $count; $i++) {
+        $arg = $argv[$i];
+        if (in_array($arg, $flags, true)) {
+            $options[ltrim($arg, '-')] = true;
+            continue;
+        }
+        if (str_starts_with($arg, '--')) {
+            $key = substr($arg, 2);
+            $value = $argv[$i + 1] ?? null;
+            if ($value === null || str_starts_with($value, '-')) {
+                fwrite(STDERR, "Option --{$key} needs a value.\n");
+                exit(2);
+            }
+            $options[$key] = $value;
+            $i++;
+            continue;
+        }
+        fwrite(STDERR, "Unexpected argument: {$arg}\n");
+        exit(2);
+    }
+
+    return $options;
+}
+
+$options = parse_options($argv);
+
+if (isset($options['help']) || isset($options['h'])) {
+    // Print the docblock at the top of this file.
+    $doc = (string) file_get_contents(__FILE__);
+    if (preg_match('/\/\*\*(.*?)\*\//s', $doc, $m) === 1) {
+        echo preg_replace('/^\s*\* ?/m', '', trim($m[1])), "\n";
+    }
+    exit(0);
+}
+
+$source = isset($options['source']) && is_string($options['source']) ? $options['source'] : null;
+$version = isset($options['version']) && is_string($options['version']) ? $options['version'] : null;
+
+if ($source === null || $version === null) {
+    fwrite(STDERR, "Both --source and --version are required. Try --help.\n");
+    exit(2);
+}
+
+$realSource = realpath($source);
+if ($realSource === false || !is_dir($realSource)) {
+    fwrite(STDERR, "Source directory not found: {$source}\n");
+    exit(2);
+}
+
+$name = isset($options['name']) && is_string($options['name']) ? $options['name'] : basename($realSource);
+$storageDir = isset($options['storage']) && is_string($options['storage'])
+    ? $options['storage']
+    : $projectRoot . '/storage/desktop-plugins';
+
+$obfuscator = new PluginObfuscator(
+    renameLocals: !isset($options['no-rename-locals']),
+    encodeStrings: isset($options['encode-strings']),
+);
+$packager = new DesktopPluginPackager($obfuscator);
+
+try {
+    if (isset($options['no-db'])) {
+        // Build + store the package only; print the row that WOULD be inserted.
+        $storagePath = $name . '/' . $version . '/package.zip';
+        $result = $packager->package($realSource, $name, $storageDir . '/' . $storagePath);
+
+        fwrite(STDOUT, "Package built (no DB row inserted):\n");
+        print_release($name, $version, $result->sha256, $result->sizeBytes, $storagePath, $result->entryCount, false);
+        fwrite(STDOUT, "\nInsert the row with:\n");
+        fwrite(STDOUT, sprintf(
+            "  INSERT INTO desktop_plugin_releases (plugin_name, version, sha256, size_bytes, storage_path)\n"
+            . "  VALUES ('%s', '%s', '%s', %d, '%s');\n",
+            $name,
+            $version,
+            $result->sha256,
+            $result->sizeBytes,
+            $storagePath
+        ));
+        exit(0);
+    }
+
+    $pdo = open_pdo($options);
+    $service = new DesktopPluginReleaseService($pdo, $storageDir, $packager);
+    $release = $service->release($realSource, $name, $version, isset($options['force']));
+
+    fwrite(STDOUT, $release->replacedExisting ? "Release re-cut (replaced existing):\n" : "Release published:\n");
+    print_release(
+        $release->name,
+        $release->version,
+        $release->sha256,
+        $release->sizeBytes,
+        $release->storagePath,
+        $release->entryCount,
+        true
+    );
+    exit(0);
+} catch (DesktopPluginReleaseException | ObfuscationException $e) {
+    fwrite(STDERR, 'Release failed: ' . $e->getMessage() . "\n");
+    exit(1);
+} catch (Throwable $e) {
+    fwrite(STDERR, 'Unexpected error: ' . $e->getMessage() . "\n");
+    exit(1);
+}
+
+/**
+ * @param array<string, string|bool> $options
+ */
+function open_pdo(array $options): PDO
+{
+    if (isset($options['db-dsn']) && is_string($options['db-dsn'])) {
+        $user = isset($options['db-user']) && is_string($options['db-user']) ? $options['db-user'] : '';
+        $password = isset($options['db-password']) && is_string($options['db-password']) ? $options['db-password'] : '';
+
+        return new PDO($options['db-dsn'], $user, $password, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+    }
+
+    return Database::connect()->getPdo();
+}
+
+function print_release(
+    string $name,
+    string $version,
+    string $sha256,
+    int $sizeBytes,
+    string $storagePath,
+    int $entryCount,
+    bool $catalogued
+): void {
+    fwrite(STDOUT, "  name:         {$name}\n");
+    fwrite(STDOUT, "  version:      {$version}\n");
+    fwrite(STDOUT, "  sha256:       {$sha256}\n");
+    fwrite(STDOUT, "  size_bytes:   {$sizeBytes}\n");
+    fwrite(STDOUT, "  entries:      {$entryCount}\n");
+    fwrite(STDOUT, "  storage_path: {$storagePath}\n");
+    fwrite(STDOUT, "  catalogued:   " . ($catalogued ? 'yes' : 'no') . "\n");
+}
