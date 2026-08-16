@@ -71,8 +71,17 @@ $offlineProfileId = (int) ($_ENV['WHITY_OFFLINE_PROFILE_ID'] ?? 1);
 // deliberately exercise the 403 path offline.
 $deviceRole = (string) ($_ENV['WHITY_DEVICE_ROLE'] ?? 'admin');
 
+// Bundled (read-only, shipped with the installer) first, then — when the Rust
+// sidecar sets it — the writable root a device downloads new plugins into at
+// runtime (WC-desktop-plugins). Bundled-first ordering means a downloaded
+// plugin can never shadow a bundled one (see PluginRuntimeLoader).
 $pluginsRoot = $_ENV['PLUGINS_ROOT'] ?? (__DIR__ . '/../plugins');
-$loader = new PluginRuntimeLoader($pluginsRoot);
+$downloadedPluginsRoot = $_ENV['WHITY_DOWNLOADED_PLUGINS_ROOT'] ?? null;
+$pluginsRoots = array_values(array_filter(
+    [$pluginsRoot, $downloadedPluginsRoot],
+    static fn ($root) => $root !== null && $root !== ''
+));
+$loader = new PluginRuntimeLoader($pluginsRoots);
 
 // WHITY_PLUGINS set (non-empty) pins an explicit FQCN list; unset means
 // "discover whatever plugin directories are actually there" — the

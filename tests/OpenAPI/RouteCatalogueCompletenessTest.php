@@ -105,6 +105,12 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'PATCH /api/errors/{id}',
         'GET /api/settings/error-tracking',
         'PUT /api/settings/error-tracking/dsn',
+        // WC-desktop-plugins: a device's catalog + download of obfuscated desktop
+        // plugin packages, consumed by the desktop app (not the web UI). OpenAPI
+        // components land with the desktop-plugins documentation task, per the
+        // KNOWN_UNDOCUMENTED-first path this file establishes.
+        'GET /api/desktop-plugins',
+        'GET /api/desktop-plugins/{name}/versions/{version}/download',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void

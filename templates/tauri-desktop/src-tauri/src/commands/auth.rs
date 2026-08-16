@@ -41,9 +41,10 @@ pub fn auth_enroll(
     password: String,
     device_name: String,
 ) -> Result<EnrollResult, String> {
-    match api::login(auth.client(), &auth.cfg, &email, &password)? {
+    let cfg = auth.config();
+    match api::login(auth.client(), &cfg, &email, &password)? {
         LoginOutcome::Session { access_token } => {
-            finish_enroll(&db, &auth, &access_token, &device_name, &email)
+            finish_enroll(&db, &auth, &cfg, &access_token, &device_name, &email)
         }
         LoginOutcome::Requires2fa { temp_token } => Ok(EnrollResult::Requires2fa { temp_token }),
         LoginOutcome::RequiresTenantSelection { selection_token } => {
@@ -55,26 +56,23 @@ pub fn auth_enroll(
 fn finish_enroll(
     db: &State<'_, Db>,
     auth: &State<'_, AuthManager>,
+    cfg: &crate::config::Config,
     access_token: &str,
     device_name: &str,
     email: &str,
 ) -> Result<EnrollResult, String> {
-    let device = api::register_device(
-        auth.client(),
-        &auth.cfg,
-        access_token,
-        device_name,
-        auth.cfg.platform,
-    )?;
+    let device = api::register_device(auth.client(), cfg, access_token, device_name, cfg.platform)?;
     // Persist the 90-day credential in the OS keychain BEFORE exchanging, so an
     // exchange failure still leaves an enrolled, retryable device.
     credential_store::store(&device.credential)?;
 
-    let session = api::exchange(auth.client(), &auth.cfg, &device.credential)?;
+    let session = api::exchange(auth.client(), cfg, &device.credential)?;
     auth.set_access(session.access_token);
 
     let conn = db.0.lock().map_err(lock_err)?;
-    auth_repo::set_enrolled(&conn, device.id, email, None, &device.expires_at)
+    // Persist the backend URL only on SUCCESSFUL enrollment — a typed-but-
+    // unsubmitted Server field value never becomes "the" server.
+    auth_repo::set_enrolled(&conn, device.id, email, None, &device.expires_at, &cfg.backend_url)
         .map_err(|e| e.to_string())?;
     auth_repo::record_online_auth(&conn, now_epoch(), session.desktop_login_max_seconds)
         .map_err(|e| e.to_string())?;
@@ -91,7 +89,7 @@ fn finish_enroll(
 pub fn auth_login(db: State<'_, Db>, auth: State<'_, AuthManager>) -> Result<AuthStatus, String> {
     let credential = credential_store::load()?
         .ok_or_else(|| "not enrolled — enroll a device first".to_string())?;
-    let session = api::exchange(auth.client(), &auth.cfg, &credential)?;
+    let session = api::exchange(auth.client(), &auth.config(), &credential)?;
     auth.set_access(session.access_token);
 
     let conn = db.0.lock().map_err(lock_err)?;
@@ -101,15 +99,31 @@ pub fn auth_login(db: State<'_, Db>, auth: State<'_, AuthManager>) -> Result<Aut
 }
 
 /// Log out: best-effort server revocation of the access token, clear the stored
-/// credential, and reset `auth_state`. Local DATA is intentionally left intact.
+/// credential, and reset `auth_state`. Local DATA (including the chosen
+/// `server_url`) is intentionally left intact.
 #[tauri::command]
 pub fn auth_logout(db: State<'_, Db>, auth: State<'_, AuthManager>) -> Result<(), String> {
     if let Some(token) = auth.take_access() {
-        let _ = api::logout(auth.client(), &auth.cfg, &token); // best-effort
+        let _ = api::logout(auth.client(), &auth.config(), &token); // best-effort
     }
     credential_store::clear()?;
     let conn = db.0.lock().map_err(lock_err)?;
     auth_repo::clear(&conn).map_err(|e| e.to_string())
+}
+
+/// The backend URL currently in effect (compile-time default, or a previously
+/// stored/just-picked server) — pre-fills the login screen's Server field.
+#[tauri::command]
+pub fn get_backend_url(auth: State<'_, AuthManager>) -> String {
+    auth.config().backend_url
+}
+
+/// Point subsequent backend calls (enroll, login, sync) at a new server. Takes
+/// effect immediately for this process; only persisted to `auth_state` on a
+/// SUCCESSFUL `auth_enroll` (see `finish_enroll`).
+#[tauri::command]
+pub fn set_backend_url(auth: State<'_, AuthManager>, url: String) -> Result<String, String> {
+    auth.set_backend_url(url)
 }
 
 /// The current enrollment/session snapshot (drives the UI + the offline lock).

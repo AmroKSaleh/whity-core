@@ -14,6 +14,7 @@ pub mod native_bridge;
 pub mod proxy;
 pub mod sidecar;
 
+use std::path::Path;
 use tauri::AppHandle;
 
 /// Managed app state combining both halves: the native bridge Rust runs, and
@@ -30,6 +31,19 @@ impl PhpHostHandle {
 
     pub fn shutdown(&self) {
         self.sidecar.shutdown();
+    }
+
+    /// The writable root a device downloads new plugins into (see
+    /// `crate::plugins::installer`), distinct from the read-only bundled
+    /// `php-host/plugins` resource tree.
+    pub fn plugins_root(&self) -> &Path {
+        self.sidecar.plugins_root()
+    }
+
+    /// Reload FrankenPHP so it picks up a newly installed plugin (its worker
+    /// only discovers plugins once, at process boot).
+    pub fn restart_php(&self) {
+        self.sidecar.restart();
     }
 }
 
