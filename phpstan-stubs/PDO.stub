@@ -1,0 +1,30 @@
+<?php
+
+/**
+ * PHPStan 2 remembers the return value of a method call and reuses it later in
+ * the same scope unless something it recognises as impure intervenes. A method
+ * that returns a value (rather than void) is assumed side-effect-free, so the
+ * bundled PDO stub lets PHPStan carry an earlier PDO::inTransaction() result
+ * across a beginTransaction()/commit()/rollBack() call — after which it decides
+ * our `$ownTransaction && $pdo->inTransaction()` rollback guards can never be
+ * true and reports them as dead code. They are not: rollBack() throws when no
+ * transaction is active, so the second half of that guard is load-bearing.
+ *
+ * Marking only the three state mutators impure is the narrow correction. It
+ * makes PHPStan forget a remembered inTransaction() exactly where the
+ * transaction state actually changes, and keeps the check itself working — a
+ * re-test with no intervening beginTransaction() is still reported.
+ *
+ * @see https://phpstan.org/blog/remembering-and-forgetting-returned-values
+ */
+class PDO
+{
+    /** @phpstan-impure */
+    public function beginTransaction(): bool {}
+
+    /** @phpstan-impure */
+    public function commit(): bool {}
+
+    /** @phpstan-impure */
+    public function rollBack(): bool {}
+}

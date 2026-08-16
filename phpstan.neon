@@ -20,3 +20,8 @@ parameters:
         # numbered file), not via Composer PSR-4. Point PHPStan at them so the
         # WC-54 real-engine test can reference its migration class for analysis.
         - database/migrations
+    # Corrects the bundled PDO stub so PHPStan stops carrying a remembered
+    # inTransaction() result across the calls that change transaction state.
+    # See the file header for why the rollback guards are not dead code.
+    stubFiles:
+        - phpstan-stubs/PDO.stub
