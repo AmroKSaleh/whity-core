@@ -66,13 +66,16 @@ final class PersonResource implements SyncableResource
 
     public function toPublicFields(array $row): array
     {
+        // profileId / hasAccount are intentionally NOT here: `profile_id` is not a
+        // domain column of this resource, so SyncController never SELECTs it, and
+        // surfacing it would always be null/false — misleading. It returns in the
+        // profile-linkage slice, which reads persons through PersonRepository (the
+        // full projection) rather than the sync engine.
         return [
             'displayName' => (string) ($row['display_name'] ?? ''),
             'birthDate'   => isset($row['birth_date']) && $row['birth_date'] !== null ? (string) $row['birth_date'] : null,
             'deceased'    => self::toBool($row['deceased'] ?? false),
             'notes'       => isset($row['notes']) && $row['notes'] !== null ? (string) $row['notes'] : null,
-            'profileId'   => isset($row['profile_id']) && $row['profile_id'] !== null ? (int) $row['profile_id'] : null,
-            'hasAccount'  => isset($row['profile_id']) && $row['profile_id'] !== null,
         ];
     }
 

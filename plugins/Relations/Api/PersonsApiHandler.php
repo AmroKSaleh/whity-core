@@ -23,6 +23,13 @@ use Whity\Sdk\Sync\SyncController;
  * First slice: the graph-derived list (relationCount + reciprocal relations),
  * search/pagination, and the profile-linkage edit/delete guard are added by the
  * repository/edges slices; here persons is a clean syncable resource.
+ *
+ * UPDATE IS A FULL ROW REPLACE (the sync model — a client pushes its whole local
+ * copy), unlike core's PersonsApiHandler, whose PATCH merged only the fields
+ * present. So an update MUST carry every field: an omitted birthDate/notes is
+ * written as null. This is correct for the desktop sync client (it always holds
+ * the full row); at the R3 cutover the web caller must send full rows, or a
+ * partial-merge path is added then.
  */
 final class PersonsApiHandler
 {
