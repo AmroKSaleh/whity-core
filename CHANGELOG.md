@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-16
+
 ### Added
 - **A resource's role grants can be cleaned up in one call when the record is deleted.** `DELETE /api/resource-role-grants/all?resource_type=T&resource_id=N` revokes every grant addressed at one resource. `ResourceRoleAssignmentRepository::revokeAllFor()` already existed but had no route, so the first consumer to delete a record carrying grants had to hand-roll list-then-revoke-each — the loop this surface exists to eliminate, and one that leaves the resource half-cleaned if it dies midway. Nothing removes these rows automatically: `resource_id` carries no foreign key, so core is never told a record disappeared and a later record reusing that id silently inherits authority granted to a dead one.
   - **A distinct `/all` path**, mirroring `DELETE /api/entity-tags/all`, rather than an argument-shape variant of the by-id revoke. The path segment says "every grant here" out loud, and a malformed single-revoke can never degrade into "remove everything". `all` is never `\d+`, so the two routes cannot collide.
