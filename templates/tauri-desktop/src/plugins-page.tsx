@@ -2,30 +2,30 @@ import * as React from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
-import { Button } from "@amroksaleh/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@amroksaleh/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@amroksaleh/ui/card"
 import { Badge } from "@amroksaleh/ui/badge"
 
-/** Mirrors `plugins::CatalogVersion` (camelCase over the IPC wire). */
-interface CatalogVersion {
-  version: string
-  sha256: string
-  sizeBytes: number
-  releasedAt: string
+/** Mirrors `db::plugin_sync_repo::PluginSyncStatus` (camelCase over the IPC wire). */
+interface PluginSyncStatus {
+  lastSyncedAt: number | null
+  lastInstalled: number
+  lastUpdated: number
+  lastRemoved: number
+  lastFailed: PluginSyncFailure[]
+  lastError: string | null
 }
 
-/** Mirrors `plugins::CatalogEntry`. */
-interface CatalogEntry {
+/** Mirrors `plugins::reconcile::PluginSyncFailure`. */
+interface PluginSyncFailure {
   name: string
-  latestVersion: string
-  versions: CatalogVersion[]
+  message: string
 }
 
-/** Mirrors `plugins::InstallOutcome`. */
-interface InstallOutcome {
-  name: string
-  version: string
-}
+/** Mirrors `commands::post_login::PluginSyncEvent`. */
+type PluginSyncEvent =
+  | { state: "syncing" }
+  | { state: "synced"; installed: number; updated: number; removed: number; failed: PluginSyncFailure[] }
+  | { state: "failed"; message: string }
 
 type PhpStatusEvent =
   | { state: "starting" }
@@ -58,30 +58,25 @@ interface PluginsReport {
 }
 
 /**
- * Browse this tenant's entitled desktop plugin catalog (fetched from the
- * chosen backend — see src-tauri/src/plugins/) and install a version at
- * runtime. Installing writes into the writable `plugins-downloaded/` dir and
- * reloads FrankenPHP (its worker only discovers plugins once, at boot) — this
- * page watches the same `php:status` event `PhpHostDemo` does to show that
- * reload, then re-checks `GET /__whity/plugins` to confirm the plugin landed
- * loaded (surfacing the quarantine reason if the plugin host rejected it).
+ * Read-only status view for the plugins this device runs (WC-plugin-sync).
+ * There is no install/uninstall control here anymore — the tenant's plugin
+ * catalog on the connected server is the single source of truth, and every
+ * successful login automatically reconciles this device to match it (see
+ * src-tauri/src/plugins/reconcile.rs + src-tauri/src/commands/post_login.rs).
+ * This page only reports what happened: the last sync's outcome, and what's
+ * actually loaded (or quarantined) in the running PHP plugin host right now.
  */
 export function PluginsPage() {
-  const [catalog, setCatalog] = React.useState<CatalogEntry[] | null>(null)
-  const [catalogError, setCatalogError] = React.useState<string | null>(null)
-  const [installingName, setInstallingName] = React.useState<string | null>(null)
-  const [installError, setInstallError] = React.useState<string | null>(null)
-  const [lastOutcome, setLastOutcome] = React.useState<InstallOutcome | null>(null)
-  const [phpStatus, setPhpStatus] = React.useState<PhpStatusEvent | null>(null)
+  const [syncStatus, setSyncStatus] = React.useState<PluginSyncStatus | null>(null)
   const [pluginsReport, setPluginsReport] = React.useState<PluginsReport | null>(null)
-  const awaitingReloadRef = React.useRef(false)
+  const [syncing, setSyncing] = React.useState(false)
+  const [lastEvent, setLastEvent] = React.useState<PluginSyncEvent | null>(null)
 
-  const loadCatalog = React.useCallback(async () => {
-    setCatalogError(null)
+  const loadSyncStatus = React.useCallback(async () => {
     try {
-      setCatalog(await invoke<CatalogEntry[]>("plugin_catalog"))
-    } catch (error) {
-      setCatalogError(String(error))
+      setSyncStatus(await invoke<PluginSyncStatus>("plugin_sync_status"))
+    } catch {
+      // Pre-first-boot or a busy DB — the next successful sync will populate it.
     }
   }, [])
 
@@ -95,115 +90,104 @@ export function PluginsPage() {
       setPluginsReport(response.body as PluginsReport)
     } catch {
       // The php-host proxy is transiently unreachable right after a reload —
-      // not worth surfacing as an error; the user can re-check via the badge.
+      // not worth surfacing as an error; the next reload retriggers this.
     }
   }, [])
 
   React.useEffect(() => {
-    void loadCatalog()
+    void loadSyncStatus()
     void loadPluginsReport()
 
-    let unlisten: (() => void) | undefined
+    let unlistenSync: (() => void) | undefined
+    let unlistenPhp: (() => void) | undefined
+
+    void listen<PluginSyncEvent>("plugin-sync:status", (event) => {
+      setLastEvent(event.payload)
+      setSyncing(event.payload.state === "syncing")
+      if (event.payload.state !== "syncing") {
+        void loadSyncStatus()
+      }
+    }).then((un) => {
+      unlistenSync = un
+    })
+
+    // A sync that changed anything triggers a FrankenPHP reload — re-check
+    // what's actually loaded once it comes back up.
     void listen<PhpStatusEvent>("php:status", (event) => {
-      setPhpStatus(event.payload)
-      if (event.payload.state === "ready" && awaitingReloadRef.current) {
-        awaitingReloadRef.current = false
+      if (event.payload.state === "ready") {
         void loadPluginsReport()
       }
     }).then((un) => {
-      unlisten = un
+      unlistenPhp = un
     })
 
-    return () => unlisten?.()
-  }, [loadCatalog, loadPluginsReport])
-
-  async function handleInstall(entry: CatalogEntry, version: CatalogVersion) {
-    setInstallingName(entry.name)
-    setInstallError(null)
-    try {
-      const outcome = await invoke<InstallOutcome>("plugin_install", {
-        name: entry.name,
-        version: version.version,
-        expectedSha256: version.sha256,
-      })
-      setLastOutcome(outcome)
-      awaitingReloadRef.current = true
-    } catch (error) {
-      setInstallError(String(error))
-    } finally {
-      setInstallingName(null)
+    return () => {
+      unlistenSync?.()
+      unlistenPhp?.()
     }
-  }
+  }, [loadSyncStatus, loadPluginsReport])
 
-  const reloading = phpStatus?.state === "reloading" || awaitingReloadRef.current
   const loadedNames = new Set(pluginsReport?.loaded.map((p) => p.name) ?? [])
   const quarantinedByName = new Map((pluginsReport?.quarantined ?? []).map((q) => [q.name, q.reason]))
+  const allNames = Array.from(new Set([...loadedNames, ...quarantinedByName.keys()]))
 
   return (
     <div className="space-y-4">
-      {reloading && (
-        <p className="text-sm text-muted-foreground">Reloading the PHP plugin host…</p>
-      )}
-      {lastOutcome && !reloading && (
-        <p className="text-sm text-muted-foreground">
-          Installed {lastOutcome.name} v{lastOutcome.version}.
-        </p>
-      )}
-      {installError && (
-        <p role="alert" className="text-sm text-destructive">
-          {installError}
-        </p>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Sync status</CardTitle>
+          <CardDescription>
+            {syncing
+              ? "Syncing plugins…"
+              : syncStatus?.lastSyncedAt
+                ? `Last synced ${new Date(syncStatus.lastSyncedAt * 1000).toLocaleString()}`
+                : "Not synced yet — this happens automatically the next time you sign in."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-1 text-xs text-muted-foreground">
+          {syncStatus && (syncStatus.lastInstalled > 0 || syncStatus.lastUpdated > 0 || syncStatus.lastRemoved > 0) && (
+            <p>
+              Last pass: {syncStatus.lastInstalled} installed, {syncStatus.lastUpdated} updated, {syncStatus.lastRemoved}{" "}
+              removed.
+            </p>
+          )}
+          {syncStatus?.lastError && <p className="text-destructive">{syncStatus.lastError}</p>}
+          {lastEvent?.state === "failed" && <p className="text-destructive">{lastEvent.message}</p>}
+          {(syncStatus?.lastFailed?.length ?? 0) > 0 && (
+            <div className="space-y-0.5">
+              {syncStatus?.lastFailed.map((f) => (
+                <p key={f.name} className="text-destructive">
+                  {f.name}: {f.message}
+                </p>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-      {catalogError && (
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-destructive">{catalogError}</p>
-            <Button size="sm" variant="outline" className="mt-3" onClick={() => void loadCatalog()}>
-              Retry
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {catalog && catalog.length === 0 && !catalogError && (
-        <p className="text-sm text-muted-foreground">No desktop plugins are available from this server yet.</p>
+      {allNames.length === 0 && (
+        <p className="text-sm text-muted-foreground">No plugins are running on this device yet.</p>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        {catalog?.map((entry) => {
-          const latest = entry.versions.find((v) => v.version === entry.latestVersion) ?? entry.versions[0]
-          const isLoaded = loadedNames.has(entry.name)
-          const quarantineReason = quarantinedByName.get(entry.name)
+        {allNames.map((name) => {
+          const isLoaded = loadedNames.has(name)
+          const quarantineReason = quarantinedByName.get(name)
+          const loaded = pluginsReport?.loaded.find((p) => p.name === name)
 
           return (
-            <Card key={entry.name}>
+            <Card key={name}>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between gap-2 text-sm">
-                  {entry.name}
+                  {name}
                   {isLoaded && <Badge variant="success-solid">Loaded</Badge>}
                   {quarantineReason && <Badge variant="destructive-solid">Quarantined</Badge>}
                 </CardTitle>
-                <CardDescription>Latest v{entry.latestVersion}</CardDescription>
+                {loaded && <CardDescription>v{loaded.version}</CardDescription>}
               </CardHeader>
-              <CardContent className="space-y-1 text-xs text-muted-foreground">
-                {latest && (
-                  <>
-                    <p>Released {latest.releasedAt}</p>
-                    <p>{(latest.sizeBytes / 1024).toFixed(1)} KB</p>
-                  </>
-                )}
-                {quarantineReason && <p className="text-destructive">{quarantineReason}</p>}
-              </CardContent>
-              <CardFooter>
-                <Button
-                  size="sm"
-                  disabled={!latest || installingName === entry.name || isLoaded}
-                  onClick={() => latest && void handleInstall(entry, latest)}
-                >
-                  {isLoaded ? "Installed" : installingName === entry.name ? "Installing…" : "Install"}
-                </Button>
-              </CardFooter>
+              {quarantineReason && (
+                <CardContent className="text-xs text-destructive">{quarantineReason}</CardContent>
+              )}
             </Card>
           )
         })}

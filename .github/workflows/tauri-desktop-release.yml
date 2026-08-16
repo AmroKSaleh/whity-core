@@ -1,0 +1,133 @@
+# Tauri desktop app release pipeline (WC-app-self-update). Pushing a tag
+# `tauri-desktop-vX.Y.Z` builds, signs, and publishes the Windows installer as
+# a GitHub Release — independent of `release.yml` (which ships whity-core's
+# own PHP/web platform under its own `vX.Y.Z` tags and CoreVersion::VERSION;
+# the desktop template's version, in templates/tauri-desktop/src-tauri/
+# tauri.conf.json + Cargo.toml + package.json, is a completely separate axis).
+#
+# Windows-only for v1 — the only platform templates/tauri-desktop/README.md
+# documents as run-verified end-to-end (macOS is unspiked, Linux compiles but
+# is not verified). Add macOS/Linux build legs once those are actually spiked.
+#
+# This workflow does NOT register the built release against any specific
+# instance's `desktop_app_releases` table — see the final step, and
+# docs/wiki/Desktop-App-Updates.md. Self-hosted-per-instance means CI cannot
+# reach into a customer's database; an operator runs `bin/desktop-app-release`
+# themselves once the build is published.
+#
+# REQUIRES a minisign signing keypair to actually produce a verifiable
+# release: TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# secrets, generated via `npx tauri signer generate` by a human with org
+# secrets access (see docs/wiki/Desktop-App-Updates.md — this is a manual
+# prerequisite this workflow cannot create for itself).
+name: Tauri Desktop Release
+
+on:
+  push:
+    tags:
+      - 'tauri-desktop-v*'
+
+defaults:
+  run:
+    working-directory: templates/tauri-desktop
+
+jobs:
+  resolve:
+    name: Resolve + verify the tagged version
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      version: ${{ steps.r.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Versions must agree with the tag
+        id: r
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#tauri-desktop-v}"
+
+          CONF_VERSION=$(grep -oE '"version":\s*"[^"]+"' src-tauri/tauri.conf.json | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[^"]*')
+          CARGO_VERSION=$(grep -oE '^version\s*=\s*"[^"]+"' src-tauri/Cargo.toml | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[^"]*')
+          PKG_VERSION=$(grep -oE '"version":\s*"[^"]+"' package.json | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[^"]*')
+
+          echo "tag=${VERSION} tauri.conf.json=${CONF_VERSION} Cargo.toml=${CARGO_VERSION} package.json=${PKG_VERSION}"
+
+          # Three independent files agreeing with the tag is the point — same
+          # "never ship a version that lies" posture as release.yml's own
+          # CoreVersion::VERSION check, just three files instead of one.
+          if [ "${VERSION}" != "${CONF_VERSION}" ] || [ "${VERSION}" != "${CARGO_VERSION}" ] || [ "${VERSION}" != "${PKG_VERSION}" ]; then
+            echo "::error::Tag ${TAG} does not match tauri.conf.json/Cargo.toml/package.json. Bump all three to ${VERSION} first, then tag."
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build, sign + publish (Windows)
+    runs-on: windows-latest
+    needs: [resolve]
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            templates/tauri-desktop/src-tauri/target
+          key: cargo-tauri-desktop-release-${{ hashFiles('templates/tauri-desktop/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-tauri-desktop-release-
+
+      # frankenphp.exe + its ~50 sibling DLLs are gitignored (not committed —
+      # see scripts/setup-php-runtime.ps1's own doc comment); must be fetched
+      # before `tauri build` since tauri.conf.json's bundle.resources ships them.
+      - name: Fetch the FrankenPHP runtime
+        run: pwsh -File scripts/setup-php-runtime.ps1
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build, sign and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: templates/tauri-desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Whity Desktop v__VERSION__'
+          releaseBody: 'See the commit history for changes in this release.'
+          releaseDraft: false
+          prerelease: false
+
+      - name: Registering this release
+        run: |
+          echo "Build published to the GitHub Release for ${{ github.ref_name }}."
+          echo "This workflow does NOT register it against any instance's desktop_app_releases table (self-hosted-per-instance — CI cannot reach a customer's database)."
+          echo ""
+          echo "An operator with access to a given deployment's database runs, once the .msi + .sig asset URLs are known:"
+          echo ""
+          echo "  php bin/desktop-app-release --version=${{ needs.resolve.outputs.version }} --target=windows-x86_64 \\"
+          echo "    --url=<the published .msi asset URL> --signature-file=<downloaded .sig file>"
+          echo ""
+          echo "See docs/wiki/Desktop-App-Updates.md."

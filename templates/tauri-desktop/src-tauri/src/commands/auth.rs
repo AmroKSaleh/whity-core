@@ -11,11 +11,12 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::auth::api::{self, LoginOutcome};
 use crate::auth::lock::{self, LockState};
 use crate::auth::{credential_store, AuthManager};
+use crate::commands::post_login;
 use crate::db::auth_repo::{self, AuthStatus};
 use crate::db::Db;
 
@@ -35,6 +36,7 @@ pub enum EnrollResult {
 /// `auth_state`.
 #[tauri::command]
 pub fn auth_enroll(
+    app: AppHandle,
     db: State<'_, Db>,
     auth: State<'_, AuthManager>,
     email: String,
@@ -44,7 +46,7 @@ pub fn auth_enroll(
     let cfg = auth.config();
     match api::login(auth.client(), &cfg, &email, &password)? {
         LoginOutcome::Session { access_token } => {
-            finish_enroll(&db, &auth, &cfg, &access_token, &device_name, &email)
+            finish_enroll(&app, &db, &auth, &cfg, &access_token, &device_name, &email)
         }
         LoginOutcome::Requires2fa { temp_token } => Ok(EnrollResult::Requires2fa { temp_token }),
         LoginOutcome::RequiresTenantSelection { selection_token } => {
@@ -54,6 +56,7 @@ pub fn auth_enroll(
 }
 
 fn finish_enroll(
+    app: &AppHandle,
     db: &State<'_, Db>,
     auth: &State<'_, AuthManager>,
     cfg: &crate::config::Config,
@@ -67,6 +70,9 @@ fn finish_enroll(
     credential_store::store(&device.credential)?;
 
     let session = api::exchange(auth.client(), cfg, &device.credential)?;
+    // Cloned before set_access() consumes it — post_login::spawn_after_login
+    // needs its own copy of the same just-exchanged token, no second round trip.
+    let access_token_for_sync = session.access_token.clone();
     auth.set_access(session.access_token);
 
     let conn = db.0.lock().map_err(lock_err)?;
@@ -76,6 +82,11 @@ fn finish_enroll(
         .map_err(|e| e.to_string())?;
     auth_repo::record_online_auth(&conn, now_epoch(), session.desktop_login_max_seconds)
         .map_err(|e| e.to_string())?;
+    drop(conn);
+
+    // Mandatory plugin sync (WC-plugin-sync): fire-and-forget, never blocks
+    // enrollment on a slow/down catalog endpoint.
+    post_login::spawn_after_login(app.clone(), auth, access_token_for_sync);
 
     Ok(EnrollResult::Enrolled {
         email: email.to_string(),
@@ -86,16 +97,23 @@ fn finish_enroll(
 /// Exchange the stored credential for a fresh session (call on startup /
 /// reconnect). Refreshes the online-auth clock the offline lock measures.
 #[tauri::command]
-pub fn auth_login(db: State<'_, Db>, auth: State<'_, AuthManager>) -> Result<AuthStatus, String> {
+pub fn auth_login(app: AppHandle, db: State<'_, Db>, auth: State<'_, AuthManager>) -> Result<AuthStatus, String> {
     let credential = credential_store::load()?
         .ok_or_else(|| "not enrolled — enroll a device first".to_string())?;
     let session = api::exchange(auth.client(), &auth.config(), &credential)?;
+    let access_token_for_sync = session.access_token.clone();
     auth.set_access(session.access_token);
 
     let conn = db.0.lock().map_err(lock_err)?;
     auth_repo::record_online_auth(&conn, now_epoch(), session.desktop_login_max_seconds)
         .map_err(|e| e.to_string())?;
-    auth_repo::status(&conn).map_err(|e| e.to_string())
+    let status = auth_repo::status(&conn).map_err(|e| e.to_string())?;
+    drop(conn);
+
+    // Mandatory plugin sync (WC-plugin-sync): fire-and-forget, same as enroll.
+    post_login::spawn_after_login(app, &auth, access_token_for_sync);
+
+    Ok(status)
 }
 
 /// Log out: best-effort server revocation of the access token, clear the stored

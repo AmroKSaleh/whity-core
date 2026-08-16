@@ -74,6 +74,16 @@ zip = "2"
 # declared checksum, before anything touches disk.
 sha2 = "0.10"
 
+# Whole-app self-update (WC-app-self-update, src/self_update.rs), checked
+# before every plugin sync since a plugin package assumes a compatible app
+# runtime. Fetches/verifies (minisign)/applies a signed release from an
+# endpoint resolved at RUNTIME via app.updater_builder() (this app's backend
+# URL and access token are both only known at runtime — see self_update.rs —
+# never tauri.conf.json's static endpoint). Relaunching after an update uses
+# `AppHandle::request_restart()`, part of core `tauri` itself — no separate
+# process-control plugin needed for a Rust-side-triggered restart.
+tauri-plugin-updater = "2"
+
 # OS-native secure storage for the long-lived (90-day) device credential
 # (WC-desktop-sync) — the short-lived access token stays in memory only. Each
 # platform gets its native backend: Windows Credential Manager / macOS Keychain /

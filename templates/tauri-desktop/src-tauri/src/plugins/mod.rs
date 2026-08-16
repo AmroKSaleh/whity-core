@@ -12,6 +12,7 @@
 
 pub mod api;
 pub mod installer;
+pub mod reconcile;
 
 use serde::{Deserialize, Serialize};
 

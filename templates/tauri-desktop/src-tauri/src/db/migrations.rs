@@ -25,6 +25,9 @@
 //!   and is a device-level fact, not a per-session one — logout deliberately does
 //!   NOT clear it (see `auth_repo::clear()`), so re-enrolling pre-fills the same
 //!   server the device already trusted.
+//! - v8: the singleton `plugin_sync_state` row (WC-plugin-sync) — bookkeeping
+//!   for the last automatic plugin reconcile pass (see `plugins::reconcile`),
+//!   so the UI can show sync status without needing a fresh sync to answer it.
 //!
 //! `run()` applies each pending step then stamps its version, so a partially
 //! migrated DB always resumes correctly. Add later steps as another
@@ -65,6 +68,11 @@ pub fn run(conn: &Connection) -> rusqlite::Result<()> {
     if version < 7 {
         migrate_to_v7(conn)?;
         conn.pragma_update(None, "user_version", 7)?;
+        version = 7;
+    }
+    if version < 8 {
+        migrate_to_v8(conn)?;
+        conn.pragma_update(None, "user_version", 8)?;
     }
     Ok(())
 }
@@ -241,6 +249,30 @@ fn migrate_to_v7(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(V7_SERVER_URL)
 }
 
+/// v8 (WC-plugin-sync): the singleton `plugin_sync_state` row — bookkeeping
+/// for the last automatic reconcile pass (see `plugins::reconcile` and
+/// `commands::post_login`), so the Plugins page can show "last synced at"
+/// and any per-plugin failures without needing a fresh sync to answer that.
+/// `last_failed_json` is a JSON-encoded `list<PluginSyncFailure>` (empty
+/// array when nothing failed) rather than a normalized table — this is a
+/// small, purely-informational snapshot, not queried by anything else.
+const V8_PLUGIN_SYNC_STATE: &str = "
+    CREATE TABLE plugin_sync_state (
+        id                INTEGER PRIMARY KEY CHECK (id = 1),
+        last_synced_at    INTEGER,
+        last_installed    INTEGER NOT NULL DEFAULT 0,
+        last_updated      INTEGER NOT NULL DEFAULT 0,
+        last_removed      INTEGER NOT NULL DEFAULT 0,
+        last_failed_json  TEXT NOT NULL DEFAULT '[]',
+        last_error        TEXT
+    )";
+
+fn migrate_to_v8(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V8_PLUGIN_SYNC_STATE)?;
+    conn.execute("INSERT INTO plugin_sync_state (id) VALUES (1)", [])?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -297,7 +329,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 7);
+        assert_eq!(ver, 8);
 
         let (id, uuid, sync_state, dirty, deleted): (i64, String, String, i64, i64) = conn
             .query_row(
@@ -329,7 +361,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 7);
+        assert_eq!(ver, 8);
         assert!(column_exists(&conn, "demo_catalog_items", "client_uuid").unwrap());
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
@@ -337,6 +369,7 @@ mod tests {
         assert!(table_exists(&conn, "item_conflicts").unwrap());
         assert!(column_exists(&conn, "demo_catalog_items", "next_attempt_at").unwrap());
         assert!(column_exists(&conn, "auth_state", "server_url").unwrap());
+        assert!(table_exists(&conn, "plugin_sync_state").unwrap());
 
         // The auth_state singleton exists and starts un-enrolled, with no server
         // chosen yet (Config::resolve() falls back to the compile-time default).
@@ -377,7 +410,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 7);
+        assert_eq!(ver, 8);
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
     }
@@ -386,9 +419,9 @@ mod tests {
     fn run_is_idempotent() {
         let conn = v1_conn();
         run(&conn).unwrap();
-        run(&conn).unwrap(); // version already 7 → no-op
+        run(&conn).unwrap(); // version already 8 → no-op
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 7);
+        assert_eq!(ver, 8);
     }
 
     #[test]
@@ -409,6 +442,24 @@ mod tests {
             .query_row("SELECT server_url FROM auth_state WHERE id = 1", [], |r| r.get(0))
             .unwrap();
         assert_eq!(server_url.as_deref(), Some("https://staging.example.com"));
+    }
+
+    #[test]
+    fn plugin_sync_state_singleton_seeded_on_fresh_install() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+
+        let (id, last_synced_at, last_installed, last_failed_json): (i64, Option<i64>, i64, String) = conn
+            .query_row(
+                "SELECT id, last_synced_at, last_installed, last_failed_json FROM plugin_sync_state",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(id, 1);
+        assert_eq!(last_synced_at, None, "no sync has run yet");
+        assert_eq!(last_installed, 0);
+        assert_eq!(last_failed_json, "[]");
     }
 
     fn migrated_for_auth_tests() -> Connection {

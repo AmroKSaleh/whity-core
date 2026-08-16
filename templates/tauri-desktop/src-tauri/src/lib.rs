@@ -4,6 +4,7 @@ mod config;
 mod db;
 mod php_host;
 mod plugins;
+mod self_update;
 mod sync;
 
 use db::Db;
@@ -15,6 +16,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // DB opens (and migrates, incl. v7's auth_state.server_url) BEFORE
             // Config is resolved — a previously chosen backend URL lives there.
@@ -64,8 +66,7 @@ pub fn run() {
             commands::printer::print_text,
             commands::php_host::php_request,
             commands::php_host::php_host_status,
-            commands::plugins::plugin_catalog,
-            commands::plugins::plugin_install,
+            commands::plugins::plugin_sync_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

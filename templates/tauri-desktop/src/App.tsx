@@ -146,7 +146,7 @@ function AppInner() {
       <>
         <PageHeader
           title="Plugins"
-          description="Download and install this tenant's entitled desktop plugins from the connected server — see src-tauri/src/plugins/."
+          description="Plugins your organization has enabled sync automatically when you sign in — nothing to install or manage here. See src-tauri/src/plugins/reconcile.rs."
         />
         <PluginsPage />
       </>

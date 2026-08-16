@@ -35,5 +35,14 @@
       "resources/frankenphp/": "frankenphp",
       "../php-host/": "php-host"
     }
+  },
+  "plugins": {
+    "updater": {
+      "_comment": "WC-app-self-update: pubkey/endpoints below are PLACEHOLDERS — a real minisign keypair must be generated (`npx tauri signer generate`) and its public key substituted before this can verify anything (see docs/wiki/Desktop-App-Updates.md). The endpoint here is a build-time fallback only; src-tauri/src/self_update.rs's runtime `app.updater_builder()` call always overrides it with this device's own chosen backend URL + bearer token, since both are only known at runtime.",
+      "pubkey": "REPLACE_WITH_MINISIGN_PUBLIC_KEY",
+      "endpoints": [
+        "http://localhost:8000/api/desktop-app-updates/latest?target={{target}}&current_version={{current_version}}"
+      ]
+    }
   }
 }
