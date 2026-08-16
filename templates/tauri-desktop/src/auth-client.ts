@@ -16,6 +16,8 @@ export interface AuthStatus {
   credentialExpiresAt: string | null
   lastOnlineAuthAt: number | null
   maxLoginSeconds: number | null
+  /** The backend this device last enrolled against; null before first enrollment. */
+  serverUrl: string | null
 }
 
 /** Mirrors `auth::lock::LockState`. */
@@ -48,4 +50,11 @@ export const authClient = {
 
   /** Best-effort server revocation + clear the local credential (local DATA is left intact). */
   logout: () => invoke<void>("auth_logout"),
+
+  /** The backend URL currently in effect — pre-fills the login screen's Server field. */
+  getBackendUrl: () => invoke<string>("get_backend_url"),
+
+  /** Point subsequent backend calls at a new server (takes effect immediately;
+   * only persisted on a successful `enroll`). */
+  setBackendUrl: (url: string) => invoke<string>("set_backend_url", { url }),
 }

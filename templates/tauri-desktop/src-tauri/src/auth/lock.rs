@@ -66,6 +66,7 @@ mod tests {
             credential_expires_at: None,
             last_online_auth_at: last,
             max_login_seconds: max,
+            server_url: None,
         }
     }
 
