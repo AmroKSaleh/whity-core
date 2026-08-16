@@ -12,6 +12,11 @@
 //! `PluginRequirementsGate::gateAndOrder()` already quarantines a broken or
 //! incompatible plugin without crashing boot — the same safety net a
 //! "disabled" landing would give, without a second install step.
+//!
+//! WC-plugin-sync: `install`/`update`/`uninstall`/`list_installed` are the
+//! primitives `plugins::reconcile` composes into "converge this device's
+//! installed set to exactly match the server's catalog" — there is no manual
+//! install path left in the frontend.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -37,10 +42,18 @@ const MAX_TOTAL_UNCOMPRESSED_BYTES: u64 = 67_108_864; // 64 MiB
 const MAX_COMPRESSION_RATIO: u64 = 200;
 const RATIO_MIN_COMPRESSED_BYTES: u64 = 256;
 
+/// Sidecar file recording which version is installed under a plugin's
+/// directory — written INSIDE the staged directory before the commit rename,
+/// so it lands atomically with everything else. Invisible to the PHP loader:
+/// `PluginRuntimeLoader::registerPluginNamespaces()` skips any top-level
+/// entry starting with `.`, and `PluginDiscovery` only ever requires `.php`
+/// files under a plugin's directory.
+const VERSION_MARKER_FILE: &str = ".whity-version";
+
 /// Download, verify, extract and atomically install one plugin version into
 /// `plugins_root` (the writable `plugins-downloaded/` dir — see
 /// `php_host::PhpHostHandle::plugins_root()`). Does NOT restart FrankenPHP;
-/// the caller (`commands::plugins::plugin_install`) does that on success.
+/// the caller (`plugins::reconcile`) batches that across a whole sync pass.
 pub fn install(
     client: &Client,
     cfg: &Config,
@@ -50,15 +63,174 @@ pub fn install(
     version: &str,
     expected_sha256: &str,
 ) -> Result<InstallOutcome, String> {
-    validate_name(name)?;
-    validate_path_segment(version).map_err(|_| "Invalid plugin version.".to_string())?;
-
     let dest = plugins_root.join(name);
     if dest.exists() {
         return Err(format!(
-            "Plugin '{name}' is already installed (no overwrite/upgrade in this version)."
+            "Plugin '{name}' is already installed (use update() to change its version)."
         ));
     }
+
+    let staged_plugin_dir =
+        prepare_staged_package(client, cfg, access_token, plugins_root, name, version, expected_sha256)?;
+    let stage_root = staged_plugin_dir
+        .parent()
+        .expect("a staged plugin dir always has a stage-root parent")
+        .to_path_buf();
+
+    let result = (|| -> Result<(), String> {
+        // Re-check right before commit: another install could have raced in
+        // during the network round trip / extraction above.
+        if dest.exists() {
+            return Err(format!(
+                "Plugin '{name}' is already installed (use update() to change its version)."
+            ));
+        }
+        std::fs::rename(&staged_plugin_dir, &dest).map_err(|e| format!("failed to install the plugin: {e}"))?;
+        Ok(())
+    })();
+
+    // Clean up the staging parent either way: on success only the now-empty
+    // `.tmp-*` dir remains (its one child was renamed OUT to `dest`); on
+    // failure this removes whatever was partially extracted.
+    let _ = std::fs::remove_dir_all(&stage_root);
+    result?;
+
+    Ok(InstallOutcome {
+        name: name.to_string(),
+        version: version.to_string(),
+    })
+}
+
+/// Download, verify and extract a new version, then swap it in for whatever
+/// is currently installed under `name` (if anything). `rename` can't target
+/// an existing non-empty directory, so the commit is DISPLACE-then-commit:
+/// move the current install aside to a doomed `.trash-*` name, rename the
+/// newly-staged version into `dest`, then discard the trash — restoring it
+/// if the second rename itself fails, so a failed update never leaves the
+/// plugin fully absent. Same "never a window with nothing at `dest`"
+/// atomicity philosophy as `install()`'s stage-then-rename, extended to
+/// handle a non-empty destination.
+pub fn update(
+    client: &Client,
+    cfg: &Config,
+    access_token: &str,
+    plugins_root: &Path,
+    name: &str,
+    version: &str,
+    expected_sha256: &str,
+) -> Result<InstallOutcome, String> {
+    let dest = plugins_root.join(name);
+    let staged_plugin_dir =
+        prepare_staged_package(client, cfg, access_token, plugins_root, name, version, expected_sha256)?;
+    let stage_root = staged_plugin_dir
+        .parent()
+        .expect("a staged plugin dir always has a stage-root parent")
+        .to_path_buf();
+
+    let result = (|| -> Result<(), String> {
+        if !dest.exists() {
+            // Raced away since the caller listed it (or this is really a
+            // first install under this name) — a plain commit.
+            std::fs::rename(&staged_plugin_dir, &dest).map_err(|e| format!("failed to install the plugin: {e}"))?;
+            return Ok(());
+        }
+
+        let trash = plugins_root.join(format!(".trash-{}", Uuid::new_v4()));
+        std::fs::rename(&dest, &trash).map_err(|e| format!("failed to displace the current install: {e}"))?;
+
+        match std::fs::rename(&staged_plugin_dir, &dest) {
+            Ok(()) => {
+                let _ = std::fs::remove_dir_all(&trash);
+                Ok(())
+            }
+            Err(e) => {
+                // Put the old copy back — a failed update must never leave
+                // the plugin fully gone.
+                let _ = std::fs::rename(&trash, &dest);
+                Err(format!("failed to update the plugin: {e}"))
+            }
+        }
+    })();
+
+    let _ = std::fs::remove_dir_all(&stage_root);
+    result?;
+
+    Ok(InstallOutcome {
+        name: name.to_string(),
+        version: version.to_string(),
+    })
+}
+
+/// Remove a plugin directory. Idempotent — a no-op if already absent, since
+/// callers (`plugins::reconcile`) want convergence to "not installed," not
+/// proof that something existed.
+pub fn uninstall(plugins_root: &Path, name: &str) -> Result<(), String> {
+    validate_name(name)?;
+    let dest = plugins_root.join(name);
+    if !dest.exists() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(&dest).map_err(|e| format!("failed to remove plugin '{name}': {e}"))
+}
+
+/// Direct children of `plugins_root` that are actual installed plugins —
+/// excludes non-directories and the `.tmp-*`/`.trash-*` staging artifacts
+/// `install()`/`update()` use.
+pub fn list_installed(plugins_root: &Path) -> Result<Vec<String>, String> {
+    let entries = match std::fs::read_dir(plugins_root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("failed to read the plugins directory: {e}")),
+    };
+
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("failed to read a plugins directory entry: {e}"))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("failed to read a plugins directory entry: {e}"))?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| "a plugin directory name is not valid UTF-8".to_string())?;
+        if name.starts_with(".tmp-") || name.starts_with(".trash-") {
+            continue;
+        }
+        names.push(name);
+    }
+    Ok(names)
+}
+
+/// The version currently installed under `name`, or `None` if unknown
+/// (missing/unreadable/empty marker — e.g. a plugin installed before this
+/// marker existed) — `plugins::reconcile` treats `None` as "reinstall to
+/// converge on a known-good state" rather than an error.
+pub fn installed_version(plugins_root: &Path, name: &str) -> Option<String> {
+    std::fs::read_to_string(plugins_root.join(name).join(VERSION_MARKER_FILE))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Shared preamble for `install()`/`update()`: validate inputs, download,
+/// verify the checksum, extract into a fresh staging dir, and record the
+/// version marker — all before either caller decides how to commit. Returns
+/// the staged plugin directory (`<stage_root>/<name>`); on any failure the
+/// staging dir is cleaned up before returning `Err`.
+fn prepare_staged_package(
+    client: &Client,
+    cfg: &Config,
+    access_token: &str,
+    plugins_root: &Path,
+    name: &str,
+    version: &str,
+    expected_sha256: &str,
+) -> Result<PathBuf, String> {
+    validate_name(name)?;
+    validate_path_segment(version).map_err(|_| "Invalid plugin version.".to_string())?;
 
     let bytes = api::download_package(client, cfg, access_token, name, version, MAX_PACKAGE_BYTES)?;
     verify_checksum(&bytes, expected_sha256)?;
@@ -74,28 +246,21 @@ pub fn install(
                 "the package's top-level directory ('{extracted_name}') does not match the requested plugin name ('{name}')"
             ));
         }
-        // Re-check right before commit: another install could have raced in
-        // during the network round trip / extraction above.
-        if dest.exists() {
-            return Err(format!(
-                "Plugin '{name}' is already installed (no overwrite/upgrade in this version)."
-            ));
-        }
-        std::fs::rename(stage_root.join(&extracted_name), &dest)
-            .map_err(|e| format!("failed to install the plugin: {e}"))?;
+        write_version_marker(&stage_root.join(&extracted_name), version)?;
         Ok(())
     })();
 
-    // Clean up the staging parent either way: on success only the now-empty
-    // `.tmp-*` dir remains (its one child was renamed OUT to `dest`); on
-    // failure this removes whatever was partially extracted.
-    let _ = std::fs::remove_dir_all(&stage_root);
-    result?;
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(&stage_root);
+        return Err(e);
+    }
 
-    Ok(InstallOutcome {
-        name: name.to_string(),
-        version: version.to_string(),
-    })
+    Ok(stage_root.join(name))
+}
+
+fn write_version_marker(staged_plugin_dir: &Path, version: &str) -> Result<(), String> {
+    std::fs::write(staged_plugin_dir.join(VERSION_MARKER_FILE), version)
+        .map_err(|e| format!("failed to record the installed version: {e}"))
 }
 
 /// Same allowlist as `PluginInstaller::NAME_PATTERN` server-side — the name

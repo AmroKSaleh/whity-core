@@ -18,9 +18,10 @@ import { Sidebar } from "./sidebar"
 import { useHashPath } from "./use-hash-path"
 import { demoCatalogAdapter } from "./demo-catalog-tauri-adapter"
 import { PrinterDemo } from "./printer-demo"
-import { PhpHostDemo } from "./php-host-demo"
 import { PluginsPage } from "./plugins-page"
-import { AppStateProvider, AuthGate, useAppState } from "./app-state-provider"
+import { BlockRenderer } from "./plugin-blocks/block-renderer"
+import { PluginFeaturesProvider, usePluginFeatures, usePluginNavGroups } from "./plugin-nav-provider"
+import { AppStateProvider, AuthGate, useAppState, useAuthGateState } from "./app-state-provider"
 import { authClient } from "./auth-client"
 import { useThemeMode } from "./theme-mode-context"
 import { appT } from "./sync-i18n"
@@ -38,8 +39,35 @@ export function App() {
 }
 
 function AppInner() {
+  const state = useAuthGateState()
+
+  // Matches the website's split between `/login` (app/login/page.tsx, no
+  // sidebar at all) and `app/(protected)/layout.tsx` (sidebar only once
+  // authenticated): the enroll form and the locked/relogin screen render
+  // full-screen with zero chrome, exactly like an anonymous caller bounced to
+  // `/login` there. The sidebar mounts ONLY once there is an authenticated,
+  // unlocked session to show it around.
+  if (state !== "ready") {
+    return <AuthGate>{null}</AuthGate>
+  }
+
+  // Plugin features (and therefore their nav entries + /plugins/x/:id routes)
+  // only make sense once there's a device to fetch them FROM — see
+  // plugin-nav-provider.tsx's own dual php:status/plugin-sync:status
+  // listeners for when it (re)fetches.
+  return (
+    <PluginFeaturesProvider>
+      <AuthenticatedApp />
+    </PluginFeaturesProvider>
+  )
+}
+
+function AuthenticatedApp() {
   const path = useHashPath()
-  const navGroups = useMemo(() => resolveNavGroups(navConfig, path), [path])
+  const pluginNavGroups = usePluginNavGroups()
+  const pluginFeatures = usePluginFeatures()
+  const mergedNav = useMemo(() => ({ groups: [...navConfig.groups, ...pluginNavGroups] }), [pluginNavGroups])
+  const navGroups = useMemo(() => resolveNavGroups(mergedNav, path), [mergedNav, path])
   const { controller, auth, reloadAuth } = useAppState()
   const status = useSyncStatus(controller)
 
@@ -131,25 +159,31 @@ function AppInner() {
         <PrinterDemo />
       </>
     )
-  } else if (path === "/php-host-demo") {
-    body = (
-      <>
-        <PageHeader
-          title="PHP plugin host"
-          description="A bundled FrankenPHP process running real whity plugins offline, with a native bridge back into Rust."
-        />
-        <PhpHostDemo />
-      </>
-    )
   } else if (path === "/plugins") {
     body = (
       <>
         <PageHeader
           title="Plugins"
-          description="Download and install this tenant's entitled desktop plugins from the connected server — see src-tauri/src/plugins/."
+          description="Plugins your organization has enabled sync automatically when you sign in — nothing to install or manage here. See src-tauri/src/plugins/reconcile.rs."
         />
         <PluginsPage />
       </>
+    )
+  } else if (path.startsWith("/plugins/x/")) {
+    // Generic route for ANY installed plugin's screen:'blocks' feature — one
+    // provider + one route + one renderer serve every plugin, with zero
+    // per-feature TypeScript (see plugin-nav-provider.tsx / plugin-blocks/).
+    // Deliberately namespaced under /plugins/x/ so it can never collide with
+    // /plugins above, mirroring the website's own /admin/x/[featureId].
+    const featureId = path.slice("/plugins/x/".length)
+    const feature = pluginFeatures.find((f) => f.id === featureId)
+    body = feature ? (
+      <>
+        <PageHeader title={feature.label} />
+        <BlockRenderer feature={feature} />
+      </>
+    ) : (
+      <PageHeader title="Not found" description="This plugin feature isn't installed on this device." />
     )
   } else {
     body = (
@@ -163,9 +197,11 @@ function AppInner() {
   return (
     // Matches the website's protected layout (web/app/(protected)/layout.tsx),
     // which caps page content at max-w-7xl rather than letting it stretch
-    // full-bleed on a wide window.
+    // full-bleed on a wide window. `AuthenticatedApp` only ever mounts once
+    // `AppInner`'s `useAuthGateState()` is already "ready", so there's no
+    // second gate check needed here.
     <PageShell sidebar={sidebar} topBar={topBar} contentClassName="max-w-7xl">
-      <AuthGate>{body}</AuthGate>
+      {body}
     </PageShell>
   )
 }

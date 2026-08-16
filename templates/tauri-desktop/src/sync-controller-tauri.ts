@@ -53,6 +53,7 @@ interface FieldDiff {
   theirs: string | null
 }
 interface ConflictView {
+  resource: string
   id: number
   clientUuid: string
   title: string | null
@@ -91,8 +92,9 @@ export function createTauriSyncController(
   const backstopMs = options.backstopMs ?? 30000
 
   const listeners = new Set<(status: SyncStatus) => void>()
-  // conflict id -> client_uuid, so resolveConflict can key back into Rust.
-  const uuidById = new Map<number, string>()
+  // conflict id -> (resource, client_uuid), so resolveConflict can key back
+  // into Rust without needing to guess which ResourceDescriptor owns it.
+  const keyById = new Map<number, { resource: string; clientUuid: string }>()
 
   let snapshot: SyncStatus = {
     online: isOnline(),
@@ -120,12 +122,12 @@ export function createTauriSyncController(
   }
 
   function mapConflicts(views: ConflictView[]): Conflict[] {
-    uuidById.clear()
+    keyById.clear()
     return views.map((c) => {
-      uuidById.set(c.id, c.clientUuid)
+      keyById.set(c.id, { resource: c.resource, clientUuid: c.clientUuid })
       return {
         id: c.id,
-        resource: "demo-catalog",
+        resource: c.resource,
         title: c.title ?? undefined,
         fields: c.fields.map<FieldConflict>((f) => ({
           field: f.field,
@@ -148,7 +150,7 @@ export function createTauriSyncController(
         console.warn("list_conflicts failed:", err)
       }
     } else {
-      uuidById.clear()
+      keyById.clear()
     }
     if (ev.lastError) console.warn("sync error:", ev.lastError)
     emit({
@@ -190,15 +192,19 @@ export function createTauriSyncController(
 
   async function resolveConflict(resolution: Resolution): Promise<void> {
     const id = Number(resolution.conflictId)
-    const clientUuid = uuidById.get(id)
-    if (!clientUuid) throw new Error(`resolveConflict: no client_uuid for conflict ${id}`)
+    const key = keyById.get(id)
+    if (!key) throw new Error(`resolveConflict: no client_uuid for conflict ${id}`)
+    const { resource, clientUuid } = key
 
-    // Seed from the current local record so fields that did NOT diverge (and so
-    // aren't in the conflict) are preserved, then apply the user's per-field pick.
-    const base = await invoke<LocalItem | null>("get_item", { id })
-    let name = base?.name ?? ""
-    let description: string | null = base?.description ?? null
-    let status: "active" | "archived" = base?.status ?? "active"
+    // Seed non-diverging fields from the current local record so they're
+    // preserved (only the fields IN the conflict are otherwise present in
+    // `fields`), then apply the user's per-field pick on top. Only
+    // demo-catalog/items has a local-read command to seed from today — a
+    // second resource with its own UI needs its own seed call here, matching
+    // how `commands/items.rs` + `demo-catalog-tauri-adapter.ts` are
+    // deliberately per-resource, not generalized (see sync/resource.rs).
+    const fields: Record<string, unknown> =
+      resource === "demo-catalog/items" ? await seedDemoCatalogFields(id) : {}
 
     const current = snapshot.conflicts.find((c) => Number(c.id) === id)
     for (const field of current?.fields ?? []) {
@@ -206,17 +212,23 @@ export function createTauriSyncController(
       if (!choice) continue
       const picked =
         choice.pick === "custom" ? choice.value : choice.pick === "mine" ? field.mine : field.theirs
-      const value = picked == null ? null : String(picked)
-      if (field.field === "name") name = value ?? ""
-      else if (field.field === "description") description = value
-      else if (field.field === "status") status = value === "archived" ? "archived" : "active"
+      fields[field.field] = picked == null ? null : String(picked)
     }
 
     // Rust's resolve_conflict rebases + fires a LocalWrite trigger, so the loop
     // pushes the merged result and emits the cleared status. Refresh locally for
     // an immediate UI update (the conflict is already gone from the local read).
-    await invoke("resolve_conflict", { clientUuid, name, description, status })
+    await invoke("resolve_conflict", { resource, clientUuid, fields })
     await refresh()
+  }
+
+  async function seedDemoCatalogFields(id: number): Promise<Record<string, unknown>> {
+    const base = await invoke<LocalItem | null>("get_item", { id })
+    return {
+      name: base?.name ?? "",
+      description: base?.description ?? null,
+      status: base?.status ?? "active",
+    }
   }
 
   function start(): () => void {

@@ -1395,6 +1395,15 @@ $desktopPluginsHandler = new \Whity\Api\DesktopPluginsApiHandler(__DIR__ . '/../
 $router->register('GET', '/api/desktop-plugins', [$desktopPluginsHandler, 'catalog'], null, null, CorePermissions::DESKTOP_PLUGINS_READ);
 $router->register('GET', '/api/desktop-plugins/{name}/versions/{version}/download', [$desktopPluginsHandler, 'download'], null, null, CorePermissions::DESKTOP_PLUGINS_READ);
 
+// Desktop app self-update manifest (WC-app-self-update). Same authenticated-
+// endpoint posture as the desktop-plugins routes above (device bearer token,
+// a dedicated permission) rather than a public unauthenticated manifest —
+// consistent with this instance's existing trust model for this exact
+// client. Checked BEFORE plugin sync on the desktop side, since a plugin
+// package assumes a compatible app runtime.
+$desktopAppUpdateHandler = new \Whity\Api\DesktopAppUpdateApiHandler($db->getPdo());
+$router->register('GET', '/api/desktop-app-updates/latest', [$desktopAppUpdateHandler, 'latest'], null, null, CorePermissions::DESKTOP_APP_UPDATES_READ);
+
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
 // Only allow read-only access to migration status via API
 // Mutations (run/rollback) are performed via CLI only for security

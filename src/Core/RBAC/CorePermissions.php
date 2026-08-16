@@ -75,6 +75,14 @@ final class CorePermissions
     // every release; per-tenant entitlement is a deferred follow-up.
     public const DESKTOP_PLUGINS_READ = 'desktop-plugins:read';
 
+    // Desktop app self-update manifest (WC-app-self-update). Gates an enrolled
+    // desktop device's read access to its own update-check endpoint — kept
+    // distinct from DESKTOP_PLUGINS_READ since "may this device learn about a
+    // newer app build" is a separate grant from "may this device download
+    // plugin packages," even though both are consumed by the same client via
+    // the same bearer token.
+    public const DESKTOP_APP_UPDATES_READ = 'desktop-app-updates:read';
+
     // Permission delegation management (WC-34). Gates the delegation API; the
     // runtime subset-of-own-permissions invariant is enforced independently in
     // the delegation service so holding this permission never lets a grantor
@@ -254,6 +262,7 @@ final class CorePermissions
             self::PLUGINS_UNINSTALL,
             self::PLUGINS_RELOAD,
             self::DESKTOP_PLUGINS_READ,
+            self::DESKTOP_APP_UPDATES_READ,
             self::DELEGATION_MANAGE,
             self::RELATIONS_READ,
             self::RELATIONS_MANAGE,

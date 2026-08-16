@@ -1,4 +1,4 @@
-import { IconBox, IconHome, IconPrinter, IconPuzzle, IconServer } from "@tabler/icons-react"
+import { IconBox, IconHome, IconPrinter, IconPuzzle } from "@tabler/icons-react"
 import type { NavConfig } from "@amroksaleh/features/nav"
 
 /**
@@ -36,12 +36,6 @@ export const navConfig: NavConfig = {
           label: "Printer demo",
           href: "/printer-demo",
           icon: <IconPrinter className="size-5" />,
-        },
-        {
-          id: "php-host-demo",
-          label: "PHP plugin host",
-          href: "/php-host-demo",
-          icon: <IconServer className="size-5" />,
         },
         {
           id: "plugins",

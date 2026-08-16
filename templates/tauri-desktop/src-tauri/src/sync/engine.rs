@@ -1,33 +1,47 @@
-//! The push/pull reconciliation logic. Pure functions over a `&Connection` + an
-//! HTTP `Client` + `(api_base, token)` — no Tauri types — so the flow is
-//! testable against a real backend from a harness. `sync_cycle` = push then pull.
+//! The push/pull reconciliation logic, generalized (WC-sync-generalize) to
+//! any `resource::ResourceDescriptor` rather than hardcoded to DemoCatalog.
+//! Pure functions over a `&Connection` + an HTTP `Client` + `(api_base,
+//! token)` — no Tauri types — so the flow is testable against a real backend
+//! (or a mock — see `resource.rs`'s sibling test module) from a harness.
+//! `sync_cycle_for` = push then pull, once per resource.
 
 use reqwest::blocking::Client;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::http::{self, WriteOutcome};
-use super::{ServerItem, SyncSummary, DEMO_CATALOG_RESOURCE};
+use super::resource::{self, ResourceDescriptor};
+use super::{SyncRow, SyncStatusView, SyncSummary};
 
 const PAGE_LIMIT: u32 = 200;
 
-/// Run one full reconciliation: push every dirty local row, then pull + apply
-/// the server changes feed. Conflicts are parked (not fatal).
-pub fn sync_cycle(
+/// Run one full reconciliation of every resource in `resource::RESOURCES`.
+/// Conflicts are parked (not fatal); an expired session aborts the whole
+/// cycle immediately (all resources share one token).
+pub fn sync_cycle(conn: &Connection, client: &Client, api_base: &str, token: &str) -> Result<SyncSummary, String> {
+    sync_cycle_for(conn, client, api_base, Some(token), resource::RESOURCES)
+}
+
+/// Same as `sync_cycle`, but over an explicit resource slice and an optional
+/// token — the entry point `sync::bridge` reuses for its local<->remote
+/// relay, where one leg (the local PHP host) takes no bearer token at all.
+pub fn sync_cycle_for(
     conn: &Connection,
     client: &Client,
     api_base: &str,
-    token: &str,
+    token: Option<&str>,
+    resources: &[&ResourceDescriptor],
 ) -> Result<SyncSummary, String> {
-    let (pushed, push_conflicts) = push_pending(conn, client, api_base, token)?;
-    stamp(conn, "last_push_at")?;
-    let (pulled, pull_conflicts) = pull_changes(conn, client, api_base, token)?;
-
-    Ok(SyncSummary {
-        pushed,
-        pulled,
-        conflicts: push_conflicts + pull_conflicts,
-        unsynced_count: unsynced_count(conn)?,
-    })
+    let mut summary = SyncSummary::default();
+    for r in resources {
+        let (pushed, push_conflicts) = push_pending(conn, client, api_base, token, r)?;
+        stamp(conn, r, "last_push_at")?;
+        let (pulled, pull_conflicts) = pull_changes(conn, client, api_base, token, r)?;
+        summary.pushed += pushed;
+        summary.pulled += pulled;
+        summary.conflicts += push_conflicts + pull_conflicts;
+    }
+    summary.unsynced_count = unsynced_count(conn, resources)?;
+    Ok(summary)
 }
 
 // ---------------------------------------------------------------- push
@@ -36,11 +50,9 @@ struct PendingRow {
     id: i64,
     client_uuid: String,
     server_id: Option<i64>,
-    name: String,
-    description: Option<String>,
-    status: String,
     base_version: i64,
     sync_state: String,
+    domain: serde_json::Map<String, serde_json::Value>,
 }
 
 enum RowOutcome {
@@ -68,14 +80,15 @@ fn push_pending(
     conn: &Connection,
     client: &Client,
     api_base: &str,
-    token: &str,
+    token: Option<&str>,
+    resource: &ResourceDescriptor,
 ) -> Result<(usize, usize), String> {
-    let rows = select_pending(conn).map_err(db_err)?;
+    let rows = select_pending(conn, resource).map_err(db_err)?;
     let mut pushed = 0;
     let mut conflicts = 0;
 
     for row in rows {
-        match push_row(conn, client, api_base, token, &row) {
+        match push_row(conn, client, api_base, token, resource, &row) {
             Ok(RowOutcome::Pushed) => pushed += 1,
             Ok(RowOutcome::Conflicted) => conflicts += 1,
             // A dead session aborts the whole cycle — the caller re-authenticates.
@@ -85,10 +98,10 @@ fn push_pending(
             // Per-row transient/permanent failures back the ROW off but never abort
             // the cycle — one flaky or invalid row can't block the rest.
             Err(StepError::Http(http::HttpError::Retryable(msg))) => {
-                record_push_failure(conn, row.id, false, &msg).map_err(db_err)?;
+                record_push_failure(conn, resource, row.id, false, &msg).map_err(db_err)?;
             }
             Err(StepError::Http(http::HttpError::Permanent(msg))) => {
-                record_push_failure(conn, row.id, true, &msg).map_err(db_err)?;
+                record_push_failure(conn, resource, row.id, true, &msg).map_err(db_err)?;
             }
             // A local DB failure is not recoverable here.
             Err(StepError::Db(e)) => return Err(db_err(e)),
@@ -105,79 +118,81 @@ fn push_row(
     conn: &Connection,
     client: &Client,
     api_base: &str,
-    token: &str,
+    token: Option<&str>,
+    resource: &ResourceDescriptor,
     row: &PendingRow,
 ) -> Result<RowOutcome, StepError> {
     if row.sync_state == "deleted_pending" {
         return match row.server_id {
             // Never synced → nothing to delete server-side; drop it locally.
             None => {
-                conn.execute("DELETE FROM demo_catalog_items WHERE id = ?1", params![row.id])?;
+                conn.execute(&format!("DELETE FROM {} WHERE id = ?1", resource.table), params![row.id])?;
                 Ok(RowOutcome::Pushed)
             }
-            Some(server_id) => match http::delete(client, api_base, token, server_id, row.base_version)? {
-                WriteOutcome::Applied(_) | WriteOutcome::NotFound => {
-                    conn.execute(
-                        "UPDATE demo_catalog_items
-                         SET dirty = 0, sync_state = 'synced', deleted = 1,
-                             push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
-                         WHERE id = ?1",
-                        params![row.id],
-                    )?;
-                    Ok(RowOutcome::Pushed)
+            Some(server_id) => {
+                match http::delete(client, api_base, token, resource.base_path, server_id, row.base_version)? {
+                    WriteOutcome::Applied(_) | WriteOutcome::NotFound => {
+                        conn.execute(
+                            &format!(
+                                "UPDATE {} SET dirty = 0, sync_state = 'synced', deleted = 1,
+                                     push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
+                                 WHERE id = ?1",
+                                resource.table
+                            ),
+                            params![row.id],
+                        )?;
+                        Ok(RowOutcome::Pushed)
+                    }
+                    WriteOutcome::Conflict(server) => {
+                        park_conflict(conn, resource, &row.client_uuid, &row.domain, true, row.base_version, &server)?;
+                        Ok(RowOutcome::Conflicted)
+                    }
                 }
-                WriteOutcome::Conflict(server) => {
-                    park_conflict(conn, &row.client_uuid, &row.name, row.description.as_deref(), &row.status, true, row.base_version, &server)?;
-                    Ok(RowOutcome::Conflicted)
-                }
-            },
+            }
         };
     }
 
     match row.server_id {
         None => {
-            let item = http::create(
-                client, api_base, token,
-                &row.client_uuid, &row.name, row.description.as_deref(), &row.status,
-            )?;
+            let item = http::create(client, api_base, token, resource.base_path, &row.client_uuid, &row.domain)?;
             conn.execute(
-                "UPDATE demo_catalog_items
-                 SET server_id = ?1, base_version = ?2, dirty = 0, sync_state = 'synced',
-                     updated_at = ?3, updated_by = ?4,
-                     push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
-                 WHERE id = ?5",
+                &format!(
+                    "UPDATE {} SET server_id = ?1, base_version = ?2, dirty = 0, sync_state = 'synced',
+                         updated_at = ?3, updated_by = ?4,
+                         push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
+                     WHERE id = ?5",
+                    resource.table
+                ),
                 params![item.id, item.version, item.updated_at, item.updated_by, row.id],
             )?;
             Ok(RowOutcome::Pushed)
         }
-        Some(server_id) => match http::update(
-            client, api_base, token, server_id, row.base_version,
-            &row.name, row.description.as_deref(), &row.status,
-        )? {
-            WriteOutcome::Applied(item) => {
-                conn.execute(
-                    "UPDATE demo_catalog_items
-                     SET base_version = ?1, dirty = 0, sync_state = 'synced',
-                         updated_at = ?2, updated_by = ?3,
-                         push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
-                     WHERE id = ?4",
-                    params![item.version, item.updated_at, item.updated_by, row.id],
-                )?;
-                Ok(RowOutcome::Pushed)
+        Some(server_id) => {
+            match http::update(client, api_base, token, resource.base_path, server_id, row.base_version, &row.domain)? {
+                WriteOutcome::Applied(item) => {
+                    conn.execute(
+                        &format!(
+                            "UPDATE {} SET base_version = ?1, dirty = 0, sync_state = 'synced',
+                                 updated_at = ?2, updated_by = ?3,
+                                 push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
+                             WHERE id = ?4",
+                            resource.table
+                        ),
+                        params![item.version, item.updated_at, item.updated_by, row.id],
+                    )?;
+                    Ok(RowOutcome::Pushed)
+                }
+                WriteOutcome::Conflict(server) => {
+                    park_conflict(conn, resource, &row.client_uuid, &row.domain, false, row.base_version, &server)?;
+                    Ok(RowOutcome::Conflicted)
+                }
+                // Server row vanished → forget the server id so it re-creates next push.
+                WriteOutcome::NotFound => {
+                    conn.execute(&format!("UPDATE {} SET server_id = NULL WHERE id = ?1", resource.table), params![row.id])?;
+                    Ok(RowOutcome::Pushed)
+                }
             }
-            WriteOutcome::Conflict(server) => {
-                park_conflict(conn, &row.client_uuid, &row.name, row.description.as_deref(), &row.status, false, row.base_version, &server)?;
-                Ok(RowOutcome::Conflicted)
-            }
-            // Server row vanished → forget the server id so it re-creates next push.
-            WriteOutcome::NotFound => {
-                conn.execute(
-                    "UPDATE demo_catalog_items SET server_id = NULL WHERE id = ?1",
-                    params![row.id],
-                )?;
-                Ok(RowOutcome::Pushed)
-            }
-        },
+        }
     }
 }
 
@@ -186,24 +201,23 @@ fn push_row(
 /// hammering the server but stays visible via `last_push_error`).
 fn record_push_failure(
     conn: &Connection,
+    resource: &ResourceDescriptor,
     id: i64,
     permanent: bool,
     message: &str,
 ) -> rusqlite::Result<()> {
     let attempts: i64 = conn
-        .query_row(
-            "SELECT push_attempts FROM demo_catalog_items WHERE id = ?1",
-            params![id],
-            |r| r.get(0),
-        )
+        .query_row(&format!("SELECT push_attempts FROM {} WHERE id = ?1", resource.table), params![id], |r| r.get(0))
         .unwrap_or(0)
         + 1;
     let delay = if permanent { 24 * 3600 } else { next_backoff(attempts) };
     conn.execute(
-        "UPDATE demo_catalog_items
-         SET push_attempts = ?1, last_push_error = ?2,
-             next_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || ?3 || ' seconds')
-         WHERE id = ?4",
+        &format!(
+            "UPDATE {} SET push_attempts = ?1, last_push_error = ?2,
+                 next_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || ?3 || ' seconds')
+             WHERE id = ?4",
+            resource.table
+        ),
         params![attempts, message, delay, id],
     )?;
     Ok(())
@@ -216,25 +230,33 @@ fn next_backoff(attempts: i64) -> i64 {
     (5_i64 << shift).min(300)
 }
 
-fn select_pending(conn: &Connection) -> rusqlite::Result<Vec<PendingRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, client_uuid, server_id, name, description, status, base_version, sync_state
-         FROM demo_catalog_items
+fn select_pending(conn: &Connection, resource: &ResourceDescriptor) -> rusqlite::Result<Vec<PendingRow>> {
+    let domain_cols = resource.domain_columns.join(", ");
+    let sql = format!(
+        "SELECT id, client_uuid, server_id, base_version, sync_state{sep}{domain_cols}
+         FROM {table}
          WHERE sync_state IN ('pending', 'deleted_pending')
            AND (next_attempt_at IS NULL OR next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))
          ORDER BY updated_at_local ASC, id ASC",
-    )?;
+        sep = if domain_cols.is_empty() { "" } else { ", " },
+        domain_cols = domain_cols,
+        table = resource.table,
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let columns = resource.domain_columns;
     let rows = stmt
         .query_map([], |r| {
+            let mut domain = serde_json::Map::new();
+            for (i, col) in columns.iter().enumerate() {
+                domain.insert((*col).to_string(), super::sql_value::sql_to_json(r, 5 + i)?);
+            }
             Ok(PendingRow {
                 id: r.get(0)?,
                 client_uuid: r.get(1)?,
                 server_id: r.get(2)?,
-                name: r.get(3)?,
-                description: r.get(4)?,
-                status: r.get(5)?,
-                base_version: r.get(6)?,
-                sync_state: r.get(7)?,
+                base_version: r.get(3)?,
+                sync_state: r.get(4)?,
+                domain,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -246,180 +268,188 @@ fn select_pending(conn: &Connection) -> rusqlite::Result<Vec<PendingRow>> {
 struct LocalMatch {
     id: i64,
     client_uuid: String,
-    name: String,
-    description: Option<String>,
-    status: String,
     base_version: i64,
     dirty: bool,
     deleted: bool,
+    domain: serde_json::Map<String, serde_json::Value>,
 }
 
 fn pull_changes(
     conn: &Connection,
     client: &Client,
     api_base: &str,
-    token: &str,
+    token: Option<&str>,
+    resource: &ResourceDescriptor,
 ) -> Result<(usize, usize), String> {
-    let mut cursor = get_cursor(conn).map_err(db_err)?;
+    let mut cursor = get_cursor(conn, resource).map_err(db_err)?;
     let mut pulled = 0;
     let mut conflicts = 0;
 
     loop {
-        let page = http::fetch_changes(client, api_base, token, &cursor, PAGE_LIMIT)
-            .map_err(|e| e.to_string())?;
+        let page = http::fetch_changes(client, api_base, token, resource.base_path, &cursor, PAGE_LIMIT).map_err(|e| e.to_string())?;
         for item in &page.items {
-            if apply_pulled(conn, item).map_err(db_err)? {
+            if apply_pulled(conn, resource, item).map_err(db_err)? {
                 conflicts += 1;
             }
             pulled += 1;
         }
         cursor = page.cursor.clone();
-        set_cursor(conn, &cursor).map_err(db_err)?;
+        set_cursor(conn, resource, &cursor).map_err(db_err)?;
         if !page.has_more {
             break;
         }
     }
-    stamp(conn, "last_pull_at")?;
+    stamp(conn, resource, "last_pull_at")?;
 
     Ok((pulled, conflicts))
 }
 
 /// Apply one server item to local. Returns true when it produced a conflict.
-fn apply_pulled(conn: &Connection, server: &ServerItem) -> rusqlite::Result<bool> {
-    let local = find_local(conn, server.id, server.client_uuid.as_deref())?;
+fn apply_pulled(conn: &Connection, resource: &ResourceDescriptor, server: &SyncRow) -> rusqlite::Result<bool> {
+    let local = find_local(conn, resource, server.id, server.client_uuid.as_deref())?;
     match local {
         None => {
-            insert_from_server(conn, server)?;
+            insert_from_server(conn, resource, server)?;
             Ok(false)
         }
         Some(l) if !l.dirty => {
-            update_from_server(conn, l.id, server)?;
+            update_from_server(conn, resource, l.id, server)?;
             Ok(false)
         }
         Some(l) if server.version > l.base_version => {
             // Locally dirty AND the server moved past our base → real divergence.
-            park_conflict(conn, &l.client_uuid, &l.name, l.description.as_deref(), &l.status, l.deleted, l.base_version, server)?;
+            park_conflict(conn, resource, &l.client_uuid, &l.domain, l.deleted, l.base_version, server)?;
             Ok(true)
         }
-        // Locally dirty but the server hasn't advanced since our base — our
+        // Locally dirty but the server hasn't advanced since our base → our
         // pending push will carry the local change; leave it be.
         Some(_) => Ok(false),
     }
 }
 
-fn find_local(conn: &Connection, server_id: i64, client_uuid: Option<&str>) -> rusqlite::Result<Option<LocalMatch>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, client_uuid, name, description, status, base_version, dirty, deleted
-         FROM demo_catalog_items
+fn find_local(
+    conn: &Connection,
+    resource: &ResourceDescriptor,
+    server_id: i64,
+    client_uuid: Option<&str>,
+) -> rusqlite::Result<Option<LocalMatch>> {
+    let domain_cols = resource.domain_columns.join(", ");
+    let sql = format!(
+        "SELECT id, client_uuid, base_version, dirty, deleted{sep}{domain_cols}
+         FROM {table}
          WHERE server_id = ?1 OR client_uuid = ?2
          LIMIT 1",
-    )?;
+        sep = if domain_cols.is_empty() { "" } else { ", " },
+        domain_cols = domain_cols,
+        table = resource.table,
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let columns = resource.domain_columns;
     let mut rows = stmt.query(params![server_id, client_uuid])?;
     if let Some(r) = rows.next()? {
+        let mut domain = serde_json::Map::new();
+        for (i, col) in columns.iter().enumerate() {
+            domain.insert((*col).to_string(), super::sql_value::sql_to_json(r, 5 + i)?);
+        }
         Ok(Some(LocalMatch {
             id: r.get(0)?,
             client_uuid: r.get(1)?,
-            name: r.get(2)?,
-            description: r.get(3)?,
-            status: r.get(4)?,
-            base_version: r.get(5)?,
-            dirty: r.get::<_, i64>(6)? != 0,
-            deleted: r.get::<_, i64>(7)? != 0,
+            base_version: r.get(2)?,
+            dirty: r.get::<_, i64>(3)? != 0,
+            deleted: r.get::<_, i64>(4)? != 0,
+            domain,
         }))
     } else {
         Ok(None)
     }
 }
 
-fn insert_from_server(conn: &Connection, server: &ServerItem) -> rusqlite::Result<()> {
-    let client_uuid = server
-        .client_uuid
-        .clone()
-        .unwrap_or_else(|| format!("srv-{}", server.id));
-    conn.execute(
-        "INSERT INTO demo_catalog_items
-           (client_uuid, server_id, name, description, status, base_version,
-            sync_state, dirty, deleted, created_at, updated_at, updated_by, updated_at_local)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'synced', 0, ?7,
-                 COALESCE(?8, strftime('%Y-%m-%dT%H:%M:%fZ','now')), ?9, ?10,
-                 strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-        params![
-            client_uuid,
-            server.id,
-            server.name,
-            server.description,
-            server.status,
-            server.version,
-            server.is_deleted() as i64,
-            server.created_at,
-            server.updated_at,
-            server.updated_by,
-        ],
-    )?;
+fn insert_from_server(conn: &Connection, resource: &ResourceDescriptor, server: &SyncRow) -> rusqlite::Result<()> {
+    let client_uuid = server.client_uuid.clone().unwrap_or_else(|| format!("srv-{}", server.id));
+    let deleted = server.is_deleted() as i64;
+    let domain_cols = resource.domain_columns.join(", ");
+    let domain_placeholders: Vec<String> = (0..resource.domain_columns.len()).map(|i| format!("?{}", 8 + i)).collect();
+    let sql = format!(
+        "INSERT INTO {table}
+           (client_uuid, server_id, base_version, sync_state, dirty, deleted,
+            created_at, updated_at, updated_by, updated_at_local{sep}{domain_cols})
+         VALUES (?1, ?2, ?3, 'synced', 0, ?4,
+                 COALESCE(?5, strftime('%Y-%m-%dT%H:%M:%fZ','now')), ?6, ?7,
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now'){psep}{placeholders})",
+        table = resource.table,
+        sep = if domain_cols.is_empty() { "" } else { ", " },
+        domain_cols = domain_cols,
+        psep = if domain_placeholders.is_empty() { "" } else { ", " },
+        placeholders = domain_placeholders.join(", "),
+    );
+
+    let domain_values: Vec<_> = resource.domain_columns.iter().map(|c| super::sql_value::json_to_sql(server.domain.get(*c))).collect();
+    let mut bound: Vec<&dyn rusqlite::ToSql> =
+        vec![&client_uuid, &server.id, &server.version, &deleted, &server.created_at, &server.updated_at, &server.updated_by];
+    for v in &domain_values {
+        bound.push(v);
+    }
+    conn.execute(&sql, bound.as_slice())?;
     Ok(())
 }
 
-fn update_from_server(conn: &Connection, local_id: i64, server: &ServerItem) -> rusqlite::Result<()> {
-    conn.execute(
-        "UPDATE demo_catalog_items
-         SET server_id = ?1, name = ?2, description = ?3, status = ?4, base_version = ?5,
-             sync_state = 'synced', dirty = 0, deleted = ?6, updated_at = ?7, updated_by = ?8
-         WHERE id = ?9",
-        params![
-            server.id,
-            server.name,
-            server.description,
-            server.status,
-            server.version,
-            server.is_deleted() as i64,
-            server.updated_at,
-            server.updated_by,
-            local_id,
-        ],
-    )?;
+fn update_from_server(conn: &Connection, resource: &ResourceDescriptor, local_id: i64, server: &SyncRow) -> rusqlite::Result<()> {
+    let domain_set: String =
+        resource.domain_columns.iter().enumerate().map(|(i, c)| format!("{c} = ?{}", 6 + i)).collect::<Vec<_>>().join(", ");
+    let id_placeholder = 6 + resource.domain_columns.len();
+    let sql = format!(
+        "UPDATE {table} SET server_id = ?1, base_version = ?2, sync_state = 'synced', dirty = 0,
+             deleted = ?3, updated_at = ?4, updated_by = ?5{sep}{domain_set}
+         WHERE id = ?{id_placeholder}",
+        table = resource.table,
+        sep = if domain_set.is_empty() { "" } else { ", " },
+    );
+
+    let deleted = server.is_deleted() as i64;
+    let domain_values: Vec<_> = resource.domain_columns.iter().map(|c| super::sql_value::json_to_sql(server.domain.get(*c))).collect();
+    let mut bound: Vec<&dyn rusqlite::ToSql> = vec![&server.id, &server.version, &deleted, &server.updated_at, &server.updated_by];
+    for v in &domain_values {
+        bound.push(v);
+    }
+    bound.push(&local_id);
+    conn.execute(&sql, bound.as_slice())?;
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn park_conflict(
     conn: &Connection,
+    resource: &ResourceDescriptor,
     client_uuid: &str,
-    mine_name: &str,
-    mine_description: Option<&str>,
-    mine_status: &str,
+    mine: &serde_json::Map<String, serde_json::Value>,
     mine_deleted: bool,
     base_version: i64,
-    server: &ServerItem,
+    server: &SyncRow,
 ) -> rusqlite::Result<()> {
-    let mine = serde_json::json!({
-        "name": mine_name,
-        "description": mine_description,
-        "status": mine_status,
-        "deleted": mine_deleted,
-    })
-    .to_string();
-    let theirs = serde_json::json!({
-        "name": server.name,
-        "description": server.description,
-        "status": server.status,
-        "deleted": server.is_deleted(),
-        "updatedBy": server.updated_by,
-    })
-    .to_string();
+    let mut mine_obj = mine.clone();
+    mine_obj.insert("deleted".to_string(), serde_json::Value::from(mine_deleted));
+    let mine_json = serde_json::Value::Object(mine_obj).to_string();
+
+    let mut theirs_obj = server.domain.clone();
+    theirs_obj.insert("deleted".to_string(), serde_json::Value::from(server.is_deleted()));
+    theirs_obj.insert(
+        "updatedBy".to_string(),
+        server.updated_by.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null),
+    );
+    let theirs_json = serde_json::Value::Object(theirs_obj).to_string();
 
     conn.execute(
-        "INSERT INTO item_conflicts (client_uuid, base_version, server_version, mine_json, theirs_json)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(client_uuid) DO UPDATE SET
+        "INSERT INTO item_conflicts (resource, client_uuid, base_version, server_version, mine_json, theirs_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(resource, client_uuid) DO UPDATE SET
              base_version = excluded.base_version,
              server_version = excluded.server_version,
              mine_json = excluded.mine_json,
              theirs_json = excluded.theirs_json,
              detected_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
-        params![client_uuid, base_version, server.version, mine, theirs],
+        params![resource.key, client_uuid, base_version, server.version, mine_json, theirs_json],
     )?;
     conn.execute(
-        "UPDATE demo_catalog_items SET sync_state = 'conflict' WHERE client_uuid = ?1",
+        &format!("UPDATE {} SET sync_state = 'conflict' WHERE client_uuid = ?1", resource.table),
         params![client_uuid],
     )?;
     Ok(())
@@ -427,59 +457,100 @@ fn park_conflict(
 
 // ---------------------------------------------------------------- cursor / status
 
-fn get_cursor(conn: &Connection) -> rusqlite::Result<String> {
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT cursor FROM sync_state_kv WHERE resource = ?1",
-            params![DEMO_CATALOG_RESOURCE],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
+fn get_cursor(conn: &Connection, resource: &ResourceDescriptor) -> rusqlite::Result<String> {
+    let existing: Option<String> =
+        conn.query_row("SELECT cursor FROM sync_state_kv WHERE resource = ?1", params![resource.key], |r| r.get(0)).ok().flatten();
     match existing {
         Some(c) => Ok(c),
         None => {
             conn.execute(
-                "INSERT INTO sync_state_kv (resource, cursor) VALUES (?1, '0')
-                 ON CONFLICT(resource) DO NOTHING",
-                params![DEMO_CATALOG_RESOURCE],
+                "INSERT INTO sync_state_kv (resource, cursor) VALUES (?1, '0') ON CONFLICT(resource) DO NOTHING",
+                params![resource.key],
             )?;
             Ok("0".to_string())
         }
     }
 }
 
-fn set_cursor(conn: &Connection, cursor: &str) -> rusqlite::Result<()> {
+fn set_cursor(conn: &Connection, resource: &ResourceDescriptor, cursor: &str) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO sync_state_kv (resource, cursor) VALUES (?1, ?2)
          ON CONFLICT(resource) DO UPDATE SET cursor = excluded.cursor",
-        params![DEMO_CATALOG_RESOURCE, cursor],
+        params![resource.key, cursor],
     )?;
     Ok(())
 }
 
-fn stamp(conn: &Connection, column: &str) -> Result<(), String> {
+fn stamp(conn: &Connection, resource: &ResourceDescriptor, column: &str) -> Result<(), String> {
     // `column` is a fixed internal identifier (last_pull_at | last_push_at).
     conn.execute(
         &format!(
             "INSERT INTO sync_state_kv (resource, {column}) VALUES (?1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
              ON CONFLICT(resource) DO UPDATE SET {column} = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
         ),
-        params![DEMO_CATALOG_RESOURCE],
+        params![resource.key],
     )
     .map_err(db_err)?;
     Ok(())
 }
 
-pub fn unsynced_count(conn: &Connection) -> Result<usize, String> {
+fn unsynced_count_for(conn: &Connection, resource: &ResourceDescriptor) -> Result<usize, String> {
     let n: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM demo_catalog_items WHERE sync_state <> 'synced'",
-            [],
-            |r| r.get(0),
-        )
+        .query_row(&format!("SELECT COUNT(*) FROM {} WHERE sync_state <> 'synced'", resource.table), [], |r| r.get(0))
         .map_err(db_err)?;
     Ok(n as usize)
+}
+
+fn conflict_count_for(conn: &Connection, resource: &ResourceDescriptor) -> Result<usize, String> {
+    let n: i64 = conn
+        .query_row(&format!("SELECT COUNT(*) FROM {} WHERE sync_state = 'conflict'", resource.table), [], |r| r.get(0))
+        .map_err(db_err)?;
+    Ok(n as usize)
+}
+
+fn stamps_for(conn: &Connection, resource: &ResourceDescriptor) -> rusqlite::Result<(Option<String>, Option<String>)> {
+    conn.query_row("SELECT last_pull_at, last_push_at FROM sync_state_kv WHERE resource = ?1", params![resource.key], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })
+    .optional()
+    .map(|o| o.unwrap_or((None, None)))
+}
+
+/// ISO-8601 timestamps compare lexically; `None` loses to any `Some`.
+fn later_iso(a: Option<String>, b: Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if b > a { b } else { a }),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+pub fn unsynced_count(conn: &Connection, resources: &[&ResourceDescriptor]) -> Result<usize, String> {
+    let mut total = 0;
+    for r in resources {
+        total += unsynced_count_for(conn, r)?;
+    }
+    Ok(total)
+}
+
+/// A point-in-time status snapshot summed across `resources` — the single
+/// implementation `commands::sync::get_sync_status` and
+/// `scheduler::run_cycle` both now call, replacing what used to be three
+/// independent copies of the same query.
+pub fn read_status(conn: &Connection, resources: &[&ResourceDescriptor]) -> Result<SyncStatusView, String> {
+    let mut unsynced = 0usize;
+    let mut conflicts = 0usize;
+    let mut last_pull_at: Option<String> = None;
+    let mut last_push_at: Option<String> = None;
+    for r in resources {
+        unsynced += unsynced_count_for(conn, r)?;
+        conflicts += conflict_count_for(conn, r)?;
+        let (pull, push) = stamps_for(conn, r).map_err(db_err)?;
+        last_pull_at = later_iso(last_pull_at, pull);
+        last_push_at = later_iso(last_push_at, push);
+    }
+    Ok(SyncStatusView { unsynced_count: unsynced, conflict_count: conflicts, last_pull_at, last_push_at })
 }
 
 fn db_err<E: std::fmt::Display>(e: E) -> String {
@@ -537,14 +608,21 @@ mod tests {
         )
         .unwrap();
 
-        let uuids: Vec<String> = select_pending(&conn)
-            .unwrap()
-            .into_iter()
-            .map(|r| r.client_uuid)
-            .collect();
+        let uuids: Vec<String> =
+            select_pending(&conn, &resource::DEMO_CATALOG_ITEMS).unwrap().into_iter().map(|r| r.client_uuid).collect();
         assert!(uuids.contains(&"due-null".to_string()));
         assert!(uuids.contains(&"due-past".to_string()));
         assert!(!uuids.contains(&"not-due".to_string()), "a future next_attempt_at is skipped");
+    }
+
+    #[test]
+    fn select_pending_captures_declared_domain_columns() {
+        let conn = migrated();
+        insert_pending(&conn, "u1");
+        let rows = select_pending(&conn, &resource::DEMO_CATALOG_ITEMS).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].domain.get("name").and_then(|v| v.as_str()), Some("n"));
+        assert_eq!(rows[0].domain.get("status").and_then(|v| v.as_str()), Some("active"));
     }
 
     #[test]
@@ -553,13 +631,10 @@ mod tests {
         insert_pending(&conn, "a");
         insert_pending(&conn, "b");
         // A closed local port → connection refused → a Retryable network error.
-        let client = reqwest::blocking::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(3))
-            .build()
-            .unwrap();
+        let client = reqwest::blocking::Client::builder().connect_timeout(std::time::Duration::from_secs(3)).build().unwrap();
 
         let (pushed, conflicts) =
-            push_pending(&conn, &client, "http://127.0.0.1:1/api/v1", "tok").unwrap();
+            push_pending(&conn, &client, "http://127.0.0.1:1/api/v1", Some("tok"), &resource::DEMO_CATALOG_ITEMS).unwrap();
         assert_eq!(pushed, 0);
         assert_eq!(conflicts, 0);
 
@@ -577,6 +652,25 @@ mod tests {
             assert!(err.is_some(), "the error is surfaced for {uuid}");
             assert_eq!(state, "pending", "the row is preserved (not lost) for {uuid}");
         }
+    }
+
+    #[test]
+    fn read_status_sums_across_resources_and_takes_the_later_stamp() {
+        let conn = migrated();
+        insert_pending(&conn, "a");
+        stamp(&conn, &resource::DEMO_CATALOG_ITEMS, "last_pull_at").unwrap();
+        let status = read_status(&conn, resource::RESOURCES).unwrap();
+        assert_eq!(status.unsynced_count, 1);
+        assert!(status.last_pull_at.is_some());
+        assert_eq!(status.last_push_at, None);
+    }
+
+    #[test]
+    fn later_iso_picks_the_lexically_greater_timestamp() {
+        assert_eq!(later_iso(Some("2024-01-01T00:00:00Z".into()), Some("2024-06-01T00:00:00Z".into())), Some("2024-06-01T00:00:00Z".into()));
+        assert_eq!(later_iso(None, Some("x".into())), Some("x".into()));
+        assert_eq!(later_iso(Some("x".into()), None), Some("x".into()));
+        assert_eq!(later_iso(None, None), None);
     }
 }
 
@@ -605,14 +699,13 @@ mod integration {
             "set WHITY_BACKEND_URL to a throwaway backend these tests may write to \
              (e.g. http://localhost:8300); refusing to fall back to the compiled-in default"
         );
-        Config::from_env()
+        Config::resolve()
     }
 
     fn token(client: &Client, cfg: &Config) -> String {
         match api::login(client, cfg, "admin@example.com", "admin123").expect("login") {
             LoginOutcome::Session { access_token } => {
-                let dev = api::register_device(client, cfg, &access_token, "sync-it", cfg.platform)
-                    .expect("device enroll");
+                let dev = api::register_device(client, cfg, &access_token, "sync-it", cfg.platform).expect("device enroll");
                 api::exchange(client, cfg, &dev.credential).expect("exchange").access_token
             }
             _ => panic!("expected a full session for the seeded admin"),
@@ -634,6 +727,14 @@ mod integration {
         .unwrap();
     }
 
+    fn domain(name: &str, status: &str) -> serde_json::Map<String, serde_json::Value> {
+        let mut m = serde_json::Map::new();
+        m.insert("name".to_string(), serde_json::Value::String(name.to_string()));
+        m.insert("description".to_string(), serde_json::Value::Null);
+        m.insert("status".to_string(), serde_json::Value::String(status.to_string()));
+        m
+    }
+
     #[test]
     #[ignore = "requires a live PR-A2 backend (WHITY_BACKEND_URL must be set)"]
     fn pushes_pulls_and_detects_conflicts() {
@@ -641,6 +742,7 @@ mod integration {
         let client = api::build_client().unwrap();
         let tok = token(&client, &cfg);
         let api_base = cfg.api_base();
+        let resource = &resource::DEMO_CATALOG_ITEMS;
 
         // --- PUSH: a locally-created item reaches the server ---
         let db1 = local_db();
@@ -650,11 +752,9 @@ mod integration {
         let s1 = sync_cycle(&db1, &client, &api_base, &tok).unwrap();
         assert!(s1.pushed >= 1, "the pending create should push");
         let (server_id, state, base_v): (Option<i64>, String, i64) = db1
-            .query_row(
-                "SELECT server_id, sync_state, base_version FROM demo_catalog_items WHERE client_uuid = ?1",
-                [&uuid],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
+            .query_row("SELECT server_id, sync_state, base_version FROM demo_catalog_items WHERE client_uuid = ?1", [&uuid], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
             .unwrap();
         let server_id = server_id.expect("server_id assigned after push");
         assert_eq!(state, "synced");
@@ -674,7 +774,7 @@ mod integration {
         assert_eq!(found, 1, "the fresh client pulled the pushed row");
 
         // --- CONFLICT: server moves ahead of a locally-dirty row ---
-        match http::update(&client, &api_base, &tok, server_id, 1, "Server edit", None, "active").unwrap() {
+        match http::update(&client, &api_base, Some(&tok), resource.base_path, server_id, 1, &domain("Server edit", "active")).unwrap() {
             WriteOutcome::Applied(item) => assert_eq!(item.version, 2),
             other => panic!("expected the server update to apply, got {other:?}"),
         }
@@ -686,46 +786,33 @@ mod integration {
 
         let s3 = sync_cycle(&db1, &client, &api_base, &tok).unwrap();
         assert!(s3.conflicts >= 1, "the stale local edit must conflict with server v2");
-        let cstate: String = db1
-            .query_row(
-                "SELECT sync_state FROM demo_catalog_items WHERE client_uuid = ?1",
-                [&uuid],
-                |r| r.get(0),
-            )
-            .unwrap();
+        let cstate: String =
+            db1.query_row("SELECT sync_state FROM demo_catalog_items WHERE client_uuid = ?1", [&uuid], |r| r.get(0)).unwrap();
         assert_eq!(cstate, "conflict");
         let (mine, theirs): (String, String) = db1
-            .query_row(
-                "SELECT mine_json, theirs_json FROM item_conflicts WHERE client_uuid = ?1",
-                [&uuid],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
+            .query_row("SELECT mine_json, theirs_json FROM item_conflicts WHERE client_uuid = ?1", [&uuid], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
             .unwrap();
         assert!(mine.contains("Local edit"), "mine snapshot: {mine}");
         assert!(theirs.contains("Server edit"), "theirs snapshot: {theirs}");
 
         // --- RESOLVE: apply a merge, re-sync; the merged result reaches the server ---
-        assert!(
-            crate::db::conflicts_repo::resolve(&db1, &uuid, "Merged name", None, "active").unwrap()
-        );
+        let mut merged = serde_json::Map::new();
+        merged.insert("name".to_string(), serde_json::Value::String("Merged name".to_string()));
+        merged.insert("status".to_string(), serde_json::Value::String("active".to_string()));
+        assert!(crate::db::conflicts_repo::resolve(&db1, resource, &uuid, &merged).unwrap());
         let _ = sync_cycle(&db1, &client, &api_base, &tok).unwrap();
         let (rstate, rname, rbase): (String, String, i64) = db1
-            .query_row(
-                "SELECT sync_state, name, base_version FROM demo_catalog_items WHERE client_uuid = ?1",
-                [&uuid],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
+            .query_row("SELECT sync_state, name, base_version FROM demo_catalog_items WHERE client_uuid = ?1", [&uuid], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
             .unwrap();
         assert_eq!(rstate, "synced");
         assert_eq!(rname, "Merged name");
         assert!(rbase >= 3, "version advanced past the server's v2 after pushing the merge");
-        let conflicts_left: i64 = db1
-            .query_row(
-                "SELECT COUNT(*) FROM item_conflicts WHERE client_uuid = ?1",
-                [&uuid],
-                |r| r.get(0),
-            )
-            .unwrap();
+        let conflicts_left: i64 =
+            db1.query_row("SELECT COUNT(*) FROM item_conflicts WHERE client_uuid = ?1", [&uuid], |r| r.get(0)).unwrap();
         assert_eq!(conflicts_left, 0, "the conflict is cleared after resolve + sync");
     }
 }

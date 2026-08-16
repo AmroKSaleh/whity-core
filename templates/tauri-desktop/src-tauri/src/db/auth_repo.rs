@@ -19,8 +19,10 @@ pub struct AuthStatus {
     pub last_online_auth_at: Option<i64>,
     /// The server-echoed desktop-login TTL (seconds); the offline-lock window.
     pub max_login_seconds: Option<i64>,
-    /// The backend this device last enrolled against (WC-server-select), so the
-    /// UI can display "connected to: …". `None` before the first enrollment.
+    /// The backend this device enrolled against — informational only (the
+    /// account footer displays it), never user-editable: the backend is
+    /// fixed for the whole build (see `config.rs`). `None` before the first
+    /// enrollment.
     pub server_url: Option<String>,
 }
 
@@ -43,12 +45,6 @@ pub fn status(conn: &Connection) -> rusqlite::Result<AuthStatus> {
             })
         },
     )
-}
-
-/// The stored backend URL, read BEFORE `Config`/`AuthManager` exist (app
-/// startup, ahead of the full `AuthStatus` query) — `None` pre-enrollment.
-pub fn get_server_url(conn: &Connection) -> rusqlite::Result<Option<String>> {
-    conn.query_row("SELECT server_url FROM auth_state WHERE id = 1", [], |r| r.get(0))
 }
 
 /// Mark the device enrolled and record its identity/credential metadata,
@@ -160,17 +156,8 @@ mod tests {
         assert!(!s.enrolled);
         assert!(s.email.is_none());
         assert!(s.max_login_seconds.is_none());
-        // server_url is a device-level fact, not session state — logout must not
-        // clear it, so re-enrolling pre-fills the same previously trusted server.
+        // server_url is informational history, not session state — logout
+        // must not erase which backend this device was last talking to.
         assert_eq!(s.server_url.as_deref(), Some("https://whity.example.com"));
-    }
-
-    #[test]
-    fn get_server_url_reads_independently_of_full_status() {
-        let conn = migrated();
-        assert_eq!(get_server_url(&conn).unwrap(), None);
-
-        set_enrolled(&conn, 1, "a@b.c", None, "x", "https://whity.example.com").unwrap();
-        assert_eq!(get_server_url(&conn).unwrap().as_deref(), Some("https://whity.example.com"));
     }
 }

@@ -39,6 +39,7 @@ spl_autoload_register(static function (string $class): void {
 
 require_once __DIR__ . '/../src/helpers.php';
 
+use Whity\Api\FrontendFeaturesHandler;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\DeviceRoleChecker;
 use Whity\Core\RBAC\RoleSeeder;
@@ -123,13 +124,14 @@ if (!$deviceRoleChecker->hasRole($offlineProfileId, $offlineTenantId, $deviceRol
 $offlineIdentity = new OfflineIdentity($offlineProfileId, $offlineTenantId);
 \Whity\register_service(OfflineIdentity::class, $offlineIdentity);
 $rbacGate = new RbacGate($deviceRoleChecker, $offlineIdentity);
+$frontendFeaturesHandler = new FrontendFeaturesHandler($loader, $deviceRoleChecker, $offlineProfileId, $offlineTenantId);
 
 // ---- Request loop -----------------------------------------------------
 
 $isWorker = function_exists('frankenphp_handle_request');
 $maxRequests = (int) ($_ENV['MAX_REQUESTS'] ?? 0); // 0 = unbounded
 
-$handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate) {
+$handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate, $frontendFeaturesHandler) {
     try {
         $request = Request::fromGlobals();
 
@@ -148,6 +150,17 @@ $handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate)
                 ),
                 'quarantined' => $loader->getQuarantined(),
             ])->send();
+
+            return;
+        }
+
+        // WC-plugin-block-renderer: an installed plugin's declared UI features
+        // (screen:'blocks' today), permission-filtered for this device's
+        // profile — see Whity\Api\FrontendFeaturesHandler. Infrastructure
+        // endpoint like /__whity/plugins above, not a plugin route, so it
+        // bypasses $router/$rbacGate the same way.
+        if ($request->getMethod() === 'GET' && $request->getPath() === '/__whity/frontend-features') {
+            Response::json(['data' => $frontendFeaturesHandler->list()])->send();
 
             return;
         }

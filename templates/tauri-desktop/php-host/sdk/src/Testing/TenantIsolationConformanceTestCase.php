@@ -32,14 +32,16 @@ use Whity\Sdk\Tenant\TenantTableRegistry;
  *
  *   3. {@see testDeclaredTenantTablesExistWithTenantIdOnARealEngine()} — the
  *      RealEngine check: the plugin's migrations are applied to a genuine SQL
- *      engine (in-memory SQLite locally, the host's Postgres in CI) and every
- *      table the plugin declares tenant-owned is asserted to physically carry a
+ *      engine (in-memory SQLite locally, real PostgreSQL in CI) and every table
+ *      the plugin declares tenant-owned is asserted to physically carry a
  *      `tenant_id` column. This catches a registry that claims a column the
  *      schema does not actually create.
  *
  * A plugin supplies its specifics by implementing the three abstract hooks. The
- * base class is engine-agnostic: override {@see makePdo()} to point at Postgres
- * in CI; the default in-memory SQLite is used locally.
+ * base class is engine-agnostic and needs no subclass changes to switch engines:
+ * set `PHPUNIT_PG_DSN` in the environment and check 3 runs against real
+ * PostgreSQL — the dialect that production actually speaks — instead of SQLite.
+ * See {@see RealEnginePdo} for the harness and {@see makePdo()} for the hook.
  */
 abstract class TenantIsolationConformanceTestCase extends TestCase
 {
@@ -166,19 +168,22 @@ abstract class TenantIsolationConformanceTestCase extends TestCase
     }
 
     /**
-     * The PDO the RealEngine check runs against. Defaults to in-memory SQLite
-     * with PostgreSQL-flavoured affordances (NOW(), string fetches) so plugin
-     * migrations written for Postgres apply unmodified locally. Override in CI
-     * to return a real Postgres connection.
+     * The PDO the RealEngine check runs against.
+     *
+     * Engine choice is an ENVIRONMENT decision, not a code one: set
+     * `PHPUNIT_PG_DSN` and the same suite runs against genuine PostgreSQL; leave
+     * it unset and you get in-memory SQLite with PostgreSQL-flavoured
+     * affordances (NOW(), string fetches) for the fast local loop. See
+     * {@see RealEnginePdo} for the DSN/credential variables, the throwaway-server
+     * one-liner, and what the isolation guarantees are — and the wiki's
+     * "PostgreSQL vs SQLite" page for the dialect traps this is here to catch.
+     *
+     * Overriding is still supported for a plugin with an unusual setup, but no
+     * plugin needs to override it merely to reach Postgres in CI any more.
      */
     protected function makePdo(): \PDO
     {
-        $pdo = new \PDO('sqlite::memory:');
-        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(\PDO::ATTR_STRINGIFY_FETCHES, true);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
-
-        return $pdo;
+        return RealEnginePdo::make();
     }
 
     /**

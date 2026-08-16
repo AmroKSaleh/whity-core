@@ -28,9 +28,15 @@ use Whity\Sdk\PluginInterface;
 final class PluginDiscovery
 {
     /**
+     * @param list<string> $skipDirectoryNames Directory basenames already
+     *   claimed by an earlier-iterated root (see
+     *   PluginRuntimeLoader::loadDiscovered()) — never require_once'd here,
+     *   since a same-named directory in an earlier root already declares the
+     *   same classes: requiring both would fatal PHP with "Cannot redeclare
+     *   class" instead of the graceful per-directory skip this is meant to be.
      * @return list<class-string<PluginInterface>>
      */
-    public static function discover(string $pluginsRoot): array
+    public static function discover(string $pluginsRoot, array $skipDirectoryNames = []): array
     {
         if (!is_dir($pluginsRoot)) {
             return [];
@@ -45,6 +51,12 @@ final class PluginDiscovery
 
         foreach ($entries as $entry) {
             if (str_starts_with($entry, '.')) {
+                continue;
+            }
+
+            if (in_array($entry, $skipDirectoryNames, true)) {
+                // Already logged by PluginRuntimeLoader::registerPluginNamespaces()
+                // when it made the same first-root-wins call for this name.
                 continue;
             }
 
