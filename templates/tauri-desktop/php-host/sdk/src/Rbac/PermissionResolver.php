@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk\Rbac;
 
 /**
- * Read-only access to the host's AUTHORITATIVE permission resolution (SDK 1.17).
+ * Read-only access to the host's AUTHORITATIVE permission resolution (SDK 1.22).
  *
  * Why this exists
  * ---------------
@@ -54,12 +54,19 @@ namespace Whity\Sdk\Rbac;
  * tenant boundary. Plugins should pass the tenant resolved for the current
  * request rather than one taken from client input.
  *
- * Resource-scoped checks (SDK 1.17)
- * ---------------------------------
+ * Resource-scoped checks (SDK 1.17; roles since 1.22)
+ * ---------------------------------------------------
  * `$resourceType` / `$resourceId` are now HONOURED, not ignored. The host
  * resolves grants addressed at a single record through
  * `resource_role_assignments`, so a plugin can ask "may this caller act on THIS
  * document?" and receive an answer narrowed to that record.
+ *
+ * 1.17 fitted the PERMISSION side only. {@see self::hasRole()} kept asking the
+ * tenant-wide question even though the host's role resolution already accepted a
+ * resource scope, so a role granted at one record was resolvable and not
+ * askable — and an adopter reasonably read that as needing a schema change to
+ * `memberships` to staff a single record. It does not; 1.22 gives `hasRole()`
+ * the same two optional arguments.
  *
  * Earlier minors deliberately omitted these parameters rather than accept and
  * discard them: a caller passing a resource would have believed it held a
@@ -117,12 +124,39 @@ interface PermissionResolver
      * actually required, whereas a role name couples the plugin to one
      * deployment's role vocabulary.
      *
-     * @param int    $profileId The profile whose authority is being tested.
-     * @param int    $tenantId  The resolved tenant id (0 = system tenant).
-     * @param string $role      The role NAME to test for.
+     * Pass `$resourceType` and `$resourceId` together to narrow the question to
+     * one record; pass neither for the tenant-wide answer. Passing only one is
+     * treated as passing neither — a half-specified resource is not a resource.
+     * A role granted at a single record is then askable, not merely resolvable:
+     * "this profile holds role X at record A and role Y at record B" needs no
+     * schema change to `memberships`, only these arguments.
+     *
+     * The parity identity holds for roles as it does for permissions, at BOTH
+     * scopes — the host's effective-role set and this method must never disagree:
+     *
+     *     in_array($r, $host->getEffectiveRolesForProfile($id, $t, $ty, $rid), true)
+     *         === $resolver->hasRole($id, $t, $r, $ty, $rid)
+     *
+     * The SDK publishes no `effectiveRoles()` counterpart to
+     * {@see self::effectivePermissions()}: the effective ROLE set is a
+     * deployment's private vocabulary, and a plugin that filters on it couples
+     * itself to that vocabulary. The identity above is therefore stated against
+     * the host resolver a plugin does not hold, and is pinned by the host suite.
+     *
+     * @param int         $profileId    The profile whose authority is being tested.
+     * @param int         $tenantId     The resolved tenant id (0 = system tenant).
+     * @param string      $role         The role NAME to test for.
+     * @param string|null $resourceType A registered resource type, e.g. `document`.
+     * @param int|null    $resourceId   The id of that resource.
      * @return bool True when the profile effectively holds the role.
      */
-    public function hasRole(int $profileId, int $tenantId, string $role): bool;
+    public function hasRole(
+        int $profileId,
+        int $tenantId,
+        string $role,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): bool;
 
     /**
      * The profile's full effective permission set within a tenant.

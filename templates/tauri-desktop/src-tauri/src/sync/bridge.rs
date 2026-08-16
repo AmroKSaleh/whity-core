@@ -53,18 +53,14 @@ pub struct BridgeResource {
 /// failure) — so this can be populated ahead of confirming a resource is
 /// entitled/downloadable for any given test tenant.
 ///
-///  - `demo-catalog/items`: live today (seeded on whity.jameedium.org,
-///    confirmed with the backend agent) — DemoCatalog's hand-rolled handler
-///    now, the SyncController-backed one after PR #817 + a php-host/sdk
-///    re-vendor; the wire contract is identical either way.
-///  - `relations/persons`: PR #818's `PersonResource`/`PersonsApiHandler`,
-///    slice 1 of the Relations plugin (`display_name`, `birth_date`,
-///    `deceased`, `notes`) — not yet published through the desktop-plugin-
-///    release pipeline, so this entry is a safe no-op until it is.
-pub static BRIDGE_RESOURCES: &[&BridgeResource] = &[
-    &BridgeResource { key: "demo-catalog/items", base_path: "/demo-catalog/items" },
-    &BridgeResource { key: "relations/persons", base_path: "/persons" },
-];
+/// `demo-catalog/items` intentionally isn't here: demos are being dropped
+/// from the product (see the removal of the bundled demo plugins) and the
+/// backend agent has unseeded DemoCatalog@1.0.0 from the live catalog.
+/// `relations/persons` (PR #818's `PersonResource`/`PersonsApiHandler`,
+/// slice 1 of the Relations plugin — `display_name`, `birth_date`,
+/// `deceased`, `notes`) is the real bridge target going forward, published
+/// through the desktop-plugin-release pipeline like any other plugin.
+pub static BRIDGE_RESOURCES: &[&BridgeResource] = &[&BridgeResource { key: "relations/persons", base_path: "/persons" }];
 
 #[derive(Debug, Default, Clone)]
 pub struct BridgeSummary {
