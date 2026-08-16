@@ -100,6 +100,70 @@ final class DesktopPluginPackagerTest extends TestCase
         (new DesktopPluginPackager())->package($source, 'NoIface', $this->workDir . '/x.zip');
     }
 
+    public function testCompressionRatioGuardUsesFloatDivision(): void
+    {
+        // Regression: integer division floored the ratio and let a package the
+        // guard's own limit forbids slip through. 51201/256 = 200.0039 > 200, but
+        // intdiv(51201, 256) = 200, which is NOT > 200. (Compressed must be >= 256
+        // for the ratio to be evaluated at all.)
+        $this->assertTrue(PluginInstaller::exceedsCompressionRatio(51201, 256));
+        // Exactly at the limit is allowed (51200/256 = 200, not > 200).
+        $this->assertFalse(PluginInstaller::exceedsCompressionRatio(51200, 256));
+        // Too little compressed data for the ratio to be meaningful — skipped.
+        $this->assertFalse(PluginInstaller::exceedsCompressionRatio(1_000_000, 255));
+    }
+
+    public function testAcceptsPluginReachingInterfaceThroughAnAbstractBaseInSource(): void
+    {
+        $dir = $this->workDir . '/Inherited';
+        mkdir($dir, 0o775, true);
+        file_put_contents(
+            $dir . '/Base.php',
+            "<?php\nnamespace Inherited;\nabstract class Base implements \\Whity\\Sdk\\PluginInterface {}\n"
+        );
+        // The instantiable class only `extends Base` — no direct implements.
+        file_put_contents(
+            $dir . '/InheritedPlugin.php',
+            "<?php\nnamespace Inherited;\nclass InheritedPlugin extends Base { public function getName(): string { return 'Inherited'; } }\n"
+        );
+
+        $result = (new DesktopPluginPackager())->package($dir, 'Inherited', $this->workDir . '/inherited.zip');
+        $this->assertSame('Inherited', $result->name);
+    }
+
+    public function testAcceptsPluginReachingInterfaceThroughASubInterfaceInSource(): void
+    {
+        $dir = $this->workDir . '/Sub';
+        mkdir($dir, 0o775, true);
+        file_put_contents(
+            $dir . '/SubPluginInterface.php',
+            "<?php\nnamespace Sub;\ninterface SubPluginInterface extends \\Whity\\Sdk\\PluginInterface {}\n"
+        );
+        file_put_contents(
+            $dir . '/SubPlugin.php',
+            "<?php\nnamespace Sub;\nclass SubPlugin implements SubPluginInterface { public function getName(): string { return 'Sub'; } }\n"
+        );
+
+        $result = (new DesktopPluginPackager())->package($dir, 'Sub', $this->workDir . '/sub.zip');
+        $this->assertSame('Sub', $result->name);
+    }
+
+    public function testAcceptsPluginWhoseSupertypeIsDefinedOutsideTheSource(): void
+    {
+        // The class implements an SDK interface not present in the source; we
+        // can't disprove it descends from PluginInterface, so we defer to the
+        // device rather than false-reject a valid plugin.
+        $dir = $this->workDir . '/External';
+        mkdir($dir, 0o775, true);
+        file_put_contents(
+            $dir . '/ExternalPlugin.php',
+            "<?php\nnamespace External;\nclass ExternalPlugin implements \\Whity\\Sdk\\PluginFrontendInterface { public function getName(): string { return 'External'; } }\n"
+        );
+
+        $result = (new DesktopPluginPackager())->package($dir, 'External', $this->workDir . '/external.zip');
+        $this->assertSame('External', $result->name);
+    }
+
     public function testEnforcesEntryCountGuard(): void
     {
         $source = $this->writePlugin('Big');

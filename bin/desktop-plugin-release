@@ -33,6 +33,7 @@
 
 declare(strict_types=1);
 
+use Whity\Api\DesktopPluginsApiHandler;
 use Whity\Core\DesktopPlugins\DesktopPluginPackager;
 use Whity\Core\DesktopPlugins\DesktopPluginReleaseException;
 use Whity\Core\DesktopPlugins\DesktopPluginReleaseService;
@@ -141,6 +142,18 @@ $storageDir = isset($options['storage']) && is_string($options['storage'])
     ? $options['storage']
     : $projectRoot . '/storage/desktop-plugins';
 
+// Validate name and version up front, for EVERY path (the --no-db branch builds
+// the storage path from them directly, so an unvalidated version there would be
+// a path-traversal vector; the DB path re-validates in release() as well).
+if (preg_match(DesktopPluginsApiHandler::NAME_PATTERN, $name) !== 1) {
+    fwrite(STDERR, "Invalid plugin name '{$name}': must match " . DesktopPluginsApiHandler::NAME_PATTERN . "\n");
+    exit(2);
+}
+if (preg_match(DesktopPluginsApiHandler::VERSION_PATTERN, $version) !== 1) {
+    fwrite(STDERR, "Invalid version '{$version}': must match " . DesktopPluginsApiHandler::VERSION_PATTERN . "\n");
+    exit(2);
+}
+
 $obfuscator = new PluginObfuscator(
     renameLocals: !isset($options['no-rename-locals']),
     encodeStrings: isset($options['encode-strings']),
@@ -155,15 +168,19 @@ try {
 
         fwrite(STDOUT, "Package built (no DB row inserted):\n");
         print_release($name, $version, $result->sha256, $result->sizeBytes, $storagePath, $result->entryCount, false);
+        // Advisory text only. name/version are already validated to a quote-free
+        // charset above; single-quotes are still escaped so a pasted statement is
+        // syntactically safe regardless.
+        $sql = static fn (string $v): string => str_replace("'", "''", $v);
         fwrite(STDOUT, "\nInsert the row with:\n");
         fwrite(STDOUT, sprintf(
             "  INSERT INTO desktop_plugin_releases (plugin_name, version, sha256, size_bytes, storage_path)\n"
             . "  VALUES ('%s', '%s', '%s', %d, '%s');\n",
-            $name,
-            $version,
-            $result->sha256,
+            $sql($name),
+            $sql($version),
+            $sql($result->sha256),
             $result->sizeBytes,
-            $storagePath
+            $sql($storagePath)
         ));
         exit(0);
     }

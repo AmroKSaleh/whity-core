@@ -6,7 +6,10 @@ namespace Whity\Core\DesktopPlugins;
 
 use FilesystemIterator;
 use PhpParser\Node;
+use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassLike;
+use PhpParser\Node\Stmt\Enum_;
+use PhpParser\Node\Stmt\Interface_;
 use PhpParser\Node\Stmt\Namespace_;
 use PhpParser\NodeFinder;
 use PhpParser\ParserFactory;
@@ -40,12 +43,6 @@ use ZipArchive;
  */
 final class DesktopPluginPackager
 {
-    /**
-     * Below this many compressed bytes the ratio check is skipped (tiny files).
-     * Mirrors {@see PluginInstaller}'s private RATIO_MIN_COMPRESSED_BYTES.
-     */
-    private const RATIO_MIN_COMPRESSED_BYTES = 256;
-
     /** Directory/file names never copied into a package. */
     private const EXCLUDED_NAMES = [
         '.git', '.github', 'node_modules', 'vendor', '.idea', '.vscode',
@@ -107,7 +104,13 @@ final class DesktopPluginPackager
         $parser = (new ParserFactory())->createForNewestSupportedVersion();
         $finder = new NodeFinder();
         $prefix = $name . '\\';
-        $sawPluginImplementer = false;
+
+        // shortName => list of its supertypes' short names (extends + implements).
+        /** @var array<string, list<string>> $graph */
+        $graph = [];
+        // Short names of the instantiable classes the device could `new`.
+        /** @var list<string> $concrete */
+        $concrete = [];
 
         foreach ($this->phpFilesUnder($sourceDir) as $file) {
             $code = (string) file_get_contents($file);
@@ -136,24 +139,95 @@ final class DesktopPluginPackager
 
             /** @var list<ClassLike> $classes */
             $classes = $finder->findInstanceOf($ast, ClassLike::class);
-            foreach ($classes as $class) {
-                if (!isset($class->implements)) {
-                    continue;
+            foreach ($classes as $classLike) {
+                $shortName = $classLike->name?->toString();
+                if ($shortName === null) {
+                    continue; // anonymous class — never discovered as a top-level plugin
                 }
-                foreach ($class->implements as $interface) {
-                    $parts = $interface->getParts();
-                    if (end($parts) === 'PluginInterface') {
-                        $sawPluginImplementer = true;
+
+                $supertypes = [];
+                if ($classLike instanceof Class_) {
+                    if ($classLike->extends !== null) {
+                        $supertypes[] = self::shortName($classLike->extends);
                     }
+                    foreach ($classLike->implements as $iface) {
+                        $supertypes[] = self::shortName($iface);
+                    }
+                    if (!$classLike->isAbstract()) {
+                        $concrete[] = $shortName;
+                    }
+                } elseif ($classLike instanceof Interface_) {
+                    foreach ($classLike->extends as $iface) {
+                        $supertypes[] = self::shortName($iface);
+                    }
+                } elseif ($classLike instanceof Enum_) {
+                    foreach ($classLike->implements as $iface) {
+                        $supertypes[] = self::shortName($iface);
+                    }
+                }
+
+                $graph[$shortName] = array_merge($graph[$shortName] ?? [], $supertypes);
+            }
+        }
+
+        // A package is acceptable if some instantiable class (transitively,
+        // through abstract bases and sub-interfaces DECLARED IN THIS SOURCE)
+        // reaches PluginInterface — or reaches a supertype defined OUTSIDE the
+        // source (an SDK interface/base that may itself extend PluginInterface),
+        // which we give the benefit of the doubt rather than false-reject: the
+        // device performs the authoritative `instanceof PluginInterface` check.
+        foreach ($concrete as $class) {
+            [$reachesPluginInterface, $touchesExternal] = self::climbTowardsPluginInterface($class, $graph);
+            if ($reachesPluginInterface || $touchesExternal) {
+                return;
+            }
+        }
+
+        throw new DesktopPluginReleaseException(
+            "No class in '{$sourceDir}' implements PluginInterface — the device would quarantine this package."
+        );
+    }
+
+    /**
+     * Walk a class's supertype chain within the source graph.
+     *
+     * @param array<string, list<string>> $graph
+     * @return array{0: bool, 1: bool} [reaches PluginInterface, touches a supertype defined outside the source]
+     */
+    private static function climbTowardsPluginInterface(string $start, array $graph): array
+    {
+        $seen = [];
+        $queue = [$start];
+        $reaches = false;
+        $external = false;
+
+        while ($queue !== []) {
+            $current = array_shift($queue);
+            if (isset($seen[$current])) {
+                continue;
+            }
+            $seen[$current] = true;
+
+            foreach ($graph[$current] ?? [] as $supertype) {
+                if ($supertype === 'PluginInterface') {
+                    $reaches = true;
+                } elseif (isset($graph[$supertype])) {
+                    $queue[] = $supertype;
+                } else {
+                    // Defined outside the source (e.g. an SDK interface/base).
+                    $external = true;
                 }
             }
         }
 
-        if (!$sawPluginImplementer) {
-            throw new DesktopPluginReleaseException(
-                "No class in '{$sourceDir}' implements PluginInterface — the device would quarantine this package."
-            );
-        }
+        return [$reaches, $external];
+    }
+
+    private static function shortName(Node\Name $name): string
+    {
+        $parts = $name->getParts();
+
+        return (string) end($parts);
     }
 
     /** Recursively copy $from into $to, obfuscating every .php file. */
@@ -296,10 +370,7 @@ final class DesktopPluginPackager
                 'Package has too many entries (limit ' . PluginInstaller::MAX_ZIP_ENTRIES . ').'
             );
         }
-        if (
-            $totalCompressed >= self::RATIO_MIN_COMPRESSED_BYTES
-            && intdiv($totalUncompressed, max(1, $totalCompressed)) > PluginInstaller::MAX_COMPRESSION_RATIO
-        ) {
+        if (PluginInstaller::exceedsCompressionRatio($totalUncompressed, $totalCompressed)) {
             throw new DesktopPluginReleaseException('Package compression ratio exceeds the safe limit.');
         }
 

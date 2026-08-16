@@ -110,6 +110,22 @@ final class PluginObfuscatorTest extends TestCase
         $this->assertSame(['keepMe' => 7], $fn());
     }
 
+    public function testDoesNotRenameWhenExtractIsReachedViaCallUserFunc(): void
+    {
+        // extract() run through call_user_func still imports into THIS scope by
+        // name; renaming $keepMe would make the function return the pre-extract
+        // value. The scope must be treated as unsafe.
+        $uid = $this->uid();
+        $code = "<?php function ind_{$uid}(): int { \$keepMe = 5; call_user_func('extract', ['keepMe' => 9]); return \$keepMe; }";
+
+        $out = (new PluginObfuscator())->obfuscate($code);
+
+        $this->assertStringContainsString('$keepMe', $out);
+        $this->loadCode($out);
+        $fn = $this->fn("ind_{$uid}");
+        $this->assertSame(9, $fn());
+    }
+
     public function testDoesNotRenameParameters(): void
     {
         $uid = $this->uid();

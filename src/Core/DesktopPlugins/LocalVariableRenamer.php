@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Whity\Core\DesktopPlugins;
 
 use PhpParser\Node;
+use PhpParser\Node\Arg;
 use PhpParser\Node\Expr\ArrowFunction;
+use PhpParser\Node\Expr\Array_;
 use PhpParser\Node\Expr\Closure;
 use PhpParser\Node\Expr\FuncCall;
 use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\FunctionLike;
 use PhpParser\Node\Name;
+use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Stmt\Global_;
 
 /**
@@ -51,6 +54,16 @@ final class LocalVariableRenamer
         'compact', 'extract', 'get_defined_vars',
         'func_get_args', 'func_get_arg', 'func_num_args',
         'parse_str', 'mb_parse_str', 'eval',
+    ];
+
+    /**
+     * Functions that invoke a callable WITHOUT introducing a new scope, so a
+     * reflective function reached through them still reads THIS scope's
+     * variables by name — e.g. call_user_func('extract', $data).
+     */
+    private const INDIRECT_CALL_FUNCTIONS = [
+        'call_user_func', 'call_user_func_array',
+        'forward_static_call', 'forward_static_call_array',
     ];
 
     private const SUPERGLOBALS = [
@@ -167,7 +180,14 @@ final class LocalVariableRenamer
         }
 
         if ($node instanceof FuncCall && $node->name instanceof Name) {
-            if (in_array(strtolower($node->name->toString()), self::NAME_REFLECTIVE_FUNCTIONS, true)) {
+            $function = strtolower($node->name->toString());
+            if (in_array($function, self::NAME_REFLECTIVE_FUNCTIONS, true)) {
+                $unsafe = true;
+            } elseif (
+                in_array($function, self::INDIRECT_CALL_FUNCTIONS, true)
+                && self::indirectCallMayBeReflective($node)
+            ) {
+                // call_user_func('extract', $data) runs in THIS scope too.
                 $unsafe = true;
             }
         }
@@ -184,6 +204,32 @@ final class LocalVariableRenamer
                 }
             }
         }
+    }
+
+    /**
+     * Whether an indirect call (call_user_func & friends) might dispatch to a
+     * name-reflective function. Fail closed: a string-literal callable is
+     * checked against the reflective set; any callable we cannot resolve to a
+     * definitely-non-reflective target (a variable, a computed expression) is
+     * treated as possibly-reflective. An array callable `[$obj, 'm']` is a
+     * method, never a reflective free function, so it is safe.
+     */
+    private static function indirectCallMayBeReflective(FuncCall $node): bool
+    {
+        $first = $node->args[0] ?? null;
+        if (!$first instanceof Arg) {
+            return true; // no/spread argument — unresolvable
+        }
+
+        $callable = $first->value;
+        if ($callable instanceof String_) {
+            return in_array(strtolower($callable->value), self::NAME_REFLECTIVE_FUNCTIONS, true);
+        }
+        if ($callable instanceof Array_) {
+            return false; // object/class method callable — not a reflective function
+        }
+
+        return true; // dynamic callable — cannot prove it is not reflective
     }
 
     /**

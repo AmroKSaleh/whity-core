@@ -26,9 +26,11 @@ use Whity\Api\DesktopPluginsApiHandler;
  * BEFORE the row is inserted, so a catalogued release always has its bytes; on
  * an insert failure the just-placed file is removed again.
  *
- * IMMUTABILITY. `(plugin_name, version)` is unique and a release is never
- * overwritten in place: re-releasing an existing version is refused unless the
- * caller explicitly forces it (a deliberate re-cut of a botched build).
+ * IMMUTABILITY. `(plugin_name, version)` is unique; re-releasing an existing
+ * version is refused unless the caller explicitly forces it (a deliberate re-cut
+ * of a botched build). A forced re-cut UPDATES the row in place (ON CONFLICT DO
+ * UPDATE) rather than delete-and-reinsert, so the row's id and created_at
+ * survive — nothing downstream keyed off a release id is invalidated by a re-cut.
  *
  * ENTITLEMENT (v1). This inserts into a GLOBAL catalog with no tenant/plan
  * scoping — matching the migration, the handler and the shipped desktop client:
@@ -83,11 +85,12 @@ final class DesktopPluginReleaseService
         $absolutePath = $this->storageDir . '/' . $storagePath;
 
         // Build to a private staging file first, so a failed build never leaves
-        // a half-written package at the served path.
+        // a half-written package at the served path. Clean the staged zip up on
+        // ANY failure — including one thrown by package() itself after it has
+        // already written the zip (e.g. an oversized-package guard).
         $stagingZip = $this->stagingPath($name, $version);
-        $result = $this->packager->package($sourceDir, $name, $stagingZip);
-
         try {
+            $result = $this->packager->package($sourceDir, $name, $stagingZip);
             $this->placePackage($stagingZip, $absolutePath, $result->sha256);
         } catch (Throwable $e) {
             @unlink($stagingZip);
@@ -164,19 +167,26 @@ final class DesktopPluginReleaseService
         string $storagePath,
         bool $force
     ): void {
+        // A re-cut (--force) UPDATES the existing row in place rather than
+        // delete-then-insert, so the release's id and created_at survive — a
+        // future feature keyed off the release id (e.g. a download audit trail)
+        // must not have its foreign key silently invalidated by a re-cut. The
+        // caller has already refused a conflicting release unless $force is set,
+        // so ON CONFLICT only ever fires on a genuine re-cut.
+        $sql = $force
+            ? 'INSERT INTO desktop_plugin_releases (plugin_name, version, sha256, size_bytes, storage_path)
+               VALUES (:name, :version, :sha256, :size_bytes, :storage_path)
+               ON CONFLICT (plugin_name, version)
+               DO UPDATE SET sha256 = EXCLUDED.sha256,
+                             size_bytes = EXCLUDED.size_bytes,
+                             storage_path = EXCLUDED.storage_path,
+                             released_at = NOW()'
+            : 'INSERT INTO desktop_plugin_releases (plugin_name, version, sha256, size_bytes, storage_path)
+               VALUES (:name, :version, :sha256, :size_bytes, :storage_path)';
+
         $this->pdo->beginTransaction();
         try {
-            if ($force) {
-                $del = $this->pdo->prepare(
-                    'DELETE FROM desktop_plugin_releases WHERE plugin_name = :name AND version = :version'
-                );
-                $del->execute([':name' => $name, ':version' => $version]);
-            }
-
-            $insert = $this->pdo->prepare(
-                'INSERT INTO desktop_plugin_releases (plugin_name, version, sha256, size_bytes, storage_path)
-                 VALUES (:name, :version, :sha256, :size_bytes, :storage_path)'
-            );
+            $insert = $this->pdo->prepare($sql);
             $insert->execute([
                 ':name' => $name,
                 ':version' => $version,

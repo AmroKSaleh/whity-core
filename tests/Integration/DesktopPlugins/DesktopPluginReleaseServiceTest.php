@@ -112,6 +112,35 @@ final class DesktopPluginReleaseServiceTest extends TestCase
         $this->assertSame(1, $count, 'a re-cut must not leave a duplicate row');
     }
 
+    public function testForceRecutUpdatesInPlacePreservingRowIdentity(): void
+    {
+        $this->service()->release($this->source, 'HelloWorld', '1.0.0');
+        $before = $this->row('HelloWorld', '1.0.0');
+
+        $this->service()->release($this->source, 'HelloWorld', '1.0.0', force: true);
+        $after = $this->row('HelloWorld', '1.0.0');
+
+        // DELETE-then-INSERT would hand out a fresh id and created_at; an in-place
+        // update keeps both, so nothing keyed off the release id is invalidated.
+        $this->assertSame($before['id'], $after['id']);
+        $this->assertSame($before['created_at'], $after['created_at']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function row(string $name, string $version): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM desktop_plugin_releases WHERE plugin_name = :n AND version = :v'
+        );
+        $stmt->execute([':n' => $name, ':v' => $version]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $this->assertIsArray($row);
+
+        return $row;
+    }
+
     public function testCorruptedPackageIsDetectableByTheCatalogChecksum(): void
     {
         // The deliberately-broken case: once bytes on disk no longer match the

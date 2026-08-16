@@ -58,7 +58,7 @@ final class PluginInstaller
     public const MAX_COMPRESSION_RATIO = 200;
 
     /** Below this many compressed bytes the ratio check is skipped (tiny files). */
-    private const RATIO_MIN_COMPRESSED_BYTES = 256;
+    public const RATIO_MIN_COMPRESSED_BYTES = 256;
 
     /** The safe filesystem-name allowlist a plugin name must match. */
     private const NAME_PATTERN = '/^[A-Za-z0-9_-]+$/';
@@ -117,6 +117,21 @@ final class PluginInstaller
         $this->introspectTimeoutSeconds = ($introspectTimeoutSeconds !== null && $introspectTimeoutSeconds > 0)
             ? $introspectTimeoutSeconds
             : self::DEFAULT_INTROSPECT_TIMEOUT_SECONDS;
+    }
+
+    /**
+     * The zip-bomb compression-ratio guard, as ONE comparison both this
+     * installer and the desktop-plugin release packager call — so the two can
+     * never drift (a truncating vs. floating comparison once let the packager
+     * accept a ratio this installer rejected). Uses real (float) division:
+     * uncompressed 40199 / compressed 200 = 200.995 exceeds a limit of 200,
+     * where integer division would floor it to 200 and wave it through. Skipped
+     * when too little compressed data exists for the ratio to be meaningful.
+     */
+    public static function exceedsCompressionRatio(int $totalUncompressed, int $totalCompressed): bool
+    {
+        return $totalCompressed >= self::RATIO_MIN_COMPRESSED_BYTES
+            && $totalUncompressed / $totalCompressed > self::MAX_COMPRESSION_RATIO;
     }
 
     /**
@@ -468,10 +483,7 @@ final class PluginInstaller
 
             // Overall compression-ratio guard (zip-bomb). Skip when too little
             // compressed data exists for the ratio to be meaningful.
-            if (
-                $totalCompressed >= self::RATIO_MIN_COMPRESSED_BYTES
-                && $totalUncompressed / $totalCompressed > self::MAX_COMPRESSION_RATIO
-            ) {
+            if (self::exceedsCompressionRatio($totalUncompressed, $totalCompressed)) {
                 throw new PluginExtractionUnsafe(
                     'The archive compression ratio exceeds the safe limit.',
                     ['max_ratio' => self::MAX_COMPRESSION_RATIO]
