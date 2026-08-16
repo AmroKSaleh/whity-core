@@ -17,7 +17,7 @@ use ZipArchive;
  * End-to-end for the desktop-plugin release pipeline against a REAL migrated
  * schema (SchemaFromMigrations builds `desktop_plugin_releases` from migration
  * 097) and the REAL {@see DesktopPluginsApiHandler} that serves it. Packages the
- * bundled HelloWorld plugin, so the catalog/download contract, the checksum
+ * in-tree HelloWorld plugin source, so the catalog/download contract, the checksum
  * (no-drift) invariant, immutability, and that the OBFUSCATED package still
  * loads and behaves are all exercised together.
  */
@@ -32,7 +32,11 @@ final class DesktopPluginReleaseServiceTest extends TestCase
         $this->pdo = SchemaFromMigrations::make();
         $this->storageDir = sys_get_temp_dir() . '/whity-dpr-int-' . bin2hex(random_bytes(6));
         mkdir($this->storageDir, 0o775, true);
-        $this->source = dirname(__DIR__, 3) . '/templates/tauri-desktop/php-host/plugins/HelloWorld';
+        // Package the canonical in-tree plugin source, not the vendored offline-host
+        // copy under templates/tauri-desktop/php-host/plugins — that bundle was
+        // removed once the desktop app stopped shipping demo/example plugins, and
+        // plugins/HelloWorld is the source of truth the release pipeline packages.
+        $this->source = dirname(__DIR__, 3) . '/plugins/HelloWorld';
     }
 
     protected function tearDown(): void
