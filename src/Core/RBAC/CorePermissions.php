@@ -67,6 +67,14 @@ final class CorePermissions
     public const PLUGINS_UNINSTALL = 'plugins:uninstall';
     public const PLUGINS_RELOAD = 'plugins:reload';
 
+    // Desktop plugin release catalog/download. Distinct from PLUGINS_READ: this
+    // gates an enrolled desktop device's access to proprietary obfuscated
+    // desktop-plugin builds (list + zip download), a different trust boundary
+    // than viewing the server's own installed-plugin list. Global catalog (no
+    // tenant scoping) in v1 — every authenticated device on this instance sees
+    // every release; per-tenant entitlement is a deferred follow-up.
+    public const DESKTOP_PLUGINS_READ = 'desktop-plugins:read';
+
     // Permission delegation management (WC-34). Gates the delegation API; the
     // runtime subset-of-own-permissions invariant is enforced independently in
     // the delegation service so holding this permission never lets a grantor
@@ -245,6 +253,7 @@ final class CorePermissions
             self::PLUGINS_UPLOAD,
             self::PLUGINS_UNINSTALL,
             self::PLUGINS_RELOAD,
+            self::DESKTOP_PLUGINS_READ,
             self::DELEGATION_MANAGE,
             self::RELATIONS_READ,
             self::RELATIONS_MANAGE,

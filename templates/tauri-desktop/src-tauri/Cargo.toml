@@ -65,6 +65,15 @@ printers = "~2.3"
 # second, inconsistent async runtime.
 tiny_http = "0.12"
 
+# Safe extraction of a downloaded plugin package (src/plugins/installer.rs,
+# WC-desktop-plugins) — a pure-Rust zip reader, no system libzip dependency,
+# matching this template's "just works out of the box" bar.
+zip = "2"
+
+# SHA-256 verification of a downloaded plugin package against the server-
+# declared checksum, before anything touches disk.
+sha2 = "0.10"
+
 # OS-native secure storage for the long-lived (90-day) device credential
 # (WC-desktop-sync) — the short-lived access token stays in memory only. Each
 # platform gets its native backend: Windows Credential Manager / macOS Keychain /

@@ -3,10 +3,11 @@ mod commands;
 mod config;
 mod db;
 mod php_host;
+mod plugins;
 mod sync;
 
 use db::Db;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -15,15 +16,22 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            let cfg = config::Config::from_env();
+            // DB opens (and migrates, incl. v7's auth_state.server_url) BEFORE
+            // Config is resolved — a previously chosen backend URL lives there.
             let connection = db::open(app.handle())?;
+            let stored_server_url = db::auth_repo::get_server_url(&connection)?;
+            let cfg = config::Config::resolve(stored_server_url);
+            // Shared with sync::scheduler's background loop so a runtime
+            // set_backend_url call (the login screen's Server field) reaches
+            // both the next auth command AND the next sync tick.
+            let shared_cfg = Arc::new(RwLock::new(cfg));
             app.manage(Db(Mutex::new(connection)));
-            app.manage(auth::AuthManager::new(cfg.clone())?);
+            app.manage(auth::AuthManager::new(shared_cfg.clone())?);
 
             // Background sync loop on its OWN WAL connection so a cycle's network
             // I/O never blocks the UI connection's reads (see sync::scheduler).
             let sync_conn = db::open_sync_connection(app.handle())?;
-            let sync_handle = sync::scheduler::spawn(app.handle().clone(), cfg, sync_conn)?;
+            let sync_handle = sync::scheduler::spawn(app.handle().clone(), shared_cfg, sync_conn)?;
             app.manage(sync_handle);
 
             // Bundled PHP plugin host: a native bridge (Rust -> hardware) plus
@@ -47,6 +55,8 @@ pub fn run() {
             commands::auth::auth_logout,
             commands::auth::auth_status,
             commands::auth::auth_lock_state,
+            commands::auth::get_backend_url,
+            commands::auth::set_backend_url,
             commands::sync::sync_now,
             commands::sync::get_sync_status,
             commands::sync::list_conflicts,
@@ -54,6 +64,8 @@ pub fn run() {
             commands::printer::print_text,
             commands::php_host::php_request,
             commands::php_host::php_host_status,
+            commands::plugins::plugin_catalog,
+            commands::plugins::plugin_install,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

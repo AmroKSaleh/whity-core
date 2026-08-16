@@ -11,6 +11,7 @@ type PhpStatusEvent =
   | { state: "ready"; port: number }
   | { state: "crashed"; message: string }
   | { state: "restarting"; attempt: number }
+  | { state: "reloading" }
   | { state: "failed"; message: string }
 
 interface PhpResponse {

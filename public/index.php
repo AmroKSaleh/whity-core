@@ -1383,6 +1383,18 @@ $router->register('POST', '/api/plugins/install-from-store', [$installFromStoreH
 $router->register('GET', '/api/plugins/store/allowed', [$installFromStoreHandler, 'allowedStores'], null, null, CorePermissions::PLUGINS_READ);
 $router->register('GET', '/api/plugins/store/catalog', [$installFromStoreHandler, 'browseCatalog'], null, null, CorePermissions::PLUGINS_READ);
 
+// Desktop plugin release catalog/download (WC-desktop-plugins). Consumed by an
+// already-enrolled desktop device using the SAME bearer access token it uses
+// for every other authenticated call (issued by POST /api/v1/devices/token) —
+// no new auth mechanism, just the standard RBAC route pipeline gated on the
+// distinct DESKTOP_PLUGINS_READ permission (a different trust boundary than
+// PLUGINS_READ, which is the server's own installed-plugin list). Global
+// catalog in v1 (no tenant scoping); per-tenant entitlement is a deferred
+// follow-up.
+$desktopPluginsHandler = new \Whity\Api\DesktopPluginsApiHandler(__DIR__ . '/../storage/desktop-plugins', $db->getPdo());
+$router->register('GET', '/api/desktop-plugins', [$desktopPluginsHandler, 'catalog'], null, null, CorePermissions::DESKTOP_PLUGINS_READ);
+$router->register('GET', '/api/desktop-plugins/{name}/versions/{version}/download', [$desktopPluginsHandler, 'download'], null, null, CorePermissions::DESKTOP_PLUGINS_READ);
+
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
 // Only allow read-only access to migration status via API
 // Mutations (run/rollback) are performed via CLI only for security

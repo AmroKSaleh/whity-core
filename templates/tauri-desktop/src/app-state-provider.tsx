@@ -1,6 +1,8 @@
 import * as React from "react"
 
+import { Alert, AlertDescription } from "@amroksaleh/ui/alert"
 import { Button } from "@amroksaleh/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@amroksaleh/ui/card"
 import { Input } from "@amroksaleh/ui/input"
 import { LockedScreen } from "@amroksaleh/ui/locked-screen"
 import { useSyncStatus } from "@amroksaleh/features/sync"
@@ -110,18 +112,52 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+/**
+ * Renders for both first-enrollment and the `onReenroll` re-entry point (see
+ * {@link AuthGate}'s `ReloginScreen`) — the Server field pre-fills with
+ * whatever backend is currently in effect (the compile-time default on a
+ * fresh install, or the previously chosen/stored one on re-enroll) via
+ * `get_backend_url`, and stays editable so the user can point the device at a
+ * different instance either way.
+ */
 function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) {
+  const [serverUrl, setServerUrl] = React.useState("")
+  const [serverLoaded, setServerLoaded] = React.useState(false)
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
   const [deviceName, setDeviceName] = React.useState("Whity Desktop")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
+  React.useEffect(() => {
+    let cancelled = false
+    void authClient
+      .getBackendUrl()
+      .then((url) => {
+        if (!cancelled) setServerUrl(url)
+      })
+      .finally(() => {
+        if (!cancelled) setServerLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     setBusy(true)
     setError(null)
     try {
+      // Point the backend at the chosen server BEFORE logging in, so `enroll`
+      // (login -> register device -> exchange) hits the right instance.
+      try {
+        await authClient.setBackendUrl(serverUrl)
+      } catch (err) {
+        setError(`Invalid server: ${String(err)}`)
+        return
+      }
+
       const result: EnrollResult = await authClient.enroll(email, password, deviceName)
       if (result.status === "enrolled") {
         await onEnrolled()
@@ -138,46 +174,89 @@ function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) 
   }
 
   return (
-    <div className="mx-auto flex min-h-[450px] max-w-md flex-col justify-center">
-      <h2 className="mb-1 text-xl font-bold text-foreground">Enroll this device</h2>
-      <p className="mb-6 text-sm text-muted-foreground">
-        Sign in once to register this device with the Whity backend. A long-lived credential is stored
-        in your OS keychain; work then continues offline until the login window elapses.
-      </p>
-      <form className="grid gap-3" onSubmit={submit}>
-        <label className="grid gap-1.5 text-sm">
-          <span className="font-medium">Email</span>
-          <Input
-            type="email"
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </label>
-        <label className="grid gap-1.5 text-sm">
-          <span className="font-medium">Password</span>
-          <Input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </label>
-        <label className="grid gap-1.5 text-sm">
-          <span className="font-medium">Device name</span>
-          <Input value={deviceName} onChange={(e) => setDeviceName(e.target.value)} required />
-        </label>
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        <Button type="submit" disabled={busy || !email || !password}>
-          {busy ? "Enrolling…" : "Enroll device"}
-        </Button>
-      </form>
+    <div className="mx-auto flex min-h-[500px] w-full max-w-md flex-col justify-center py-8">
+      {/* Card/header/form shape matches the website's login page
+          (web/app/login/page.tsx) — centered title + description, labeled
+          fields in space-y-4/space-y-2, an Alert for the error banner, and a
+          full-width submit button. The Rust-backed enroll flow itself
+          (setBackendUrl -> enroll) is unchanged; only the visual shell here. */}
+      <Card>
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">Welcome to Whity Desktop</CardTitle>
+          <CardDescription>
+            Sign in once to register this device with the Whity backend. A long-lived credential is
+            stored in your OS keychain; work then continues offline until the login window elapses.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={submit}>
+            {error ? (
+              <Alert variant="destructive">
+                <AlertDescription role="alert">{error}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            <div className="space-y-2">
+              <label htmlFor="enroll-server" className="text-sm font-medium">
+                Server
+              </label>
+              <Input
+                id="enroll-server"
+                type="url"
+                placeholder="https://your-instance.example.com"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                disabled={!serverLoaded}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="enroll-email" className="text-sm font-medium">
+                Email
+              </label>
+              <Input
+                id="enroll-email"
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="enroll-password" className="text-sm font-medium">
+                Password
+              </label>
+              <Input
+                id="enroll-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="enroll-device-name" className="text-sm font-medium">
+                Device name
+              </label>
+              <Input
+                id="enroll-device-name"
+                value={deviceName}
+                onChange={(e) => setDeviceName(e.target.value)}
+                required
+              />
+            </div>
+
+            <Button type="submit" className="w-full" disabled={busy || !serverUrl || !email || !password}>
+              {busy ? "Enrolling…" : "Enroll device"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   )
 }

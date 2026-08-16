@@ -18,6 +18,13 @@
 //!   conflict snapshot store (`item_conflicts`).
 //! - v6: per-row push-retry bookkeeping (`push_attempts` / `next_attempt_at` /
 //!   `last_push_error`) so a flaky push backs off.
+//! - v7: `auth_state.server_url` — the user-chosen backend URL (WC-server-select),
+//!   picked on the login screen instead of only being bakeable at compile time.
+//!   Lives on `auth_state` (not a separate table) because it's readable at cold
+//!   boot before enrollment (the v4 migration already guarantees row id=1 exists)
+//!   and is a device-level fact, not a per-session one — logout deliberately does
+//!   NOT clear it (see `auth_repo::clear()`), so re-enrolling pre-fills the same
+//!   server the device already trusted.
 //!
 //! `run()` applies each pending step then stamps its version, so a partially
 //! migrated DB always resumes correctly. Add later steps as another
@@ -53,6 +60,11 @@ pub fn run(conn: &Connection) -> rusqlite::Result<()> {
     if version < 6 {
         migrate_to_v6(conn)?;
         conn.pragma_update(None, "user_version", 6)?;
+        version = 6;
+    }
+    if version < 7 {
+        migrate_to_v7(conn)?;
+        conn.pragma_update(None, "user_version", 7)?;
     }
     Ok(())
 }
@@ -218,6 +230,17 @@ fn migrate_to_v6(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// v7 (WC-server-select): the user-chosen backend URL, persisted on the
+/// `auth_state` singleton so it survives a relaunch and is readable before
+/// `Config`/`AuthManager` are constructed. NULL until the user enrolls (or
+/// re-enrolls) at least once; `config::Config::resolve()` falls back to the
+/// compile-time default when NULL.
+const V7_SERVER_URL: &str = "ALTER TABLE auth_state ADD COLUMN server_url TEXT;";
+
+fn migrate_to_v7(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V7_SERVER_URL)
+}
+
 fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -274,7 +297,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 6);
+        assert_eq!(ver, 7);
 
         let (id, uuid, sync_state, dirty, deleted): (i64, String, String, i64, i64) = conn
             .query_row(
@@ -306,22 +329,25 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 6);
+        assert_eq!(ver, 7);
         assert!(column_exists(&conn, "demo_catalog_items", "client_uuid").unwrap());
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
         assert!(table_exists(&conn, "sync_state_kv").unwrap());
         assert!(table_exists(&conn, "item_conflicts").unwrap());
         assert!(column_exists(&conn, "demo_catalog_items", "next_attempt_at").unwrap());
+        assert!(column_exists(&conn, "auth_state", "server_url").unwrap());
 
-        // The auth_state singleton exists and starts un-enrolled.
-        let (id, enrolled): (i64, i64) = conn
-            .query_row("SELECT id, enrolled FROM auth_state", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
+        // The auth_state singleton exists and starts un-enrolled, with no server
+        // chosen yet (Config::resolve() falls back to the compile-time default).
+        let (id, enrolled, server_url): (i64, i64, Option<String>) = conn
+            .query_row("SELECT id, enrolled, server_url FROM auth_state", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
             })
             .unwrap();
         assert_eq!(id, 1);
         assert_eq!(enrolled, 0);
+        assert_eq!(server_url, None);
 
         conn.execute(
             "INSERT INTO demo_catalog_items (client_uuid, name) VALUES ('u1','X')",
@@ -351,7 +377,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 6);
+        assert_eq!(ver, 7);
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
     }
@@ -360,8 +386,34 @@ mod tests {
     fn run_is_idempotent() {
         let conn = v1_conn();
         run(&conn).unwrap();
-        run(&conn).unwrap(); // version already 6 → no-op
+        run(&conn).unwrap(); // version already 7 → no-op
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 6);
+        assert_eq!(ver, 7);
+    }
+
+    #[test]
+    fn server_url_survives_logout() {
+        let conn = migrated_for_auth_tests();
+        conn.execute(
+            "UPDATE auth_state SET server_url = 'https://staging.example.com' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+        // clear() (logout) resets enrollment/session state but must NOT null
+        // server_url — it's a device-level fact ("which server"), not a
+        // per-session one, so re-enrolling pre-fills the same trusted server.
+        crate::db::auth_repo::clear(&conn).unwrap();
+
+        let server_url: Option<String> = conn
+            .query_row("SELECT server_url FROM auth_state WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(server_url.as_deref(), Some("https://staging.example.com"));
+    }
+
+    fn migrated_for_auth_tests() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+        conn
     }
 }

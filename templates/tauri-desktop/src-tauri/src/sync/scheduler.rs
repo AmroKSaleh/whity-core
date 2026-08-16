@@ -18,7 +18,7 @@
 //! channel with `recv_timeout` for the interval — no async runtime.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -79,8 +79,10 @@ struct SyncStatusEvent {
     last_error: Option<String>,
 }
 
-/// Spawn the background sync loop; returns a handle for triggering it.
-pub fn spawn(app: AppHandle, cfg: Config, conn: Connection) -> Result<SyncHandle, String> {
+/// Spawn the background sync loop; returns a handle for triggering it. `cfg` is
+/// SHARED with `AuthManager` (see `lib.rs`) so a `set_backend_url` call is
+/// picked up here too, not just by the next `auth_enroll`.
+pub fn spawn(app: AppHandle, cfg: Arc<RwLock<Config>>, conn: Connection) -> Result<SyncHandle, String> {
     let client = api::build_client()?;
     let (tx, rx) = mpsc::channel::<Trigger>();
     thread::Builder::new()
@@ -90,10 +92,10 @@ pub fn spawn(app: AppHandle, cfg: Config, conn: Connection) -> Result<SyncHandle
     Ok(SyncHandle { tx: Mutex::new(tx) })
 }
 
-fn run_loop(app: AppHandle, cfg: Config, client: Client, conn: Connection, rx: Receiver<Trigger>) {
+fn run_loop(app: AppHandle, cfg: Arc<RwLock<Config>>, client: Client, conn: Connection, rx: Receiver<Trigger>) {
     let mut online = true;
     // Initial paint + a startup cycle.
-    run_cycle(&app, &cfg, &client, &conn, &mut online);
+    run_cycle(&app, &current_config(&cfg), &client, &conn, &mut online);
 
     loop {
         let interval = if online { IDLE_INTERVAL } else { OFFLINE_INTERVAL };
@@ -102,14 +104,21 @@ fn run_loop(app: AppHandle, cfg: Config, client: Client, conn: Connection, rx: R
                 // Coalesce a burst of writes into a single cycle.
                 thread::sleep(WRITE_DEBOUNCE);
                 while rx.try_recv().is_ok() {}
-                run_cycle(&app, &cfg, &client, &conn, &mut online);
+                run_cycle(&app, &current_config(&cfg), &client, &conn, &mut online);
             }
-            Ok(Trigger::Manual) => run_cycle(&app, &cfg, &client, &conn, &mut online),
-            Err(RecvTimeoutError::Timeout) => run_cycle(&app, &cfg, &client, &conn, &mut online),
+            Ok(Trigger::Manual) => run_cycle(&app, &current_config(&cfg), &client, &conn, &mut online),
+            Err(RecvTimeoutError::Timeout) => run_cycle(&app, &current_config(&cfg), &client, &conn, &mut online),
             // Every Sender dropped → the app is shutting down.
             Err(RecvTimeoutError::Disconnected) => return,
         }
     }
+}
+
+/// Fresh clone taken at the top of every cycle (not held across the cycle's
+/// blocking network I/O) so a `set_backend_url` call takes effect on the very
+/// next tick.
+fn current_config(cfg: &Arc<RwLock<Config>>) -> Config {
+    cfg.read().expect("config lock poisoned").clone()
 }
 
 fn run_cycle(app: &AppHandle, cfg: &Config, client: &Client, conn: &Connection, online: &mut bool) {
