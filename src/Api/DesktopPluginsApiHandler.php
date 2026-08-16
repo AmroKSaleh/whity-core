@@ -32,6 +32,31 @@ use Whity\Core\Response;
  */
 class DesktopPluginsApiHandler
 {
+    /**
+     * Plugin-name allowlist for the {name} path parameter.
+     *
+     * Deliberately the SAME charset as {@see \Whity\Core\PluginInstaller}'s
+     * server-side name allowlist and the desktop installer's client-side
+     * `validate_name` (`^[A-Za-z0-9_-]+$`), because {name} becomes the plugin's
+     * top-level directory on the device — and the device's PSR-4 loader maps
+     * that directory name to the namespace root. It is therefore case-sensitive
+     * and mixed-case: the shipped plugins (`DemoCatalog`, `HelloWorld`, …) are
+     * PascalCase, matching their namespaces. (An earlier lowercase-first regex
+     * rejected exactly those names with a 422, so every real release 404/422'd
+     * before it could install.) The `{1,128}` bound matches the
+     * `plugin_name VARCHAR(128)` column. The release pipeline validates a name
+     * against THIS constant before cataloguing it, so a name that cannot be
+     * downloaded can never be released.
+     */
+    public const NAME_PATTERN = '/^[A-Za-z0-9_-]{1,128}$/';
+
+    /**
+     * Version allowlist for the {version} path parameter — semver-ish, bounded
+     * to the `version VARCHAR(64)` column. The pipeline validates against this
+     * too, for the same reason.
+     */
+    public const VERSION_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$/';
+
     public function __construct(
         private readonly string $storageDir,
         private readonly PDO $pdo
@@ -105,10 +130,10 @@ class DesktopPluginsApiHandler
         $name = $params['name'] ?? '';
         $version = $params['version'] ?? '';
 
-        if (preg_match('/^[a-z0-9][a-z0-9._-]{0,127}$/', $name) !== 1) {
+        if (preg_match(self::NAME_PATTERN, $name) !== 1) {
             return Response::error('Invalid plugin name.', 422);
         }
-        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$/', $version) !== 1) {
+        if (preg_match(self::VERSION_PATTERN, $version) !== 1) {
             return Response::error('Invalid version.', 422);
         }
 
