@@ -10,6 +10,7 @@ use HelloWorld\Migrations\CreateHelloGreetingsTable;
 use Whity\Sdk\Hooks\Events;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginEventsInterface;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginJobsInterface;
@@ -39,6 +40,10 @@ use Whity\Sdk\PluginRolesInterface;
  *    `queue:work` worker discovers and runs — enqueued as
  *    `helloworld:greeting_digest`, since the host namespaces a declared job
  *    under the plugin that declared it
+ *  - an audited domain event ({@see PluginEventsInterface}, SDK 1.29): creating
+ *    a greeting dispatches `helloworld:greeting.created` and the host writes it
+ *    to the platform audit trail as that action against a
+ *    `helloworld:greeting` target, beside core's own `user.created` rows
  *
  * It lives in its own directory (`plugins/HelloWorld/`) so the PluginLoader
  * resolves it under the `HelloWorld` namespace prefix (directory name) and
@@ -52,7 +57,7 @@ use Whity\Sdk\PluginRolesInterface;
  * time (see {@see self::resolvePdo()}), analogous to the migration runner
  * injecting a PDO into plugin migrations.
  */
-final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface, PluginJobsInterface
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface, PluginJobsInterface, PluginEventsInterface
 {
     /**
      * @inheritDoc
@@ -69,12 +74,12 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
      */
     public function getSdkConstraint(): string
     {
-        // Requires SDK 1.28: PluginJobsInterface. Raised from ^1.2 (which bought
-        // PluginFrontendInterface + host-enforced route-level requiredPermission)
-        // because a host below 1.28 has no such interface to implement — the
-        // plugin would not merely lose its job, it would fatal on load. The
-        // version gate is the mechanism for saying so.
-        return '^1.28';
+        // Requires SDK 1.29: PluginEventsInterface + Events::forPlugin().
+        // Raised from ^1.28 (PluginJobsInterface) for the same reason that one
+        // was raised from ^1.2 — a host below 1.29 has no such interface to
+        // implement, so the plugin would not merely lose its audit trail, it
+        // would fatal on load. The version gate is the mechanism for saying so.
+        return '^1.29';
     }
 
     /**
@@ -452,6 +457,71 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
     }
 
     /**
+     * The plugin's OWN events the host should write to the platform audit trail
+     * (SDK 1.29).
+     *
+     * Declared BARE. The host stamps this plugin's namespace on both halves of
+     * the record, so a greeting creation is audited as the action
+     * `helloworld:greeting.created` against a `helloworld:greeting` target — no
+     * declaration here can produce a bare `user.deleted` or claim another
+     * plugin's activity, because the prefix comes from the plugin name the
+     * loader holds rather than from anything returned below.
+     *
+     * `idKey` names the payload key carrying the record id and is REQUIRED even
+     * though this one is the obvious `id`: the audit row's `target_id` comes
+     * from it, and a wrong or absent key produces a row that names an action and
+     * points at nothing while the write still succeeds.
+     *
+     * The event is only audited if it is DISPATCHED — see
+     * {@see self::announceGreetingCreated()}, which fires the namespaced name
+     * this declaration is bound to.
+     *
+     * @inheritDoc
+     */
+    public function getAuditedEvents(): array
+    {
+        return [
+            'greeting.created' => ['targetType' => 'greeting', 'idKey' => 'id'],
+        ];
+    }
+
+    /**
+     * Dispatch this plugin's `greeting.created` event.
+     *
+     * {@see Events::forPlugin()} builds the namespaced name the host listens on
+     * (`helloworld:greeting.created`). Spelling it by hand is what this call
+     * avoids: the prefix is a SLUG of the plugin name, and a name that is nearly
+     * right matches no listener and reports nothing.
+     *
+     * The payload's `tenant_id` decides which tenant owns the audit row, and
+     * every other scalar in it is kept as sanitised metadata — so `message` is
+     * useful context and `id` is not repeated there, being already the row's
+     * `target_id`.
+     *
+     * FAIL-SOFT, for the same reason the audit writer itself is: announcing a
+     * greeting must never be the thing that fails creating one. A context that
+     * registers no hook manager (a bare test harness, an embedded host) simply
+     * announces nothing rather than turning a successful create into a 500.
+     *
+     * @param array<string, mixed> $greeting The created greeting row.
+     * @return void
+     */
+    private function announceGreetingCreated(array $greeting): void
+    {
+        try {
+            // Resolved through the same documented host seam as the PDO (see
+            // {@see self::resolvePdo()}), so the plugin's contract imports stay
+            // SDK-only and the one core dependency is an explicit lookup.
+            $hooks = \Whity\app(\Whity\Core\Hooks\HookManager::class);
+            if ($hooks instanceof \Whity\Core\Hooks\HookManager) {
+                $hooks->dispatch(Events::forPlugin($this->getName(), 'greeting.created'), $greeting);
+            }
+        } catch (\Throwable) {
+            // Intentionally swallowed: see the fail-soft note above.
+        }
+    }
+
+    /**
      * Handle PATCH /api/hello/greetings/{id} (requires hello:manage).
      *
      * @param Request $request The incoming HTTP request.
@@ -486,7 +556,17 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
      */
     private function greetingsHandler(): GreetingsApiHandler
     {
-        return new GreetingsApiHandler($this->resolvePdo());
+        return new GreetingsApiHandler(
+            $this->resolvePdo(),
+            // SDK 1.29: the handler reports the row it wrote and the PLUGIN
+            // decides that is an event worth auditing. The handler stays
+            // ignorant of event names and namespacing, which is what keeps the
+            // one place that has to spell them the same place that declares
+            // them ({@see self::getAuditedEvents()}).
+            function (array $greeting): void {
+                $this->announceGreetingCreated($greeting);
+            }
+        );
     }
 
     /**

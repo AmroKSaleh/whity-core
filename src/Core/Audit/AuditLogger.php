@@ -25,6 +25,15 @@ use Whity\Core\Tenant\TenantContext;
  *     needs to know the audit subsystem exists.
  *  2. Explicit calls — the auth/2FA endpoints do not fire hooks, so they call
  *     {@see self::record()} directly for login success/failure and 2FA changes.
+ *  3. Plugin declarations ({@see self::subscribeFromSource()}, SDK 1.29) — a
+ *     plugin declares which of its OWN events belong in the trail and the loader
+ *     hands the declaration here. The map in (1) is core's and hardcoded, so
+ *     before this a plugin's actions were absent from the one screen that
+ *     answers "who did what", and its only alternatives were a second writer on
+ *     this table or a private activity log nobody reads. Plugin events are
+ *     namespaced under the declaring plugin — action `acme:task.completed`,
+ *     target type `acme:task` — from the plugin name the LOADER supplies, so no
+ *     declaration can forge a core action or another plugin's.
  *
  * Design guarantees:
  *  - Tenant scoping: every row carries a `tenant_id`. It is taken from the hook
@@ -204,18 +213,80 @@ final class AuditLogger implements AuditLoggerInterface
     }
 
     /**
+     * Subscribe this logger to the events one PLUGIN declared audited
+     * ({@see \Whity\Sdk\PluginEventsInterface}, SDK 1.29).
+     *
+     * The counterpart to {@see self::subscribe()}, and deliberately the same
+     * machinery: the declaration is reduced to `[action, targetType, idKey]` —
+     * the tuple core's own map already carries — and handed to the SAME
+     * {@see self::recordFromHook()}. A plugin's row is therefore built by the
+     * code that builds core's: one tenant-resolution order (payload `tenant_id`
+     * → hook context → system tenant), one metadata sanitiser, one fail-soft
+     * write. Re-implementing any of that beside it is how a plugin's rows end up
+     * in the wrong tenant, or carrying the secret a core row would have dropped.
+     *
+     * ATTRIBUTION. `$source` is the plugin NAME the loader holds, never anything
+     * the plugin returned, and both the action and the target type are stamped
+     * with the slug of it — so a plugin can declare any event it likes and still
+     * cannot claim another plugin's activity or write a row that reads as core's
+     * (see {@see PluginAuditEvents::fromDeclaration()}).
+     *
+     * The listeners are returned rather than merely registered so the CALLER can
+     * track them. The plugin loader records them beside the plugin's own hook
+     * subscriptions, which is what makes disabling a plugin remove its audit
+     * listeners and re-enabling it restore them — a disabled plugin whose events
+     * were still being audited would be a plugin that is still doing something.
+     *
+     * @param HookManager         $hooks       The hook manager the plugin dispatches into.
+     * @param string              $source      The declaring plugin's name.
+     * @param array<mixed, mixed> $declaration The plugin's raw declaration.
+     *
+     * @return list<array{event: string, callback: callable}> The registered listeners.
+     *
+     * @throws InvalidPluginAuditEventException If the declaration is malformed.
+     *                                          Nothing is subscribed in that case.
+     */
+    public function subscribeFromSource(HookManager $hooks, string $source, array $declaration): array
+    {
+        // Validated WHOLE before anything is bound: a plugin half-subscribed
+        // ships a trail that looks complete and silently omits the rest.
+        $events = PluginAuditEvents::fromDeclaration($source, $declaration);
+
+        // The same priority core's own listeners use (50 — well after the
+        // default 10), so an audit row is written after the plugin's own
+        // listeners have had the payload, and observes what they left.
+        $priority = 50;
+
+        $registered = [];
+        foreach ($events as $action => ['targetType' => $targetType, 'idKey' => $idKey]) {
+            $callback = function (array $data, array $context) use ($action, $targetType, $idKey): array {
+                $this->recordFromHook($action, $targetType, $idKey, $data, $context);
+                return $data;
+            };
+            $hooks->listen($action, $callback, $priority);
+            $registered[] = ['event' => $action, 'callback' => $callback];
+        }
+
+        return $registered;
+    }
+
+    /**
      * Translate a generic CRUD hook payload into an audit record.
      *
      * @param string               $action     The audit action key.
      * @param string               $targetType The audited entity type.
-     * @param string               $idKey      The payload key holding the target id.
+     * @param string|null          $idKey      The payload key holding the target id, or null
+     *                                         for an event with no single target (SDK 1.29:
+     *                                         a plugin may declare that explicitly).
      * @param array<string, mixed> $data       The hook payload.
      * @param array<string, mixed> $context    The hook context (carries tenant_id).
      * @return void
      */
-    private function recordFromHook(string $action, string $targetType, string $idKey, array $data, array $context): void
+    private function recordFromHook(string $action, string $targetType, ?string $idKey, array $data, array $context): void
     {
-        $targetId = isset($data[$idKey]) && is_numeric($data[$idKey]) ? (int) $data[$idKey] : null;
+        $targetId = $idKey !== null && isset($data[$idKey]) && is_numeric($data[$idKey])
+            ? (int) $data[$idKey]
+            : null;
 
         // Tenant: prefer the payload's tenant_id (the affected resource's tenant),
         // then the hook context, then the system tenant.
@@ -230,7 +301,7 @@ final class AuditLogger implements AuditLoggerInterface
             'tenant_id' => $tenantId,
             'target_type' => $targetType,
             'target_id' => $targetId,
-            'metadata' => $this->hookMetadata($data),
+            'metadata' => $this->hookMetadata($data, $idKey),
         ]);
     }
 
@@ -268,12 +339,22 @@ final class AuditLogger implements AuditLoggerInterface
      * Drops the id/tenant_id (already first-class columns) and any secret/PII
      * keys, keeping the remaining scalar context (e.g. a role name, an OU slug).
      *
-     * @param array<string, mixed> $data The hook payload.
+     * The id key is dropped by NAME rather than only as the literal `id`: a
+     * plugin declares which payload key holds its record id (SDK 1.29), and a
+     * `task_id` left in the metadata would be the same value the row already
+     * carries in `target_id`, stored twice and free to disagree once someone
+     * edits one of them.
+     *
+     * @param array<string, mixed> $data  The hook payload.
+     * @param string|null          $idKey The payload key already promoted to `target_id`.
      * @return array<string, mixed> The metadata to store.
      */
-    private function hookMetadata(array $data): array
+    private function hookMetadata(array $data, ?string $idKey = 'id'): array
     {
         unset($data['id'], $data['tenant_id'], $data['_context']);
+        if ($idKey !== null) {
+            unset($data[$idKey]);
+        }
 
         return $this->sanitizeMetadata($data);
     }

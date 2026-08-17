@@ -58,7 +58,32 @@ Notes:
 
 2. **Explicit `record()` calls** — the auth/2FA endpoints do not fire hooks, so `AuthHandler` and `TwoFactorHandler` call `record()` directly for: `auth.login.success`, `auth.login.failure`, `auth.login.2fa_required`, `auth.2fa.verify_success`, `auth.2fa.verify_failure`, `auth.2fa.enabled`, `auth.2fa.disabled`.
 
+3. **Plugin declarations** — `AuditLogger::subscribeFromSource()`, driven by the plugin loader from a plugin's [`PluginEventsInterface`](../../sdk/src/PluginEventsInterface.php) declaration (SDK 1.29). The map in (1) is core's and hardcoded, so a plugin's own domain events reached the trail never; its only alternatives were a second writer on this table or a private activity log nobody reads.
+
 `record()` is **fail-soft**: a write error is logged via PSR-3 and swallowed so auditing can never break the action it is recording.
+
+### Plugin-declared events
+
+A plugin declares **bare** event names; the host stamps the declaring plugin's slug onto **both** the action and the target type, from the plugin name the loader supplies rather than anything the plugin returns:
+
+```php
+public function getAuditedEvents(): array
+{
+    return ['task.completed' => ['targetType' => 'task', 'idKey' => 'task_id']];
+}
+```
+
+→ action `acme:task.completed`, target type `acme:task`, `target_id` from the payload's `task_id`.
+
+Consequences an operator can rely on:
+
+- **No plugin can forge or shadow a core action.** A declaration can never produce the bare `user.deleted` core writes; a declared name containing `:` is refused outright, since that would be a plugin writing its own prefix.
+- **Every row is attributable to one plugin.** The host listens on the *namespaced* event name, so the plugin dispatches `Events::forPlugin($this->getName(), 'task.completed')`. Listening on the bare name would credit every plugin declaring `task.completed` whenever any one of them dispatched, and a trail recording an event that did not happen is worse than one recording nothing.
+- **Plugin rows go through the same writer.** Same tenant resolution (payload `tenant_id` → hook context → system tenant), same secret/PII filter, same fail-soft write. There is still exactly one writer on this table.
+- **A bad declaration is contained.** A declaration that throws or is malformed costs that plugin its subscriptions — whole-declaration, never half — and costs core's auditing and every other plugin's nothing.
+- **Disabling a plugin stops auditing it.** The subscriptions are registered with the plugin's other hooks, so `disablePlugin()` removes them and re-enabling restores them.
+
+Filtering the trail on a plugin is therefore a prefix match: everything `acme:` is that plugin's, and nothing else can appear under it. See [Plugin-Development.md](./Plugin-Development.md) Step 11 for the plugin-author view.
 
 ### Actor & IP resolution
 
@@ -83,6 +108,7 @@ See the OpenAPI spec (`public/openapi.json`) for the full request/response contr
 ## Summary
 
 - `audit_log` is an append-only, tenant-scoped trail; `tenant_id` cascades, `actor_user_id` is nullable, `metadata` is secret/PII-free.
-- `AuditLogger` is the single writer: it subscribes to the core CRUD hooks and is called explicitly by the auth/2FA endpoints; it is fail-soft and worker-safe.
+- `AuditLogger` is the single writer: it subscribes to the core CRUD hooks, is called explicitly by the auth/2FA endpoints, and subscribes to the events plugins declare; it is fail-soft and worker-safe.
+- Plugin-declared events are namespaced under the declaring plugin (action `acme:task.completed`, target type `acme:task`) from the name the loader supplies, so no plugin can forge a core action or another plugin's.
 - `AuditContext` carries the per-request actor/IP and is reset between requests.
 - `GET /api/audit-logs` is gated on `audit:read`, tenant-scoped (system tenant 0 sees all), filterable and paginated.
