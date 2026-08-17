@@ -47,7 +47,9 @@ final class RelationsPlugin implements PluginInterface, PluginRequirementsInterf
 
     public function getVersion(): string
     {
-        return '0.3.0';
+        // 0.3.1: fresh-build CREATE uses DEFAULT (NOW()) so the offline SQLite
+        // host boots (bare NOW() crash-looped the host — see CreatePersonsTable).
+        return '0.3.1';
     }
 
     public function getSdkConstraint(): string

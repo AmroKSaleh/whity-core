@@ -218,7 +218,13 @@ abstract class OfflinePluginHostConformanceTestCase extends TestCase
     {
         $context = ['tenant_id' => 1, 'timestamp' => time()];
 
-        foreach ($this->pluginUnderTest()->getHooks() as $eventName => $hookData) {
+        $hooks = $this->pluginUnderTest()->getHooks();
+        // A plugin with no hooks trivially conforms — assert the shape so this
+        // test always makes an assertion (phpunit failOnRisky) instead of being
+        // reported "risky" for the (common) no-hooks case.
+        self::assertIsArray($hooks, 'getHooks() must return an array (event => listener(s)).');
+
+        foreach ($hooks as $eventName => $hookData) {
             foreach (self::normalizeHooks($hookData) as $callback) {
                 try {
                     $result = $callback([], $context);
