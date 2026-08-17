@@ -26,14 +26,13 @@ use Whity\Sdk\Sql\SequenceAllocator;
  * SLICE 1 — persons as a two-way-syncable resource via
  * {@see \Whity\Sdk\Sync\SyncController}.
  *
- * SLICE 2a (this) — the persons BLOCK UI: {@see getFrontendFeatures()} declares a
- * `screen: 'blocks'` tree (a synced persons list + an add-person modal + a
- * per-row delete), rendered identically on web and desktop from the shared block
- * contract. EDIT is deferred to slice 2b: an in-place edit needs a form that
- * PATCHes `/api/persons/{id}` for the opened row, which the contract cannot yet
- * express (`submitSpec` allows only POST/PUT and does not interpolate the
- * endpoint from the master-detail context). A rich detail view is likewise
- * deferred (no read-only "show the published row" display block yet).
+ * SLICE 2 — the persons BLOCK UI: {@see getFrontendFeatures()} declares a
+ * `screen: 'blocks'` tree rendered identically on web and desktop from the shared
+ * block contract. Full create/edit/delete: an add-person modal (POST), a per-row
+ * edit modal opened from the row and seeded via `defaultFrom`, PATCHing
+ * `/api/persons/{edit-person.id}` for that row (the submitSpec endpoint-templating
+ * added in slice 2b), and a per-row soft-delete. A rich in-place detail view is
+ * still deferred (no read-only "show the published row" display block yet).
  *
  * Subsequent slices: the graph edges (relations + relationship types) and their
  * UI, repository-backed derived reads (relationCount, reciprocal relations,
@@ -48,7 +47,7 @@ final class RelationsPlugin implements PluginInterface, PluginRequirementsInterf
 
     public function getVersion(): string
     {
-        return '0.2.0';
+        return '0.3.0';
     }
 
     public function getSdkConstraint(): string
@@ -214,6 +213,31 @@ final class RelationsPlugin implements PluginInterface, PluginRequirementsInterf
                             ],
                         ],
                     ],
+                    // Edit-person modal — no trigger; opened by the row's Edit
+                    // action, which publishes the row under this id. The inputs
+                    // seed from it via defaultFrom, and the form PATCHes the
+                    // opened row (last-write-wins: no baseVersion sent). The whole
+                    // row is submitted, matching the sync full-replace update.
+                    [
+                        'type' => 'modal',
+                        'id' => 'edit-person',
+                        'title' => 'Edit person',
+                        'size' => 'md',
+                        'children' => [
+                            [
+                                'type' => 'form',
+                                'submit' => ['method' => 'PATCH', 'endpoint' => '/api/persons/{edit-person.id}'],
+                                'requiredPermission' => 'relations:manage',
+                                'children' => [
+                                    ['type' => 'textInput', 'name' => 'displayName', 'label' => 'Name', 'required' => true, 'defaultFrom' => 'edit-person.displayName'],
+                                    ['type' => 'dateInput', 'name' => 'birthDate', 'label' => 'Birth date', 'defaultFrom' => 'edit-person.birthDate'],
+                                    ['type' => 'checkbox', 'name' => 'deceased', 'label' => 'Deceased', 'defaultFrom' => 'edit-person.deceased'],
+                                    ['type' => 'textArea', 'name' => 'notes', 'label' => 'Notes', 'rows' => 3, 'defaultFrom' => 'edit-person.notes'],
+                                    ['type' => 'submitButton', 'label' => 'Save changes', 'requiredPermission' => 'relations:manage'],
+                                ],
+                            ],
+                        ],
+                    ],
                     // The synced persons list, with a per-row soft-delete.
                     [
                         'type' => 'dataTable',
@@ -225,6 +249,12 @@ final class RelationsPlugin implements PluginInterface, PluginRequirementsInterf
                         'pageSize' => 20,
                         'emptyText' => 'No people yet — add the first one.',
                         'rowActions' => [
+                            // Opens the edit modal, publishing the row so the form
+                            // seeds via defaultFrom and PATCHes /api/persons/{id}.
+                            [
+                                'label' => 'Edit',
+                                'open' => 'edit-person',
+                            ],
                             [
                                 'label' => 'Delete',
                                 'method' => 'DELETE',
