@@ -517,8 +517,12 @@ seeded accounts and shared-database discipline.
    - [`automated-tests.yml`](.github/workflows/automated-tests.yml):
      - **Unit, static analysis & plugin smoke (SQLite)** — `phpunit`, the
        OpenAPI-spec drift check, `phpstan analyse src tests plugins sdk`, the
-       plugin-load smoke, the tenant-predicate guard, and the plugin
-       tenant-isolation conformance check.
+       plugin-load smoke, the tenant-predicate guard, the plugin
+       tenant-isolation conformance check, and the vendored-SDK parity guard
+       (`scripts/ci-vendored-sdk-parity.php` — the Tauri desktop template
+       carries its own copy of `sdk/src`, and a change to either tree must
+       update both in the SAME commit or a device runs an older plugin
+       contract than the one core publishes).
      - **i18n catalogue drift** — regenerates the English catalogue from the
        `t()` calls in the source and fails if it differs from
        `database/i18n/`. Runs on frontend changes too, because that is where

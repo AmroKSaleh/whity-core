@@ -68,6 +68,28 @@ jobs:
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
+      # The installer this workflow is about to build BAKES IN php-host/sdk/src
+      # — that copy is the entire plugin contract every device running this
+      # release will ever see, and it is re-vendored from sdk/src by hand.
+      # #849 is what happens without this step: an installer shipped whose SDK
+      # was three releases behind, so the reference plugin (the exact source
+      # bin/desktop-plugin-release packages) could not be declared on a device.
+      # Same "never ship a version that lies" posture as the version check
+      # above, applied to the one file set the tag says nothing about.
+      #
+      # No `composer install`: the guard deliberately loads nothing through
+      # Composer's autoloader (core's `Whity\Sdk\` root would shadow the very
+      # device copy under test), so PHP alone is the whole dependency.
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Vendored-SDK parity
+        working-directory: ${{ github.workspace }}
+        run: php scripts/ci-vendored-sdk-parity.php
+
   build:
     name: Build, sign + publish (Windows)
     runs-on: windows-latest

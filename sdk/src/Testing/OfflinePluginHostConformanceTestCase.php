@@ -37,6 +37,19 @@ use Whity\Sdk\Testing\Support\OfflineHostReferencePdo;
  * HookVetoException is swallowed by the host, but should still fail a
  * plugin author's own test" philosophy.
  *
+ * What this kit deliberately does NOT prove (#849): that the SDK a given
+ * device carries is the SDK this file ships beside. The desktop template
+ * vendors its own copy of `sdk/src`, and that copy went three releases stale
+ * without anything noticing — a plugin implementing the newest contribution
+ * point could not be declared on a device at all. Asserting that here is
+ * impossible rather than merely unwritten: this class runs under whatever
+ * autoloader resolved `Whity\Sdk\`, so `interface_exists()` answers about the
+ * copy that is already loaded, which is true by construction. Proving anything
+ * about a SECOND copy needs a second process with a different autoloader, and
+ * a plugin author's checkout has no path to the template regardless — the
+ * template is not part of `whity/plugin-sdk`. That check therefore lives in
+ * whity-core's own CI, as `scripts/ci-vendored-sdk-parity.php`.
+ *
  * A plugin supplies its specifics by implementing {@see pluginUnderTest()}.
  */
 abstract class OfflinePluginHostConformanceTestCase extends TestCase
