@@ -629,8 +629,16 @@ final class BlockValidator
 
     /**
      * `form.submit` / `actionButton.action` (SP3, WC-233):
-     * an array with `method` ∈ ['POST','PUT'] and `endpoint` satisfying
+     * an array with `method` ∈ ['POST','PUT','PATCH'] and `endpoint` satisfying
      * the existing apiPath predicate (/api/ prefix, no ///../\whitespace).
+     *
+     * WC-block-submit-templating: PATCH is accepted (the sync update verb), and
+     * the `endpoint` may carry `{targetId.field}` / `{selector}` context tokens —
+     * the SAME addressing as `params.from` / `defaultFrom` — which the renderer
+     * interpolates from the master-detail context at submit time (e.g. a modal
+     * edit form PATCHing `/api/persons/{edit-person.id}` for the opened row). The
+     * `{`/`}`/`.` in a single-dot token pass the path predicate; an unresolved
+     * token is a runtime no-op, consistent with the contract's no-cross-reference stance.
      *
      * @param mixed        $value
      * @param list<string> $errors by reference
@@ -652,8 +660,8 @@ final class BlockValidator
         $method   = $value['method']   ?? null;
         $endpoint = $value['endpoint'] ?? null;
 
-        if (!\is_string($method) || !\in_array($method, ['POST', 'PUT'], true)) {
-            $errors[] = "{$path}.method: '{$type}.{$prop}.method' must be 'POST' or 'PUT', got "
+        if (!\is_string($method) || !\in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
+            $errors[] = "{$path}.method: '{$type}.{$prop}.method' must be 'POST', 'PUT', or 'PATCH', got "
                 . self::describeScalar($method);
         }
 

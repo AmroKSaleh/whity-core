@@ -140,4 +140,48 @@ describe('BlockRenderer — WC-block-modal-drawer overlays', () => {
       )
     );
   });
+
+  it('an edit form PATCHes a context-templated endpoint for the opened row', async () => {
+    // WC-block-submit-templating: the submit endpoint carries a {targetId.field}
+    // token resolved from the published row at submit time (edit-in-place).
+    const patchTree: Block[] = [
+      {
+        type: 'dataTable',
+        source: '/api/v1/people',
+        columns: [{ key: 'name', label: 'Name' }],
+        rowActions: [{ label: 'Edit', open: 'patch-modal' }],
+      } as Block,
+      {
+        type: 'modal',
+        id: 'patch-modal',
+        title: 'Edit details',
+        children: [
+          {
+            type: 'form',
+            submit: { method: 'PATCH', endpoint: '/api/v1/people/{patch-modal.name}' },
+            children: [
+              { type: 'textInput', name: 'name', label: 'Name', defaultFrom: 'patch-modal.name' },
+              { type: 'submitButton', label: 'Save' },
+            ],
+          },
+        ],
+      } as Block,
+    ];
+
+    renderWrapped(<BlockRenderer blocks={patchTree} />);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    await screen.findByText('Edit details');
+
+    mockApiClient.mockClear();
+    mockApiClient.mockResolvedValueOnce(stubResponse(true, 200, {}));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    // The row's `name` is interpolated (URL-encoded) into the PATCH endpoint.
+    await waitFor(() =>
+      expect(mockApiClient).toHaveBeenCalledWith(
+        '/api/v1/people/Ada%20Lovelace',
+        expect.objectContaining({ method: 'PATCH' })
+      )
+    );
+  });
 });

@@ -1005,6 +1005,23 @@ final class BlockValidatorTest extends TestCase
         $this->assertStringContainsString('submit', $joined);
     }
 
+    // WC-block-submit-templating: PATCH (the sync update verb) is accepted, and
+    // the endpoint may carry a {targetId.field} context token the renderer
+    // interpolates at submit — e.g. a modal edit form for the opened row.
+    public function testFormAcceptsPatchWithAContextTemplatedEndpoint(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'PATCH', 'endpoint' => '/api/persons/{edit-person.id}'],
+                'children' => [],
+            ],
+        ]);
+
+        $this->assertSame([], $result['errors']);
+        $this->assertTrue($result['ok']);
+    }
+
     public function testFormWithEndpointMissingApiPrefixIsRejected(): void
     {
         $result = BlockValidator::validate([

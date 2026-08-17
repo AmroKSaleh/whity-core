@@ -266,7 +266,7 @@ export interface DataListBlock {
  */
 export interface FormBlock {
   type: 'form';
-  submit: { method: 'POST' | 'PUT'; endpoint: string };
+  submit: { method: 'POST' | 'PUT' | 'PATCH'; endpoint: string };
   /** If present, the form GETs this path on mount and pre-populates fields with the response. */
   dataSource?: { method: 'GET'; path: string };
   requiredPermission?: string;
@@ -477,7 +477,7 @@ export interface SubmitButtonBlock {
 export interface ActionButtonBlock {
   type: 'actionButton';
   label: string;
-  action: { method: 'POST' | 'PUT'; endpoint: string };
+  action: { method: 'POST' | 'PUT' | 'PATCH'; endpoint: string };
   requiredPermission?: string;
   confirm?: string;
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
