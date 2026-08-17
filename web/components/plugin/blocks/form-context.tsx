@@ -186,7 +186,8 @@ function collectFormInputs(blocks: Block[]): Block[] {
  * (any depth — see {@link collectFormInputs}).
  */
 function collectDefaults(
-  children: FormBlock['children']
+  children: FormBlock['children'],
+  resolveRef?: (ref: string) => string | undefined
 ): Record<string, FormValue> {
   const defaults: Record<string, FormValue> = {};
   for (const input of collectFormInputs(children)) {
@@ -194,10 +195,15 @@ function collectDefaults(
       // Seed `min` empty rows (each with the template's own defaults) so a
       // required-min array starts populated; 0 min → an empty array.
       const min = typeof input.min === 'number' && input.min > 0 ? input.min : 0;
-      const rowDefault = collectDefaults(input.children) as FieldArrayValue[number];
+      const rowDefault = collectDefaults(input.children, resolveRef) as FieldArrayValue[number];
       defaults[input.name] = Array.from({ length: min }, () => ({ ...rowDefault }));
     } else if (input.type === 'checkbox') {
-      if (typeof input.default === 'boolean') {
+      // WC-block-modal-drawer: `defaultFrom` (a master-detail context ref) wins
+      // over the literal `default`. A row's boolean serialises as 'true'/'1'.
+      const seeded = input.defaultFrom !== undefined ? resolveRef?.(input.defaultFrom) : undefined;
+      if (seeded !== undefined) {
+        defaults[input.name] = seeded === 'true' || seeded === '1';
+      } else if (typeof input.default === 'boolean') {
         defaults[input.name] = input.default;
       }
     } else if (input.type === 'bilingualText') {
@@ -215,7 +221,13 @@ function collectDefaults(
       input.type === 'referenceSelect' ||
       input.type === 'richTextInput'
     ) {
-      if (typeof input.default === 'string') {
+      // WC-block-modal-drawer: `defaultFrom` resolved from context seeds the
+      // input (e.g. an edit form opened from a table row) BEFORE the literal
+      // `default`; an unresolved ref falls through to `default`.
+      const seeded = input.defaultFrom !== undefined ? resolveRef?.(input.defaultFrom) : undefined;
+      if (seeded !== undefined) {
+        defaults[input.name] = seeded;
+      } else if (typeof input.default === 'string') {
         defaults[input.name] = input.default;
       }
     }
@@ -237,9 +249,15 @@ function collectDefaults(
 export function FormProvider({
   block,
   children,
+  resolveRef,
+  onSubmitSuccess,
 }: {
   block: FormBlock;
   children: React.ReactNode;
+  /** WC-block-modal-drawer: resolves an input's `defaultFrom` against the master-detail context. */
+  resolveRef?: (ref: string) => string | undefined;
+  /** WC-block-modal-drawer: called after a successful submit (e.g. to close + refetch an enclosing overlay). */
+  onSubmitSuccess?: () => void;
 }) {
   const { addToast } = useToast();
   const t = useTranslation('plugin');
@@ -251,7 +269,7 @@ export function FormProvider({
   const loadErrorText = t('form.error.load', 'Failed to load settings');
 
   const [values, setValues] = React.useState<Record<string, FormValue>>(
-    () => collectDefaults(block.children)
+    () => collectDefaults(block.children, resolveRef)
   );
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -367,6 +385,8 @@ export function FormProvider({
         setIsSubmitting(false);
         if (result.ok) {
           addToast(t('action.toast.completed', 'Completed successfully'), 'success');
+          // WC-block-modal-drawer: close the enclosing overlay + refetch the tree.
+          onSubmitSuccess?.();
         } else if (result.issues && result.issues.length > 0) {
           setServerIssues(result.issues);
           addToast(
@@ -381,7 +401,7 @@ export function FormProvider({
         }
       }
     );
-  }, [block, values, addToast, t]);
+  }, [block, values, addToast, t, onSubmitSuccess]);
 
   const contextValue: FormBlockContextValue = {
     values,
