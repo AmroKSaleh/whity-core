@@ -740,26 +740,206 @@ function DrawerRenderer({ block }: { block: DrawerBlock }) {
   )
 }
 
+// ---------------------------------------------------------------- form defaults
+
+/** The input-leaf block types that own a value in a form's value map — the
+ * SDK's INPUT_LEAF_TYPES, same list as web's `FORM_INPUT_TYPES`. */
+const FORM_INPUT_TYPES: readonly string[] = [
+  "textInput",
+  "textArea",
+  "numberInput",
+  "select",
+  "checkbox",
+  "slider",
+  "dateInput",
+  "fileInput",
+  "colorInput",
+  "bilingualText",
+  "referenceSelect",
+  "richTextInput",
+]
+
+/** Flatten every input-leaf descendant of a form's children at ANY depth —
+ * inputs nested in a section/card/grid/row/tab (or in a modal opened from
+ * inside the form) belong to the enclosing form, because FormScopeContext is
+ * a context and nesting depth never breaks it. A nested `form` owns its own
+ * inputs, so we never descend into one; a `fieldArray` owns ONE value (its row
+ * array) under its own name, so it is a leaf here and its row-scoped template
+ * children are never flattened into the outer form. Mirrors
+ * `collectFormInputs` in web/components/plugin/blocks/form-context.tsx. */
+function collectFormInputs(blocks: Block[]): Block[] {
+  const inputs: Block[] = []
+  for (const block of blocks) {
+    if (FORM_INPUT_TYPES.includes(block.type) || block.type === "fieldArray") {
+      inputs.push(block)
+      continue
+    }
+    if (block.type === "form") continue
+    const nested = (block as { children?: unknown }).children
+    if (Array.isArray(nested)) inputs.push(...collectFormInputs(nested as Block[]))
+  }
+  return inputs
+}
+
+/** `resolveDefault`'s seed-time twin: same `defaultFrom`-wins-over-`default`
+ * precedence, but NORMALISED — an unset selector and a row field that is null
+ * both count as unresolved, so the literal `default` still gets its turn and we
+ * never seed a null the user never chose. `resolveFromContext` itself stays
+ * raw: the `params` path reads it too, and tightening it there would change
+ * which query params a data-bound block sends, which is not this fix's
+ * business. Mirrors `resolveContextRef` in web's block-renderer. */
+function resolveSeed(
+  block: { default?: unknown; defaultFrom?: string },
+  ctx: Pick<MasterDetailContextValue, "selections" | "rows">,
+): unknown {
+  const from = block.defaultFrom
+  if (from !== undefined && from !== "") {
+    const dot = from.indexOf(".")
+    if (dot === -1) {
+      const selected = ctx.selections[from]
+      if (selected !== undefined && selected !== "") return selected
+    } else {
+      const field = ctx.rows[from.slice(0, dot)]?.[from.slice(dot + 1)]
+      if (field !== undefined && field !== null) return field
+    }
+  }
+  return block.default
+}
+
+/**
+ * The resolved starting value of every input in a form, keyed by input name —
+ * what `FormRenderer` seeds its value map with at mount, so the payload it
+ * submits is the one the form is SHOWING. Without this a `defaultFrom`-seeded
+ * input displayed the row's value but contributed nothing, and since the sync
+ * endpoints are full-row replaces (`SyncController::update()` writes every
+ * domain column as `values[col] ?? null`), editing one field silently nulled
+ * every field the user had not touched — issue #847.
+ *
+ * Mirrors `collectDefaults` in web/components/plugin/blocks/form-context.tsx,
+ * with two deliberate narrowings. Web seeds `{}` for every `bilingualText` and
+ * `[]` for every zero-`min` `fieldArray` whether or not a default was declared;
+ * seeding a value for an input that declares none is the SAME data loss in the
+ * opposite direction against a full-row replace — it would overwrite stored
+ * text with `{}` and a stored collection with `[]`. So an input with neither
+ * `default` nor `defaultFrom` stays out of the map here, exactly as before, and
+ * only what the form actually shows gets seeded.
+ *
+ * Each value is seeded in the type this renderer's own `onChange` would store,
+ * so a seeded field and a typed one are indistinguishable downstream — a
+ * payload whose types depend on whether the user touched the field would be
+ * worse than either. (That is why `numberInput`/`slider` seed numbers where
+ * web seeds strings: the web renderer stores strings on change. The two
+ * renderers have always disagreed on the type of a TOUCHED numeric field;
+ * making the seed agree with web would have widened that, not closed it.)
+ */
+function collectDefaults(
+  children: Block[],
+  ctx: Pick<MasterDetailContextValue, "selections" | "rows">,
+): Record<string, unknown> {
+  const defaults: Record<string, unknown> = {}
+  for (const input of collectFormInputs(children)) {
+    switch (input.type) {
+      case "fieldArray": {
+        // A required `min` is shown as `min` empty rows, so those rows have to
+        // be in the payload; `min` 0 shows nothing and so seeds nothing.
+        const min = typeof input.min === "number" && input.min > 0 ? input.min : 0
+        if (min === 0) break
+        const rowDefaults = collectDefaults(input.children, ctx)
+        defaults[input.name] = Array.from({ length: min }, () => ({ ...rowDefaults }))
+        break
+      }
+      case "checkbox": {
+        const seeded = resolveSeed(input, ctx)
+        // A row's `false`/`"0"` is a REAL seed, not an absent one — the
+        // reported data loss included a boolean column being reset to 0.
+        if (seeded !== undefined) defaults[input.name] = coerceBoolean(seeded)
+        break
+      }
+      case "slider": {
+        const seeded = resolveSeed(input, ctx)
+        const numeric = Number(seeded)
+        if (seeded !== undefined && Number.isFinite(numeric)) defaults[input.name] = numeric
+        break
+      }
+      case "numberInput": {
+        // Seeded verbatim: a JSON row gives a number, a literal `default` a
+        // string, and the input renders either — coercing would only invent a
+        // NaN when a row holds something non-numeric.
+        const seeded = resolveSeed(input, ctx)
+        if (seeded !== undefined) defaults[input.name] = seeded
+        break
+      }
+      case "bilingualText": {
+        // No literal `default` in the contract, so this is the `defaultFrom`
+        // case only: a localized-text column arrives as an {ar, en} object.
+        const seeded = resolveSeed(input, ctx)
+        if (typeof seeded === "object" && seeded !== null && !Array.isArray(seeded)) {
+          defaults[input.name] = seeded
+        }
+        break
+      }
+      case "textInput":
+      case "textArea":
+      case "richTextInput":
+      case "select":
+      case "dateInput":
+      case "colorInput":
+      case "referenceSelect": {
+        const seeded = resolveSeed(input, ctx)
+        // Stringified because that is what these inputs' own onChange stores;
+        // a numeric row field would otherwise submit a number from an untouched
+        // field and a string from a touched one.
+        if (seeded !== undefined) defaults[input.name] = String(seeded)
+        break
+      }
+      default:
+        // `fileInput` is the only other leaf, and it has no `default` in the
+        // contract — a file the user never picked has nothing to seed.
+        break
+    }
+  }
+  return defaults
+}
+
 // ---------------------------------------------------------------- form + inputs
 
 function FormRenderer({ block }: { block: FormBlock }) {
   const modalId = React.useContext(ModalScopeContext)
   const masterDetail = React.useContext(MasterDetailContext)
   const { closeTarget } = masterDetail
-  const [values, setValues] = React.useState<Record<string, unknown>>({})
+  // Seeded ONCE, at mount, from the context as it stands then — the same lazy
+  // initializer web uses, and deliberately not an effect that re-seeds when the
+  // context changes. The context value changes on ANY selector move or overlay
+  // open anywhere in the feature, so a re-seeding effect would wipe a half-typed
+  // form because something unrelated on the screen moved. The case that
+  // actually needs a new seed — a different row opened into this overlay — is
+  // already covered: Dialog/Sheet unmount their content on close, so the next
+  // open mounts a fresh FormRenderer and this initializer runs again against
+  // the row `openTarget` has by then published.
+  const [values, setValues] = React.useState<Record<string, unknown>>(() =>
+    collectDefaults(block.children, masterDetail),
+  )
   const [submitting, setSubmitting] = React.useState(false)
   const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null)
   const preload = usePluginData<Record<string, unknown>>(block.dataSource?.path ?? "__no_data_source__", (data) =>
     block.dataSource && data && typeof data === "object" ? (data as Record<string, unknown>) : null,
   )
 
+  // A declared `dataSource` is the stored state of the thing being edited, so
+  // it WINS over the seeded defaults — the merge used to run the other way,
+  // which was harmless while the value map started empty but would now let a
+  // block's literal `default` mask the value the server just returned. Nothing
+  // of the user's is at risk in the flip: the fieldset below stays disabled
+  // until the load settles, so there are no edits yet to lose. Both halves
+  // match web's FormProvider.
   React.useEffect(() => {
     if (block.dataSource && preload.status === "ready") {
-      setValues((prev) => ({ ...preload.data, ...prev }))
+      setValues((prev) => ({ ...prev, ...preload.data }))
     }
     // Only re-seed when the preload data itself changes, not on every local edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block.dataSource, preload.status === "ready" ? preload.data : null])
+  const isPreloading = block.dataSource !== undefined && preload.status === "loading"
 
   const setValue = React.useCallback((name: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [name]: value }))
@@ -791,7 +971,7 @@ function FormRenderer({ block }: { block: FormBlock }) {
 
   return (
     <FormScopeContext.Provider value={scope}>
-      <fieldset disabled={submitting} className="space-y-4">
+      <fieldset disabled={submitting || isPreloading} className="space-y-4">
         <form onSubmit={submit} className="space-y-4">
           {result?.ok === false && (
             <Alert variant="destructive">
@@ -892,7 +1072,10 @@ function ActionButtonRenderer({ block }: { block: { label: string; action: { met
  * `resolveDefault`, which checks the master-detail context) wins over a
  * literal `default` whenever both resolve — see `resolveDefault`'s own doc.
  * A value already present in `form.values` (user edit, or an earlier seed)
- * always wins over either. */
+ * always wins over either — and since `collectDefaults` now seeds the map at
+ * mount, that is the arm every defaulted input takes. The `?? resolveDefault`
+ * fallbacks below are what an input the seed skips still renders from; they
+ * are display only, which is exactly how #847 happened. */
 function FormInput({ block, form }: { block: Extract<Block, { type: string }>; form: FormScope }) {
   const ctx = React.useContext(MasterDetailContext)
 

@@ -22,5 +22,10 @@
     }
   },
   "include": ["src"],
+  // Tests run under web/'s Jest project (see web/jest.config.mjs roots), which
+  // brings the globals and the jest-dom matchers they are written against.
+  // Compiling them here instead fails on both, and on the `React` import this
+  // config's noUnusedLocals rejects but every other test file in the repo has.
+  "exclude": ["src/**/__tests__/**"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
