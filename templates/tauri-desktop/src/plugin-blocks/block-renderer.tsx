@@ -83,9 +83,12 @@ function toAlertVariant(v: "info" | "success" | "warning" | "danger"): "info" | 
  * `selections`/`setSelection` (untouched, still scalar-only) — `rows` is the
  * row a `dataTable` `open` rowAction publishes when it opens a modal/drawer
  * by that overlay's blockId; `openTargets` tracks which overlay ids are
- * currently open. `refreshSignal` increments on every overlay close so
- * data-bound blocks can refetch (an edit modal closing should show its
- * effect in the table that opened it) — see `useRefetchOnSignal`.
+ * currently open. `refreshSignal` increments ONLY when a close follows a
+ * successful form submit (`closeTarget(id, {refresh: true})` — a plain
+ * dismiss/cancel/backdrop-click close does not refetch anything), matching
+ * the web renderer's refresh-nonce contract exactly (confirmed with the
+ * backend agent) — every data-bound block in the feature refetches on that
+ * signal, not just the one that opened the overlay — see `useRefetchOnSignal`.
  */
 interface MasterDetailContextValue {
   selections: Record<string, string>
@@ -93,7 +96,13 @@ interface MasterDetailContextValue {
   rows: Record<string, Record<string, unknown>>
   openTargets: Record<string, boolean>
   openTarget: (id: string, row?: Record<string, unknown>) => void
-  closeTarget: (id: string) => void
+  /** `refresh: true` (only ever passed by a successful form submit, see
+   * `FormRenderer`) is what bumps `refreshSignal` — a plain dismiss/cancel/
+   * backdrop-click close does NOT refetch anything, matching the web
+   * renderer's "refresh nonce only on submit-success" contract exactly
+   * (confirmed with the backend agent; this was a real bug here before —
+   * every close used to bump the signal regardless of why). */
+  closeTarget: (id: string, options?: { refresh?: boolean }) => void
   refreshSignal: number
 }
 const MasterDetailContext = React.createContext<MasterDetailContextValue>({
@@ -119,9 +128,9 @@ function MasterDetailProvider({ children }: { children: React.ReactNode }) {
     if (row) setRows((prev) => ({ ...prev, [id]: row }))
     setOpenTargets((prev) => ({ ...prev, [id]: true }))
   }, [])
-  const closeTarget = React.useCallback((id: string) => {
+  const closeTarget = React.useCallback((id: string, options?: { refresh?: boolean }) => {
     setOpenTargets((prev) => (prev[id] ? { ...prev, [id]: false } : prev))
-    setRefreshSignal((n) => n + 1)
+    if (options?.refresh) setRefreshSignal((n) => n + 1)
   }, [])
 
   const value = React.useMemo<MasterDetailContextValue>(
@@ -169,11 +178,12 @@ function useEffectiveSource(source: string, params?: SourceParam[]): string {
   }, [source, params, ctx.selections, ctx.rows])
 }
 
-/** Refetches a data-bound block's `usePluginData` result whenever an overlay
- * closes anywhere in this feature (skipped on first mount) — a simple,
- * correct-enough interpretation of "refresh the affected data-bound blocks
- * on close" absent a declared dependency graph between a specific overlay
- * and specific blocks. */
+/** Refetches a data-bound block's `usePluginData` result whenever a
+ * successful form submit closes an overlay anywhere in this feature
+ * (skipped on first mount) — every data-bound block refetches, not just
+ * ones "belonging" to the overlay that closed, absent a declared dependency
+ * graph between a specific overlay and specific blocks (matches the web
+ * renderer's refresh-nonce scope). */
 function useRefetchOnSignal(state: PluginDataState<unknown>): void {
   const { refreshSignal } = React.useContext(MasterDetailContext)
   const stateRef = React.useRef(state)
@@ -738,11 +748,12 @@ function FormRenderer({ block }: { block: FormBlock }) {
     try {
       const outcome = await submitPluginAction(block.submit.endpoint, block.submit.method, values)
       if (outcome.ok) {
-        // Inside a modal/drawer: closing IS the success feedback (also bumps
-        // refreshSignal — see MasterDetailProvider — so the table/detail
-        // that opened this form picks up the edit). At the top level, no
-        // overlay to close, so show the inline confirmation instead.
-        if (modalId) closeTarget(modalId)
+        // Inside a modal/drawer: closing IS the success feedback, and
+        // `refresh: true` is what bumps refreshSignal — see
+        // MasterDetailProvider's closeTarget doc — so the table/detail that
+        // opened this form picks up the edit. At the top level, no overlay
+        // to close, so show the inline confirmation instead.
+        if (modalId) closeTarget(modalId, { refresh: true })
         else setResult({ ok: true })
       } else {
         setResult({ ok: false, message: outcome.error ?? outcome.issues?.map((i) => i.message).join(", ") ?? "Submission failed" })
