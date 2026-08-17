@@ -1,17 +1,34 @@
-﻿'use client';
+'use client';
 
-import { useCallback, useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth-context';
-import { useToast } from '@/lib/toast-context';
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.permissionsPanel.close = Close
+ *   roles.permissionsPanel.empty = No permissions assigned to this role.
+ *   roles.permissionsPanel.error = Failed to fetch permissions
+ *   roles.permissionsPanel.loading = Loading permissions...
+ *   roles.permissionsPanel.subtitle = View all permissions assigned to this role.
+ *   roles.permissionsPanel.title = {name} - Permissions
+ * @i18n-keys common
+ *   ui.dialog.close = Close
+ */
+
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@amroksaleh/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
-import type { Permission, Role } from './types';
+import type { Permission, Role, RolesAdapter, RolesTranslate } from './types';
 
 /** Group permissions by resource (segment before ':'), sorted, stable within. */
 function groupPermissions(permissions: Permission[]): [string, Permission[]][] {
@@ -30,64 +47,72 @@ interface PermissionsPanelProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   role: Role;
+  /** Injected data-source adapter. */
+  adapter: RolesAdapter;
+  /** Injected translator (resolved by RolesScreen). */
+  t: RolesTranslate;
+  /** Optional notifier. */
+  onNotify?: (message: string, type: 'success' | 'error') => void;
 }
 
 export function PermissionsPanel({
   isOpen,
   onOpenChange,
   role,
+  adapter,
+  t,
+  onNotify,
 }: PermissionsPanelProps) {
-  const { apiClient } = useAuth();
-  const { addToast } = useToast();
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const fetchRolePermissions = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const response = await apiClient(`/api/v1/roles/${role.id}/permissions`);
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch role permissions');
-      }
-
-      const data: { data: Permission[] } = await response.json();
-      setPermissions(data.data);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to fetch permissions';
-      addToast(message, 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [apiClient, role.id, addToast]);
-
   useEffect(() => {
-    if (isOpen) {
-      void (async () => {
-        await fetchRolePermissions();
-      })();
-    }
-  }, [isOpen, fetchRolePermissions]);
+    if (!isOpen) return;
+    let cancelled = false;
+    setIsLoading(true);
+    adapter
+      .getRolePermissions(role.id)
+      .then((data) => {
+        if (!cancelled) setPermissions(data);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : t('roles.permissionsPanel.error', 'Failed to fetch permissions');
+        onNotify?.(message, 'error');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Re-run only when the modal opens for a given role.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, role.id]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl" closeLabel={t('ui.dialog.close', 'Close')}>
         <DialogHeader>
-          <DialogTitle>{role.name} - Permissions</DialogTitle>
+          <DialogTitle>
+            {t('roles.permissionsPanel.title', '{name} - Permissions', { name: role.name })}
+          </DialogTitle>
           <DialogDescription>
-            View all permissions assigned to this role.
+            {t('roles.permissionsPanel.subtitle', 'View all permissions assigned to this role.')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="py-4">
           {isLoading ? (
             <div className="text-sm text-muted-foreground py-8 text-center">
-              Loading permissions...
+              {t('roles.permissionsPanel.loading', 'Loading permissions...')}
             </div>
           ) : permissions.length === 0 ? (
             <div className="text-sm text-muted-foreground py-8 text-center">
-              No permissions assigned to this role.
+              {t('roles.permissionsPanel.empty', 'No permissions assigned to this role.')}
             </div>
           ) : (
             <div className="space-y-3 max-h-80 overflow-y-auto">
@@ -121,7 +146,7 @@ export function PermissionsPanel({
             variant="outline"
             onClick={() => onOpenChange(false)}
           >
-            Close
+            {t('roles.permissionsPanel.close', 'Close')}
           </Button>
         </div>
       </DialogContent>

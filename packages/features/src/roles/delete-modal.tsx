@@ -1,8 +1,29 @@
-﻿'use client';
+'use client';
+
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.delete.cancel = Cancel
+ *   roles.delete.description = Are you sure you want to delete this role? This action cannot be undone.
+ *   roles.delete.error = Failed to delete role
+ *   roles.delete.notManageable = This role can't be modified by your tenant — global base roles are managed by the system tenant.
+ *   roles.delete.permissionCount = Permissions: {count}
+ *   roles.delete.submit = Delete Role
+ *   roles.delete.submitting = Deleting...
+ *   roles.delete.success = Role deleted successfully
+ *   roles.delete.title = Delete Role
+ *   roles.delete.warning = If this role is assigned to users, they will lose the permissions associated with this role.
+ * @i18n-keys common
+ *   ui.dialog.close = Close
+ */
 
 import { useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
-import { useToast } from '@/lib/toast-context';
 import {
   Dialog,
   DialogContent,
@@ -10,18 +31,23 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@amroksaleh/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconAlertCircle } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import type { Role } from './types';
+import type { Role, RolesAdapter, RolesTranslate } from './types';
 
 interface DeleteRoleModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   role: Role;
   onSuccess: () => void;
+  /** Injected data-source adapter. */
+  adapter: RolesAdapter;
+  /** Injected translator (resolved by RolesScreen). */
+  t: RolesTranslate;
+  /** Optional notifier. */
+  onNotify?: (message: string, type: 'success' | 'error') => void;
 }
 
 export function DeleteRoleModal({
@@ -29,49 +55,39 @@ export function DeleteRoleModal({
   onOpenChange,
   role,
   onSuccess,
+  adapter,
+  t,
+  onNotify,
 }: DeleteRoleModalProps) {
-  const { apiClient } = useAuth();
-  const { addToast } = useToast();
-  const t = useTranslation('admin');
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
     try {
       setIsDeleting(true);
-
-      const response = await apiClient(`/api/v1/roles/${role.id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        // SAFETY NET (WC-222): a 404 here means the role is not manageable by
-        // the current tenant (a global NULL-tenant base role — managed only by
-        // the system tenant, WC-110). The row's Delete action is already gated
-        // on `manageable`, but should that gate ever be bypassed we surface a
-        // friendly toast instead of a generic error / console noise.
-        if (response.status === 404) {
-          addToast(
-            t(
-              'roles.delete.notManageable',
-              "This role can't be modified by your tenant — global base roles are managed by the system tenant."
-            ),
-            'error'
-          );
-          return;
-        }
-
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || t('roles.delete.error', 'Failed to delete role')
+      // SAFETY NET (WC-222): a 'not-manageable' result means the role is a
+      // global NULL-tenant base role, managed only by the system tenant
+      // (WC-110). The row's Delete action is already gated on `manageable`, but
+      // should that gate ever be bypassed we surface a friendly toast instead
+      // of a generic error / console noise.
+      const result = await adapter.deleteRole(role.id);
+      if (result === 'not-manageable') {
+        onNotify?.(
+          t(
+            'roles.delete.notManageable',
+            "This role can't be modified by your tenant — global base roles are managed by the system tenant."
+          ),
+          'error'
         );
+        return;
       }
-
-      addToast(t('roles.delete.success', 'Role deleted successfully'), 'success');
+      onNotify?.(t('roles.delete.success', 'Role deleted successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : t('roles.delete.error', 'Failed to delete role');
-      addToast(message, 'error');
+        error instanceof Error && error.message
+          ? error.message
+          : t('roles.delete.error', 'Failed to delete role');
+      onNotify?.(message, 'error');
     } finally {
       setIsDeleting(false);
     }
@@ -79,7 +95,7 @@ export function DeleteRoleModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent closeLabel={t('ui.dialog.close', 'Close')}>
         <DialogHeader>
           <DialogTitle>{t('roles.delete.title', 'Delete Role')}</DialogTitle>
           <DialogDescription>

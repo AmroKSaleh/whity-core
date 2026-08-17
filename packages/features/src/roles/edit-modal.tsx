@@ -1,8 +1,36 @@
-﻿'use client';
+'use client';
 
-import { useCallback, useMemo, useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth-context';
-import { useToast } from '@/lib/toast-context';
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.edit.cancel = Cancel
+ *   roles.edit.description.label = Description
+ *   roles.edit.description.placeholder = Role description
+ *   roles.edit.error = Failed to update role
+ *   roles.edit.loading = Loading role details...
+ *   roles.edit.name.label = Role Name
+ *   roles.edit.name.placeholder = e.g., Editor
+ *   roles.edit.notManageable = This role can't be modified by your tenant — global base roles are managed by the system tenant.
+ *   roles.edit.permissions.label = Permissions
+ *   roles.edit.roleDetailsError = Failed to fetch role details
+ *   roles.edit.submit = Save Changes
+ *   roles.edit.submitting = Saving...
+ *   roles.edit.subtitle = Update role information and permissions.
+ *   roles.edit.success = Role updated successfully
+ *   roles.edit.title = Edit Role
+ *   roles.edit.validation.descriptionRequired = Description is required
+ *   roles.edit.validation.nameRequired = Name is required
+ * @i18n-keys common
+ *   ui.dialog.close = Close
+ */
+
+import { useMemo, useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -10,9 +38,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@amroksaleh/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@/components/ui/input';
+import { Input } from '@amroksaleh/ui/input';
 import {
   Form,
   FormField,
@@ -24,14 +52,13 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { PermissionCheckbox } from './permission-checkbox';
-import type { Permission, Role, RoleWithPermissions } from './types';
+import type { Permission, Role, RoleWithPermissions, RolesAdapter, RolesTranslate } from './types';
 
 // Built from `t` rather than declared at module scope: a validation message is
 // user-facing text like any other, and a schema frozen at import time would
 // always speak English.
-const buildEditRoleSchema = (t: TranslateFn) =>
+const buildEditRoleSchema = (t: RolesTranslate) =>
   z.object({
     name: z.string().min(1, t('roles.edit.validation.nameRequired', 'Name is required')),
     description: z
@@ -47,6 +74,12 @@ interface EditRoleModalProps {
   onOpenChange: (open: boolean) => void;
   role: Role;
   onSuccess: () => void;
+  /** Injected data-source adapter. */
+  adapter: RolesAdapter;
+  /** Injected translator (resolved by RolesScreen). */
+  t: RolesTranslate;
+  /** Optional notifier. */
+  onNotify?: (message: string, type: 'success' | 'error') => void;
 }
 
 export function EditRoleModal({
@@ -54,15 +87,14 @@ export function EditRoleModal({
   onOpenChange,
   role,
   onSuccess,
+  adapter,
+  t,
+  onNotify,
 }: EditRoleModalProps) {
-  const { apiClient } = useAuth();
-  const { addToast } = useToast();
-  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
   const [roleData, setRoleData] = useState<RoleWithPermissions | null>(null);
-  const [isLoadingRole, setIsLoadingRole] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const schema = useMemo(() => buildEditRoleSchema(t), [t]);
 
@@ -75,61 +107,38 @@ export function EditRoleModal({
     },
   });
 
-  const fetchPermissions = useCallback(async () => {
-    try {
-      setIsLoadingPermissions(true);
-      const response = await apiClient('/api/v1/permissions?per_page=100');
-
-      if (!response.ok) {
-        throw new Error(t('roles.edit.permissionsError', 'Failed to fetch permissions'));
-      }
-
-      const data = await response.json();
-      setPermissions(data.data || []);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : t('roles.edit.permissionsError', 'Failed to fetch permissions');
-      addToast(message, 'error');
-    } finally {
-      setIsLoadingPermissions(false);
-    }
-  }, [apiClient, addToast, t]);
-
-  const fetchRole = useCallback(async () => {
-    try {
-      setIsLoadingRole(true);
-      const response = await apiClient(`/api/v1/roles/${role.id}`);
-
-      if (!response.ok) {
-        throw new Error(t('roles.edit.roleError', 'Failed to fetch role'));
-      }
-
-      const data = await response.json();
-      setRoleData(data.data);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : t('roles.edit.roleDetailsError', 'Failed to fetch role details');
-      addToast(message, 'error');
-    } finally {
-      setIsLoadingRole(false);
-    }
-  }, [apiClient, role.id, addToast, t]);
-
   useEffect(() => {
-    if (isOpen) {
-      void (async () => {
-        await Promise.all([fetchPermissions(), fetchRole()]);
-      })();
-    }
-  }, [isOpen, fetchPermissions, fetchRole]);
+    if (!isOpen) return;
+    let cancelled = false;
+    setIsLoading(true);
+    Promise.all([adapter.listPermissions(), adapter.getRole(role.id)])
+      .then(([permissionList, detail]) => {
+        if (cancelled) return;
+        setPermissions(permissionList);
+        setRoleData(detail);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : t('roles.edit.roleDetailsError', 'Failed to fetch role details');
+        onNotify?.(message, 'error');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Re-run only when the modal opens for a given role; t/onNotify/adapter
+    // identity changes must not refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, role.id]);
 
   useEffect(() => {
     if (roleData) {
-      const permissionIds = roleData.permissions.map(p => p.id);
+      const permissionIds = roleData.permissions.map((p) => p.id);
       form.reset({
         name: roleData.name,
         description: roleData.description,
@@ -141,45 +150,34 @@ export function EditRoleModal({
   const onSubmit = async (data: EditRoleFormData) => {
     try {
       setIsSubmitting(true);
-
-      const response = await apiClient(`/api/v1/roles/${role.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          name: data.name,
-          description: data.description,
-          permissions: data.permissionIds,
-        }),
+      // SAFETY NET (WC-222): a 'not-manageable' result means the role is a
+      // global NULL-tenant base role, managed only by the system tenant
+      // (WC-110). The row's Edit action is already gated on `manageable`, but
+      // should that gate ever be bypassed we surface a friendly toast instead
+      // of a generic error / console noise.
+      const result = await adapter.updateRole(role.id, {
+        name: data.name,
+        description: data.description,
+        permissions: data.permissionIds,
       });
-
-      if (!response.ok) {
-        // SAFETY NET (WC-222): a 404 here means the role is not manageable by
-        // the current tenant (a global NULL-tenant base role — managed only by
-        // the system tenant, WC-110). The row's Edit action is already gated on
-        // `manageable`, but should that gate ever be bypassed we surface a
-        // friendly toast instead of a generic error / console noise.
-        if (response.status === 404) {
-          addToast(
-            t(
-              'roles.edit.notManageable',
-              "This role can't be modified by your tenant — global base roles are managed by the system tenant."
-            ),
-            'error'
-          );
-          return;
-        }
-
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || t('roles.edit.error', 'Failed to update role')
+      if (result === 'not-manageable') {
+        onNotify?.(
+          t(
+            'roles.edit.notManageable',
+            "This role can't be modified by your tenant — global base roles are managed by the system tenant."
+          ),
+          'error'
         );
+        return;
       }
-
-      addToast(t('roles.edit.success', 'Role updated successfully'), 'success');
+      onNotify?.(t('roles.edit.success', 'Role updated successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : t('roles.edit.error', 'Failed to update role');
-      addToast(message, 'error');
+        error instanceof Error && error.message
+          ? error.message
+          : t('roles.edit.error', 'Failed to update role');
+      onNotify?.(message, 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -189,11 +187,9 @@ export function EditRoleModal({
     form.setValue('permissionIds', selectedIds);
   };
 
-  const isLoading = isLoadingPermissions || isLoadingRole;
-
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" closeLabel={t('ui.dialog.close', 'Close')}>
         <DialogHeader>
           <DialogTitle>{t('roles.edit.title', 'Edit Role')}</DialogTitle>
           <DialogDescription>
@@ -248,6 +244,7 @@ export function EditRoleModal({
                   permissions={permissions}
                   selectedIds={form.watch('permissionIds')}
                   onChange={handlePermissionChange}
+                  t={t}
                 />
               </div>
 
