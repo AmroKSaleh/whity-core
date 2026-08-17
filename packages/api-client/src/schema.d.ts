@@ -13341,7 +13341,14 @@ export interface operations {
     };
     get_api_v1_ous: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100). This is the platform-wide name; `perPage` and `limit` are not accepted. */
+                per_page?: number;
+                /** @description Return only the direct children of this OU. Use 0 for the roots. Omit or leave empty for the whole tenant; a non-numeric value is a 422. */
+                parent_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13386,6 +13393,15 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description parent_id is not a non-negative integer */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

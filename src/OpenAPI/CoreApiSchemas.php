@@ -688,9 +688,18 @@ final class CoreApiSchemas
         return [
             self::adminRoute('GET', '/api/ous', [
                 'summary' => 'List the tenant\'s organizational units',
+                'description' => 'Paginated. A client that needs the whole hierarchy (to build a tree) '
+                    . 'must follow the `pagination` envelope to the last page — `per_page` is capped at '
+                    . '100, so no single request is guaranteed to return every unit.',
                 'tags' => ['ous'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). This is the platform-wide name; `perPage` and `limit` are not accepted.'),
+                    self::queryParam('parent_id', 'integer', 'Return only the direct children of this OU. Use 0 for the roots. Omit or leave empty for the whole tenant; a non-numeric value is a 422.'),
+                ],
                 'responses' => [
                     200 => self::jsonResponse('The tenant\'s organizational units', 'OuListResponse'),
+                    422 => self::errorResponse('parent_id is not a non-negative integer'),
                 ] + self::authErrors(),
             ]),
             self::adminRoute('POST', '/api/ous', [

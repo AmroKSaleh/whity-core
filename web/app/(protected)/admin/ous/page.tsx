@@ -10,12 +10,13 @@ import { OUS_WRITE, OUS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { IconBinaryTree2, IconList, IconPlus } from '@tabler/icons-react';
+import { IconBinaryTree2, IconList, IconPlus, IconRefresh } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateOuModal } from './create-modal';
 import { EditOuModal } from './edit-modal';
 import { DeleteOuModal } from './delete-modal';
 import { OuTree } from './ou-tree';
+import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import { buildOuTree, findNode } from './ou-tree-util';
 import type { OuAction } from './ou-view';
 import type { OU } from './types';
@@ -65,12 +66,25 @@ export default function OUsPage() {
   };
 
   const { data, loading: isLoading, error, refetch: fetchOUs } = useFetch(async () => {
-    const response = await apiClient('/api/v1/ous');
-    if (!response.ok) {
-      throw new Error(t('ous.error.load', 'Failed to fetch organizational units'));
+    // The hierarchy is only correct if it holds EVERY unit. This endpoint is
+    // paginated, and a page that never arrives does not leave a visible gap —
+    // a child whose parent is missing is re-rooted, a parent whose children are
+    // missing renders as a leaf. Either way the tree looks complete and the
+    // user concludes the unit was never created. So: walk to the end, and
+    // refuse to draw anything if we could not.
+    const result = await fetchAllPages<OU>(apiClient, '/api/v1/ous');
+    if (!result.complete) {
+      throw new Error(
+        result.total === null
+          ? t('ous.error.load', 'Failed to fetch organizational units')
+          : t(
+              'ous.error.partial',
+              'Loaded only {loaded} of {total} organizational units.',
+              { loaded: result.items.length, total: result.total }
+            )
+      );
     }
-    const data = await response.json();
-    return (data.data ?? []) as OU[];
+    return result.items;
   }, [apiClient, t]);
 
   const ous = useMemo(() => data ?? [], [data]);
@@ -143,7 +157,11 @@ export default function OUsPage() {
     </div>
   );
 
-  const isEmpty = !isLoading && ous.length === 0;
+  // A load failure must pre-empt both the tree and the empty state: rendering
+  // "No organizational units yet" over a failed fetch is the same lie as
+  // rendering a truncated tree.
+  const hasLoadError = !isLoading && error !== null;
+  const isEmpty = !isLoading && !hasLoadError && ous.length === 0;
 
   return (
     <div className="space-y-8">
@@ -169,6 +187,23 @@ export default function OUsPage() {
 
       {isLoading ? (
         <Skeleton className="h-64 w-full rounded-lg" />
+      ) : hasLoadError ? (
+        <div className="rounded-lg border border-destructive/50 bg-card p-10 text-center">
+          <h2 className="font-heading text-sm font-medium">
+            {t('ous.error.title', 'Could not load the organizational units')}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(
+              'ous.error.description',
+              'The hierarchy is not shown because it would be incomplete.'
+            )}
+          </p>
+          <Button onClick={fetchOUs} variant="outline" className="mt-4 gap-2">
+            <IconRefresh />
+            {t('ous.error.retry', 'Retry')}
+          </Button>
+        </div>
       ) : isEmpty ? (
         <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
           <h2 className="font-heading text-sm font-medium">
