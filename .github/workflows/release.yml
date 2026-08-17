@@ -154,6 +154,13 @@ jobs:
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
 
+      # A core release ships templates/tauri-desktop/ as the source an operator
+      # builds their desktop app from, so a release cutting with a stale
+      # vendored SDK hands every device a plugin contract older than the one
+      # this same tag publishes to plugin authors (#849).
+      - name: Vendored-SDK parity (desktop template)
+        run: php scripts/ci-vendored-sdk-parity.php
+
   postgres-integration:
     name: Migrations + seed on real PostgreSQL
     runs-on: ubuntu-latest
