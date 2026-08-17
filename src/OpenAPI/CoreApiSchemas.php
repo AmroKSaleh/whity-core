@@ -681,12 +681,17 @@ final class CoreApiSchemas
     }
 
     /**
+     * OU management, gated on the seeded ous:* permissions rather than the bare
+     * `admin` role so a plugin aliasing these operations inherits the platform's
+     * authority model instead of inventing a slug of its own. Mirrors the wiring
+     * in public/index.php — the spec and the live router must agree on the gate.
+     *
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
     private static function ouRoutes(): array
     {
         return [
-            self::adminRoute('GET', '/api/ous', [
+            self::permissionRoute('GET', '/api/ous', 'ous:read', [
                 'summary' => 'List the tenant\'s organizational units',
                 'description' => 'Paginated. A client that needs the whole hierarchy (to build a tree) '
                     . 'must follow the `pagination` envelope to the last page — `per_page` is capped at '
@@ -702,7 +707,7 @@ final class CoreApiSchemas
                     422 => self::errorResponse('parent_id is not a non-negative integer'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('POST', '/api/ous', [
+            self::permissionRoute('POST', '/api/ous', 'ous:write', [
                 'summary' => 'Create an organizational unit',
                 'tags' => ['ous'],
                 'request' => 'OuCreateRequest',
@@ -712,7 +717,7 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Name or slug already exists in the tenant'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/ous/{id:\d+}', [
+            self::permissionRoute('GET', '/api/ous/{id:\d+}', 'ous:read', [
                 'summary' => 'Get an organizational unit with its direct children',
                 'tags' => ['ous'],
                 'responses' => [
@@ -720,7 +725,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Organizational unit not found'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('PATCH', '/api/ous/{id:\d+}', [
+            self::permissionRoute('PATCH', '/api/ous/{id:\d+}', 'ous:write', [
                 'summary' => 'Update an organizational unit (re-parenting is cycle-checked)',
                 'tags' => ['ous'],
                 'request' => 'OuUpdateRequest',
@@ -729,7 +734,7 @@ final class CoreApiSchemas
                     422 => self::errorResponse('The re-parent would create a cycle'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('DELETE', '/api/ous/{id:\d+}', [
+            self::permissionRoute('DELETE', '/api/ous/{id:\d+}', 'ous:delete', [
                 'summary' => 'Delete an organizational unit',
                 'tags' => ['ous'],
                 'responses' => [
@@ -737,7 +742,7 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Organizational unit still has children or users'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/ous/{id:\d+}/roles', [
+            self::permissionRoute('GET', '/api/ous/{id:\d+}/roles', 'ous:read', [
                 'summary' => 'List the roles assigned to an organizational unit',
                 'tags' => ['ous'],
                 'responses' => [
@@ -745,7 +750,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Organizational unit not found'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/ous/{id:\d+}/members', [
+            self::permissionRoute('GET', '/api/ous/{id:\d+}/members', 'ous:read', [
                 'summary' => 'List the users assigned to an organizational unit',
                 'tags' => ['ous'],
                 'responses' => [
@@ -753,7 +758,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Organizational unit not found'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('POST', '/api/ous/{id:\d+}/roles', [
+            self::permissionRoute('POST', '/api/ous/{id:\d+}/roles', 'ous:assign', [
                 'summary' => 'Assign a role to an organizational unit',
                 'tags' => ['ous'],
                 'request' => 'OuRoleAssignRequest',
@@ -764,7 +769,7 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Assignment already exists'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('DELETE', '/api/ous/{ouId:\d+}/roles/{roleId:\d+}', [
+            self::permissionRoute('DELETE', '/api/ous/{ouId:\d+}/roles/{roleId:\d+}', 'ous:assign', [
                 'summary' => 'Remove a role assignment from an organizational unit',
                 'tags' => ['ous'],
                 'responses' => [
