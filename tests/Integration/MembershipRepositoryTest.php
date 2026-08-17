@@ -12,10 +12,15 @@ use Whity\Core\Identity\MembershipRepository;
 /**
  * WC-101: integration tests for MembershipRepository.
  *
- * Covers all CRUD + lifecycle (invite/accept/suspend/reactivate) methods
- * against in-memory SQLite. Cross-tenant isolation for the repository is
- * proven here through the `tenantId` predicate: a find/suspend/delete scoped
- * to Tenant A must never touch Tenant B's rows.
+ * Covers all CRUD + lifecycle (invite/accept/suspend/reactivate) methods.
+ * Cross-tenant isolation for the repository is proven here through the
+ * `tenantId` predicate: a find/suspend/delete scoped to Tenant A must never
+ * touch Tenant B's rows.
+ *
+ * Runs on whichever engine SchemaFromMigrations hands back, and the single-row
+ * lookups need BOTH: which row an unordered `LIMIT 1` returns is exactly where
+ * SQLite and PostgreSQL are free to disagree, so an ordering fix proven on one
+ * of them is not proven at all.
  */
 final class MembershipRepositoryTest extends TestCase
 {
@@ -56,6 +61,54 @@ final class MembershipRepositoryTest extends TestCase
              VALUES ('Bob', '\$2y\$10\$h2', false, 0, 0, datetime('now'), datetime('now'))"
         );
         $this->bobId = (int) $this->pdo->lastInsertId();
+    }
+
+    // ── multi-role fixtures ───────────────────────────────────────────────────
+
+    /** An OU in Tenant A, so two memberships can carry two different scopes. */
+    private function seedOu(string $name): int
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO organizational_units (tenant_id, parent_id, name, slug, created_at)
+             VALUES (:tenant_id, NULL, :name, :slug, NOW())'
+        );
+        self::assertNotFalse($stmt);
+        $stmt->execute([
+            ':tenant_id' => self::TENANT_A,
+            ':name'      => $name,
+            ':slug'      => strtolower(str_replace(' ', '-', $name)),
+        ]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /**
+     * A SECOND membership in the same tenant — the state migration 094 made
+     * legal by trading the table-wide UNIQUE(profile_id, tenant_id) for a
+     * partial index over the primary rows.
+     *
+     * Written with raw SQL because the repository has no way to create one:
+     * nothing writes a non-primary row yet (#712 adds that), which is exactly
+     * why the readers were never revisited.
+     */
+    private function insertSecondaryMembership(int $profileId, int $tenantId, int $roleId, ?int $ouId): int
+    {
+        // `false`, not 0 — PostgreSQL rejects an integer literal in a BOOLEAN
+        // column, and SQLite reads the keyword as 0 all the same.
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, is_primary, status, created_at)
+             VALUES (:profile_id, :tenant_id, :role_id, :ou_id, false, :status, NOW())'
+        );
+        self::assertNotFalse($stmt);
+        $stmt->execute([
+            ':profile_id' => $profileId,
+            ':tenant_id'  => $tenantId,
+            ':role_id'    => $roleId,
+            ':ou_id'      => $ouId,
+            ':status'     => MembershipRepository::STATUS_ACTIVE,
+        ]);
+
+        return (int) $this->pdo->lastInsertId();
     }
 
     // ── insert / invite ───────────────────────────────────────────────────────
@@ -128,6 +181,128 @@ final class MembershipRepositoryTest extends TestCase
         $this->repo->insert($this->aliceId, self::TENANT_B, 1);
         // Tenant A query must not find Tenant B's row for the same profile.
         self::assertNull($this->repo->findByProfile($this->aliceId, self::TENANT_A));
+    }
+
+    public function testFindByProfileReturnsThePrimaryRowWhenAProfileHoldsSeveral(): void
+    {
+        $emergency = $this->seedOu('Emergency');
+        $family    = $this->seedOu('Family Medicine');
+
+        // The secondary is written FIRST so it holds the lower id. An unordered
+        // `LIMIT 1` reaches it before the primary on both engines, so this test
+        // fails against the unordered query instead of passing by luck.
+        $secondaryId = $this->insertSecondaryMembership($this->aliceId, self::TENANT_A, 2, $family);
+        $primaryId   = $this->repo->insert($this->aliceId, self::TENANT_A, 1, $emergency);
+
+        $row = $this->repo->findByProfile($this->aliceId, self::TENANT_A);
+        self::assertIsArray($row);
+        self::assertSame(
+            $primaryId,
+            $row['id'],
+            'findByProfile must return the PRIMARY membership, not whichever row the plan reached first.'
+        );
+        self::assertNotSame($secondaryId, $row['id']);
+        self::assertSame(
+            $emergency,
+            $row['ou_id'],
+            "The caller's OU scope comes from this row, so an unordered pick would scope queries to the wrong OU."
+        );
+    }
+
+    /**
+     * findByProfile() is deliberately status-agnostic — see its docblock. Both
+     * core callers read the status themselves and fail OPEN if rows are hidden
+     * from them, so this is pinned rather than left to be "tidied up" later.
+     */
+    public function testFindByProfileReturnsSuspendedAndInvitedMemberships(): void
+    {
+        $suspendedId = $this->repo->insert($this->aliceId, self::TENANT_A, 1);
+        $this->repo->suspend($suspendedId, self::TENANT_A);
+
+        $row = $this->repo->findByProfile($this->aliceId, self::TENANT_A);
+        self::assertIsArray($row, 'A suspended membership is still a membership.');
+        self::assertSame(MembershipRepository::STATUS_SUSPENDED, $row['status']);
+
+        $this->repo->invite($this->bobId, self::TENANT_A, 2);
+        $invited = $this->repo->findByProfile($this->bobId, self::TENANT_A);
+        self::assertIsArray($invited);
+        self::assertSame(MembershipRepository::STATUS_INVITED, $invited['status']);
+    }
+
+    // ── findActiveByProfile ──────────────────────────────────────────────────
+
+    public function testFindActiveByProfileReturnsNullWhenNoMatch(): void
+    {
+        self::assertNull($this->repo->findActiveByProfile($this->aliceId, self::TENANT_A));
+    }
+
+    public function testFindActiveByProfileReturnsTheActiveMembership(): void
+    {
+        $id = $this->repo->insert($this->aliceId, self::TENANT_A, 1);
+
+        $row = $this->repo->findActiveByProfile($this->aliceId, self::TENANT_A);
+        self::assertIsArray($row);
+        self::assertSame($id, $row['id']);
+        self::assertSame(MembershipRepository::STATUS_ACTIVE, $row['status']);
+    }
+
+    public function testFindActiveByProfileHidesSuspendedAndInvitedMemberships(): void
+    {
+        $suspendedId = $this->repo->insert($this->aliceId, self::TENANT_A, 1);
+        $this->repo->suspend($suspendedId, self::TENANT_A);
+        self::assertNull(
+            $this->repo->findActiveByProfile($this->aliceId, self::TENANT_A),
+            'A suspended member must not resolve as a caller, nor keep their OU scope.'
+        );
+
+        $this->repo->invite($this->bobId, self::TENANT_A, 2);
+        self::assertNull(
+            $this->repo->findActiveByProfile($this->bobId, self::TENANT_A),
+            'A pending invitation is not yet a caller.'
+        );
+    }
+
+    public function testFindActiveByProfileIsTenantScoped(): void
+    {
+        $this->repo->insert($this->aliceId, self::TENANT_B, 1);
+        self::assertNull($this->repo->findActiveByProfile($this->aliceId, self::TENANT_A));
+    }
+
+    public function testFindActiveByProfileReturnsThePrimaryRowWhenAProfileHoldsSeveral(): void
+    {
+        $emergency = $this->seedOu('Emergency');
+        $family    = $this->seedOu('Family Medicine');
+
+        // Secondary first, for the same reason as the findByProfile case above.
+        $secondaryId = $this->insertSecondaryMembership($this->aliceId, self::TENANT_A, 2, $family);
+        $primaryId   = $this->repo->insert($this->aliceId, self::TENANT_A, 1, $emergency);
+
+        $row = $this->repo->findActiveByProfile($this->aliceId, self::TENANT_A);
+        self::assertIsArray($row);
+        self::assertSame($primaryId, $row['id']);
+        self::assertNotSame($secondaryId, $row['id']);
+        self::assertSame($emergency, $row['ou_id']);
+    }
+
+    /**
+     * Status is judged PER ROW, matching RoleChecker::getActiveMembershipRows():
+     * suspending somebody's primary role stops that role speaking for them, but
+     * it does not silence a second role they still legitimately hold.
+     */
+    public function testFindActiveByProfileFallsBackToAnActiveSecondaryWhenThePrimaryIsSuspended(): void
+    {
+        $emergency = $this->seedOu('Emergency');
+        $family    = $this->seedOu('Family Medicine');
+
+        $secondaryId = $this->insertSecondaryMembership($this->aliceId, self::TENANT_A, 2, $family);
+        $primaryId   = $this->repo->insert($this->aliceId, self::TENANT_A, 1, $emergency);
+        $this->repo->suspend($primaryId, self::TENANT_A);
+
+        $row = $this->repo->findActiveByProfile($this->aliceId, self::TENANT_A);
+        self::assertIsArray($row);
+        self::assertSame($secondaryId, $row['id']);
+        self::assertSame($family, $row['ou_id']);
+        self::assertSame(MembershipRepository::STATUS_ACTIVE, $row['status']);
     }
 
     // ── findForProfile (cross-tenant, login flow) ────────────────────────────
