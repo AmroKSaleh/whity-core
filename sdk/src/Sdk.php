@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.27).
+ * SDK identity (v1.28).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -214,13 +214,30 @@ namespace Whity\Sdk;
  * declared hook runs cleanly on a synthetic payload — a generic `Throwable`
  * fails the test loudly, since the real host's per-plugin error boundary
  * would otherwise swallow it silently and ship the bug invisibly. Additive;
- * a plugin ignoring it is unaffected).
+ * a plugin ignoring it is unaffected) ->
+ * 1.28 ({@see PluginJobsInterface}, the async-job contribution point.
+ * {@see JobInterface} has been public since 1.0 and the host's job registry has
+ * always taken a handler, but nothing DISCOVERED a plugin's — so the shipped
+ * `queue:work` worker knew only the core handlers and dead-lettered anything a
+ * plugin enqueued as "No handler registered for job". A plugin's only remaining
+ * option was to ship a `queue:work` of its own that re-registered the core
+ * handlers beside its own, which means the operator runs one worker per plugin
+ * and every one of them is a place core's own queued work can be duplicated or
+ * dropped. Declared names are BARE and the host stamps the plugin's prefix onto
+ * them, exactly as it does for resource types, health probes and settings keys:
+ * two plugins declaring `sync` get different canonical names, and no
+ * declaration can produce a `core.`-prefixed one. Submittability is declared
+ * separately and fails CLOSED, matching core — a handler the worker can run is
+ * not thereby reachable from the public submission API. A declaration that
+ * throws or is malformed costs that plugin its jobs and costs the worker
+ * nothing: it is the process that also delivers core's notifications and error
+ * alerts, so one bad plugin must not stop it. Additive).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.27.0';
+    public const VERSION = '1.28.0';
 
     /**
      * Static identity only — never instantiated.

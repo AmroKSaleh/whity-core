@@ -164,12 +164,50 @@ final class SdkPackageContractTest extends TestCase
         $this->assertSame('array', (string) $return);
     }
 
+    /**
+     * SDK 1.28: the OPTIONAL async-job contribution point. Same sibling shape as
+     * PluginRolesInterface — a declaration map plus a second method keyed by the
+     * same names carrying the extra policy (here: which of them the public
+     * submission API may enqueue).
+     */
+    public function testPluginJobsInterfaceLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\PluginJobsInterface::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\PluginJobsInterface::class))->getMethods()
+        );
+        sort($methods);
+        $this->assertSame(['getJobs', 'getSubmittableJobs'], $methods);
+
+        foreach (['getJobs', 'getSubmittableJobs'] as $method) {
+            $return = (new \ReflectionMethod(\Whity\Sdk\PluginJobsInterface::class, $method))->getReturnType();
+            $this->assertSame('array', (string) $return);
+        }
+    }
+
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.27.0',
+            '1.28.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.27 adds the offline-host conformance kit '
+            'SDK 1.28 adds the async-job contribution point (PluginJobsInterface): '
+            . 'JobInterface has been public since 1.0 and the host job registry has always '
+            . 'taken a handler, but nothing DISCOVERED a plugin\'s — so the shipped '
+            . 'queue:work worker knew only the core handlers and dead-lettered anything a '
+            . 'plugin enqueued as "No handler registered for job". The workaround was for '
+            . 'every plugin to ship a queue:work of its own that re-registered the core '
+            . 'handlers beside its own, which puts one worker per plugin in front of one '
+            . 'queue. Declared names are BARE and the host stamps the plugin prefix on, as '
+            . 'it already does for resource types, health probes and settings keys: two '
+            . 'plugins declaring `sync` get different canonical names and none can produce '
+            . 'a core.-prefixed one. Submittability is declared separately and fails '
+            . 'CLOSED, matching core — a handler the worker can run is not thereby '
+            . 'reachable from the public submission API. A declaration that throws or is '
+            . 'malformed costs that plugin its jobs and costs the worker nothing, because '
+            . 'the worker also delivers core\'s notifications and error alerts; '
+            . 'SDK 1.27 adds the offline-host conformance kit '
             . '(Testing\OfflinePluginHostConformanceTestCase): the tenant-isolation kit '
             . '(1.3) proves a plugin\'s queries stay tenant-scoped, but says nothing about '
             . 'whether the plugin actually BOOTS under an offline PHP host with no server '

@@ -18,6 +18,8 @@ use Whity\Core\DataType\DataTypeRegistry;
 use Whity\Core\DataType\InvalidDataTypeException;
 use Whity\Core\Tenant\TableOwnershipException;
 use Whity\Core\Tenant\TableOwnershipRegistry;
+use Whity\Core\Queue\InvalidPluginJobException;
+use Whity\Core\Queue\JobRegistry;
 use Whity\Core\Settings\InvalidSettingDeclarationException;
 use Whity\Core\Settings\PluginSettingsRegistry;
 use Whity\Sdk\Settings\PluginSettingsInterface;
@@ -36,6 +38,7 @@ use Whity\Mcp\Prompts\Prompt;
 use Whity\Mcp\Prompts\PromptRegistry;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginJobsInterface;
 use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
@@ -1081,6 +1084,67 @@ class PluginLoader
             }
             foreach ($descriptors as $descriptor) {
                 $this->registerMcpPrompt($registry, $descriptor, $pluginKey);
+            }
+        }
+    }
+
+    /**
+     * Register the async-job handlers contributed by plugins.
+     *
+     * The same shape as {@see collectMcpPrompts()}, and separate from
+     * {@see registerPluginCapabilities()} for the same reason: the registry the
+     * handlers go into is not built at plugin-load time. The queue has two ends
+     * — the web request path validates submittable names, the `queue:work`
+     * worker RUNS them — and each builds its own registry after loading plugins,
+     * so the loader hands its declarations to whichever one asks.
+     *
+     * Rules:
+     * - A plugin that is administratively disabled, auto-failed, or otherwise
+     *   not in the active lifecycle state contributes NOTHING. A disabled plugin
+     *   that kept processing queued work would still be running, which is not
+     *   what disabling one means.
+     * - Names are namespaced under the plugin (see
+     *   {@see JobRegistry::registerFromSource()}), so no plugin can shadow a core
+     *   handler or claim another plugin's.
+     * - A malformed declaration is refused WHOLE and logged; the plugin
+     *   contributes no jobs and every other plugin is unaffected.
+     * - A getJobs() call that THROWS goes through the lifecycle error boundary —
+     *   the worker runs core's notification delivery and error alerting too, so
+     *   no plugin defect may stop it.
+     */
+    public function collectJobs(JobRegistry $registry): void
+    {
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            $plugin = $info['plugin'];
+            if (!$plugin instanceof PluginJobsInterface) {
+                continue;
+            }
+
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            try {
+                // Read BOTH declarations inside the boundary: an exposure list
+                // is worthless without the handlers it names, so half a
+                // declaration is no declaration.
+                $jobs = $plugin->getJobs();
+                $submittable = array_values($plugin->getSubmittableJobs());
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getJobs');
+                continue;
+            }
+
+            try {
+                $registry->registerFromSource($plugin->getName(), $jobs, $submittable);
+            } catch (InvalidPluginJobException $e) {
+                $this->logWarning("Plugin {$pluginKey} declares invalid jobs: " . $e->getMessage());
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getJobs');
             }
         }
     }

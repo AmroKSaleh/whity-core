@@ -10,6 +10,7 @@ use Whity\Core\Queue\CoreJobs;
 use Whity\Core\Queue\JobRegistry;
 use Whity\Core\Queue\JobRepository;
 use Whity\Core\Queue\JobRunner;
+use Whity\Core\Queue\PluginJobs;
 use Whity\Database\Database;
 
 /**
@@ -36,8 +37,15 @@ use Whity\Database\Database;
  * No-arg constructable (Database::connect) so CliRunner + public/index.php can
  * dispatch it; deps are injectable for tests. Registered handlers come from the
  * JobRegistry: the default (no-arg) worker registers the core jobs via
- * {@see CoreJobs::register()} so it can run them; a job whose name has no
+ * {@see CoreJobs::register()} and the plugin-declared ones via
+ * {@see PluginJobs::register()} so it can run both; a job whose name has no
  * registered handler is dead-lettered as "no handler".
+ *
+ * Discovering plugin handlers HERE, in the shipped worker, is the point: without
+ * it a plugin's only option was to ship a `queue:work` of its own that
+ * re-registered the core handlers alongside its own — an operator running one
+ * worker process per plugin, each of them a place core's own queued work could
+ * be silently duplicated or dropped.
  */
 final class QueueWorkCommand
 {
@@ -58,12 +66,26 @@ final class QueueWorkCommand
     ) {
         $this->logger = $logger ?? new NullLogger();
         if ($repo === null || $runner === null) {
-            $pdo = Database::connect()->getPdo();
+            $database = Database::connect();
+            $pdo = $database->getPdo();
+            // A plugin builds its own job handlers and resolves what they need
+            // from the host service container — the documented data-access seam.
+            // The worker is a bare CLI process that registers nothing, so without
+            // this every plugin handler that touches the database would throw at
+            // declaration time and be quarantined: the HTTP/CLI divergence this
+            // codebase has already paid for more than once (#717, #724, #727).
+            \Whity\register_service(Database::class, $database);
+
             $repo ??= new JobRepository($pdo);
             $registry = new JobRegistry();
             // Pass the PDO so the internal notification-delivery job (+ its default
             // log transports) is registered and thus RUNNABLE by the worker.
             CoreJobs::register($registry, $pdo, null, $this->logger);
+            // Core FIRST, then plugins: core owns the unprefixed `core.` names and
+            // a plugin's are namespaced under its own plugin name, so the order is
+            // not load-bearing for correctness — but it does mean a plugin that
+            // fails to load never delays or displaces core's own work.
+            PluginJobs::register($registry, null, $this->logger);
             $runner ??= new JobRunner($repo, $registry, $this->logger);
         }
         $this->repo = $repo;

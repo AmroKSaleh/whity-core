@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace HelloWorld;
 
 use HelloWorld\Api\GreetingsApiHandler;
+use HelloWorld\Jobs\GreetingDigestJob;
 use HelloWorld\Migrations\CreateHelloGreetingsTable;
 use Whity\Sdk\Hooks\Events;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginJobsInterface;
 use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
@@ -33,6 +35,10 @@ use Whity\Sdk\PluginRolesInterface;
  *  - permissions declared in the mandated `resource:action` colon notation
  *  - a hook that runs custom logic before a user is created (`user.creating`)
  *  - a migration class registered for the platform migration runner
+ *  - an async job ({@see PluginJobsInterface}, SDK 1.28) the host's own
+ *    `queue:work` worker discovers and runs — enqueued as
+ *    `helloworld:greeting_digest`, since the host namespaces a declared job
+ *    under the plugin that declared it
  *
  * It lives in its own directory (`plugins/HelloWorld/`) so the PluginLoader
  * resolves it under the `HelloWorld` namespace prefix (directory name) and
@@ -46,7 +52,7 @@ use Whity\Sdk\PluginRolesInterface;
  * time (see {@see self::resolvePdo()}), analogous to the migration runner
  * injecting a PDO into plugin migrations.
  */
-final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface, PluginJobsInterface
 {
     /**
      * @inheritDoc
@@ -63,9 +69,12 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
      */
     public function getSdkConstraint(): string
     {
-        // Requires SDK 1.2: PluginFrontendInterface + host-enforced
-        // route-level requiredPermission.
-        return '^1.2';
+        // Requires SDK 1.28: PluginJobsInterface. Raised from ^1.2 (which bought
+        // PluginFrontendInterface + host-enforced route-level requiredPermission)
+        // because a host below 1.28 has no such interface to implement — the
+        // plugin would not merely lose its job, it would fatal on load. The
+        // version gate is the mechanism for saying so.
+        return '^1.28';
     }
 
     /**
@@ -526,6 +535,44 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
         $data['hello_world_greeted'] = true;
 
         return $data;
+    }
+
+    /**
+     * The async jobs this plugin contributes (SDK 1.28).
+     *
+     * Declared BARE. The host stamps the plugin's namespace on, so the name to
+     * enqueue is `helloworld:greeting_digest` — which is also why two plugins
+     * could both call a job `greeting_digest` without either one running the
+     * other's work.
+     *
+     * The handler is built HERE, by the plugin, with the plugin's own
+     * collaborators. The PDO is passed as a closure rather than a handle: the
+     * handler outlives every job it runs in a persistent worker, so a connection
+     * captured at load time would be pinned past the host's own recycling.
+     *
+     * @inheritDoc
+     */
+    public function getJobs(): array
+    {
+        return [
+            GreetingDigestJob::NAME => new GreetingDigestJob(fn (): \PDO => $this->resolvePdo()),
+        ];
+    }
+
+    /**
+     * The declared jobs a tenant may enqueue through POST /api/jobs.
+     *
+     * The digest is safe to expose: it reads only the caller's OWN tenant rows,
+     * takes no payload it acts on, and is idempotent. A job with side effects
+     * would be left OFF this list and enqueued by the plugin's own code instead —
+     * omission is the default, and the host treats an unlisted handler as
+     * worker-only.
+     *
+     * @inheritDoc
+     */
+    public function getSubmittableJobs(): array
+    {
+        return [GreetingDigestJob::NAME];
     }
 
     /**

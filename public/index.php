@@ -47,6 +47,17 @@ if ($isCli && isset($argv[1])) {
     // Require composer autoloader
     require dirname(__DIR__) . '/vendor/autoload.php';
 
+    // The service-container helpers (\Whity\app / \Whity\register_service), as
+    // bin/whity-cli has always loaded them. They are NOT autoloaded — helpers.php
+    // is a plain function file, and the HTTP path below requires it explicitly —
+    // so without this line every command dispatched through THIS entry point ran
+    // with no container at all: `queue:work` could not register the Database
+    // service a plugin's job handler resolves, and any plugin using the
+    // documented container seam fatalled on an undefined function rather than
+    // failing through the loader's error boundary. Same command reached through
+    // whity-cli worked, which is what made it invisible.
+    require_once dirname(__DIR__) . '/src/helpers.php';
+
     if ($command === 'generate:openapi') {
         $className = 'Whity\Console\GenerateOpenApiSchemaCommand';
         exit($className::execute($argv));
@@ -244,7 +255,7 @@ if (file_exists($envFile)) {
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 // Require helpers
-require dirname(__DIR__) . '/src/helpers.php';
+require_once dirname(__DIR__) . '/src/helpers.php';
 
 // 0. Capture the worker boot timestamp (drives the health endpoint's uptime).
 //    A FrankenPHP worker survives across many requests, so this is the start of
@@ -2230,6 +2241,12 @@ $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']
 // shadowed by a plugin claiming the same path.
 $pluginLoader->load();
 $pluginLoader->collectMcpPrompts($promptRegistry);
+// The producer end of the queue learns the plugin handlers too. $jobsRegistry is
+// the SAME object JobsApiHandler already holds, so registering into it now is
+// what makes a plugin's submittable job acceptable at POST /api/jobs — and, just
+// as importantly, keeps the two ends agreeing: a name the API accepts is a name
+// the worker (which discovers the same declarations) can actually run.
+$pluginLoader->collectJobs($jobsRegistry);
 
 // Descriptor-derived navigation (WC-169): every validated plugin frontend
 // feature gets a menu entry pointing at the dynamic screen route /admin/x/{id}.

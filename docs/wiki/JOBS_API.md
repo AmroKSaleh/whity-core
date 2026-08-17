@@ -84,6 +84,23 @@ but are **not** submittable via the API. The one submittable core job is
 `core.diagnostics.echo` (echoes its payload as the result) — the reference for
 opting in and the vehicle for the API's e2e smoke.
 
+## Plugin-contributed jobs
+
+A plugin declares handlers via
+[`PluginJobsInterface`](../../sdk/src/PluginJobsInterface.php); both ends of the
+queue discover them (the web boot path so submission validates, the `queue:work`
+worker so they run). Two differences from a core handler:
+
+- **The name is namespaced.** A plugin declares a bare `sync`; the host
+  registers it as `<plugin-slug>:sync`, so that is the name to enqueue.
+  Registration derives the prefix from the plugin **name** the loader supplies,
+  which is why no plugin can shadow a `core.`-prefixed handler or claim
+  another plugin's.
+- **Submittability is a separate declaration** (`getSubmittableJobs()`), listing
+  bare names, and fails closed exactly as above.
+
+See Step 10 of [Plugin-Development.md](Plugin-Development.md).
+
 Every submission is stamped with the caller's tenant (`TenantContext`); reads
 bind `tenant_id`. See also [HOOK_SYSTEM.md](HOOK_SYSTEM.md) for the event spine
 that feeds jobs, and the durable queue worker (`queue:work`).
