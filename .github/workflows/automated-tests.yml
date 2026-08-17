@@ -1,28 +1,33 @@
 name: Automated Tests
 
-# Doc-only changes can't affect the build, tests, or generated artifacts, so
-# skip the suite when every changed path is documentation. `paths-ignore` only
-# suppresses a run when ALL changed files match — a PR that touches both code
-# and docs still runs the full gate. (No required status checks are configured
+# Doc-only changes can't affect the build, tests, or generated artifacts, so the
+# expensive jobs below still skip on them — but they skip via the `changes` job,
+# NOT via `paths-ignore` on the trigger.
+#
+# That difference is the whole point. `paths-ignore` stops the workflow from
+# starting at all, so `CI gate` never reports — and `CI gate` is a REQUIRED check
+# on both `develop` and `main`. A required check that never reports is not a
+# skipped check, it is a permanently pending one, so every doc-only PR was
+# unmergeable by construction.
+#
+# This block used to end with the note "No required status checks are configured
 # on `main`, so a skipped run never leaves a doc-only PR blocked on a pending
-# check.)
+# check." That was true when it was written, and stopped being true the day
+# branch protection was added — with nothing linking the two changes, and no
+# failure until someone opened a PR that touched only docs.
+#
+# Filtering inside the workflow cannot rot that way: the gate always reports, and
+# it already treats `skipped` as success, so the saving is kept and the deadlock
+# is not reachable.
 on:
   push:
     branches:
       - main
       - develop
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'LICENSE'
   pull_request:
     branches:
       - main
       - develop
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'LICENSE'
 
 # A newer push to the same ref obsoletes the in-flight run; never let two full
 # suites race (this is what burned a duplicate ~13-min run when a fix commit
@@ -75,6 +80,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       render_service: ${{ steps.filter.outputs.render_service }}
       i18n: ${{ steps.filter.outputs.i18n }}
+      desktop_host: ${{ steps.filter.outputs.desktop_host }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -98,6 +104,19 @@ jobs:
               - 'phpstan-baseline.neon'
               - 'phpunit.xml'
               - 'infection.json5'
+              - '.github/workflows/automated-tests.yml'
+            # The Tauri desktop template ships its own vendored copy of the
+            # plugin SDK, and the parity guard that compares it against sdk/src
+            # lives in `static-analysis`. Its own filter, because the OTHER
+            # half of what that guard reads is not under any path `backend`
+            # matches: an edit that touches only the device's copy is exactly
+            # the drift being guarded against, and under `backend` alone it
+            # would skip the entire job and merge unchecked. Scoped to
+            # php-host/ rather than the whole template — the Rust and TS sides
+            # cannot move this guard, and pulling them in would run PHP static
+            # analysis for every icon change.
+            desktop_host:
+              - 'templates/tauri-desktop/php-host/**'
               - '.github/workflows/automated-tests.yml'
             frontend:
               - 'web/**'
@@ -301,7 +320,7 @@ jobs:
   static-analysis:
     name: Static analysis, guards & plugin smoke
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.desktop_host == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -398,6 +417,23 @@ jobs:
       # that would fire on the intended design of nearly every plugin table.
       - name: Undeclared-reference guard (in-tree plugins)
         run: php scripts/ci-undeclared-reference-guard.php
+
+      # Vendored-SDK parity guard (#849): the Tauri desktop template carries its
+      # own copy of sdk/src, because a device boots from a hand-rolled PSR-4
+      # autoloader with no Composer behind it. Re-vendoring that copy was a
+      # manual step verified in a commit message, and it silently fell three SDK
+      # releases behind — so the reference plugin, which is also the exact
+      # source bin/desktop-plugin-release packages, could not be declared on a
+      # device at all. The guard compares the two trees AND boots every in-tree
+      # plugin against the device's copy; see the script header for why one
+      # check does not subsume the other.
+      #
+      # Runs whenever `desktop_host` OR `backend` changed — the drift is
+      # introduced by an edit to EITHER side, and a guard that watched only the
+      # side it happens to live next to would have missed #849 entirely (which
+      # was three commits to sdk/**, not one to templates/**).
+      - name: Vendored-SDK parity (desktop template)
+        run: php scripts/ci-vendored-sdk-parity.php
 
   # The English translation catalogue must stay a faithful projection of the
   # t() calls that produce it. A converted screen whose keys were never

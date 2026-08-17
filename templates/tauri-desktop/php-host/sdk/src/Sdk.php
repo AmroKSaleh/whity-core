@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.27).
+ * SDK identity (v1.29).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -214,13 +214,56 @@ namespace Whity\Sdk;
  * declared hook runs cleanly on a synthetic payload — a generic `Throwable`
  * fails the test loudly, since the real host's per-plugin error boundary
  * would otherwise swallow it silently and ship the bug invisibly. Additive;
- * a plugin ignoring it is unaffected).
+ * a plugin ignoring it is unaffected) ->
+ * 1.28 ({@see PluginJobsInterface}, the async-job contribution point.
+ * {@see JobInterface} has been public since 1.0 and the host's job registry has
+ * always taken a handler, but nothing DISCOVERED a plugin's — so the shipped
+ * `queue:work` worker knew only the core handlers and dead-lettered anything a
+ * plugin enqueued as "No handler registered for job". A plugin's only remaining
+ * option was to ship a `queue:work` of its own that re-registered the core
+ * handlers beside its own, which means the operator runs one worker per plugin
+ * and every one of them is a place core's own queued work can be duplicated or
+ * dropped. Declared names are BARE and the host stamps the plugin's prefix onto
+ * them, exactly as it does for resource types, health probes and settings keys:
+ * two plugins declaring `sync` get different canonical names, and no
+ * declaration can produce a `core.`-prefixed one. Submittability is declared
+ * separately and fails CLOSED, matching core — a handler the worker can run is
+ * not thereby reachable from the public submission API. A declaration that
+ * throws or is malformed costs that plugin its jobs and costs the worker
+ * nothing: it is the process that also delivers core's notifications and error
+ * alerts, so one bad plugin must not stop it. Additive) ->
+ * 1.29 ({@see PluginEventsInterface}, the audited-event contribution point,
+ * plus {@see \Whity\Sdk\Hooks\Events::forPlugin()} and the now-published
+ * namespacing rule {@see PluginNamespace}. The host's audit writer subscribed
+ * to a HARDCODED map of core event names, so a plugin's own domain events
+ * reached the platform audit trail never — an operator opening the one screen
+ * that answers "who did what" saw core's mutations and a silence where every
+ * plugin-side action had been. Both workarounds are worse than the gap: writing
+ * to `audit_log` directly puts a second writer on a table whose entire design
+ * is that it has one (no metadata sanitising, no tenant resolution, and nothing
+ * stopping a row that claims to be `user.deleted`), and a private activity table
+ * is a second audit surface in a second place nobody is looking at. A plugin now
+ * declares which of its events belong in the trail and the host records them
+ * through the SAME path core's go through. Names are declared BARE and the host
+ * stamps the plugin's prefix onto BOTH halves of the record — action
+ * `acme:task.completed`, target type `acme:task` — because an attributable
+ * action beside a target type of `user` still reads as something core did to a
+ * core record. The trigger is namespaced too, and that is the load-bearing part:
+ * the hook manager tells a listener nothing about who dispatched, so listening
+ * on the bare name would have written a row for EVERY plugin declaring
+ * `task.completed` whenever any one of them fired it, and an audit trail that
+ * records an event which did not happen is worse than one that records nothing.
+ * A declaration that throws or is malformed costs that plugin its subscriptions
+ * and costs core's own auditing nothing; the refusal is whole-declaration,
+ * because a plugin with half its events audited ships a trail that looks
+ * complete. The subscriptions are registered with the plugin's other hooks, so
+ * disabling a plugin removes them and re-enabling it restores them. Additive).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.27.0';
+    public const VERSION = '1.29.0';
 
     /**
      * Static identity only — never instantiated.
