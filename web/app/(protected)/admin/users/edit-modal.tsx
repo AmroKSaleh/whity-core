@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@amroksaleh/ui/select';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -78,7 +79,9 @@ export function EditUserModal({
   // removes the phantom "Moderator" option that 404'd on save (WC-121).
   const { roleOptions, isLoadingRoles } = useRoleOptions(isOpen);
   // OU dropdown options come from the live tenant-scoped OU list (WC-205).
-  const { ouOptions, isLoadingOus } = useOuOptions(isOpen);
+  // `ouLoadFailure` is set when that list could not be fetched in full; the
+  // picker is then disabled rather than offered short (see the field below).
+  const { ouOptions, isLoadingOus, ouLoadFailure } = useOuOptions(isOpen);
 
   // Only the editable fields (`role`, `ou_id`) are bound to the form. Name and
   // tenant are displayed read-only directly from the user record (see below).
@@ -303,6 +306,7 @@ export function EditUserModal({
                 <FormItem>
                   <FormLabel>{t('users.edit.ou.label', 'Organisational Unit')}</FormLabel>
                   <Select
+                    disabled={ouLoadFailure !== null}
                     onValueChange={(val) => field.onChange(val === '__none__' ? null : val)}
                     value={field.value ?? '__none__'}
                   >
@@ -328,6 +332,31 @@ export function EditUserModal({
                       ))}
                     </SelectContent>
                   </Select>
+                  {/*
+                    Disabled rather than short: the rest of the form still edits
+                    the role safely, and leaving the picker inert keeps this
+                    user's existing OU (the form's default) rather than clearing
+                    it. Offering the units that did arrive would let an admin
+                    move somebody into the wrong OU while believing the right
+                    one was never created.
+                  */}
+                  {ouLoadFailure !== null && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        {ouLoadFailure.total === null
+                          ? t('ous.error.load', 'Failed to fetch organizational units')
+                          : t(
+                              'ous.error.partial',
+                              'Loaded only {loaded} of {total} organizational units.',
+                              { loaded: ouLoadFailure.loaded, total: ouLoadFailure.total }
+                            )}{' '}
+                        {t(
+                          'ous.error.pickerDisabled',
+                          'The picker is disabled because a partial list would hide units that exist.'
+                        )}
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}

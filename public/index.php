@@ -428,6 +428,9 @@ $queueService = new \Whity\Core\Queue\QueueService(
 // handlers already fire (no per-handler audit code), while the auth/2FA paths —
 // which do not fire hooks — receive the same logger and call record() directly.
 // It is process-scoped infrastructure; per-request actor/IP live in AuditContext.
+// A PLUGIN's own events reach the same trail by declaring them (SDK 1.29): the
+// plugin loader is handed this instance below and subscribes it to each
+// declaring plugin's events, namespaced under that plugin.
 $auditLogger = new AuditLogger($db->getPdo(), $logger);
 $auditLogger->subscribe($hookManager);
 
@@ -846,7 +849,13 @@ $pluginLoader = new PluginLoader(
     $healthProbeRegistry,
     $tableOwnershipRegistry,
     $dataTypeRegistry,
-    $pluginSettingsRegistry
+    $pluginSettingsRegistry,
+    // Plugin-declared audited events (SDK 1.29): the loader subscribes this
+    // writer to each declaring plugin's own events, beside that plugin's other
+    // hook subscriptions, so a plugin's actions land in the SAME audit trail as
+    // core's — namespaced under the plugin, and removed again when it is
+    // disabled. Built at step 4c above, long before this point.
+    $auditLogger
 );
 
 // 9b. Initialize deployment manager

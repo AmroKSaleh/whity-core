@@ -12,6 +12,13 @@
  * So this walks `pagination.totalPages` to the end and, crucially, reports
  * whether it got there. Callers MUST branch on `complete` — the whole point is
  * that a truncated set is never mistaken for the full one.
+ *
+ * Two entry points, one walk: {@link fetchAllPages} for the raw `apiClient`
+ * from `useAuth()`, {@link fetchAllPagesTyped} for the openapi-fetch client in
+ * `lib/api/client`. They differ only in how a page is requested and how failure
+ * is signalled (a non-ok `Response` versus an undefined `data`), so the
+ * termination and completeness rules — the parts that are easy to get subtly
+ * wrong — exist exactly once, in `walkPages`.
  */
 
 type ApiClient = (url: string, options?: RequestInit) => Promise<Response>;
@@ -57,19 +64,19 @@ function isEnvelope(value: unknown): value is PaginationEnvelope {
   );
 }
 
+/** One page as the walk needs to see it, whichever client fetched it. */
+type PageOutcome<T> =
+  | { ok: false }
+  | { ok: true; rows: T[] | undefined; pagination: unknown };
+
 /**
- * Fetch every page of `path` and concatenate the `data` arrays.
- *
- * @param apiClient The authenticated fetch wrapper from `useAuth()`.
- * @param path      List endpoint path; an existing query string is preserved.
- * @param perPage   Rows per request. Defaults to the server maximum.
+ * The walk itself: request pages until the envelope says there are no more,
+ * then decide whether the set is whole.
  */
-export async function fetchAllPages<T>(
-  apiClient: ApiClient,
-  path: string,
-  perPage: number = MAX_PER_PAGE
+async function walkPages<T>(
+  fetchPage: (page: number, perPage: number) => Promise<PageOutcome<T>>,
+  perPage: number
 ): Promise<FetchAllPagesResult<T>> {
-  const separator = path.includes('?') ? '&' : '?';
   const items: T[] = [];
   let total: number | null = null;
   let totalPages = 1;
@@ -79,18 +86,14 @@ export async function fetchAllPages<T>(
       return { complete: false, items, total };
     }
 
-    const response = await apiClient(
-      `${path}${separator}page=${page}&per_page=${perPage}`
-    );
-    if (!response.ok) {
+    const outcome = await fetchPage(page, perPage);
+    if (!outcome.ok) {
       return { complete: false, items, total };
     }
 
-    const body: unknown = await response.json();
-    const rows = (body as { data?: T[] } | null)?.data;
+    const { rows, pagination } = outcome;
     items.push(...(Array.isArray(rows) ? rows : []));
 
-    const pagination = (body as { pagination?: unknown } | null)?.pagination;
     if (!isEnvelope(pagination)) {
       // No envelope means the endpoint is not paginated; what we have is all
       // there is. Treating this as incomplete would break unpaginated callers.
@@ -115,4 +118,75 @@ export async function fetchAllPages<T>(
   }
 
   return { complete: true, items, total: total ?? items.length };
+}
+
+/**
+ * Fetch every page of `path` and concatenate the `data` arrays.
+ *
+ * @param apiClient The authenticated fetch wrapper from `useAuth()`.
+ * @param path      List endpoint path; an existing query string is preserved.
+ * @param perPage   Rows per request. Defaults to the server maximum.
+ */
+export async function fetchAllPages<T>(
+  apiClient: ApiClient,
+  path: string,
+  perPage: number = MAX_PER_PAGE
+): Promise<FetchAllPagesResult<T>> {
+  const separator = path.includes('?') ? '&' : '?';
+
+  return walkPages<T>(async (page, size) => {
+    const response = await apiClient(
+      `${path}${separator}page=${page}&per_page=${size}`
+    );
+    if (!response.ok) {
+      return { ok: false };
+    }
+
+    const body: unknown = await response.json();
+    return {
+      ok: true,
+      rows: (body as { data?: T[] } | null)?.data,
+      pagination: (body as { pagination?: unknown } | null)?.pagination,
+    };
+  }, perPage);
+}
+
+/**
+ * What one `api.GET(...)` call resolves to. The typed client never throws on an
+ * HTTP error — it leaves `data` undefined and puts the parsed body in `error` —
+ * so an absent `data` is the only failure signal there is.
+ */
+export interface TypedPageResult<T> {
+  data?: { data?: T[]; pagination?: unknown };
+}
+
+/**
+ * Same walk for the typed client. It takes the request as a closure rather than
+ * a path because openapi-fetch derives the response type from the path
+ * literal — `api.GET('/api/v1/ous', …)` typed at the call site keeps that, a
+ * path passed through this helper as a string would not.
+ *
+ * ```ts
+ * const result = await fetchAllPagesTyped<Ou>((query) =>
+ *   api.GET('/api/v1/ous', { params: { query } })
+ * );
+ * ```
+ *
+ * @param fetchPage Issues one request for the given page.
+ * @param perPage   Rows per request. Defaults to the server maximum.
+ */
+export async function fetchAllPagesTyped<T>(
+  fetchPage: (query: {
+    page: number;
+    per_page: number;
+  }) => Promise<TypedPageResult<T>>,
+  perPage: number = MAX_PER_PAGE
+): Promise<FetchAllPagesResult<T>> {
+  return walkPages<T>(async (page, size) => {
+    const { data } = await fetchPage({ page, per_page: size });
+    if (data === undefined) {
+      return { ok: false };
+    }
+    return { ok: true, rows: data.data, pagination: data.pagination };
+  }, perPage);
 }

@@ -11,11 +11,15 @@ use Whity\Core\Hooks\HookManager;
 use Whity\Core\PluginLoader;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Router;
+use Whity\Core\Tenant\TenantContext;
+use Whity\Database\Database;
+use Whity\Sdk\Hooks\Events;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginInterface;
 
 require_once dirname(__DIR__, 2) . '/plugins/HelloWorld/HelloWorldPlugin.php';
+require_once dirname(__DIR__, 2) . '/plugins/HelloWorld/Api/GreetingsApiHandler.php';
 require_once dirname(__DIR__, 2) . '/plugins/HelloWorld/Migrations/CreateHelloGreetingsTable.php';
 
 /**
@@ -234,5 +238,96 @@ final class HelloWorldPluginTest extends TestCase
         $this->assertSame('HelloWorld', $byId['hello-greetings']['plugin']);
         $this->assertSame('crud', $byId['hello-greetings']['screen']);
         $this->assertSame('/api/hello/greetings', $byId['hello-greetings']['resource']['basePath']);
+    }
+
+    // ==================== audited events (SDK 1.29) ====================
+
+    public function testDeclaresItsGreetingEventForTheAuditTrail(): void
+    {
+        $declared = (new HelloWorldPlugin())->getAuditedEvents();
+
+        // BARE, with both descriptor halves spelled out. The host stamps the
+        // namespace on; a declaration carrying its own prefix is refused.
+        $this->assertSame(
+            ['greeting.created' => ['targetType' => 'greeting', 'idKey' => 'id']],
+            $declared
+        );
+    }
+
+    /**
+     * The declaration and the DISPATCH have to name the same event, and nothing
+     * at load time can tell you they do not: an event nobody listens for raises
+     * nothing, so a reference plugin whose two halves disagreed would document a
+     * capability while quietly producing an empty audit trail.
+     */
+    public function testTheEventItDispatchesIsTheEventItDeclared(): void
+    {
+        $plugin = new HelloWorldPlugin();
+        $hookManager = new HookManager();
+        $savedServices = $GLOBALS['whity_services'] ?? [];
+
+        try {
+            \Whity\register_service(HookManager::class, $hookManager);
+            \Whity\register_service(Database::class, self::greetingsDatabase());
+
+            $seen = [];
+            foreach (array_keys($plugin->getAuditedEvents()) as $bare) {
+                $canonical = Events::forPlugin($plugin->getName(), $bare);
+                $hookManager->listen($canonical, function (array $data) use ($canonical, &$seen): array {
+                    $seen[$canonical] = $data;
+                    return $data;
+                });
+            }
+
+            TenantContext::setTenantId(1);
+            $response = $plugin->createGreeting(new Request(
+                'POST',
+                '/api/hello/greetings',
+                ['Content-Type' => 'application/json'],
+                (string) json_encode(['message' => 'hello'])
+            ));
+
+            $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+            $this->assertArrayHasKey(
+                'helloworld:greeting.created',
+                $seen,
+                'the plugin must dispatch the namespaced name its declaration is bound to'
+            );
+            // The payload carries the key the declaration names as the target id
+            // — a declaration pointing at a key the dispatch does not send would
+            // audit every greeting against a null target.
+            $this->assertArrayHasKey('id', $seen['helloworld:greeting.created']);
+            $this->assertSame(1, $seen['helloworld:greeting.created']['tenant_id']);
+        } finally {
+            TenantContext::reset();
+            $GLOBALS['whity_services'] = $savedServices;
+        }
+    }
+
+    /**
+     * An in-memory greetings table behind the host's own Database service, so
+     * the create path runs exactly as it does in production.
+     */
+    private static function greetingsDatabase(): Database
+    {
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(\PDO::ATTR_STRINGIFY_FETCHES, true);
+        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+        $pdo->exec('
+            CREATE TABLE hello_greetings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ');
+
+        $db = Database::withFactory(static fn (): \PDO => $pdo);
+        $db->setMaxLifetimeSeconds(86400);
+        $db->setPingIntervalSeconds(86400);
+        $db->forceConnect();
+
+        return $db;
     }
 }
