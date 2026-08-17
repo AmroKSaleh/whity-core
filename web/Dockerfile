@@ -52,9 +52,30 @@ RUN npm ci
 
 COPY web web
 
+# The bundle's IDENTITY, baked in at build time (WHIT-587).
+#
+# next.config.ts freezes the commit and CoreVersion::VERSION into the bundle so
+# /web-build can report which artefact this server loaded — the check that makes
+# "the API updated and the UI did not" observable from outside the box.
+#
+# Both of its sources are absent from an image build unless supplied here: the
+# build context is a copied tree with no .git, so `git rev-parse` fails, and
+# src/ is not copied, so it cannot read the version out of CoreVersion.php.
+# Without them every identifying field is null and the endpoint answers but
+# cannot do its job — which is exactly how v0.2.2 shipped.
+ARG WHITY_BUILD_COMMIT=""
+ENV WHITY_BUILD_COMMIT=$WHITY_BUILD_COMMIT
+COPY src/Core/CoreVersion.php src/Core/CoreVersion.php
+
 # The same command the release `web` job gates on: the `prebuild` hook
 # regenerates the shadcn registry, then `next build` compiles.
 RUN npm run build --workspace web
+
+# A build that cannot identify itself is not worth shipping: /web-build would
+# answer 200 with every field null, which reads as "working" to anything
+# checking it. Fail here, where it is one line to read, rather than in a
+# deployment nobody is watching. This is the guard v0.2.2 did not have.
+RUN test -s web/.next/BUILD_ID     || (echo "ERROR: web/.next/BUILD_ID is empty — build identity was not injected" && exit 1)
 
 # Strip the toolchain from the tree the runtime stage inherits.
 RUN npm prune --omit=dev
