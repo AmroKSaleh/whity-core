@@ -1,4 +1,4 @@
-import { IconBox, IconHome, IconPrinter, IconPuzzle } from "@tabler/icons-react"
+import { IconBox, IconBuildingStore, IconHome, IconPrinter, IconPuzzle } from "@tabler/icons-react"
 import type { NavConfig } from "@amroksaleh/features/nav"
 
 /**
@@ -42,6 +42,12 @@ export const navConfig: NavConfig = {
           label: "Plugins",
           href: "/plugins",
           icon: <IconPuzzle className="size-5" />,
+        },
+        {
+          id: "plugin-store",
+          label: "Plugin store",
+          href: "/plugin-store",
+          icon: <IconBuildingStore className="size-5" />,
         },
       ],
     },
