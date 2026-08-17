@@ -46,6 +46,7 @@ use Whity\Core\RBAC\RoleSeeder;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
+use Whity\Database\SequenceCounters;
 use Whity\Database\SqliteCompatPdo;
 use Whity\Http\RbacGate;
 use Whity\Native\NativeBridgeClient;
@@ -55,6 +56,7 @@ use Whity\PluginHost\PluginRuntimeLoader;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\Rbac\PermissionResolver;
+use Whity\Sdk\Sql\SequenceAllocator;
 
 // ---- Boot (runs once per worker process start) ----------------------------
 
@@ -97,6 +99,7 @@ if ($explicitPlugins !== '') {
 
 $migrationRunner = new MigrationRunner();
 $migrationRunner->bootstrapHostSkeleton($pdo);
+\Whity\register_service(SequenceAllocator::class, new SequenceCounters($pdo));
 
 // Quarantines any plugin whose getPermissions() throws or is malformed
 // BEFORE its migrations/roles/hooks/routes are registered.

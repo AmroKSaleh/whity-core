@@ -69,6 +69,19 @@ final class MigrationRunner
                 applied_at TIMESTAMP NOT NULL DEFAULT (NOW())
             )
         ');
+        // Backs Whity\Database\SequenceCounters (this host's SequenceAllocator),
+        // registered in public/index.php — same shape as production's 092
+        // migration minus the `tenants` FK, which this single-tenant offline
+        // host has no table for.
+        $pdo->exec('
+            CREATE TABLE IF NOT EXISTS sequence_counters (
+                tenant_id INTEGER NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                value BIGINT NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, name)
+            )
+        ');
 
         $pdo->exec("INSERT INTO roles (name) VALUES ('admin') ON CONFLICT(name) DO NOTHING");
     }
