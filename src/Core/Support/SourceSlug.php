@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Core\Support;
 
+use Whity\Sdk\PluginNamespace;
+
 /**
  * Normalises a REGISTRATION SOURCE (a plugin name) into a slug.
  *
@@ -17,6 +19,16 @@ namespace Whity\Core\Support;
  * with two slightly different rules is how `acme` and `acme_widgets` end up
  * naming the same plugin in different tables — and ownership comparisons that
  * are almost right are a security defect, not a cosmetic one.
+ *
+ * That one place is now {@see \Whity\Sdk\PluginNamespace::slug()}, in the SDK.
+ * The rule stayed host-internal for as long as only the host had to spell a
+ * namespaced name; audited events (SDK 1.29) made a PLUGIN produce one, since
+ * the host binds its audit listener to the namespaced event name and the plugin
+ * has to dispatch that exact string. Publishing the rule and deferring to it
+ * here is the only arrangement in which the name a plugin dispatches and the
+ * name the host listens for cannot drift; this class keeps its name and its
+ * callers, so every ownership comparison in core still asks exactly one
+ * implementation.
  */
 final class SourceSlug
 {
@@ -45,11 +57,6 @@ final class SourceSlug
      */
     public static function from(string $source): ?string
     {
-        $segments = explode('\\', $source);
-        $last = (string) end($segments);
-        $slug = strtolower(preg_replace('/[^A-Za-z0-9_]+/', '_', $last) ?? '');
-        $slug = trim($slug, '_');
-
-        return $slug === '' || preg_match('/^[a-z]/', $slug) !== 1 ? null : $slug;
+        return PluginNamespace::slug($source);
     }
 }
