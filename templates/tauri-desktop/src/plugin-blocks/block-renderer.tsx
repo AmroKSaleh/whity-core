@@ -17,10 +17,14 @@ import { Button } from "@amroksaleh/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@amroksaleh/ui/card"
 import { Chart } from "@amroksaleh/ui/chart"
 import { Checkbox } from "@amroksaleh/ui/checkbox"
+import { DataTable } from "@amroksaleh/ui/data-table"
 import { DatePicker } from "@amroksaleh/ui/date-picker"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@amroksaleh/ui/dialog"
 import { EmptyState, ErrorState } from "@amroksaleh/ui/empty-state"
 import { Input } from "@amroksaleh/ui/input"
+import { Pagination } from "@amroksaleh/ui/pagination"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@amroksaleh/ui/select"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@amroksaleh/ui/sheet"
 import { Skeleton } from "@amroksaleh/ui/skeleton"
 import { Slider } from "@amroksaleh/ui/slider"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@amroksaleh/ui/table"
@@ -35,15 +39,17 @@ import type {
   DataListBlock,
   DataStatBlock,
   DataTableBlock,
+  DrawerBlock,
   FieldArrayBlock,
   FormBlock,
+  ModalBlock,
   PluginFeature,
   RowAction,
   SelectorBlock,
   SourceParam,
   VisibleWhen,
 } from "./types"
-import { usePluginData } from "./use-plugin-data"
+import { usePluginData, type PluginDataState } from "./use-plugin-data"
 
 type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "destructive"
 
@@ -72,36 +78,138 @@ function toAlertVariant(v: "info" | "success" | "warning" | "danger"): "info" | 
 
 // ---------------------------------------------------------------- master-detail
 
+/**
+ * WC-block-modal-drawer: widened, additive to the original selector-driven
+ * `selections`/`setSelection` (untouched, still scalar-only) — `rows` is the
+ * row a `dataTable` `open` rowAction publishes when it opens a modal/drawer
+ * by that overlay's blockId; `openTargets` tracks which overlay ids are
+ * currently open. `refreshSignal` increments ONLY when a close follows a
+ * successful form submit (`closeTarget(id, {refresh: true})` — a plain
+ * dismiss/cancel/backdrop-click close does not refetch anything), matching
+ * the web renderer's refresh-nonce contract exactly (confirmed with the
+ * backend agent) — every data-bound block in the feature refetches on that
+ * signal, not just the one that opened the overlay — see `useRefetchOnSignal`.
+ */
 interface MasterDetailContextValue {
   selections: Record<string, string>
   setSelection: (name: string, value: string) => void
+  rows: Record<string, Record<string, unknown>>
+  openTargets: Record<string, boolean>
+  openTarget: (id: string, row?: Record<string, unknown>) => void
+  /** `refresh: true` (only ever passed by a successful form submit, see
+   * `FormRenderer`) is what bumps `refreshSignal` — a plain dismiss/cancel/
+   * backdrop-click close does NOT refetch anything, matching the web
+   * renderer's "refresh nonce only on submit-success" contract exactly
+   * (confirmed with the backend agent; this was a real bug here before —
+   * every close used to bump the signal regardless of why). */
+  closeTarget: (id: string, options?: { refresh?: boolean }) => void
+  refreshSignal: number
 }
-const MasterDetailContext = React.createContext<MasterDetailContextValue>({ selections: {}, setSelection: () => {} })
+const MasterDetailContext = React.createContext<MasterDetailContextValue>({
+  selections: {},
+  setSelection: () => {},
+  rows: {},
+  openTargets: {},
+  openTarget: () => {},
+  closeTarget: () => {},
+  refreshSignal: 0,
+})
 
 function MasterDetailProvider({ children }: { children: React.ReactNode }) {
   const [selections, setSelections] = React.useState<Record<string, string>>({})
+  const [rows, setRows] = React.useState<Record<string, Record<string, unknown>>>({})
+  const [openTargets, setOpenTargets] = React.useState<Record<string, boolean>>({})
+  const [refreshSignal, setRefreshSignal] = React.useState(0)
+
   const setSelection = React.useCallback((name: string, value: string) => {
     setSelections((prev) => ({ ...prev, [name]: value }))
   }, [])
-  const value = React.useMemo(() => ({ selections, setSelection }), [selections, setSelection])
+  const openTarget = React.useCallback((id: string, row?: Record<string, unknown>) => {
+    if (row) setRows((prev) => ({ ...prev, [id]: row }))
+    setOpenTargets((prev) => ({ ...prev, [id]: true }))
+  }, [])
+  const closeTarget = React.useCallback((id: string, options?: { refresh?: boolean }) => {
+    setOpenTargets((prev) => (prev[id] ? { ...prev, [id]: false } : prev))
+    if (options?.refresh) setRefreshSignal((n) => n + 1)
+  }, [])
+
+  const value = React.useMemo<MasterDetailContextValue>(
+    () => ({ selections, setSelection, rows, openTargets, openTarget, closeTarget, refreshSignal }),
+    [selections, setSelection, rows, openTargets, openTarget, closeTarget, refreshSignal],
+  )
   return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>
+}
+
+/** Resolves a `params`/`defaultFrom` address: a bare name reads the
+ * selector-driven `selections` (unchanged behavior); a dotted
+ * `{targetId}.{field}` reads the row a modal/drawer's opener published. */
+function resolveFromContext(from: string, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): unknown {
+  const dot = from.indexOf(".")
+  if (dot === -1) return ctx.selections[from]
+  return ctx.rows[from.slice(0, dot)]?.[from.slice(dot + 1)]
+}
+
+/** `defaultFrom` (resolved via `resolveFromContext`) wins over the literal
+ * `default` when both resolve — an edit modal opened with a row always
+ * wants the row's current value, not the block's static placeholder. */
+function resolveDefault(block: { default?: unknown; defaultFrom?: string }, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): unknown {
+  if (block.defaultFrom) {
+    const resolved = resolveFromContext(block.defaultFrom, ctx)
+    if (resolved !== undefined) return resolved
+  }
+  return block.default
+}
+
+/** A row's published field can arrive as a real boolean or as a string
+ * ("true"/"1" vs. "false"/"0") depending on how the source serialized it —
+ * plain `Boolean(...)` truthiness is wrong here since "false" and "0" are
+ * both non-empty strings. Matches the web renderer's coercion. */
+function coerceBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") return value === "true" || value === "1"
+  if (typeof value === "number") return value === 1
+  return Boolean(value)
 }
 
 /** Applies a data-bound block's `params` (master-detail query params) on top
  * of its `source`, same as the web renderer's `useEffectiveSource`. */
 function useEffectiveSource(source: string, params?: SourceParam[]): string {
-  const { selections } = React.useContext(MasterDetailContext)
+  const ctx = React.useContext(MasterDetailContext)
   return React.useMemo(() => {
     if (!params || params.length === 0) return source
     const pairs = params
       .map((p) => {
-        const value = selections[p.from]
-        return value === undefined ? null : `${encodeURIComponent(p.param)}=${encodeURIComponent(value)}`
+        const value = resolveFromContext(p.from, ctx)
+        return value === undefined ? null : `${encodeURIComponent(p.param)}=${encodeURIComponent(String(value))}`
       })
       .filter((p): p is string => p !== null)
     if (pairs.length === 0) return source
     return `${source}${source.includes("?") ? "&" : "?"}${pairs.join("&")}`
-  }, [source, params, selections])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, params, ctx.selections, ctx.rows])
+}
+
+/** Refetches a data-bound block's `usePluginData` result whenever a
+ * successful form submit closes an overlay anywhere in this feature
+ * (skipped on first mount) — every data-bound block refetches, not just
+ * ones "belonging" to the overlay that closed, absent a declared dependency
+ * graph between a specific overlay and specific blocks (matches the web
+ * renderer's refresh-nonce scope). */
+function useRefetchOnSignal(state: PluginDataState<unknown>): void {
+  const { refreshSignal } = React.useContext(MasterDetailContext)
+  const stateRef = React.useRef(state)
+  stateRef.current = state
+  const mounted = React.useRef(false)
+  React.useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true
+      return
+    }
+    const current = stateRef.current
+    if (current.status === "ready" || current.status === "empty") current.refresh()
+    else if (current.status === "error") current.retry()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshSignal])
 }
 
 // ---------------------------------------------------------------- form scope
@@ -111,6 +219,11 @@ interface FormScope {
   setValue: (name: string, value: unknown) => void
 }
 const FormScopeContext = React.createContext<FormScope | null>(null)
+
+/** The enclosing `modal`/`drawer` blockId, or `null` at the top level —
+ * lets `FormRenderer` auto-close the overlay it's nested in on a successful
+ * submit (a renderer convention; there is no contract prop for it). */
+const ModalScopeContext = React.createContext<string | null>(null)
 
 function isVisible(visibleWhen: VisibleWhen | undefined, values: Record<string, unknown>): boolean {
   if (!visibleWhen) return true
@@ -327,6 +440,10 @@ function BlockNode({ block }: { block: Block }) {
       return <ChartRenderer block={block} />
     case "selector":
       return <SelectorRenderer block={block} />
+    case "modal":
+      return <ModalRenderer block={block} />
+    case "drawer":
+      return <DrawerRenderer block={block} />
     case "form":
       return <FormRenderer block={block} />
     case "fieldArray":
@@ -361,49 +478,52 @@ function BlockNode({ block }: { block: Block }) {
 function DataTableRenderer({ block }: { block: DataTableBlock }) {
   const source = useEffectiveSource(block.source, block.params)
   const state = usePluginData<Record<string, unknown>[]>(source, (data) => (Array.isArray(data) && data.length > 0 ? data : Array.isArray(data) ? [] : null))
+  useRefetchOnSignal(state)
 
   if (state.status === "loading") return <Skeleton className="h-24 w-full" />
   if (state.status === "error") return <ErrorState title="Couldn't load this table" action={<Button onClick={state.retry}>Retry</Button>} />
-  if (state.status === "empty") return <EmptyState title={block.emptyText ?? "Nothing here yet"} />
+
+  const rows = state.status === "empty" ? [] : state.data
+  const refresh = state.status === "empty" || state.status === "ready" ? state.refresh : () => {}
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          {block.columns.map((c) => (
-            <TableHead key={c.key}>{c.label}</TableHead>
-          ))}
-          {block.rowActions && block.rowActions.length > 0 && <TableHead>Actions</TableHead>}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {state.data.map((row, i) => (
-          <TableRow key={i}>
-            {block.columns.map((c) => (
-              <TableCell key={c.key}>{String(row[c.key] ?? "")}</TableCell>
-            ))}
-            {block.rowActions && block.rowActions.length > 0 && (
-              <TableCell>
-                <RowActions actions={block.rowActions} row={row} onDone={state.refresh} />
-              </TableCell>
-            )}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <DataTable<Record<string, unknown>>
+      columns={block.columns.map((c) => ({
+        id: c.key,
+        accessorKey: c.key,
+        header: c.label,
+        enableSorting: c.sortable === true,
+        enableColumnFilter: c.filterable === true,
+      }))}
+      data={rows}
+      emptyStateTitle={block.emptyText ?? "Nothing here yet"}
+      pagination={block.pageSize && block.pageSize > 0 ? { pageSize: block.pageSize } : undefined}
+      rowActions={block.rowActions && block.rowActions.length > 0 ? (row) => <RowActions actions={block.rowActions!} row={row} onDone={refresh} /> : undefined}
+    />
   )
 }
 
 function RowActions({ actions, row, onDone }: { actions: RowAction[]; row: Record<string, unknown>; onDone: () => void }) {
+  const { openTarget } = React.useContext(MasterDetailContext)
   const fill = (template: string) => template.replace(/\{(\w+)\}/g, (_, key: string) => String(row[key] ?? ""))
   return (
     <div className="flex gap-2">
-      {actions.map((action, i) =>
-        "href" in action ? (
-          <Button key={i} variant="ghost" onClick={() => (window.location.hash = fill(action.href))}>
-            {action.label}
-          </Button>
-        ) : (
+      {actions.map((action, i) => {
+        if ("href" in action) {
+          return (
+            <Button key={i} variant="ghost" onClick={() => (window.location.hash = fill(action.href))}>
+              {action.label}
+            </Button>
+          )
+        }
+        if ("open" in action) {
+          return (
+            <Button key={i} variant="ghost" onClick={() => openTarget(action.open, row)}>
+              {action.label}
+            </Button>
+          )
+        }
+        return (
           <Button
             key={i}
             variant="ghost"
@@ -415,8 +535,8 @@ function RowActions({ actions, row, onDone }: { actions: RowAction[]; row: Recor
           >
             {action.label}
           </Button>
-        ),
-      )}
+        )
+      })}
     </div>
   )
 }
@@ -424,6 +544,7 @@ function RowActions({ actions, row, onDone }: { actions: RowAction[]; row: Recor
 function DataStatRenderer({ block }: { block: DataStatBlock }) {
   const source = useEffectiveSource(block.source, block.params)
   const state = usePluginData<Record<string, unknown>>(source, (data) => (data && typeof data === "object" ? (data as Record<string, unknown>) : null))
+  useRefetchOnSignal(state)
 
   if (state.status === "loading") return <Skeleton className="h-20 w-full" />
   if (state.status === "error") return <ErrorState title="Couldn't load this stat" action={<Button onClick={state.retry}>Retry</Button>} />
@@ -443,24 +564,73 @@ function DataStatRenderer({ block }: { block: DataStatBlock }) {
 function DataListRenderer({ block }: { block: DataListBlock }) {
   const source = useEffectiveSource(block.source, block.params)
   const state = usePluginData<Record<string, unknown>[]>(source, (data) => (Array.isArray(data) && data.length > 0 ? data : Array.isArray(data) ? [] : null))
+  useRefetchOnSignal(state)
+
+  const [filterText, setFilterText] = React.useState("")
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc" | null>(null)
+  const [page, setPage] = React.useState(1)
 
   if (state.status === "loading") return <Skeleton className="h-16 w-full" />
   if (state.status === "error") return <ErrorState title="Couldn't load this list" action={<Button onClick={state.retry}>Retry</Button>} />
   if (state.status === "empty") return <EmptyState title={block.emptyText ?? "Nothing here yet"} />
 
+  const itemText = (row: Record<string, unknown>) => String(row[block.itemField] ?? "")
+
+  let items = state.data
+  if (block.filterable && filterText.trim() !== "") {
+    const needle = filterText.trim().toLowerCase()
+    items = items.filter((row) => itemText(row).toLowerCase().includes(needle))
+  }
+  if (block.sortable && sortDir) {
+    items = [...items].sort((a, b) => itemText(a).localeCompare(itemText(b)) * (sortDir === "asc" ? 1 : -1))
+  }
+
+  const pageSize = block.pageSize && block.pageSize > 0 ? block.pageSize : items.length || 1
+  const pageItems = block.pageSize && block.pageSize > 0 ? items.slice((page - 1) * pageSize, page * pageSize) : items
+
   const Tag = block.ordered ? "ol" : "ul"
   return (
-    <Tag className={`space-y-1 text-sm ${block.ordered ? "list-decimal" : "list-disc"} ps-5`}>
-      {state.data.map((row, i) => (
-        <li key={i}>{String(row[block.itemField] ?? "")}</li>
-      ))}
-    </Tag>
+    <div className="space-y-2">
+      {(block.filterable || block.sortable) && (
+        <div className="flex items-center gap-2">
+          {block.filterable && (
+            <Input
+              value={filterText}
+              onChange={(e) => {
+                setFilterText(e.target.value)
+                setPage(1)
+              }}
+              placeholder="Filter…"
+              className="max-w-xs"
+            />
+          )}
+          {block.sortable && (
+            <Button type="button" variant="outline" onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}>
+              Sort {sortDir === "asc" ? "A→Z" : sortDir === "desc" ? "Z→A" : ""}
+            </Button>
+          )}
+        </div>
+      )}
+      {pageItems.length === 0 ? (
+        <EmptyState title="No matches" />
+      ) : (
+        <Tag className={`space-y-1 text-sm ${block.ordered ? "list-decimal" : "list-disc"} ps-5`}>
+          {pageItems.map((row, i) => (
+            <li key={i}>{itemText(row)}</li>
+          ))}
+        </Tag>
+      )}
+      {block.pageSize && block.pageSize > 0 && items.length > 0 && (
+        <Pagination page={page} perPage={pageSize} total={items.length} onPageChange={setPage} />
+      )}
+    </div>
   )
 }
 
 function ChartRenderer({ block }: { block: ChartBlock }) {
   const source = useEffectiveSource(block.source, block.params)
   const state = usePluginData<Record<string, string | number>[]>(source, (data) => (Array.isArray(data) && data.length > 0 ? (data as Record<string, string | number>[]) : Array.isArray(data) ? [] : null))
+  useRefetchOnSignal(state)
 
   if (state.status === "loading") return <Skeleton className="h-48 w-full" />
   if (state.status === "error") return <ErrorState title="Couldn't load this chart" action={<Button onClick={state.retry}>Retry</Button>} />
@@ -508,9 +678,60 @@ function SelectorRenderer({ block }: { block: SelectorBlock }) {
   )
 }
 
+function ModalRenderer({ block }: { block: ModalBlock }) {
+  const { openTargets, openTarget, closeTarget } = React.useContext(MasterDetailContext)
+  const open = openTargets[block.id] ?? false
+  const sizeClass = { sm: "sm:max-w-sm", md: "sm:max-w-lg", lg: "sm:max-w-2xl" }[block.size ?? "md"]
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => (next ? openTarget(block.id) : closeTarget(block.id))}>
+      {block.trigger && (
+        <DialogTrigger asChild>
+          <Button variant={toButtonVariant(block.variant)}>{block.trigger}</Button>
+        </DialogTrigger>
+      )}
+      <DialogContent className={sizeClass}>
+        <DialogHeader>
+          <DialogTitle>{block.title}</DialogTitle>
+        </DialogHeader>
+        <ModalScopeContext.Provider value={block.id}>
+          <BlockList blocks={block.children} />
+        </ModalScopeContext.Provider>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DrawerRenderer({ block }: { block: DrawerBlock }) {
+  const { openTargets, openTarget, closeTarget } = React.useContext(MasterDetailContext)
+  const open = openTargets[block.id] ?? false
+
+  return (
+    <Sheet open={open} onOpenChange={(next) => (next ? openTarget(block.id) : closeTarget(block.id))}>
+      {block.trigger && (
+        <SheetTrigger asChild>
+          <Button variant="outline">{block.trigger}</Button>
+        </SheetTrigger>
+      )}
+      <SheetContent side={block.side ?? "right"}>
+        <SheetHeader>
+          <SheetTitle>{block.title}</SheetTitle>
+        </SheetHeader>
+        <div className="space-y-4 px-4">
+          <ModalScopeContext.Provider value={block.id}>
+            <BlockList blocks={block.children} />
+          </ModalScopeContext.Provider>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 // ---------------------------------------------------------------- form + inputs
 
 function FormRenderer({ block }: { block: FormBlock }) {
+  const modalId = React.useContext(ModalScopeContext)
+  const { closeTarget } = React.useContext(MasterDetailContext)
   const [values, setValues] = React.useState<Record<string, unknown>>({})
   const [submitting, setSubmitting] = React.useState(false)
   const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null)
@@ -537,7 +758,17 @@ function FormRenderer({ block }: { block: FormBlock }) {
     setResult(null)
     try {
       const outcome = await submitPluginAction(block.submit.endpoint, block.submit.method, values)
-      setResult(outcome.ok ? { ok: true } : { ok: false, message: outcome.error ?? outcome.issues?.map((i) => i.message).join(", ") ?? "Submission failed" })
+      if (outcome.ok) {
+        // Inside a modal/drawer: closing IS the success feedback, and
+        // `refresh: true` is what bumps refreshSignal — see
+        // MasterDetailProvider's closeTarget doc — so the table/detail that
+        // opened this form picks up the edit. At the top level, no overlay
+        // to close, so show the inline confirmation instead.
+        if (modalId) closeTarget(modalId, { refresh: true })
+        else setResult({ ok: true })
+      } else {
+        setResult({ ok: false, message: outcome.error ?? outcome.issues?.map((i) => i.message).join(", ") ?? "Submission failed" })
+      }
     } finally {
       setSubmitting(false)
     }
@@ -642,8 +873,14 @@ function ActionButtonRenderer({ block }: { block: { label: string; action: { met
 }
 
 /** Every form-only input type, dispatched by a single component so
- * `BlockNode` doesn't need a case per input. */
+ * `BlockNode` doesn't need a case per input. `defaultFrom` (resolved via
+ * `resolveDefault`, which checks the master-detail context) wins over a
+ * literal `default` whenever both resolve — see `resolveDefault`'s own doc.
+ * A value already present in `form.values` (user edit, or an earlier seed)
+ * always wins over either. */
 function FormInput({ block, form }: { block: Extract<Block, { type: string }>; form: FormScope }) {
+  const ctx = React.useContext(MasterDetailContext)
+
   switch (block.type) {
     case "textInput":
       return (
@@ -652,7 +889,7 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
           required={block.required}
           type={block.sensitive ? "password" : "text"}
           placeholder={block.placeholder}
-          value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+          value={(form.values[block.name] as string | undefined) ?? (resolveDefault(block, ctx) as string | undefined) ?? ""}
           onChange={(e) => form.setValue(block.name, e.target.value)}
         />
       )
@@ -664,7 +901,7 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
           <Textarea
             required={block.required}
             rows={block.rows}
-            value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+            value={(form.values[block.name] as string | undefined) ?? (resolveDefault(block, ctx) as string | undefined) ?? ""}
             onChange={(e) => form.setValue(block.name, e.target.value)}
           />
         </div>
@@ -678,7 +915,7 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
           min={block.min}
           max={block.max}
           step={block.step}
-          value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+          value={(form.values[block.name] as string | number | undefined) ?? (resolveDefault(block, ctx) as string | undefined) ?? ""}
           onChange={(e) => form.setValue(block.name, e.target.value === "" ? "" : Number(e.target.value))}
         />
       )
@@ -687,7 +924,7 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
         <div className="space-y-1">
           <label className="text-sm font-medium">{block.label}</label>
           <Select
-            value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+            value={(form.values[block.name] as string | undefined) ?? (resolveDefault(block, ctx) as string | undefined) ?? ""}
             onValueChange={(v) => form.setValue(block.name, v)}
           >
             <SelectTrigger>
@@ -707,20 +944,24 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
       return (
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
-            checked={Boolean(form.values[block.name] ?? block.default ?? false)}
+            checked={
+              block.name in form.values
+                ? coerceBoolean(form.values[block.name])
+                : coerceBoolean(resolveDefault(block, ctx) ?? false)
+            }
             onCheckedChange={(checked) => form.setValue(block.name, checked === true)}
           />
           {block.label}
         </label>
       )
     case "slider": {
-      const current = (form.values[block.name] as number | undefined) ?? Number(block.default ?? block.min)
+      const current = (form.values[block.name] as number | undefined) ?? Number(resolveDefault(block, ctx) ?? block.min)
       return (
         <Slider label={block.label} min={block.min} max={block.max} step={block.step} value={[current]} onValueChange={([v]) => form.setValue(block.name, v)} />
       )
     }
     case "dateInput": {
-      const current = (form.values[block.name] as string | undefined) ?? block.default
+      const current = (form.values[block.name] as string | undefined) ?? (resolveDefault(block, ctx) as string | undefined)
       return (
         <DatePicker
           label={block.label}
@@ -760,13 +1001,13 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
           <input
             type="color"
             className="h-8 w-16 rounded border border-input"
-            value={(form.values[block.name] as string | undefined) ?? block.default ?? "#000000"}
+            value={(form.values[block.name] as string | undefined) ?? (resolveDefault(block, ctx) as string | undefined) ?? "#000000"}
             onChange={(e) => form.setValue(block.name, e.target.value)}
           />
         </div>
       )
     case "bilingualText": {
-      const value = (form.values[block.name] as BilingualValue | undefined) ?? {}
+      const value = (form.values[block.name] as BilingualValue | undefined) ?? (resolveDefault(block, ctx) as BilingualValue | undefined) ?? {}
       return (
         <BilingualInput
           label={block.label}
@@ -779,7 +1020,7 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
       )
     }
     case "referenceSelect":
-      return <ReferenceSelectInput block={block} form={form} />
+      return <ReferenceSelectInput block={block} form={form} ctx={ctx} />
     default:
       return <UnsupportedBlock reason={block.type} />
   }
@@ -788,9 +1029,22 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
 function ReferenceSelectInput({
   block,
   form,
+  ctx,
 }: {
-  block: { type: "referenceSelect"; name: string; label: string; source: string; valueField: string; labelField: string; required?: boolean; placeholder?: string; default?: string }
+  block: {
+    type: "referenceSelect"
+    name: string
+    label: string
+    source: string
+    valueField: string
+    labelField: string
+    required?: boolean
+    placeholder?: string
+    default?: string
+    defaultFrom?: string
+  }
   form: FormScope
+  ctx: Pick<MasterDetailContextValue, "selections" | "rows">
 }) {
   const state = usePluginData<Record<string, unknown>[]>(block.source, (data) => (Array.isArray(data) ? data : null))
   const options = state.status === "ready" ? state.data : []
@@ -798,7 +1052,7 @@ function ReferenceSelectInput({
     <div className="space-y-1">
       <label className="text-sm font-medium">{block.label}</label>
       <Select
-        value={(form.values[block.name] as string | undefined) ?? block.default ?? ""}
+        value={(form.values[block.name] as string | undefined) ?? (resolveDefault(block, ctx) as string | undefined) ?? ""}
         onValueChange={(v) => form.setValue(block.name, v)}
       >
         <SelectTrigger>

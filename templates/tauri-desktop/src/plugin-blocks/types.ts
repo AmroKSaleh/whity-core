@@ -140,6 +140,7 @@ export interface MarkdownBlock {
 export type RowAction =
   | { label: string; href: string }
   | { label: string; method: "POST" | "PUT" | "DELETE"; endpoint: string; confirm?: string }
+  | { label: string; open: string }
 
 export interface SourceParam {
   param: string
@@ -197,6 +198,14 @@ export interface FieldArrayBlock {
   children: Block[]
 }
 
+/**
+ * `defaultFrom` (WC-block-modal-drawer, additive — never overloads `default`'s
+ * literal-value type) is on every one of the SDK's INPUT_LEAF_TYPES: a
+ * dot-path address (`"{targetId}.{field}"`, the same addressing
+ * `SourceParam.from` uses) into the master-detail context's published row —
+ * see `block-renderer.tsx`'s `useEffectiveSource`/`FormInput`. Resolved
+ * BEFORE `default` when both are somehow present.
+ */
 export interface TextInputBlock {
   type: "textInput"
   name: string
@@ -204,6 +213,7 @@ export interface TextInputBlock {
   placeholder?: string
   required?: boolean
   default?: string
+  defaultFrom?: string
   sensitive?: boolean
   visibleWhen?: VisibleWhen
 }
@@ -215,6 +225,7 @@ export interface TextAreaBlock {
   rows?: number
   required?: boolean
   default?: string
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -225,6 +236,7 @@ export interface RichTextInputBlock {
   rows?: number
   required?: boolean
   default?: string
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -237,6 +249,7 @@ export interface NumberInputBlock {
   step?: number
   required?: boolean
   default?: string
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -247,6 +260,7 @@ export interface SelectBlock {
   options: { value: string; label: string }[]
   required?: boolean
   default?: string
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -255,6 +269,7 @@ export interface CheckboxBlock {
   name: string
   label: string
   default?: boolean
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -266,6 +281,7 @@ export interface SliderBlock {
   max: number
   step?: number
   default?: string
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -275,6 +291,7 @@ export interface DateInputBlock {
   label: string
   required?: boolean
   default?: string
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -285,6 +302,7 @@ export interface FileInputBlock {
   accept?: string
   required?: boolean
   encoding?: "base64"
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -293,6 +311,7 @@ export interface ColorInputBlock {
   name: string
   label: string
   default?: string
+  defaultFrom?: string
   visibleWhen?: VisibleWhen
 }
 
@@ -309,6 +328,7 @@ export interface BilingualTextInputBlock {
   required?: boolean
   arLabel?: string
   enLabel?: string
+  defaultFrom?: string
 }
 
 export interface ReferenceSelectBlock {
@@ -321,6 +341,7 @@ export interface ReferenceSelectBlock {
   required?: boolean
   placeholder?: string
   default?: string
+  defaultFrom?: string
 }
 
 export interface SubmitButtonBlock {
@@ -357,6 +378,34 @@ export interface SelectorBlock {
   valueField: string
   labelField: string
   placeholder?: string
+}
+
+/**
+ * Container (WC-block-modal-drawer): `id` is a blockId (non-empty, no dots,
+ * no whitespace — the SDK validator enforces this, unambiguous for
+ * `{id}.{field}` addressing). `trigger`, when present, is a plain button
+ * label rendered internally (NOT a nested Block — there is no trigger
+ * slot); absent means the overlay is only opened via a `dataTable`
+ * rowAction's `open: id`. One homogeneous `children` slot, same as every
+ * other container.
+ */
+export interface ModalBlock {
+  type: "modal"
+  id: string
+  title: string
+  trigger?: string
+  variant?: "primary" | "secondary" | "outline" | "ghost" | "destructive"
+  size?: "sm" | "md" | "lg"
+  children: Block[]
+}
+
+export interface DrawerBlock {
+  type: "drawer"
+  id: string
+  title: string
+  trigger?: string
+  side?: "left" | "right"
+  children: Block[]
 }
 
 export type Block =
@@ -401,6 +450,8 @@ export type Block =
   | ActionButtonBlock
   | ChartBlock
   | SelectorBlock
+  | ModalBlock
+  | DrawerBlock
 
 /** A single plugin-contributed UI feature, as published by the offline host's
  * `GET /__whity/frontend-features` (mirrors the server's `GET /api/v1/frontend/features`). */

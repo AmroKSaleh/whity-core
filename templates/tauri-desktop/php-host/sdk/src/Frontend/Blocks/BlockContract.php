@@ -333,6 +333,7 @@ final class BlockContract
                 'placeholder' => ['type' => 'string',    'required' => false],
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'textArea' => ['container' => false, 'props' => [
@@ -341,6 +342,7 @@ final class BlockContract
                 'rows'        => ['type' => 'int',       'required' => false],
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             // WC-532 A5: a Markdown-aware multi-line input. Submits Markdown
@@ -352,6 +354,7 @@ final class BlockContract
                 'rows'        => ['type' => 'int',       'required' => false],
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'numberInput' => ['container' => false, 'props' => [
@@ -362,6 +365,7 @@ final class BlockContract
                 'step'        => ['type' => 'int',       'required' => false],
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'select' => ['container' => false, 'props' => [
@@ -370,12 +374,14 @@ final class BlockContract
                 'options'     => ['type' => 'selectOptions', 'required' => true],
                 'required'    => ['type' => 'bool',         'required' => false],
                 'default'     => ['type' => 'string',       'required' => false],
+                'defaultFrom' => ['type' => 'contextPath',  'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'checkbox' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'default'     => ['type' => 'bool',      'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'slider' => ['container' => false, 'props' => [
@@ -385,6 +391,7 @@ final class BlockContract
                 'max'         => ['type' => 'int',       'required' => true],
                 'step'        => ['type' => 'int',       'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'dateInput' => ['container' => false, 'props' => [
@@ -392,6 +399,7 @@ final class BlockContract
                 'label'       => ['type' => 'string',    'required' => true],
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'fileInput' => ['container' => false, 'props' => [
@@ -405,6 +413,7 @@ final class BlockContract
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'default'     => ['type' => 'string',    'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             // WC-532 A4: a paired Arabic/English bilingual text input. Submits a
@@ -436,6 +445,7 @@ final class BlockContract
                 'required'    => ['type' => 'bool',       'required' => false],
                 'placeholder' => ['type' => 'string',     'required' => false],
                 'default'     => ['type' => 'string',     'required' => false],
+                'defaultFrom' => ['type' => 'contextPath', 'required' => false],
             ]],
             'submitButton' => ['container' => false, 'props' => [
                 'label'              => ['type' => 'string', 'required' => true],
@@ -450,6 +460,33 @@ final class BlockContract
                 'confirm'            => ['type' => 'string',     'required' => false],
                 'variant'            => ['type' => 'enum',       'required' => false,
                     'values' => ['primary', 'secondary', 'outline', 'ghost', 'destructive']],
+            ]],
+
+            // ---- overlay containers (WC-relations-ui): in-place edit/detail ----
+            // A `modal` (→ Dialog) or `drawer` (→ Sheet) wraps its `children` as
+            // overlay content — typically a `form`. Opened two ways: its own
+            // `trigger` button (present → a top-level "Add …" affordance), or,
+            // when `trigger` is omitted, ONLY programmatically by a dataTable
+            // `rowActions` entry of kind `open` that targets this block's `id` and
+            // publishes the clicked row into the master-detail context. Content
+            // then reads that row: a form input via `defaultFrom`, a data-bound
+            // child via a dotted `params.from` (`{id}.{field}`). `id` is REQUIRED
+            // (the row action's target) and carries no dot so the `{id}.{field}`
+            // addressing stays unambiguous. A form nested inside closes the
+            // overlay on submit-success (renderer convention — no prop).
+            'modal' => ['container' => true, 'props' => [
+                'id'      => ['type' => 'blockId', 'required' => true],
+                'title'   => ['type' => 'string',  'required' => true],
+                'trigger' => ['type' => 'string',  'required' => false],
+                'variant' => ['type' => 'enum',    'required' => false,
+                    'values' => ['primary', 'secondary', 'outline', 'ghost', 'destructive']],
+                'size'    => ['type' => 'enum',     'required' => false, 'values' => ['sm', 'md', 'lg']],
+            ]],
+            'drawer' => ['container' => true, 'props' => [
+                'id'      => ['type' => 'blockId', 'required' => true],
+                'title'   => ['type' => 'string',  'required' => true],
+                'trigger' => ['type' => 'string',  'required' => false],
+                'side'    => ['type' => 'enum',     'required' => false, 'values' => ['left', 'right']],
             ]],
         ];
     }
