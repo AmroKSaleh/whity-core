@@ -43,6 +43,13 @@ class OusApiHandler
 
     /**
      * GET /api/ous - List OUs for the current tenant (paginated).
+     *
+     * Supports `?parent_id=` to narrow the list to one OU's DIRECT children
+     * (`parent_id=0` selects the roots). The parameter used to be accepted and
+     * discarded, which is the worst of both worlds: the caller believes it
+     * filtered and cannot tell an ignored filter from one that matched
+     * everything. A malformed value is now a 422 rather than a silent
+     * full-tenant read.
      */
     public function list(Request $request): Response
     {
@@ -50,44 +57,58 @@ class OusApiHandler
             $tenantId = TenantContext::getTenantId();
             $p = PaginationParams::fromPath($request->getPath());
 
+            $query = self::queryParams($request);
+            $parentId = null;
+            if (isset($query['parent_id']) && $query['parent_id'] !== '') {
+                if (!ctype_digit($query['parent_id'])) {
+                    return Response::error('parent_id must be a non-negative integer', 422);
+                }
+                $parentId = (int) $query['parent_id'];
+            }
+
+            $parentClause = self::parentClause($parentId);
+
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists OUs across all tenants; scoped else-branch binds tenant_id
-                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM organizational_units');
+                $countSql = 'SELECT COUNT(*) AS cnt FROM organizational_units WHERE 1 = 1' . $parentClause;
+                $countStmt = $this->db->prepare($countSql);
+                if ($parentId !== null && $parentId !== 0) {
+                    $countStmt->bindValue(':parent_id', $parentId, PDO::PARAM_INT);
+                }
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
                 // @tenant-guard-ignore: system-tenant (id 0) lists all OUs; scoped else-branch binds tenant_id
-                $stmt = $this->db->prepare('
-                    SELECT id, tenant_id, parent_id, name, slug, description, created_at
-                    FROM organizational_units
-                    ORDER BY tenant_id, id
-                    LIMIT :limit OFFSET :offset
-                ');
-                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
-                $stmt->execute();
+                $sql = 'SELECT id, tenant_id, parent_id, name, slug, description, created_at'
+                    . ' FROM organizational_units WHERE 1 = 1' . $parentClause
+                    . ' ORDER BY tenant_id, id LIMIT :limit OFFSET :offset';
+                $stmt = $this->db->prepare($sql);
             } else {
-                $countStmt = $this->db->prepare(
-                    'SELECT COUNT(*) AS cnt FROM organizational_units WHERE tenant_id = :tenant_id'
-                );
+                $countSql = 'SELECT COUNT(*) AS cnt FROM organizational_units'
+                    . ' WHERE tenant_id = :tenant_id' . $parentClause;
+                $countStmt = $this->db->prepare($countSql);
                 $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                if ($parentId !== null && $parentId !== 0) {
+                    $countStmt->bindValue(':parent_id', $parentId, PDO::PARAM_INT);
+                }
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-                $stmt = $this->db->prepare('
-                    SELECT id, tenant_id, parent_id, name, slug, description, created_at
-                    FROM organizational_units
-                    WHERE tenant_id = :tenant_id
-                    ORDER BY id
-                    LIMIT :limit OFFSET :offset
-                ');
+                $sql = 'SELECT id, tenant_id, parent_id, name, slug, description, created_at'
+                    . ' FROM organizational_units WHERE tenant_id = :tenant_id' . $parentClause
+                    . ' ORDER BY id LIMIT :limit OFFSET :offset';
+                $stmt = $this->db->prepare($sql);
                 $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
-                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
-                $stmt->execute();
             }
+
+            if ($parentId !== null && $parentId !== 0) {
+                $stmt->bindValue(':parent_id', $parentId, PDO::PARAM_INT);
+            }
+            $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+            $stmt->execute();
 
             $ous = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -96,6 +117,61 @@ class OusApiHandler
             error_log('[OusApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to fetch organizational units', 500);
         }
+    }
+
+    /**
+     * The `AND ...` fragment implementing the `parent_id` filter, or '' for no
+     * filter.
+     *
+     * Kept out of {@see self::list()} on purpose: the tenant-predicate scanner
+     * stitches SQL fragments assigned within one function into the statement
+     * that consumes them, which would pull this clause into the system-tenant
+     * queries and push their first line above their `@tenant-guard-ignore`
+     * annotations. Returning it from a separate method keeps each statement's
+     * literal — and its annotation — adjacent.
+     *
+     * @param int|null $parentId Parsed filter: null for none, 0 for the roots.
+     */
+    private static function parentClause(?int $parentId): string
+    {
+        if ($parentId === null) {
+            return '';
+        }
+
+        // No OU can have id 0, so 0 is free to mean "the roots" — otherwise a
+        // query string has no way to express parent_id IS NULL.
+        return $parentId === 0 ? ' AND parent_id IS NULL' : ' AND parent_id = :parent_id';
+    }
+
+    /**
+     * Read the request's query parameters.
+     *
+     * Merges $_GET (the runtime source, since FrankenPHP strips the query off
+     * the path) with anything embedded in the path, path last — the same
+     * precedence PaginationParams uses, so a test that puts params in the path
+     * and production traffic resolve identically.
+     *
+     * @return array<string, string>
+     */
+    private static function queryParams(Request $request): array
+    {
+        $query = [];
+        foreach ($_GET as $k => $v) {
+            if (is_string($k) && is_string($v)) {
+                $query[$k] = $v;
+            }
+        }
+        $qs = parse_url($request->getPath(), PHP_URL_QUERY);
+        if (is_string($qs) && $qs !== '') {
+            parse_str($qs, $parsed);
+            foreach ($parsed as $k => $v) {
+                if (is_string($k) && is_string($v)) {
+                    $query[$k] = $v;
+                }
+            }
+        }
+
+        return $query;
     }
 
     /**

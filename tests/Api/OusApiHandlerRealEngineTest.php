@@ -414,6 +414,105 @@ final class OusApiHandlerRealEngineTest extends TestCase
     }
 
     /**
+     * `?parent_id=` used to be accepted and silently discarded, so a caller that
+     * asked for one subtree got the whole tenant back and had no way to tell.
+     * It now filters to direct children (11 Backend and 13 Frontend under 10).
+     */
+    public function testListFiltersByParentId(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?parent_id=10'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $ids = array_map(static fn (array $ou): int => (int) $ou['id'], $body['data']);
+        sort($ids);
+        $this->assertSame([11, 13], $ids, 'Only the direct children of OU 10 may be returned.');
+        // 12 Platform is a grandchild: the filter is one level, not a subtree.
+        $this->assertNotContains(12, $ids);
+    }
+
+    /**
+     * The pagination envelope must describe the FILTERED set, not the tenant's
+     * whole OU count — a total that ignores the filter would make a client walk
+     * pages that do not exist.
+     */
+    public function testListParentIdFilterIsReflectedInPaginationTotal(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?parent_id=10'));
+
+        $pagination = json_decode($response->getBody(), true)['pagination'];
+        $this->assertSame(2, $pagination['total']);
+        $this->assertSame(1, $pagination['totalPages']);
+    }
+
+    /** `parent_id=0` selects the tenant's roots (10 Engineering and 14 Sales). */
+    public function testListFiltersByRootParentId(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?parent_id=0'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $ids = array_map(
+            static fn (array $ou): int => (int) $ou['id'],
+            json_decode($response->getBody(), true)['data']
+        );
+        sort($ids);
+        $this->assertSame([10, 14], $ids);
+    }
+
+    /**
+     * An empty value is "no filter" — the same reading TagsApiHandler gives
+     * `?group_id=`, so a client building a query string from a blank form field
+     * does not get a surprise 422.
+     */
+    public function testListTreatsEmptyParentIdAsNoFilter(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?parent_id='));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertCount(5, json_decode($response->getBody(), true)['data']);
+    }
+
+    /**
+     * A malformed value is refused rather than ignored: silently returning an
+     * unfiltered list is what made the original defect invisible.
+     */
+    public function testListRejectsNonNumericParentId(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?parent_id=abc'));
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame(
+            'parent_id must be a non-negative integer',
+            json_decode($response->getBody(), true)['error']
+        );
+    }
+
+    /**
+     * The filter must not become a cross-tenant read primitive: OU 30 belongs to
+     * tenant 2, so tenant 1 asking for its children gets an empty list, not
+     * tenant 2's rows.
+     */
+    public function testListParentIdFilterStaysTenantScoped(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?parent_id=30'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame([], json_decode($response->getBody(), true)['data']);
+    }
+
+    /**
      * A valid create persists the OU, dispatches the creating/created hooks, and
      * returns 201 with the new row.
      */
