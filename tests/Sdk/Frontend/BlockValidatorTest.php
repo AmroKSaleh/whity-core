@@ -302,9 +302,9 @@ final class BlockValidatorTest extends TestCase
         // (WC-233) + SP4 chart type (WC-240)
         $expected = [
             'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
-            'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
+            'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider', 'drawer',
             'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list', 'markdown', 'math',
-            'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
+            'modal', 'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput',
         ];
         sort($expected);
@@ -1470,7 +1470,7 @@ final class BlockValidatorTest extends TestCase
             'rowActions' => [['label' => 'X', 'href' => '/x', 'endpoint' => '/api/x', 'method' => 'POST']],
         ]]);
         $this->assertFalse($result['ok']);
-        $this->assertStringContainsString("exactly one of 'href' or 'endpoint'", implode(' | ', $result['errors']));
+        $this->assertStringContainsString("exactly one of 'href', 'endpoint', or 'open'", implode(' | ', $result['errors']));
     }
 
     public function testRowActionWithNeitherHrefNorEndpointIsRejected(): void
@@ -1481,7 +1481,7 @@ final class BlockValidatorTest extends TestCase
             'rowActions' => [['label' => 'X']],
         ]]);
         $this->assertFalse($result['ok']);
-        $this->assertStringContainsString("exactly one of 'href' or 'endpoint'", implode(' | ', $result['errors']));
+        $this->assertStringContainsString("exactly one of 'href', 'endpoint', or 'open'", implode(' | ', $result['errors']));
     }
 
     public function testRowActionEndpointWithBadMethodIsRejected(): void
@@ -1735,7 +1735,7 @@ final class BlockValidatorTest extends TestCase
              'params' => [['param' => 'x']]],
         ]);
         $this->assertFalse($result['ok']);
-        $this->assertStringContainsString('{param: non-empty string, from: non-empty string}', implode(' | ', $result['errors']));
+        $this->assertStringContainsString('{param: non-empty string, from: a selector name or "{targetId}.{field}"}', implode(' | ', $result['errors']));
     }
 
     public function testDataStatChartAndDataListAllAcceptParams(): void
