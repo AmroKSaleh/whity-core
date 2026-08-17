@@ -6,6 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Fixed
+- **A profile's membership lookup is deterministic again, and no longer answers a question it was never asked.** `MembershipRepository::findByProfile()` picked its row with `LIMIT 1` and no `ORDER BY`. That was unambiguous by construction until 0.2.1's migration 094 traded the table-wide `UNIQUE(profile_id, tenant_id)` for a partial index over the primary rows only, at which point several memberships per (profile, tenant) became legal and the query started returning whichever row the plan reached first — so the `ou_id` scoping every query built from that membership could differ between calls. It now orders `is_primary DESC, id ASC`, identical to `RoleChecker::getMembershipRow()`, which was given that ordering in the same body of work while this method was overlooked. No deployment behaves differently today: nothing writes a non-primary row yet, so the readers are simply correct *before* the writer lands.
+- **`findActiveByProfile()` is the lookup to use when the answer decides what somebody may do.** `findByProfile()` reports invited and suspended rows, so callers using it to resolve a caller's OU let a suspended member keep their scope. It stays status-agnostic deliberately, and is now documented as such: both core callers — federated tenant-trust login and the email-domain policy — read the status themselves and fail *open* if rows are hidden from them, treating a suspended member who reads back as `null` as a stranger to onboard. The new method is the gate, judging status per row like `RoleChecker::getActiveMembershipRows()`, so a suspended primary stops speaking for a profile without silencing a second role they still legitimately hold.
+
 ## [0.2.2] - 2026-08-16
 
 ### Added
