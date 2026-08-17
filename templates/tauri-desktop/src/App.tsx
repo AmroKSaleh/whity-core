@@ -20,6 +20,7 @@ import { demoCatalogAdapter } from "./demo-catalog-tauri-adapter"
 import { PrinterDemo } from "./printer-demo"
 import { PluginsPage } from "./plugins-page"
 import { PluginStorePage } from "./plugin-store-page"
+import { RolesPage } from "./roles-page"
 import { BlockRenderer } from "./plugin-blocks/block-renderer"
 import { PluginFeaturesProvider, usePluginFeatures, usePluginNavGroups } from "./plugin-nav-provider"
 import { AppStateProvider, AuthGate, useAppState, useAuthGateState } from "./app-state-provider"
@@ -180,6 +181,11 @@ function AuthenticatedApp() {
         <PluginStorePage />
       </>
     )
+  } else if (path === "/roles") {
+    // Server-owned admin surface rendered by the SHARED @amroksaleh/features/roles
+    // page over the remote transport (Path B). RolesScreen renders its own
+    // PageHeader, so no wrapping header here.
+    body = <RolesPage />
   } else if (path.startsWith("/plugins/x/")) {
     // Generic route for ANY installed plugin's screen:'blocks' feature — one
     // provider + one route + one renderer serve every plugin, with zero
