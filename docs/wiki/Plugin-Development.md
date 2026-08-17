@@ -1106,6 +1106,103 @@ the HelloWorld plugin, enqueued as `helloworld:greeting_digest`.
 
 ---
 
+## Step 11 — Put your own events in the audit trail (SDK 1.29)
+
+The host's audit writer subscribes to a hardcoded map of **core** event names,
+so before SDK 1.29 nothing your plugin did appeared in the one screen an
+operator opens to answer "who did what". Implement
+[`PluginEventsInterface`](../../sdk/src/PluginEventsInterface.php) to declare
+which of your own events belong there; the host records them through exactly the
+path core's own rows go through.
+
+```php
+use Whity\Sdk\Hooks\Events;
+
+final class AcmePlugin implements PluginInterface, PluginEventsInterface
+{
+    /** @return array<string, array{targetType: string, idKey: string|null}> */
+    public function getAuditedEvents(): array
+    {
+        return [
+            'task.completed' => ['targetType' => 'task', 'idKey' => 'task_id'],
+        ];
+    }
+}
+
+// …wherever the task is actually completed:
+$hooks->dispatch(Events::forPlugin($this->getName(), 'task.completed'), [
+    'task_id'   => $taskId,
+    'tenant_id' => $tenantId,
+    'title'     => $title,   // kept as sanitised audit metadata
+]);
+```
+
+That writes an `audit_log` row with action `acme:task.completed`, target type
+`acme:task`, target id `$taskId`, and the actor and IP the request already
+resolved.
+
+### Declare bare, dispatch namespaced
+
+You declare a **bare** name and the host stamps your prefix on **both halves** of
+the record — the action and the target type. A `task` target type sitting beside
+core's `user` and `role` would read, to an operator filtering the trail, as
+something core did to a core record.
+
+The host listens on the **namespaced** name, so that is what you dispatch. Build
+it with `Events::forPlugin($this->getName(), 'task.completed')` rather than by
+hand: the prefix is a slug of your plugin name (`Acme\Widgets\Plugin` prefixes as
+`plugin`), and a name that is nearly right matches no listener and reports
+nothing.
+
+Listening on the bare name was considered and rejected. The hook manager tells a
+listener nothing about who dispatched, so with two plugins declaring
+`task.completed` a single dispatch by one of them would have written an audit row
+for both — and a trail that records an event which did not happen is worse than
+one that records nothing. Namespacing the trigger also means two plugins can both
+dispatch `item.created` without running each other's listeners.
+
+A declared name containing `:` is refused: that would be you writing your own
+prefix. A valid one is lowercase, starts with a letter, and continues with
+letters, digits, underscores or dots.
+
+### `idKey` is required, including when it is `null`
+
+`targetType` and `idKey` are both mandatory. `idKey` names the payload key
+holding the affected record's id and becomes the row's `target_id`; for an event
+with no single target, declare `'idKey' => null` explicitly. There is no default,
+because `id` is right for core's payloads and wrong for most plugin ones, and
+getting it wrong produces a row that names an action and points at nothing while
+the write still succeeds.
+
+At runtime the payload is treated as data, not contract: a missing or
+non-numeric id records a null `target_id` rather than failing. Auditing must
+never break the action it records.
+
+### What the trail does with your payload
+
+`tenant_id` in the payload decides which tenant owns the row (then the hook
+context, then the system tenant). Every other scalar is kept as metadata, minus
+the id key (already `target_id`) and minus anything matching the writer's
+secret/PII filter — the same filter core's rows go through, so a `password`,
+`token` or `secret` in your payload never reaches the table.
+
+### One bad declaration costs only you
+
+A `getAuditedEvents()` that throws, or a malformed declaration, is caught: your
+plugin's events are simply not audited (logged, and recorded against your
+plugin's lifecycle), and core's own auditing and every other plugin's are
+untouched. The refusal is whole-declaration rather than per entry, because a
+plugin with half its events audited ships a trail that *looks* complete.
+
+Subscriptions are registered with your other hooks, so disabling your plugin
+removes them and re-enabling it restores them.
+
+The working reference is `getAuditedEvents()` in
+[`HelloWorldPlugin`](../../plugins/HelloWorld/HelloWorldPlugin.php), which
+audits `helloworld:greeting.created` when a greeting is created.
+
+---
+
 ## Checklist
 
 - [ ] Directory `plugins/HelloWorld/` with namespace prefix `HelloWorld\`.
@@ -1132,6 +1229,10 @@ the HelloWorld plugin, enqueued as `helloworld:greeting_digest`.
 - [ ] (Optional) Async jobs declare **bare** names, are idempotent, scope their
       queries to the restored tenant, and opt into `getSubmittableJobs()` only
       where a tenant may legitimately trigger the work on demand (Step 10).
+- [ ] (Optional) Audited events declare **bare** names with an explicit
+      `targetType` and `idKey`, and are dispatched via
+      `Events::forPlugin($this->getName(), …)` rather than a hand-written
+      prefix (Step 11).
 
 See [Architecture.md](./Architecture.md) for how this all fits together.
 

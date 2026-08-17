@@ -53,11 +53,27 @@ final class GreetingsApiHandler
     private PDO $db;
 
     /**
-     * @param PDO $db Live database connection.
+     * Optional announcer, invoked with the created row after a successful
+     * create (SDK 1.29).
+     *
+     * A callback rather than a hook manager, deliberately: this handler is the
+     * code that knows a greeting became real, and nothing else about it should
+     * have to know that events exist, what they are named, or how the host
+     * namespaces them. The plugin passes a closure that dispatches; tests
+     * construct the handler with none and it announces nothing.
+     *
+     * @var (\Closure(array<string, mixed>): void)|null
      */
-    public function __construct(PDO $db)
+    private ?\Closure $onCreated;
+
+    /**
+     * @param PDO $db Live database connection.
+     * @param (\Closure(array<string, mixed>): void)|null $onCreated Optional post-create announcer.
+     */
+    public function __construct(PDO $db, ?\Closure $onCreated = null)
     {
         $this->db = $db;
+        $this->onCreated = $onCreated;
     }
 
     /**
@@ -132,6 +148,18 @@ final class GreetingsApiHandler
             $row = $this->findScoped($id, $tenantId);
             if ($row === null) {
                 return Response::error('Failed to create greeting', 500);
+            }
+
+            // Announced only once the row is read back, so the event describes a
+            // greeting that demonstrably exists rather than one that was merely
+            // attempted. Announcing is fail-soft in the plugin's own closure —
+            // it must never turn a successful create into a 500.
+            if ($this->onCreated !== null) {
+                ($this->onCreated)([
+                    'id' => (int) $row['id'],
+                    'tenant_id' => (int) $row['tenant_id'],
+                    'message' => (string) $row['message'],
+                ]);
             }
 
             return Response::json(['data' => $this->toPublicGreeting($row)], 201);

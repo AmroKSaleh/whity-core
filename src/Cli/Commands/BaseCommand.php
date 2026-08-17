@@ -222,6 +222,18 @@ abstract class BaseCommand
         // registered in the CLI at all and a route gated on one failed closed —
         // the same HTTP/CLI divergence WC-712 fixed for the RoleChecker above,
         // one layer out.
+        //
+        // The audit writer is passed for the same reason, and the case that
+        // makes it necessary rather than tidy is `queue:work`: a plugin JOB that
+        // completes a record and dispatches its own event runs under THIS
+        // loader, so a worker without the writer would leave exactly the
+        // background half of a plugin's activity missing from the trail — and
+        // missing invisibly, since an unsubscribed event raises nothing.
+        //
+        // Deliberately NOT ->subscribe()d here: that would start auditing CORE
+        // CRUD driven from the CLI, which this entry point has never done and
+        // which is a separate decision with its own blast radius.
+        $auditLogger = new \Whity\Core\Audit\AuditLogger($db->getPdo());
         $pluginLoader = new PluginLoader(
             $baseDir . '/plugins',
             $router,
@@ -233,7 +245,8 @@ abstract class BaseCommand
             $healthProbeRegistry,
             $tableOwnershipRegistry,
             $dataTypeRegistry,
-            $pluginSettingsRegistry
+            $pluginSettingsRegistry,
+            $auditLogger
         );
         $pluginLoader->load();
 
