@@ -160,6 +160,17 @@ function resolveDefault(block: { default?: unknown; defaultFrom?: string }, ctx:
   return block.default
 }
 
+/** A row's published field can arrive as a real boolean or as a string
+ * ("true"/"1" vs. "false"/"0") depending on how the source serialized it —
+ * plain `Boolean(...)` truthiness is wrong here since "false" and "0" are
+ * both non-empty strings. Matches the web renderer's coercion. */
+function coerceBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") return value === "true" || value === "1"
+  if (typeof value === "number") return value === 1
+  return Boolean(value)
+}
+
 /** Applies a data-bound block's `params` (master-detail query params) on top
  * of its `source`, same as the web renderer's `useEffectiveSource`. */
 function useEffectiveSource(source: string, params?: SourceParam[]): string {
@@ -933,7 +944,11 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
       return (
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
-            checked={Boolean(form.values[block.name] ?? resolveDefault(block, ctx) ?? false)}
+            checked={
+              block.name in form.values
+                ? coerceBoolean(form.values[block.name])
+                : coerceBoolean(resolveDefault(block, ctx) ?? false)
+            }
             onCheckedChange={(checked) => form.setValue(block.name, checked === true)}
           />
           {block.label}
