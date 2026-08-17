@@ -1,4 +1,4 @@
-import { IconBox, IconBuildingStore, IconHome, IconPrinter, IconPuzzle } from "@tabler/icons-react"
+import { IconBox, IconBuildingStore, IconHome, IconPrinter, IconPuzzle, IconShieldLock } from "@tabler/icons-react"
 import type { NavConfig } from "@amroksaleh/features/nav"
 
 /**
@@ -48,6 +48,23 @@ export const navConfig: NavConfig = {
           label: "Plugin store",
           href: "/plugin-store",
           icon: <IconBuildingStore className="size-5" />,
+        },
+      ],
+    },
+    {
+      id: "administration",
+      label: "Administration",
+      items: [
+        {
+          id: "roles",
+          label: "Roles",
+          href: "/roles",
+          // Server-owned admin surface: RolesScreen fetches through the remote
+          // transport and the backend RBAC is authoritative. The entry is shown
+          // unconditionally; a user without roles access sees the screen's error
+          // state (capability-gating the nav entry itself is a later refinement,
+          // once App resolves capabilities at nav-render time).
+          icon: <IconShieldLock className="size-5" />,
         },
       ],
     },

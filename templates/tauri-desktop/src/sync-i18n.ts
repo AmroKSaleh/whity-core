@@ -54,3 +54,19 @@ const STRINGS: Record<string, string> = {
 
 /** The app-wide translator injected into every shared feature component. */
 export const appT: NavTranslate = (key) => STRINGS[key] ?? key
+
+/**
+ * Translator for `@amroksaleh/features/roles`'s `RolesScreen`, whose `t` prop
+ * is richer than `NavTranslate`: it passes an English `fallback` and `{token}`
+ * `vars` alongside each key. The screen's own default (`identityTranslate`)
+ * renders the raw KEY, so a real translator is required for a usable UI. This
+ * one resolves `STRINGS[key]` first (nothing roles-specific is mapped yet —
+ * add keys here to localize), then the fallback, then the key, and interpolates
+ * any `{token}` placeholders. Typed structurally so it needs no import from the
+ * roles package.
+ */
+export const rolesT = (key: string, fallback?: string, vars?: Record<string, string | number>): string => {
+  const template = STRINGS[key] ?? fallback ?? key
+  if (!vars) return template
+  return template.replace(/\{(\w+)\}/g, (_match, name: string) => (name in vars ? String(vars[name]) : `{${name}}`))
+}
