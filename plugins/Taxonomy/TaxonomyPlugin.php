@@ -10,6 +10,7 @@ use Taxonomy\Api\TagsApiHandler;
 use Taxonomy\Migrations\CreateTaxonomyTables;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\Sql\SequenceAllocator;
@@ -22,19 +23,21 @@ use Whity\Sdk\Sql\SequenceAllocator;
  * host (ADR 0003 / desktop feature-parity effort), mirroring the Relations
  * port. Core Taxonomy keeps serving the web app until cutover.
  *
- * SLICE 1a — the adopt-and-augment migration (offline-SQLite-safe). SLICE 1b
- * (this) — `tag_groups` and `tags` as two-way-syncable resources via
- * {@see \Whity\Sdk\Sync\SyncController}, with CRUD routes. SLICE 1c adds the
- * block UI (a master-detail: pick a group → manage its tags). Cross-store sync
- * of a tag's `group_id` reference (client→server id remapping) is deferred to
- * the same reference-remapping work the Relations edges slice defers.
+ * SLICE 1a — the adopt-and-augment migration (offline-SQLite-safe). SLICE 1b —
+ * `tag_groups` and `tags` as two-way-syncable resources via
+ * {@see \Whity\Sdk\Sync\SyncController}, with CRUD routes. SLICE 1c (this) — the
+ * BLOCK UI: {@see getFrontendFeatures()} declares two CRUD screens (tag groups,
+ * and tags whose owning group is picked via a `referenceSelect`), full
+ * create/edit/delete on the modal overlays. Cross-store sync of a tag's
+ * `group_id` reference (client→server id remapping) is deferred to the same
+ * reference-remapping work the Relations edges slice defers.
  *
  * As with Relations, the `/api/tag-groups` + `/api/tags` routes + the
  * `tags:read`/`tags:manage` permissions collide with core Taxonomy on the SERVER
  * (core owns them) — so the plugin is inert there until the R3 cutover; it is the
  * sole provider on the OFFLINE host, where no core Taxonomy exists.
  */
-final class TaxonomyPlugin implements PluginInterface, PluginRequirementsInterface
+final class TaxonomyPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface
 {
     public function getName(): string
     {
@@ -43,14 +46,13 @@ final class TaxonomyPlugin implements PluginInterface, PluginRequirementsInterfa
 
     public function getVersion(): string
     {
-        return '0.1.0';
+        return '0.2.0';
     }
 
     public function getSdkConstraint(): string
     {
-        // Requires the SDK carrying Whity\Sdk\Sync\SyncController (^1.2); the
-        // block-UI slice will raise this to ^1.27 (modal/drawer) when it lands.
-        return '^1.2';
+        // Requires SyncController AND the modal overlay block type — SDK 1.27+.
+        return '^1.27';
     }
 
     public function getCoreConstraint(): string
@@ -130,6 +132,162 @@ final class TaxonomyPlugin implements PluginInterface, PluginRequirementsInterfa
     public function getMigrations(): array
     {
         return [CreateTaxonomyTables::class];
+    }
+
+    /**
+     * SLICE 1c: the Taxonomy block UI. One `screen: 'blocks'` feature gated on
+     * `tags:read`; write affordances carry `tags:manage`.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getFrontendFeatures(): array
+    {
+        return [
+            [
+                'id' => 'taxonomy',
+                'label' => 'Taxonomy',
+                'icon' => 'tags',
+                'group' => 'plugins',
+                'order' => 40,
+                'screen' => 'blocks',
+                'requiredPermission' => 'tags:read',
+                'blocks' => $this->blocks(),
+            ],
+        ];
+    }
+
+    /**
+     * Two CRUD screens: tag groups, and tags (each tag picks its owning group via
+     * a referenceSelect fed from /api/tag-groups). Create/edit run on modal
+     * overlays; edit seeds via defaultFrom and PATCHes the templated per-row
+     * endpoint; delete tombstones. Validated against {@see
+     * \Whity\Sdk\Frontend\Blocks\BlockValidator} at registration.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function blocks(): array
+    {
+        return [
+            [
+                'type' => 'section',
+                'title' => 'Tag groups',
+                'children' => [
+                    [
+                        'type' => 'text',
+                        'value' => 'Groups that organise the tenant\'s tags. Changes sync offline-first.',
+                        'tone' => 'muted',
+                    ],
+                    $this->tagGroupModal('create-tag-group', 'New tag group', 'New tag group', 'POST', '/api/tag-groups', false),
+                    $this->tagGroupModal('edit-tag-group', 'Edit tag group', null, 'PATCH', '/api/tag-groups/{edit-tag-group.id}', true),
+                    [
+                        'type' => 'dataTable',
+                        'source' => '/api/tag-groups',
+                        'columns' => [
+                            ['key' => 'groupKey', 'label' => 'Key', 'sortable' => true, 'filterable' => true],
+                            ['key' => 'displayName', 'label' => 'Display name', 'sortable' => true],
+                        ],
+                        'pageSize' => 20,
+                        'emptyText' => 'No tag groups yet — add the first one.',
+                        'rowActions' => [
+                            ['label' => 'Edit', 'open' => 'edit-tag-group'],
+                            ['label' => 'Delete', 'method' => 'DELETE', 'endpoint' => '/api/tag-groups/{id}',
+                                'confirm' => 'Delete this tag group? Its tags are removed too.'],
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'type' => 'section',
+                'title' => 'Tags',
+                'children' => [
+                    $this->tagModal('create-tag', 'New tag', 'New tag', 'POST', '/api/tags', false),
+                    $this->tagModal('edit-tag', 'Edit tag', null, 'PATCH', '/api/tags/{edit-tag.id}', true),
+                    [
+                        'type' => 'dataTable',
+                        'source' => '/api/tags',
+                        'columns' => [
+                            ['key' => 'name', 'label' => 'Name', 'sortable' => true, 'filterable' => true],
+                        ],
+                        'pageSize' => 20,
+                        'emptyText' => 'No tags yet — add the first one.',
+                        'rowActions' => [
+                            ['label' => 'Edit', 'open' => 'edit-tag'],
+                            ['label' => 'Delete', 'method' => 'DELETE', 'endpoint' => '/api/tags/{id}',
+                                'confirm' => 'Delete this tag?'],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * A create/edit modal for a tag group. When $seeded, inputs pull from the
+     * opened row via defaultFrom (a full-replace edit must carry every field).
+     *
+     * @return array<string, mixed>
+     */
+    private function tagGroupModal(string $id, string $title, ?string $trigger, string $method, string $endpoint, bool $seeded): array
+    {
+        $key  = ['type' => 'textInput', 'name' => 'groupKey', 'label' => 'Key', 'required' => true];
+        $name = ['type' => 'textInput', 'name' => 'displayName', 'label' => 'Display name'];
+        if ($seeded) {
+            $key['defaultFrom']  = "{$id}.groupKey";
+            $name['defaultFrom'] = "{$id}.displayName";
+        }
+
+        return $this->modal($id, $title, $trigger, [
+            'type' => 'form',
+            'submit' => ['method' => $method, 'endpoint' => $endpoint],
+            'requiredPermission' => 'tags:manage',
+            'children' => [$key, $name, $this->submit($seeded)],
+        ]);
+    }
+
+    /**
+     * A create/edit modal for a tag: its owning group is chosen via a
+     * referenceSelect fed from /api/tag-groups.
+     *
+     * @return array<string, mixed>
+     */
+    private function tagModal(string $id, string $title, ?string $trigger, string $method, string $endpoint, bool $seeded): array
+    {
+        $group = ['type' => 'referenceSelect', 'name' => 'groupId', 'label' => 'Group',
+            'source' => '/api/tag-groups', 'valueField' => 'id', 'labelField' => 'groupKey', 'required' => true];
+        $name  = ['type' => 'textInput', 'name' => 'name', 'label' => 'Name', 'required' => true];
+        if ($seeded) {
+            $group['defaultFrom'] = "{$id}.groupId";
+            $name['defaultFrom']  = "{$id}.name";
+        }
+
+        return $this->modal($id, $title, $trigger, [
+            'type' => 'form',
+            'submit' => ['method' => $method, 'endpoint' => $endpoint],
+            'requiredPermission' => 'tags:manage',
+            'children' => [$group, $name, $this->submit($seeded)],
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     *
+     * @return array<string, mixed>
+     */
+    private function modal(string $id, string $title, ?string $trigger, array $form): array
+    {
+        $modal = ['type' => 'modal', 'id' => $id, 'title' => $title, 'size' => 'md', 'children' => [$form]];
+        if ($trigger !== null) {
+            $modal['trigger'] = $trigger;
+            $modal['variant'] = 'primary';
+        }
+
+        return $modal;
+    }
+
+    /** @return array<string, mixed> */
+    private function submit(bool $seeded): array
+    {
+        return ['type' => 'submitButton', 'label' => $seeded ? 'Save changes' : 'Create', 'requiredPermission' => 'tags:manage'];
     }
 
     // ==================== route delegates: tag groups ====================

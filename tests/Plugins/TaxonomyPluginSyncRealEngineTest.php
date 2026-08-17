@@ -77,11 +77,11 @@ final class TaxonomyPluginSyncRealEngineTest extends TestCase
 
     public function testTagGroupCreateThenSyncLifecycle(): void
     {
-        $created = $this->groups->create($this->body(['groupKey' => 'colors', 'displayName' => ['en' => 'Colors']]));
+        $created = $this->groups->create($this->body(['groupKey' => 'colors', 'displayName' => 'Colors']));
         $this->assertSame(201, $created->getStatusCode());
         $group = $this->data($created);
         $this->assertSame('colors', $group['groupKey']);
-        $this->assertSame(['en' => 'Colors'], (array) $group['displayName']);
+        $this->assertSame('Colors', $group['displayName']);
         $this->assertSame(1, $group['version']);
         $id = $group['id'];
 
@@ -91,10 +91,11 @@ final class TaxonomyPluginSyncRealEngineTest extends TestCase
         $this->assertSame($id, $this->data($replay)['id']);
 
         // Update bumps version.
-        $updated = $this->groups->update($this->body(['groupKey' => 'colours', 'displayName' => ['en' => 'Colours']]), ['id' => (string) $id]);
+        $updated = $this->groups->update($this->body(['groupKey' => 'colours', 'displayName' => 'Colours']), ['id' => (string) $id]);
         $this->assertSame(200, $updated->getStatusCode());
         $this->assertSame(2, $this->data($updated)['version']);
         $this->assertSame('colours', $this->data($updated)['groupKey']);
+        $this->assertSame('Colours', $this->data($updated)['displayName']);
 
         // Soft-delete tombstones; live list drops it.
         $deleted = $this->groups->delete($this->body([]), ['id' => (string) $id]);
