@@ -128,7 +128,14 @@ abstract class OfflinePluginHostConformanceTestCase extends TestCase
         $plugin = $this->pluginUnderTest();
         $declared = $plugin->getPermissions();
 
-        foreach ($plugin->getRoutes() as $route) {
+        $routes = $plugin->getRoutes();
+        // A plugin with no routes trivially conforms — assert the shape so this
+        // test always makes an assertion (phpunit failOnRisky) instead of being
+        // reported "risky" for the (valid) no-routes case, e.g. a migration- or
+        // hooks-only plugin.
+        self::assertIsArray($routes, 'getRoutes() must return a list of route descriptors.');
+
+        foreach ($routes as $route) {
             $permission = $route['requiredPermission'] ?? null;
             if ($permission === null) {
                 continue;
