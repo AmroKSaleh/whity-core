@@ -1,28 +1,33 @@
 name: Automated Tests
 
-# Doc-only changes can't affect the build, tests, or generated artifacts, so
-# skip the suite when every changed path is documentation. `paths-ignore` only
-# suppresses a run when ALL changed files match — a PR that touches both code
-# and docs still runs the full gate. (No required status checks are configured
+# Doc-only changes can't affect the build, tests, or generated artifacts, so the
+# expensive jobs below still skip on them — but they skip via the `changes` job,
+# NOT via `paths-ignore` on the trigger.
+#
+# That difference is the whole point. `paths-ignore` stops the workflow from
+# starting at all, so `CI gate` never reports — and `CI gate` is a REQUIRED check
+# on both `develop` and `main`. A required check that never reports is not a
+# skipped check, it is a permanently pending one, so every doc-only PR was
+# unmergeable by construction.
+#
+# This block used to end with the note "No required status checks are configured
 # on `main`, so a skipped run never leaves a doc-only PR blocked on a pending
-# check.)
+# check." That was true when it was written, and stopped being true the day
+# branch protection was added — with nothing linking the two changes, and no
+# failure until someone opened a PR that touched only docs.
+#
+# Filtering inside the workflow cannot rot that way: the gate always reports, and
+# it already treats `skipped` as success, so the saving is kept and the deadlock
+# is not reachable.
 on:
   push:
     branches:
       - main
       - develop
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'LICENSE'
   pull_request:
     branches:
       - main
       - develop
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'LICENSE'
 
 # A newer push to the same ref obsoletes the in-flight run; never let two full
 # suites race (this is what burned a duplicate ~13-min run when a fix commit
