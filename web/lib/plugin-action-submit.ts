@@ -61,7 +61,7 @@ export type SubmitResult =
  */
 export async function submitPluginAction(
   endpoint: string,
-  method: 'POST' | 'PUT' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   payload: Record<string, unknown>
 ): Promise<SubmitResult> {
   try {

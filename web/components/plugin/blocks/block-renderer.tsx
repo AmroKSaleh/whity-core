@@ -287,11 +287,12 @@ function isOneOfNumber<T extends number>(value: unknown, allowed: readonly T[]):
 }
 
 
-function isValidSubmitSpec(value: unknown): value is { method: 'POST' | 'PUT'; endpoint: string } {
+function isValidSubmitSpec(value: unknown): value is { method: 'POST' | 'PUT' | 'PATCH'; endpoint: string } {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    (v.method === 'POST' || v.method === 'PUT') &&
+    // WC-block-submit-templating: PATCH (the sync update verb) joins POST/PUT.
+    (v.method === 'POST' || v.method === 'PUT' || v.method === 'PATCH') &&
     typeof v.endpoint === 'string' &&
     v.endpoint !== ''
   );

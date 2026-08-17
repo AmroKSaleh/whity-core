@@ -380,7 +380,16 @@ export function FormProvider({
       payload[key] = val;
     }
 
-    void submitPluginAction(block.submit.endpoint, block.submit.method, payload).then(
+    // WC-block-submit-templating: interpolate {targetId.field}/{selector} context
+    // tokens in the endpoint (e.g. an edit form inside a modal PATCHing
+    // /api/persons/{edit-person.id} for the opened row). Unresolved → '' (a
+    // runtime no-op), same as the SDK contract's no-cross-reference stance.
+    const endpoint = block.submit.endpoint.replace(
+      /\{([^}]+)\}/g,
+      (_match: string, ref: string) => encodeURIComponent(resolveRef?.(ref) ?? '')
+    );
+
+    void submitPluginAction(endpoint, block.submit.method, payload).then(
       (result) => {
         setIsSubmitting(false);
         if (result.ok) {
@@ -401,7 +410,7 @@ export function FormProvider({
         }
       }
     );
-  }, [block, values, addToast, t, onSubmitSuccess]);
+  }, [block, values, addToast, t, onSubmitSuccess, resolveRef]);
 
   const contextValue: FormBlockContextValue = {
     values,
