@@ -160,6 +160,19 @@ function resolveDefault(block: { default?: unknown; defaultFrom?: string }, ctx:
   return block.default
 }
 
+/** Interpolates `{targetId.field}`/`{selector}` context tokens in a form's
+ * `submit.endpoint` (same addressing as `params.from`/`defaultFrom`, via
+ * `resolveFromContext`) — e.g. an edit modal PATCHing
+ * `/api/persons/{edit-person.id}` for the row it was opened with. An
+ * unresolved token becomes `''`, matching the web renderer/SDK contract's
+ * no-cross-reference stance. */
+function interpolateEndpoint(endpoint: string, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): string {
+  return endpoint.replace(/\{([^}]+)\}/g, (_match, ref: string) => {
+    const resolved = resolveFromContext(ref, ctx)
+    return encodeURIComponent(resolved === undefined ? "" : String(resolved))
+  })
+}
+
 /** A row's published field can arrive as a real boolean or as a string
  * ("true"/"1" vs. "false"/"0") depending on how the source serialized it —
  * plain `Boolean(...)` truthiness is wrong here since "false" and "0" are
@@ -731,7 +744,8 @@ function DrawerRenderer({ block }: { block: DrawerBlock }) {
 
 function FormRenderer({ block }: { block: FormBlock }) {
   const modalId = React.useContext(ModalScopeContext)
-  const { closeTarget } = React.useContext(MasterDetailContext)
+  const masterDetail = React.useContext(MasterDetailContext)
+  const { closeTarget } = masterDetail
   const [values, setValues] = React.useState<Record<string, unknown>>({})
   const [submitting, setSubmitting] = React.useState(false)
   const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null)
@@ -757,7 +771,8 @@ function FormRenderer({ block }: { block: FormBlock }) {
     setSubmitting(true)
     setResult(null)
     try {
-      const outcome = await submitPluginAction(block.submit.endpoint, block.submit.method, values)
+      const endpoint = interpolateEndpoint(block.submit.endpoint, masterDetail)
+      const outcome = await submitPluginAction(endpoint, block.submit.method, values)
       if (outcome.ok) {
         // Inside a modal/drawer: closing IS the success feedback, and
         // `refresh: true` is what bumps refreshSignal — see
@@ -851,7 +866,7 @@ function SubmitButtonRenderer({ label, variant }: { label: string; variant?: But
   )
 }
 
-function ActionButtonRenderer({ block }: { block: { label: string; action: { method: "POST" | "PUT"; endpoint: string }; confirm?: string; variant?: ButtonVariant } }) {
+function ActionButtonRenderer({ block }: { block: { label: string; action: { method: "POST" | "PUT" | "PATCH"; endpoint: string }; confirm?: string; variant?: ButtonVariant } }) {
   const [busy, setBusy] = React.useState(false)
   return (
     <Button

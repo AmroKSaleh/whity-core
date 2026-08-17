@@ -41,7 +41,7 @@ function extractError(body: unknown): string | null {
 
 export async function submitPluginAction(
   endpoint: string,
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   payload: Record<string, unknown>,
 ): Promise<SubmitResult> {
   try {

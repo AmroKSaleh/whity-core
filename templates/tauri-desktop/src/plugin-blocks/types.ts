@@ -180,9 +180,15 @@ export interface DataListBlock {
   params?: SourceParam[]
 }
 
+/**
+ * `submit.endpoint` may carry `{targetId.field}`/`{selector}` context tokens —
+ * the same addressing as `params.from`/`defaultFrom` — interpolated from the
+ * master-detail context at submit time (e.g. an edit modal PATCHing
+ * `/api/persons/{edit-person.id}` for the opened row). See `FormRenderer`.
+ */
 export interface FormBlock {
   type: "form"
-  submit: { method: "POST" | "PUT"; endpoint: string }
+  submit: { method: "POST" | "PUT" | "PATCH"; endpoint: string }
   dataSource?: { method: "GET"; path: string }
   requiredPermission?: string
   children: Block[]
@@ -354,7 +360,7 @@ export interface SubmitButtonBlock {
 export interface ActionButtonBlock {
   type: "actionButton"
   label: string
-  action: { method: "POST" | "PUT"; endpoint: string }
+  action: { method: "POST" | "PUT" | "PATCH"; endpoint: string }
   requiredPermission?: string
   confirm?: string
   variant?: "primary" | "secondary" | "outline" | "ghost" | "destructive"
