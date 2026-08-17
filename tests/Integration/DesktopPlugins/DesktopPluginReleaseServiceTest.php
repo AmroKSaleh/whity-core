@@ -20,12 +20,34 @@ use ZipArchive;
  * in-tree HelloWorld plugin source, so the catalog/download contract, the checksum
  * (no-drift) invariant, immutability, and that the OBFUSCATED package still
  * loads and behaves are all exercised together.
+ *
+ * The obfuscated package is loaded in a CHILD process (#825). It carries the
+ * same class name as the in-tree plugin this suite also exercises, and PHP has
+ * no way to unload a class: whichever copy is declared first owns the name for
+ * the life of the process, and the loser's `require` is a FATAL redeclare that
+ * kills the whole run rather than failing one test. Both orderings were wrong
+ * here — extracting first fataled the suite the moment anything discovered the
+ * real plugins/ directory, and loading the in-tree copy first made this test
+ * silently assert against it and prove nothing about the artefact. A child
+ * process is not a workaround for that: it is what a device actually does, and
+ * it is the only place the real PSR-4 mapping can be exercised under the real
+ * class name without the parent inheriting the declaration.
  */
 final class DesktopPluginReleaseServiceTest extends TestCase
 {
     private PDO $pdo;
     private string $storageDir;
     private string $source;
+
+    /** Extraction root of the released package, if a test made one. */
+    private ?string $extractDir = null;
+
+    /**
+     * The process's autoloader stack as this test found it.
+     *
+     * @var list<callable>
+     */
+    private array $autoloadersOnEntry = [];
 
     protected function setUp(): void
     {
@@ -37,11 +59,32 @@ final class DesktopPluginReleaseServiceTest extends TestCase
         // removed once the desktop app stopped shipping demo/example plugins, and
         // plugins/HelloWorld is the source of truth the release pipeline packages.
         $this->source = dirname(__DIR__, 3) . '/plugins/HelloWorld';
+        $this->autoloadersOnEntry = array_values(spl_autoload_functions());
     }
 
     protected function tearDown(): void
     {
         $this->removeTree($this->storageDir);
+
+        // Cleaned here, not at the end of the test body: an assertion that fires
+        // mid-test aborts the method, and a leftover extraction of a plugin under
+        // its real class name is exactly the debris that makes the next run
+        // confusing.
+        if ($this->extractDir !== null) {
+            $this->removeTree($this->extractDir);
+            $this->extractDir = null;
+        }
+
+        // A test that registers a global autoloader must remove it (#825). A
+        // leaked one is not a local defect: it silently re-points a namespace for
+        // every test that runs afterwards, and the failure surfaces thousands of
+        // tests later as a fatal in an unrelated file. Pinned here because this is
+        // the class that had the leak, and the cost of the check is a comparison.
+        $this->assertSame(
+            $this->autoloadersOnEntry,
+            array_values(spl_autoload_functions()),
+            'this test changed the process-wide autoloader stack and did not restore it'
+        );
     }
 
     public function testReleaseInsertsRowAndStoresPackage(): void
@@ -170,6 +213,7 @@ final class DesktopPluginReleaseServiceTest extends TestCase
 
         $extract = sys_get_temp_dir() . '/whity-dpr-extract-' . bin2hex(random_bytes(6));
         mkdir($extract, 0o775, true);
+        $this->extractDir = $extract;
         $zip = new ZipArchive();
         $this->assertTrue($zip->open($this->storageDir . '/' . $result->storagePath) === true);
         $zip->extractTo($extract);
@@ -177,26 +221,110 @@ final class DesktopPluginReleaseServiceTest extends TestCase
 
         $this->assertDirectoryExists($extract . '/HelloWorld');
 
-        // Register the SAME dir-name -> namespace PSR-4 mapping the device uses.
-        spl_autoload_register(static function (string $class) use ($extract): void {
-            $prefix = 'HelloWorld\\';
-            if (!str_starts_with($class, $prefix)) {
-                return;
-            }
-            $file = $extract . '/HelloWorld/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
-            if (is_file($file)) {
-                require_once $file;
-            }
-        });
+        $probe = $this->loadInChildProcess($extract);
 
-        $this->assertTrue(class_exists('HelloWorld\\HelloWorldPlugin'));
-        $plugin = new \HelloWorld\HelloWorldPlugin();
-        $this->assertInstanceOf(\Whity\Sdk\PluginInterface::class, $plugin);
-        $this->assertSame('HelloWorld', $plugin->getName());
-        $this->assertIsArray($plugin->getRoutes());
-        $this->assertIsArray($plugin->getPermissions());
+        $this->assertSame('', $probe['error'], 'the obfuscated package must load without error');
+        $this->assertTrue($probe['classExists'], 'the PSR-4 mapping must resolve the obfuscated class');
 
-        $this->removeTree($extract);
+        // The assertion that keeps this test honest. Without it, an in-tree
+        // HelloWorld already declared in the process satisfies every check below
+        // while the artefact is never opened — a green test proving nothing.
+        $this->assertSame(
+            realpath($extract . '/HelloWorld/HelloWorldPlugin.php'),
+            $probe['declaredIn'],
+            'the class under test must be the extracted package, not the in-tree source'
+        );
+
+        $this->assertTrue($probe['isPluginInterface'], 'the obfuscated class must still satisfy the SDK contract');
+        $this->assertSame('HelloWorld', $probe['name']);
+        $this->assertTrue($probe['routesIsArray']);
+        $this->assertTrue($probe['permissionsIsArray']);
+    }
+
+    /**
+     * Load the extracted package under the SAME dir-name -> namespace PSR-4
+     * mapping a device uses, in a child PHP process, and report what it found.
+     *
+     * Everything the parent would have to mutate to do this itself — the global
+     * autoloader stack and the `HelloWorld\` class table — is process-scoped and
+     * unrecoverable, so the child owns both and exits. The report travels on
+     * STDERR between markers because the plugin's own top-level code is free to
+     * write to STDOUT, and mixing the two would make the JSON undecodable.
+     *
+     * @return array<string, mixed>
+     */
+    private function loadInChildProcess(string $extract): array
+    {
+        $root = dirname(__DIR__, 3);
+
+        $probe = "<?php\n"
+            . "declare(strict_types=1);\n"
+            . 'require ' . var_export($root . '/vendor/autoload.php', true) . ";\n"
+            . '$extract = ' . var_export($extract, true) . ";\n"
+            . <<<'PHP'
+                spl_autoload_register(static function (string $class) use ($extract): void {
+                    $prefix = 'HelloWorld\\';
+                    if (!str_starts_with($class, $prefix)) {
+                        return;
+                    }
+                    $file = $extract . '/HelloWorld/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+                    if (is_file($file)) {
+                        require_once $file;
+                    }
+                });
+
+                $report = [
+                    'error' => '',
+                    'classExists' => false,
+                    'declaredIn' => null,
+                    'isPluginInterface' => false,
+                    'name' => null,
+                    'routesIsArray' => false,
+                    'permissionsIsArray' => false,
+                ];
+
+                try {
+                    $report['classExists'] = class_exists('HelloWorld\\HelloWorldPlugin');
+                    if ($report['classExists']) {
+                        $plugin = new \HelloWorld\HelloWorldPlugin();
+                        $report['declaredIn'] = (new \ReflectionClass($plugin))->getFileName();
+                        $report['isPluginInterface'] = $plugin instanceof \Whity\Sdk\PluginInterface;
+                        $report['name'] = $plugin->getName();
+                        $report['routesIsArray'] = is_array($plugin->getRoutes());
+                        $report['permissionsIsArray'] = is_array($plugin->getPermissions());
+                    }
+                } catch (\Throwable $e) {
+                    $report['error'] = $e::class . ': ' . $e->getMessage();
+                }
+
+                fwrite(STDERR, '<<<WHITY_PROBE>>>' . json_encode($report) . '<<<END>>>');
+                PHP;
+
+        // Inside the extraction, so the tearDown that removes the extraction
+        // removes this too. The autoloader above only maps HelloWorld/, so a
+        // sibling file cannot collide with the package.
+        $probePath = $extract . '/load-probe.php';
+        $this->assertNotFalse(file_put_contents($probePath, $probe), 'could not write the load probe');
+
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $process = proc_open([PHP_BINARY, $probePath], $descriptors, $pipes, $root);
+        $this->assertIsResource($process, 'could not start the load probe');
+
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        preg_match('/<<<WHITY_PROBE>>>(.*?)<<<END>>>/s', $stderr, $matches);
+        if (!isset($matches[1])) {
+            $this->fail("The load probe did not report. Exit code {$exitCode}.\nSTDOUT:\n{$stdout}\nSTDERR:\n{$stderr}");
+        }
+
+        /** @var array<string, mixed> $decoded */
+        $decoded = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
+
+        return $decoded;
     }
 
     private function service(): DesktopPluginReleaseService
