@@ -11,11 +11,13 @@ use Whity\Sdk\Sync\SyncableResource;
  * table — the declarative half; {@see \Whity\Sdk\Sync\SyncController} drives the
  * sync lifecycle.
  *
- * `display_name` is a plain human-readable string offline (stored in the TEXT
- * column). Core uses a localized `{ar,en}` JSONB value; the offline plugin keeps
- * it a simple string so a full-replace edit form can seed it via `defaultFrom`
- * (the block contract has no localized-input seeding yet). Reconciling the two
- * representations is an R3-cutover concern, when the plugin runs on the server.
+ * `display_name` is a plain human-readable string on the wire (so a full-replace
+ * edit form can seed it via `defaultFrom` — the block contract has no localized-
+ * input seeding yet). It is STORED json-encoded (`"Colors"`, a JSON string):
+ * that is valid for BOTH the server's JSONB column (core migration 063) and the
+ * offline TEXT column, whereas a bare `Colors` is invalid JSON and Postgres
+ * rejects it into JSONB. The resource decodes it on read. Core stores a localized
+ * `{ar,en}` object there; reconciling the two shapes is an R3-cutover concern.
  */
 final class TagGroupResource implements SyncableResource
 {
@@ -55,15 +57,23 @@ final class TagGroupResource implements SyncableResource
 
         return ['ok' => true, 'values' => [
             'group_key'    => is_string($groupKey) ? trim($groupKey) : '',
-            'display_name' => is_string($displayName) && trim($displayName) !== '' ? trim($displayName) : '',
+            // JSON-encode the string ('"Colors"' / '""') so it is valid for both
+            // the server JSONB column and the offline TEXT column.
+            'display_name' => json_encode(is_string($displayName) ? trim($displayName) : '', JSON_UNESCAPED_UNICODE) ?: '""',
         ]];
     }
 
     public function toPublicFields(array $row): array
     {
+        // Decode the stored JSON back to a plain string. A legacy/default object
+        // (e.g. the '{}' column default, or core's localized value) decodes to a
+        // non-string, which surfaces as an empty display name until reconciled.
+        $raw = $row['display_name'] ?? null;
+        $decoded = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+
         return [
             'groupKey'    => (string) ($row['group_key'] ?? ''),
-            'displayName' => (string) ($row['display_name'] ?? ''),
+            'displayName' => is_string($decoded) ? $decoded : '',
         ];
     }
 }
