@@ -475,8 +475,12 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'building-community',
         'group' => 'admin',
         'order' => 4,
-        // WC-175 (#191): mirrors GET /api/ous, gated on the 'admin' ROLE.
-        'requiredRole' => 'admin',
+        // Mirrors GET /api/ous, now gated on ous:read. requiredRole is cleared so
+        // the item follows the route it mirrors rather than drifting from it —
+        // that drift is what left the ous:* grants vestigial in the first place.
+        // Not a visibility change: the only non-admin holder of ous:read was the
+        // base `user` role, whose inert grant the revoke migration removes.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::OUS_READ,
     ];
     $items[] = [
         'id' => 'delegations',
@@ -1423,17 +1427,31 @@ $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin
 $adminHandler = new AdminApiHandler($db, __DIR__ . '/../database/migrations');
 $router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], 'admin');
 
-// 12. Register OUs API handler
+// 12. Register OUs API handler. Gated on the seeded ous:* PERMISSIONS (6th
+// positional arg; requiredRole stays null so RbacMiddleware enforces the
+// permission alone). The bare `admin` role gate these routes used to carry left
+// a downstream plugin that aliases OU management with no slug to reuse: it had
+// to mirror the role or invent its own, and an invented slug would let a caller
+// holding only that plugin's permissions mutate platform-wide OUs while holding
+// no OU permission at all. The permission is deliberately the WHOLE gate —
+// keeping the role alongside it would make core stricter than any plugin
+// aliasing the same slug, which is that same hazard in mirror image.
+//
+// ous:create/ous:update are seeded by migration 005 but are absent from
+// CorePermissions, so the registry does not know them and RoleChecker refuses
+// them outright; ous:write is the create/update slug the admin UI's capability
+// check already uses. ous:assign gates the two routes that ASSIGN roles to an
+// OU — verbatim what migration 005 seeded it for.
 $ousHandler = new OusApiHandler($db->getPdo(), $hookManager);
-$router->register('GET', '/api/ous', [$ousHandler, 'list'], 'admin');
-$router->register('POST', '/api/ous', [$ousHandler, 'create'], 'admin');
-$router->register('GET', '/api/ous/{id:\d+}', [$ousHandler, 'get'], 'admin');
-$router->register('PATCH', '/api/ous/{id:\d+}', [$ousHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/ous/{id:\d+}', [$ousHandler, 'delete'], 'admin');
-$router->register('GET', '/api/ous/{id:\d+}/roles', [$ousHandler, 'roles'], 'admin');
-$router->register('GET', '/api/ous/{id:\d+}/members', [$ousHandler, 'members'], 'admin');
-$router->register('POST', '/api/ous/{id:\d+}/roles', [$ousHandler, 'assignRole'], 'admin');
-$router->register('DELETE', '/api/ous/{ouId:\d+}/roles/{roleId:\d+}', [$ousHandler, 'removeRole'], 'admin');
+$router->register('GET', '/api/ous', [$ousHandler, 'list'], null, null, CorePermissions::OUS_READ);
+$router->register('POST', '/api/ous', [$ousHandler, 'create'], null, null, CorePermissions::OUS_WRITE);
+$router->register('GET', '/api/ous/{id:\d+}', [$ousHandler, 'get'], null, null, CorePermissions::OUS_READ);
+$router->register('PATCH', '/api/ous/{id:\d+}', [$ousHandler, 'update'], null, null, CorePermissions::OUS_WRITE);
+$router->register('DELETE', '/api/ous/{id:\d+}', [$ousHandler, 'delete'], null, null, CorePermissions::OUS_DELETE);
+$router->register('GET', '/api/ous/{id:\d+}/roles', [$ousHandler, 'roles'], null, null, CorePermissions::OUS_READ);
+$router->register('GET', '/api/ous/{id:\d+}/members', [$ousHandler, 'members'], null, null, CorePermissions::OUS_READ);
+$router->register('POST', '/api/ous/{id:\d+}/roles', [$ousHandler, 'assignRole'], null, null, CorePermissions::OUS_ASSIGN);
+$router->register('DELETE', '/api/ous/{ouId:\d+}/roles/{roleId:\d+}', [$ousHandler, 'removeRole'], null, null, CorePermissions::OUS_ASSIGN);
 
 // 12b. Register permission delegations API handler (WC-34). Gated on the
 // delegation:manage permission (6th positional arg; requiredRole stays null so

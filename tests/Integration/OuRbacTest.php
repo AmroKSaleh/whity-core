@@ -24,7 +24,12 @@ use Whity\Http\RbacMiddleware;
  * tenant locked into {@see TenantContext} ahead of RBAC. Two concerns:
  *
  *  1. RBAC gating: an under-privileged user is denied the admin-gated OU
- *     endpoints; an admin reaches them.
+ *     endpoints; an admin reaches them. The admin-gated route here is a FIXTURE
+ *     of this test, not a description of the live wiring — the real OU routes are
+ *     gated on the ous:* permissions (see OusApiRbacTest, which drives the wiring
+ *     parsed out of public/index.php). What these cases pin is RbacMiddleware's
+ *     role semantics and the OU role inheritance feeding them, which is why they
+ *     stayed meaningful when the routes moved off the role gate.
  *  2. OU role inheritance (the WC-54 fix, exercising the REAL
  *     {@see RoleChecker::getEffectiveRolesForUser()} / {@see RoleChecker::hasRole()}
  *     rather than a hand-rolled simulation): a user's effective roles union their
