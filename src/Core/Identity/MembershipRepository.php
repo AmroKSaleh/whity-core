@@ -102,17 +102,78 @@ final class MembershipRepository
     }
 
     /**
-     * Find the unique membership for a profile within a specific tenant, or null
-     * if the profile has no membership in that tenant.
+     * The ONE membership row that speaks for a profile in a tenant — whatever
+     * its status — or null when the profile has no membership there.
+     *
+     * DELIBERATELY STATUS-AGNOSTIC, and the name is the reason this needs saying:
+     * "find by profile" promises a lookup, not a gate. Both core callers read the
+     * status themselves and would fail OPEN if rows were hidden from them. A
+     * suspended or invited member that reads back as null is indistinguishable
+     * from a stranger, and both callers treat a stranger as somebody to onboard:
+     * {@see FederatedIdentityLinker::resolveTenantTrust()} would fall through to
+     * its domain-claim JIT branch and re-admit the member an admin just
+     * suspended, and {@see TenantEmailDomainPolicyService::applyToVerifiedEmail()}
+     * would try to provision a fresh membership over the top of the existing one.
+     * Callers asking "may this person act here?" — resolving a caller's OU, say —
+     * want {@see findActiveByProfile()} or {@see hasActiveMembership()}.
+     *
+     * ORDER BY, not a bare LIMIT 1: migration 094 traded the table-wide
+     * UNIQUE(profile_id, tenant_id) for a partial index over the primary rows
+     * only, so a profile may legally hold several memberships in one tenant.
+     * Unordered, the engine returns whichever row the plan reaches first, and the
+     * `ou_id` every query is then scoped by varies between calls. The primary row
+     * is the answer and `id` breaks ties, so the result stays stable even if the
+     * partial index were ever missing — identical to
+     * {@see \Whity\Auth\RoleChecker::getMembershipRow()}, which was given this
+     * ordering when 094 landed while this method was overlooked.
      *
      * @return array<string, mixed>|null
      */
     public function findByProfile(int $profileId, int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT * FROM memberships WHERE profile_id = :profile_id AND tenant_id = :tenant_id LIMIT 1'
+            'SELECT * FROM memberships
+             WHERE profile_id = :profile_id AND tenant_id = :tenant_id
+             ORDER BY is_primary DESC, id ASC
+             LIMIT 1'
         );
         $stmt->execute([':profile_id' => $profileId, ':tenant_id' => $tenantId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? $this->normalizeRow($row) : null;
+    }
+
+    /**
+     * The ONE ACTIVE membership row that speaks for a profile in a tenant, or
+     * null when the profile holds no active membership there.
+     *
+     * The gate to reach for whenever the answer decides what somebody may see or
+     * do — resolving a caller's OU scope, most of all. {@see findByProfile()}
+     * reports invited and suspended rows too, so using it for that keeps a
+     * suspended member's `ou_id` scoping their every query. This mirrors what
+     * resource-grant resolution already does, where an ACTIVE membership is
+     * required before grants are consulted at all.
+     *
+     * Status is judged PER ROW, matching
+     * {@see \Whity\Auth\RoleChecker::getActiveMembershipRows()}: suspending
+     * somebody's primary role stops THAT role speaking for them without silencing
+     * a second role they still legitimately hold. So the filter runs before the
+     * ordering, and this returns the primary row only when the primary is active.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findActiveByProfile(int $profileId, int $tenantId): ?array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT * FROM memberships
+             WHERE profile_id = :profile_id AND tenant_id = :tenant_id AND status = :status
+             ORDER BY is_primary DESC, id ASC
+             LIMIT 1'
+        );
+        $stmt->execute([
+            ':profile_id' => $profileId,
+            ':tenant_id'  => $tenantId,
+            ':status'     => self::STATUS_ACTIVE,
+        ]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? $this->normalizeRow($row) : null;
     }

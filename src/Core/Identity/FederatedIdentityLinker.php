@@ -232,9 +232,12 @@ final class FederatedIdentityLinker
         try {
             $this->memberships->insert($profileId, $ctx->tenantId, $roleId);
         } catch (\PDOException $e) {
-            // ONLY a duplicate membership (UNIQUE(profile_id, tenant_id)) is benign
-            // here — proceed to link. Any other DB error (bad role FK, connection,
-            // etc.) must surface, not be silently swallowed.
+            // ONLY a duplicate membership is benign here — proceed to link. Any
+            // other DB error (bad role FK, connection, etc.) must surface, not be
+            // silently swallowed. Migration 094 relocated the table-wide
+            // UNIQUE(profile_id, tenant_id) onto a partial index over the primary
+            // rows; insert() leaves is_primary at its TRUE default, so a duplicate
+            // still collides.
             if (!self::isUniqueViolation($e)) {
                 throw $e;
             }
