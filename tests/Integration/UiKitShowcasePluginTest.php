@@ -369,7 +369,8 @@ final class UiKitShowcasePluginTest extends TestCase
      * WC-236 / WC-240: interactive and chart demos are now in the tree, so the
      * coverage assertion is restored to ALL BlockContract::types()
      * (SP1 + SP2 + SP3 interactive + SP4 chart).
-     * Total: 34 types (21 SP1+SP2 + 12 SP3 interactive + 1 SP4 chart).
+     * Total: 36 types (21 SP1+SP2 + 12 SP3 interactive + 1 SP4 chart
+     * + 2 overlay containers: modal + drawer).
      */
     public function testTheBlocksTreeCoversEveryBlockType(): void
     {

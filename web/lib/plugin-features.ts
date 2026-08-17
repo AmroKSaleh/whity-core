@@ -198,7 +198,11 @@ export interface MarkdownBlock {
  */
 export type RowAction =
   | { label: string; href: string }
-  | { label: string; method: 'POST' | 'PUT' | 'DELETE'; endpoint: string; confirm?: string };
+  | { label: string; method: 'POST' | 'PUT' | 'DELETE'; endpoint: string; confirm?: string }
+  // WC-block-modal-drawer: open a modal/drawer by its `id`, publishing this row
+  // into the master-detail context under that id for the overlay's content to
+  // read (a form input via `defaultFrom`, a data-bound child via `params.from`).
+  | { label: string; open: string };
 
 /**
  * WC-532 A7 (master-detail): binds a query `param` on a data-bound block's
@@ -292,6 +296,8 @@ export interface TextInputBlock {
   placeholder?: string;
   required?: boolean;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   /** When true, renders as type="password". The sentinel value '••••••' is never sent on submit. */
   sensitive?: boolean;
   visibleWhen?: VisibleWhen;
@@ -305,6 +311,8 @@ export interface TextAreaBlock {
   rows?: number;
   required?: boolean;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   visibleWhen?: VisibleWhen;
 }
 
@@ -320,6 +328,8 @@ export interface RichTextInputBlock {
   rows?: number;
   required?: boolean;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   visibleWhen?: VisibleWhen;
 }
 
@@ -333,6 +343,8 @@ export interface NumberInputBlock {
   step?: number;
   required?: boolean;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   visibleWhen?: VisibleWhen;
 }
 
@@ -344,6 +356,8 @@ export interface SelectBlock {
   options: { value: string; label: string }[];
   required?: boolean;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   visibleWhen?: VisibleWhen;
 }
 
@@ -353,6 +367,8 @@ export interface CheckboxBlock {
   name: string;
   label: string;
   default?: boolean;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   visibleWhen?: VisibleWhen;
 }
 
@@ -365,6 +381,8 @@ export interface SliderBlock {
   max: number;
   step?: number;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   visibleWhen?: VisibleWhen;
 }
 
@@ -375,6 +393,8 @@ export interface DateInputBlock {
   label: string;
   required?: boolean;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   visibleWhen?: VisibleWhen;
 }
 
@@ -396,6 +416,8 @@ export interface ColorInputBlock {
   name: string;
   label: string;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
   visibleWhen?: VisibleWhen;
 }
 
@@ -439,6 +461,8 @@ export interface ReferenceSelectBlock {
   required?: boolean;
   placeholder?: string;
   default?: string;
+  /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
+  defaultFrom?: string;
 }
 
 /** Leaf (form only): triggers form submission. */
@@ -494,6 +518,33 @@ export interface SelectorBlock {
   placeholder?: string;
 }
 
+// ---- WC-block-modal-drawer: overlay containers ----
+
+/**
+ * Container (→ Dialog): overlay content, typically a `form`. Opened by its own
+ * `trigger` button (when present) or by a dataTable `open` row action targeting
+ * its `id`. `id` carries no dot so `{id}.{field}` addressing is unambiguous.
+ */
+export interface ModalBlock {
+  type: 'modal';
+  id: string;
+  title: string;
+  trigger?: string;
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+  size?: 'sm' | 'md' | 'lg';
+  children: Block[];
+}
+
+/** Container (→ Sheet): a slide-out panel; same open model as {@link ModalBlock}. */
+export interface DrawerBlock {
+  type: 'drawer';
+  id: string;
+  title: string;
+  trigger?: string;
+  side?: 'left' | 'right';
+  children: Block[];
+}
+
 /**
  * The discriminated union of every SP1 + SP2 + SP3 + SP4 block, keyed on `type`. The host has
  * already validated the tree, but the web renderer revalidates defensively so a
@@ -540,7 +591,9 @@ export type Block =
   | SubmitButtonBlock
   | ActionButtonBlock
   | ChartBlock
-  | SelectorBlock;
+  | SelectorBlock
+  | ModalBlock
+  | DrawerBlock;
 
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {
