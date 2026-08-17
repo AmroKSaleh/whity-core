@@ -181,6 +181,14 @@ final class JobRegistryPluginJobsTest extends TestCase
         $registry->registerFromSource('Acme', ['sync' => $this->handler()], ['acme:sync']);
     }
 
+    public function testANonStringSubmittableEntryIsRefusedRatherThanCoercedToAMiss(): void
+    {
+        $registry = new JobRegistry();
+
+        $this->expectException(InvalidPluginJobException::class);
+        $registry->registerFromSource('Acme', ['sync' => $this->handler()], [['sync']]);
+    }
+
     // ── Malformed declarations are refused whole ──────────────────────────────
 
     public function testANonHandlerValueRefusesTheWholeDeclaration(): void

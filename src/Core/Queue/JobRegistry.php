@@ -125,9 +125,9 @@ final class JobRegistry implements HostWiredService
      * failure this seam exists to remove — so a malformed declaration costs the
      * plugin all of its jobs rather than an arbitrary subset.
      *
-     * @param string                $source      A plugin name; `core` is reserved.
-     * @param array<string, mixed>  $jobs        Bare name => {@see JobInterface}.
-     * @param list<string>          $submittable Bare names that may be enqueued via the public API.
+     * @param string               $source      A plugin name; `core` is reserved.
+     * @param array<string, mixed> $jobs        Bare name => {@see JobInterface}.
+     * @param array<int, mixed>    $submittable Bare names that may be enqueued via the public API.
      *
      * @return list<string> The canonical names registered.
      *
@@ -171,13 +171,19 @@ final class JobRegistry implements HostWiredService
             $canonical[$name] = $key;
         }
 
+        // Checked without casting: a declaration is untrusted data, and casting a
+        // non-string entry to compare it would turn a malformed exposure list
+        // into a plausible-looking miss instead of a refusal.
+        $exposed = [];
         foreach ($submittable as $bare) {
-            if (!isset($canonical[(string) $bare])) {
-                throw InvalidPluginJobException::forUnknownSubmittable((string) $bare);
+            if (!is_string($bare) || !isset($canonical[$bare])) {
+                throw InvalidPluginJobException::forUnknownSubmittable(
+                    is_string($bare) ? $bare : get_debug_type($bare)
+                );
             }
+            $exposed[$bare] = true;
         }
 
-        $exposed = array_flip(array_map('strval', $submittable));
         foreach ($canonical as $name => $key) {
             // Cleared first: register() only ever SETS the flag, so a plugin
             // that withdrew a job from its submittable list on reload would
