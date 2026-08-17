@@ -249,6 +249,20 @@ Why it is shaped this way:
 Pushing a `vX.Y.Z` tag by hand still works, as an escape hatch for re-running a
 release whose publish step failed.
 
+**The back-merge PR has a window.** Strict protection requires a PR's HEAD to be
+up to date with its BASE. The back-merge's head is `main` against a base of
+`develop`, so it is mergeable only while nothing new has landed on `develop` —
+merge it immediately, or close it.
+
+Closing it is fine. The commit it carries has a tree identical to its
+develop-side parent, which `develop` already contains, so `main` introduces no
+content `develop` lacks and every later `develop → main` merge is still clean.
+The only cost is cosmetic: `git` reports `develop` as N behind after N releases,
+which misleads a reader but breaks nothing.
+
+Do NOT "fix" a stale one with `gh pr update-branch` — that merges `develop` into
+`main`, pushing unreleased work onto the release line.
+
 ### Branch naming
 
 Branches follow `type/WC-XX-short-description`, where `WC-XX` is the tracking

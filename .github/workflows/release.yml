@@ -740,6 +740,12 @@ jobs:
 
           gh pr create \n            --base develop \n            --head main \n            --title "chore: back-merge main into develop after ${RELEASE_TAG}" \n            --body "Opened automatically after **${RELEASE_TAG}** published.
 
-          Expect **zero file changes** - this carries main's release merge commit back onto develop so the two branches stop diverging in history. Without it develop reads as behind main after every release, and the gap compounds.
+          Expect **zero file changes**. This carries main's release merge commit back onto develop so git stops reporting develop as behind.
 
-          Safe to merge as-is; the trees are identical."
+          ## Merge this NOW, or close it
+
+          Strict branch protection requires the HEAD branch to be up to date with the BASE. Here the head is main and the base is develop, so this is mergeable ONLY while nothing new has landed on develop. Once something has, this PR can never merge — and update-branch would push unreleased work from develop onto the release line, the opposite of the intent.
+
+          ## If that window closed, closing this is correct
+
+          The merge commit it carries has a tree IDENTICAL to its develop-side parent, which develop already contains. main introduces no content develop lacks, so every future develop-to-main merge is still clean. What you lose by closing is cosmetic: git reports develop as N behind after N releases, which misleads a reader but breaks nothing."
