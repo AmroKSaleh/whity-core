@@ -42,8 +42,13 @@ final class DeviceRoleChecker implements PermissionResolver
         return in_array($permission, $this->effectivePermissions($profileId, $tenantId), true);
     }
 
-    public function hasRole(int $profileId, int $tenantId, string $role): bool
-    {
+    public function hasRole(
+        int $profileId,
+        int $tenantId,
+        string $role,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): bool {
         if ($role !== $this->deviceRole) {
             return false;
         }
