@@ -63,6 +63,7 @@ pub fn run() {
             commands::php_host::php_request,
             commands::php_host::php_host_status,
             commands::plugins::plugin_sync_status,
+            commands::remote::remote_request,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
