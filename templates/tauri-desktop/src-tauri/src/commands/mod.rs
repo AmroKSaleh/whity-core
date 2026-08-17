@@ -5,4 +5,5 @@ pub mod php_host;
 pub mod plugins;
 pub mod post_login;
 pub mod printer;
+pub mod remote;
 pub mod sync;

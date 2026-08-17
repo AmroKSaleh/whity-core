@@ -50,6 +50,22 @@ pub fn build_client() -> Result<Client, String> {
         .map_err(|e| format!("failed to build HTTP client: {e}"))
 }
 
+/// Build the blocking client used by `remote_request` (the remote peer of the
+/// local `php_request`). Same timeouts/user-agent as `build_client`, but with
+/// redirects DISABLED (`Policy::none()`): a desktop client has no browser
+/// cookie jar, so an auth/SSO 3xx must surface as its real status (302/401)
+/// rather than being transparently followed into an HTML login page that would
+/// masquerade as a `200` and break the JSON contract the admin APIs speak.
+pub fn build_remote_client() -> Result<Client, String> {
+    Client::builder()
+        .user_agent("whity-tauri-desktop-template")
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))
+}
+
 /// POST /login in token mode. Branches on the response shape.
 pub fn login(
     client: &Client,
