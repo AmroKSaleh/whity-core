@@ -1011,6 +1011,101 @@ guidance see [MCP-Server.md](./MCP-Server.md).
 
 ---
 
+## Step 10 — Run work in the background (async jobs, SDK 1.28)
+
+Implement [`PluginJobsInterface`](../../sdk/src/PluginJobsInterface.php) to
+contribute [`JobInterface`](../../sdk/src/JobInterface.php) handlers to the
+host's job registry. The host's own `queue:work` worker discovers them and runs
+them beside the core handlers — you do **not** ship a worker of your own.
+
+```php
+final class AcmePlugin implements PluginInterface, PluginJobsInterface
+{
+    /** @return array<string, \Whity\Sdk\JobInterface> */
+    public function getJobs(): array
+    {
+        return [
+            'catalog.sync' => new CatalogSyncJob(fn (): \PDO => $this->resolvePdo()),
+        ];
+    }
+
+    /** @return list<string> */
+    public function getSubmittableJobs(): array
+    {
+        return ['catalog.sync'];
+    }
+}
+```
+
+### Names are namespaced by the host
+
+You declare a **bare** name; the host stamps your plugin's prefix onto it. A
+plugin called `Acme` declaring `catalog.sync` is registered — and must be
+**enqueued** — as `acme:catalog.sync`. Use
+`JobRegistry::canonicalName($this->getName(), 'catalog.sync')` rather than
+concatenating it yourself.
+
+This is the same rule the host already applies to resource types, health probes
+and settings keys, and it exists for the same two reasons: two plugins can both
+declare `sync` without either one running the other's work, and no declaration
+can produce a `core.`-prefixed name and take over `core.notifications.deliver`.
+The prefix comes from your plugin **name**, which the loader supplies — you can
+declare any name you like, but you cannot declare who said it. A declared name
+containing `:` is refused for that reason.
+
+A valid declared name is lowercase, starts with a letter, and continues with
+letters, digits, underscores or dots: `sync`, `catalog.sync`.
+
+### Submittability fails closed
+
+A declared job is runnable by the worker but **not** reachable from
+`POST /api/jobs` unless you list its bare name in `getSubmittableJobs()`. That
+mirrors core, where internal handlers (notification delivery, error alerting)
+are registered without the flag. Submitting still requires the caller's
+`jobs:submit` permission, and the job runs under the **submitting** tenant — so
+treat a submittable job's payload as caller-supplied input and validate it.
+Listing a name you do not ship is an error, not a no-op.
+
+### Dependencies reach the handler because you build it
+
+Nothing is injected into `handle()` beyond the payload — the host cannot know
+what your handler needs. You construct the handler in `getJobs()`, so resolve
+what it needs from the service container exactly as a route handler does
+(see `resolvePdo()` in Step 2). Pass anything connection-shaped as a **closure**:
+handlers are built once at load time and reused for every job a persistent
+worker runs, so a PDO captured in the constructor would outlive the host's own
+connection recycling.
+
+### What the host guarantees, and what you owe it
+
+[`JobInterface`](../../sdk/src/JobInterface.php) is the full contract; the two
+obligations that bite hardest:
+
+- **Be idempotent.** Delivery is at-least-once. A worker killed after your side
+  effect but before the completion write re-runs your handler.
+- **Signal failure by throwing.** A return value is the job's result; an
+  exception is a retry (then a dead-letter).
+
+The host restores the enqueuing tenant's `TenantContext` before calling, so
+scope your queries to it — and note that the tenant-isolation conformance kit
+scans your `Jobs/` directory alongside `Api/`, because an unscoped query in a
+background handler is a cross-tenant read with no request behind it.
+
+### One bad plugin cannot stop the worker
+
+The worker that runs your job also delivers core's notifications and error
+alerts. A `getJobs()` that throws, or a malformed declaration, is caught: your
+plugin contributes **no** jobs (logged, and recorded against your plugin's
+lifecycle) and every other plugin — and core — keeps running. The refusal is
+whole-declaration rather than per entry, because a half-registered plugin
+silently dead-letters the jobs that did not make it.
+
+The working reference is
+[`GreetingDigestJob`](../../plugins/HelloWorld/Jobs/GreetingDigestJob.php) in
+the HelloWorld plugin, enqueued as `helloworld:greeting_digest`.
+
+---
+
 ## Checklist
 
 - [ ] Directory `plugins/HelloWorld/` with namespace prefix `HelloWorld\`.
@@ -1034,6 +1129,9 @@ guidance see [MCP-Server.md](./MCP-Server.md).
 - [ ] (Optional) MCP-exposed routes carry `operationId`, `summary`, and a
       resolved request schema so AI clients receive full parameter guidance
       (Step 9).
+- [ ] (Optional) Async jobs declare **bare** names, are idempotent, scope their
+      queries to the restored tenant, and opt into `getSubmittableJobs()` only
+      where a tenant may legitimately trigger the work on demand (Step 10).
 
 See [Architecture.md](./Architecture.md) for how this all fits together.
 
