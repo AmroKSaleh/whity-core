@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { api } from '@/lib/api/client';
+import { fetchAllPagesTyped } from '@/lib/api/fetch-all-pages';
 import { useToast } from '@/lib/toast-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
@@ -141,10 +142,29 @@ function TwoFactorPoliciesSection({
     return body.data;
   }, []);
 
-  const { data: ous } = useFetch<OuOption[]>(async () => {
-    const { data: body } = await api.GET('/api/v1/ous');
-    return body?.data ?? [];
-  }, []);
+  // A 2FA policy scoped to an OU covers that unit and everything beneath it, so
+  // the scope picker has to offer every unit — this endpoint is paginated, and a
+  // unit on page 2 would look like one that does not exist. `ousError` is what
+  // stops a short list being presented as the whole organization; the same list
+  // also names the scope of existing policies below, which is why the failure is
+  // surfaced rather than swallowed into an empty array as it used to be.
+  const { data: ous, error: ousError } = useFetch<OuOption[]>(async () => {
+    const result = await fetchAllPagesTyped<OuOption>((query) =>
+      api.GET('/api/v1/ous', { params: { query } })
+    );
+    if (!result.complete) {
+      throw new Error(
+        result.total === null
+          ? t('ous.error.load', 'Failed to fetch organizational units')
+          : t(
+              'ous.error.partial',
+              'Loaded only {loaded} of {total} organizational units.',
+              { loaded: result.items.length, total: result.total }
+            )
+      );
+    }
+    return result.items;
+  }, [t]);
 
   const { data: users } = useFetch<UserOption[]>(async () => {
     const { data: body } = await api.GET('/api/v1/users');
@@ -193,6 +213,7 @@ function TwoFactorPoliciesSection({
         {adding && (
           <PolicyFormCard
             ous={ous ?? []}
+            ousError={ousError}
             users={users ?? []}
             onCancel={() => setAdding(false)}
             onSaved={() => {
@@ -298,12 +319,15 @@ function TwoFactorPoliciesSection({
 
 function PolicyFormCard({
   ous,
+  ousError,
   users,
   onCancel,
   onSaved,
   addToast,
 }: {
   ous: OuOption[];
+  /** Non-null when the OU list is incomplete, which makes the OU scope unusable. */
+  ousError: string | null;
   users: UserOption[];
   onCancel: () => void;
   onSaved: () => void;
@@ -416,7 +440,7 @@ function PolicyFormCard({
           <label className="text-sm font-medium text-foreground">
             {t('settings.security.form.ou.label', 'Organizational unit')}
           </label>
-          <Select value={scopeId} onValueChange={setScopeId}>
+          <Select value={scopeId} onValueChange={setScopeId} disabled={ousError !== null}>
             <SelectTrigger data-testid="policy-scope-ou">
               <SelectValue
                 placeholder={t(
@@ -433,6 +457,23 @@ function PolicyFormCard({
               ))}
             </SelectContent>
           </Select>
+          {/*
+            The scope option stays selectable so the reason is discoverable
+            here, where the admin is looking for the missing unit, rather than
+            as a greyed-out choice with no explanation. Submitting is already
+            impossible while no unit is chosen, so an OU-scoped policy cannot be
+            created against a list that is short — which would silently enforce
+            2FA on the wrong part of the organization.
+          */}
+          {ousError !== null && (
+            <p role="alert" className="text-sm text-destructive" data-testid="policy-scope-ou-error">
+              {ousError}{' '}
+              {t(
+                'ous.error.pickerDisabled',
+                'The picker is disabled because a partial list would hide units that exist.'
+              )}
+            </p>
+          )}
         </div>
       )}
 
