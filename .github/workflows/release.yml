@@ -361,6 +361,13 @@ jobs:
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           push: true
+          # The build context is a COPIED tree with no .git, so next.config.ts
+          # cannot resolve the commit itself and every /web-build field comes
+          # back null — which is how v0.2.2 shipped an endpoint that answered
+          # but could not identify the bundle it served. Harmless to the app
+          # image, which ignores it.
+          build-args: |
+            WHITY_BUILD_COMMIT=${{ github.sha }}
           tags: |
             ${{ steps.image.outputs.name }}:${{ needs.resolve.outputs.tag }}
             ${{ steps.image.outputs.name }}:latest
@@ -596,6 +603,39 @@ jobs:
           docker ps -a
           exit 1
 
+      # The bundle must be able to IDENTIFY itself, not merely render.
+      #
+      # v0.2.2 shipped /web-build answering 200 with every identifying field
+      # null, because the image build supplied neither the commit nor
+      # CoreVersion.php. The endpoint existed and was useless: comparing the
+      # served bundle's core_version against /api/health — the entire reason it
+      # was added — stayed exactly as impossible as before.
+      #
+      # A 200 was never the property worth checking. This asserts the CONTENT,
+      # so an image that cannot say what it is fails the release.
+      - name: The served bundle must identify itself
+        run: |
+          BODY=$(curl -s --max-time 10 http://localhost:3000/web-build)
+          echo "$BODY"
+
+          MISSING=$(python3 - "$BODY" <<'PY'
+          import json, sys
+          try:
+              d = json.loads(sys.argv[1])
+          except Exception as e:
+              print(f"unparseable: {e}")
+              sys.exit(0)
+          bad = [k for k in ("build_id", "commit", "core_version") if not d.get(k)]
+          print(",".join(bad))
+          PY
+          )
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::/web-build cannot identify the bundle — empty: ${MISSING}. Build identity was not injected into the image."
+            exit 1
+          fi
+          echo "Bundle identity check passed."
+
       # Always clean up the containers and network, even on failure, so the
       # runner is left in a clean state for any subsequent jobs.
       - name: Tear down
@@ -700,6 +740,12 @@ jobs:
 
           gh pr create \n            --base develop \n            --head main \n            --title "chore: back-merge main into develop after ${RELEASE_TAG}" \n            --body "Opened automatically after **${RELEASE_TAG}** published.
 
-          Expect **zero file changes** - this carries main's release merge commit back onto develop so the two branches stop diverging in history. Without it develop reads as behind main after every release, and the gap compounds.
+          Expect **zero file changes**. This carries main's release merge commit back onto develop so git stops reporting develop as behind.
 
-          Safe to merge as-is; the trees are identical."
+          ## Merge this NOW, or close it
+
+          Strict branch protection requires the HEAD branch to be up to date with the BASE. Here the head is main and the base is develop, so this is mergeable ONLY while nothing new has landed on develop. Once something has, this PR can never merge — and update-branch would push unreleased work from develop onto the release line, the opposite of the intent.
+
+          ## If that window closed, closing this is correct
+
+          The merge commit it carries has a tree IDENTICAL to its develop-side parent, which develop already contains. main introduces no content develop lacks, so every future develop-to-main merge is still clean. What you lose by closing is cosmetic: git reports develop as N behind after N releases, which misleads a reader but breaks nothing."
