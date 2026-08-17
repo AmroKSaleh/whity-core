@@ -93,6 +93,21 @@ final class RelationsPluginFrontendTest extends TestCase
         $this->assertContains('/api/persons/{id}', $endpoints, 'delete templates the row id');
     }
 
+    public function testCarriesTheEditWorkflow(): void
+    {
+        $blocks = (new RelationsPlugin())->getFrontendFeatures()[0]['blocks'];
+        $this->assertIsArray($blocks);
+
+        // A row `open` action targets an `edit-person` modal that exists in the tree.
+        $this->assertContains('edit-person', $this->collectProp($blocks, 'open'), 'the Edit row action');
+        $this->assertContains('edit-person', $this->collectProp($blocks, 'id'), 'the edit modal');
+
+        // The edit form PATCHes the opened row via the context-templated endpoint,
+        // and its inputs seed from the published row via defaultFrom.
+        $this->assertContains('/api/persons/{edit-person.id}', $this->collectProp($blocks, 'endpoint'));
+        $this->assertContains('edit-person.displayName', $this->collectProp($blocks, 'defaultFrom'));
+    }
+
     /**
      * @param array<mixed> $blocks
      *
