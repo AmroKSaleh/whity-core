@@ -8,16 +8,42 @@
  * client mounts the same `RolesScreen` with its own adapter/can/t/onNotify.
  */
 
+import { useCallback } from 'react';
 import { RolesScreen } from '@amroksaleh/features/roles';
 import { webRolesAdapter } from '@/lib/roles-adapter';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { useToast } from '@/lib/toast-context';
 
+/**
+ * Sentinel used to detect a "this domain has no translation for the key" miss.
+ * `getTranslation` resolves as `value || fallback || key`, so passing this as
+ * the fallback returns it verbatim when the `admin` domain lacks the key. It
+ * carries no `{placeholder}` tokens, so interpolation leaves it byte-for-byte
+ * intact and the equality check below stays reliable.
+ */
+const I18N_MISS = '__ROLES_I18N_MISS__';
+
 export default function Page() {
   const { hasPermission } = useCapabilities();
-  const t = useTranslation('admin');
   const { addToast } = useToast();
+
+  // The Roles feature's own copy lives in the `admin` domain, but the shared UI
+  // chrome it now renders directly — the DataTable/Dialog `ui.*` keys — lives in
+  // `common`, exactly where the old `@/components/ui/*` wrappers sourced its
+  // Arabic strings. `RolesScreen` takes a SINGLE translator, so compose one that
+  // resolves `admin` first and falls back to `common` for the keys `admin`
+  // lacks — restoring Arabic/RTL parity for the chrome without ever shipping an
+  // English label on an RTL admin page.
+  const tAdmin = useTranslation('admin');
+  const tCommon = useTranslation('common');
+  const t = useCallback(
+    (key: string, fallback?: string, vars?: Record<string, string | number>): string => {
+      const fromAdmin = tAdmin(key, I18N_MISS, vars);
+      return fromAdmin === I18N_MISS ? tCommon(key, fallback, vars) : fromAdmin;
+    },
+    [tAdmin, tCommon]
+  );
 
   return (
     <RolesScreen
