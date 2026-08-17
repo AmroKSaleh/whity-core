@@ -19,6 +19,7 @@ import { useHashPath } from "./use-hash-path"
 import { demoCatalogAdapter } from "./demo-catalog-tauri-adapter"
 import { PrinterDemo } from "./printer-demo"
 import { PluginsPage } from "./plugins-page"
+import { PluginStorePage } from "./plugin-store-page"
 import { BlockRenderer } from "./plugin-blocks/block-renderer"
 import { PluginFeaturesProvider, usePluginFeatures, usePluginNavGroups } from "./plugin-nav-provider"
 import { AppStateProvider, AuthGate, useAppState, useAuthGateState } from "./app-state-provider"
@@ -167,6 +168,16 @@ function AuthenticatedApp() {
           description="Plugins your organization has enabled sync automatically when you sign in — nothing to install or manage here. See src-tauri/src/plugins/reconcile.rs."
         />
         <PluginsPage />
+      </>
+    )
+  } else if (path === "/plugin-store") {
+    body = (
+      <>
+        <PageHeader
+          title="Plugin store"
+          description="Plugins your organization has enabled for this device, from the connected server's catalog. Install/update converges the whole set at once — see src-tauri/src/plugins/reconcile.rs."
+        />
+        <PluginStorePage />
       </>
     )
   } else if (path.startsWith("/plugins/x/")) {
