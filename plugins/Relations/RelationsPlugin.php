@@ -9,6 +9,7 @@ use Relations\Api\PersonsApiHandler;
 use Relations\Migrations\CreatePersonsTable;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\Sql\SequenceAllocator;
@@ -23,12 +24,22 @@ use Whity\Sdk\Sql\SequenceAllocator;
  * server) surface.
  *
  * SLICE 1 — persons as a two-way-syncable resource via
- * {@see \Whity\Sdk\Sync\SyncController}. The graph edges (relations +
- * relationship types), the repository-backed derived reads (relationCount,
- * reciprocal relations, search), the profile-linkage guards, and the block UI
- * are subsequent slices; the cutover (removing core Relations) is last.
+ * {@see \Whity\Sdk\Sync\SyncController}.
+ *
+ * SLICE 2a (this) — the persons BLOCK UI: {@see getFrontendFeatures()} declares a
+ * `screen: 'blocks'` tree (a synced persons list + an add-person modal + a
+ * per-row delete), rendered identically on web and desktop from the shared block
+ * contract. EDIT is deferred to slice 2b: an in-place edit needs a form that
+ * PATCHes `/api/persons/{id}` for the opened row, which the contract cannot yet
+ * express (`submitSpec` allows only POST/PUT and does not interpolate the
+ * endpoint from the master-detail context). A rich detail view is likewise
+ * deferred (no read-only "show the published row" display block yet).
+ *
+ * Subsequent slices: the graph edges (relations + relationship types) and their
+ * UI, repository-backed derived reads (relationCount, reciprocal relations,
+ * search), the profile-linkage guards; the cutover (removing core Relations) is last.
  */
-final class RelationsPlugin implements PluginInterface, PluginRequirementsInterface
+final class RelationsPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface
 {
     public function getName(): string
     {
@@ -37,13 +48,14 @@ final class RelationsPlugin implements PluginInterface, PluginRequirementsInterf
 
     public function getVersion(): string
     {
-        return '0.1.0';
+        return '0.2.0';
     }
 
     public function getSdkConstraint(): string
     {
-        // Requires the SDK carrying Whity\Sdk\Sync\SyncController.
-        return '^1.2';
+        // Requires the SDK carrying Whity\Sdk\Sync\SyncController AND the modal
+        // block type (block UI overlays) — both present from SDK 1.27.
+        return '^1.27';
     }
 
     public function getCoreConstraint(): string
@@ -132,6 +144,98 @@ final class RelationsPlugin implements PluginInterface, PluginRequirementsInterf
     public function getMigrations(): array
     {
         return [CreatePersonsTable::class];
+    }
+
+    /**
+     * SLICE 2a: the persons block UI. One `screen: 'blocks'` feature, gated on
+     * `relations:read`; the write affordances (the add-person form + its submit)
+     * carry `relations:manage`, so a read-only delegate never sees them.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getFrontendFeatures(): array
+    {
+        return [
+            [
+                'id' => 'relations',
+                'label' => 'Relations',
+                'icon' => 'users-group',
+                'group' => 'plugins',
+                'order' => 30,
+                'screen' => 'blocks',
+                'requiredPermission' => 'relations:read',
+                'blocks' => $this->blocks(),
+            ],
+        ];
+    }
+
+    /**
+     * The persons tree: a synced list, an add-person modal, and a per-row delete.
+     * Create closes its modal and refetches the list on success (the overlay
+     * submit-success → refresh-signal path); delete tombstones and refreshes.
+     * Validated against {@see \Whity\Sdk\Frontend\Blocks\BlockValidator} at
+     * registration.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function blocks(): array
+    {
+        return [
+            [
+                'type' => 'section',
+                'title' => 'People',
+                'children' => [
+                    [
+                        'type' => 'text',
+                        'value' => "Everyone in this tenant's relations graph. Changes sync offline-first.",
+                        'tone' => 'muted',
+                    ],
+                    // Add-person modal — a top-level trigger that POSTs a new
+                    // person (the sync engine generates the id + clientUuid).
+                    [
+                        'type' => 'modal',
+                        'id' => 'create-person',
+                        'title' => 'Add person',
+                        'trigger' => 'Add person',
+                        'variant' => 'primary',
+                        'size' => 'md',
+                        'children' => [
+                            [
+                                'type' => 'form',
+                                'submit' => ['method' => 'POST', 'endpoint' => '/api/persons'],
+                                'requiredPermission' => 'relations:manage',
+                                'children' => [
+                                    ['type' => 'textInput', 'name' => 'displayName', 'label' => 'Name', 'required' => true],
+                                    ['type' => 'dateInput', 'name' => 'birthDate', 'label' => 'Birth date'],
+                                    ['type' => 'checkbox', 'name' => 'deceased', 'label' => 'Deceased'],
+                                    ['type' => 'textArea', 'name' => 'notes', 'label' => 'Notes', 'rows' => 3],
+                                    ['type' => 'submitButton', 'label' => 'Add person', 'requiredPermission' => 'relations:manage'],
+                                ],
+                            ],
+                        ],
+                    ],
+                    // The synced persons list, with a per-row soft-delete.
+                    [
+                        'type' => 'dataTable',
+                        'source' => '/api/persons',
+                        'columns' => [
+                            ['key' => 'displayName', 'label' => 'Name', 'sortable' => true, 'filterable' => true],
+                            ['key' => 'birthDate', 'label' => 'Birth date', 'sortable' => true],
+                        ],
+                        'pageSize' => 20,
+                        'emptyText' => 'No people yet — add the first one.',
+                        'rowActions' => [
+                            [
+                                'label' => 'Delete',
+                                'method' => 'DELETE',
+                                'endpoint' => '/api/persons/{id}',
+                                'confirm' => 'Delete this person? This removes them from the relations graph.',
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
     }
 
     // ==================== route delegates ====================
