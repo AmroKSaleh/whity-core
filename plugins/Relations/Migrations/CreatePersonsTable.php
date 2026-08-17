@@ -58,7 +58,15 @@ final class CreatePersonsTable implements MigrationInterface
                 birth_date DATE NULL,
                 deceased BOOLEAN NOT NULL DEFAULT false,
                 notes TEXT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                -- DEFAULT (NOW()) parenthesised is valid on BOTH PostgreSQL and
+                -- SQLite: the offline host SqliteCompatPdo registers NOW() as a
+                -- UDF, but SQLite DDL only accepts a function in a DEFAULT when
+                -- wrapped in parens. Bare DEFAULT NOW() throws a syntax error
+                -- offline, and this fresh CREATE only runs there (on the server,
+                -- core migration 018 already owns persons, so IF NOT EXISTS is a
+                -- no-op there, which is why no PG/SQLite test with core persons
+                -- ever exercised this line).
+                created_at TIMESTAMP NOT NULL DEFAULT (NOW()),
                 updated_at TIMESTAMP NULL
             )'
         );
