@@ -1,5 +1,24 @@
 'use client';
 
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.permissionsPanel.close = Close
+ *   roles.permissionsPanel.empty = No permissions assigned to this role.
+ *   roles.permissionsPanel.error = Failed to fetch permissions
+ *   roles.permissionsPanel.loading = Loading permissions...
+ *   roles.permissionsPanel.subtitle = View all permissions assigned to this role.
+ *   roles.permissionsPanel.title = {name} - Permissions
+ * @i18n-keys common
+ *   ui.dialog.close = Close
+ */
+
 import { useState, useEffect } from 'react';
 import {
   Dialog,
@@ -9,7 +28,7 @@ import {
   DialogTitle,
 } from '@amroksaleh/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
-import type { Permission, Role, RolesAdapter, TranslateFn } from './types';
+import type { Permission, Role, RolesAdapter, RolesTranslate } from './types';
 
 /** Group permissions by resource (segment before ':'), sorted, stable within. */
 function groupPermissions(permissions: Permission[]): [string, Permission[]][] {
@@ -31,7 +50,7 @@ interface PermissionsPanelProps {
   /** Injected data-source adapter. */
   adapter: RolesAdapter;
   /** Injected translator (resolved by RolesScreen). */
-  t: TranslateFn;
+  t: RolesTranslate;
   /** Optional notifier. */
   onNotify?: (message: string, type: 'success' | 'error') => void;
 }

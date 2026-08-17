@@ -1,5 +1,34 @@
 'use client';
 
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.create.cancel = Cancel
+ *   roles.create.description.label = Description
+ *   roles.create.description.placeholder = Role description
+ *   roles.create.error = Failed to create role
+ *   roles.create.name.label = Role Name
+ *   roles.create.name.placeholder = e.g., Editor
+ *   roles.create.permissions.label = Permissions
+ *   roles.create.permissions.loading = Loading permissions...
+ *   roles.create.permissionsError = Failed to fetch permissions
+ *   roles.create.submit = Create Role
+ *   roles.create.submitting = Creating...
+ *   roles.create.subtitle = Add a new role to your system with permissions.
+ *   roles.create.success = Role created successfully
+ *   roles.create.title = Create New Role
+ *   roles.create.validation.descriptionRequired = Description is required
+ *   roles.create.validation.nameRequired = Name is required
+ * @i18n-keys common
+ *   ui.dialog.close = Close
+ */
+
 import { useMemo, useState, useEffect } from 'react';
 import {
   Dialog,
@@ -23,12 +52,12 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PermissionCheckbox } from './permission-checkbox';
-import type { Permission, RolesAdapter, TranslateFn } from './types';
+import type { Permission, RolesAdapter, RolesTranslate } from './types';
 
 // Built from `t` rather than declared at module scope: a validation message is
 // user-facing text like any other, and a schema frozen at import time would
 // always speak English.
-const buildCreateRoleSchema = (t: TranslateFn) =>
+const buildCreateRoleSchema = (t: RolesTranslate) =>
   z.object({
     name: z.string().min(1, t('roles.create.validation.nameRequired', 'Name is required')),
     description: z
@@ -46,7 +75,7 @@ interface CreateRoleModalProps {
   /** Injected data-source adapter. */
   adapter: RolesAdapter;
   /** Injected translator (resolved by RolesScreen). */
-  t: TranslateFn;
+  t: RolesTranslate;
   /** Optional notifier. */
   onNotify?: (message: string, type: 'success' | 'error') => void;
   /** Optional prefill (used by "Clone role"); resets the form when the modal opens. */

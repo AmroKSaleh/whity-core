@@ -100,6 +100,20 @@ export type TranslateFn = (
   vars?: Record<string, string | number>
 ) => string;
 
+/**
+ * Structural alias of {@link TranslateFn} used on the injected `t` params and
+ * locals INSIDE this slice's components. Named distinctly on purpose: the i18n
+ * catalogue extractor binds any `x: TranslateFn` parameter as a translate call
+ * and then needs a single `useTranslation('domain')` in the file to resolve its
+ * domain — which these prop-driven components deliberately don't have. Typing
+ * `t` as `RolesTranslate` keeps the extractor from scanning these files (the
+ * same way DemoCatalog stays unscanned via `NavTranslate`); the keys are
+ * declared instead through file-scoped `@i18n-keys` blocks. The public
+ * `RolesScreenProps.t` keeps the `TranslateFn` name so the export surface is
+ * unchanged — the two are the same type.
+ */
+export type RolesTranslate = TranslateFn;
+
 export interface RolesScreenProps {
   /** Injected data-source adapter (server api-client on web, remote transport on desktop). */
   adapter: RolesAdapter;

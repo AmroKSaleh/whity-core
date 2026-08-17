@@ -1,5 +1,42 @@
 'use client';
 
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.action.clone = Clone
+ *   roles.action.delete = Delete
+ *   roles.action.delete.disabled = Global base roles can only be deleted by the system tenant.
+ *   roles.action.edit = Edit
+ *   roles.action.edit.disabled = Global base roles can only be edited by the system tenant.
+ *   roles.action.viewPermissions = View Permissions
+ *   roles.clone.error = Failed to clone role
+ *   roles.clone.name = {name} (copy)
+ *   roles.description = Manage roles and their permissions
+ *   roles.error.load = Failed to fetch roles
+ *   roles.header.create = Create Role
+ *   roles.searchPlaceholder = Search roles…
+ *   roles.table.description = Description
+ *   roles.table.name = Name
+ *   roles.table.permissionCount = Permission Count
+ *   roles.title = Roles
+ * @i18n-keys common
+ *   ui.pagination.entries = {count} entries
+ *   ui.pagination.entry = 1 entry
+ *   ui.pagination.nav = Pagination
+ *   ui.pagination.next = Next page
+ *   ui.pagination.page = page {page} of {total}
+ *   ui.pagination.previous = Previous page
+ *   ui.table.actions = Actions
+ *   ui.table.columnFilter = Filter…
+ *   ui.table.empty = No data available
+ */
+
 import { useEffect, useState } from 'react';
 import { PageHeader } from '@amroksaleh/ui/page-header';
 import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
@@ -17,7 +54,7 @@ import { CreateRoleModal } from './create-modal';
 import { EditRoleModal } from './edit-modal';
 import { DeleteRoleModal } from './delete-modal';
 import { PermissionsPanel } from './permissions-panel';
-import type { Role, RolesScreenProps, TranslateFn } from './types';
+import type { Role, RolesScreenProps, RolesTranslate } from './types';
 
 /**
  * The Roles admin screen — presentational and data-source-agnostic (Path B
@@ -33,7 +70,7 @@ export function RolesScreen({
   onNotify,
   className,
 }: RolesScreenProps) {
-  const t: TranslateFn = injectedT ?? identityTranslate;
+  const t: RolesTranslate = injectedT ?? identityTranslate;
 
   const canCreate = can(ROLES_WRITE);
   const canEdit = can(ROLES_WRITE);

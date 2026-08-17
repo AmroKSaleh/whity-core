@@ -1,5 +1,35 @@
 'use client';
 
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.edit.cancel = Cancel
+ *   roles.edit.description.label = Description
+ *   roles.edit.description.placeholder = Role description
+ *   roles.edit.error = Failed to update role
+ *   roles.edit.loading = Loading role details...
+ *   roles.edit.name.label = Role Name
+ *   roles.edit.name.placeholder = e.g., Editor
+ *   roles.edit.notManageable = This role can't be modified by your tenant — global base roles are managed by the system tenant.
+ *   roles.edit.permissions.label = Permissions
+ *   roles.edit.roleDetailsError = Failed to fetch role details
+ *   roles.edit.submit = Save Changes
+ *   roles.edit.submitting = Saving...
+ *   roles.edit.subtitle = Update role information and permissions.
+ *   roles.edit.success = Role updated successfully
+ *   roles.edit.title = Edit Role
+ *   roles.edit.validation.descriptionRequired = Description is required
+ *   roles.edit.validation.nameRequired = Name is required
+ * @i18n-keys common
+ *   ui.dialog.close = Close
+ */
+
 import { useMemo, useState, useEffect } from 'react';
 import {
   Dialog,
@@ -23,12 +53,12 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PermissionCheckbox } from './permission-checkbox';
-import type { Permission, Role, RoleWithPermissions, RolesAdapter, TranslateFn } from './types';
+import type { Permission, Role, RoleWithPermissions, RolesAdapter, RolesTranslate } from './types';
 
 // Built from `t` rather than declared at module scope: a validation message is
 // user-facing text like any other, and a schema frozen at import time would
 // always speak English.
-const buildEditRoleSchema = (t: TranslateFn) =>
+const buildEditRoleSchema = (t: RolesTranslate) =>
   z.object({
     name: z.string().min(1, t('roles.edit.validation.nameRequired', 'Name is required')),
     description: z
@@ -47,7 +77,7 @@ interface EditRoleModalProps {
   /** Injected data-source adapter. */
   adapter: RolesAdapter;
   /** Injected translator (resolved by RolesScreen). */
-  t: TranslateFn;
+  t: RolesTranslate;
   /** Optional notifier. */
   onNotify?: (message: string, type: 'success' | 'error') => void;
 }

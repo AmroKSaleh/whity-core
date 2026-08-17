@@ -1,5 +1,28 @@
 'use client';
 
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.delete.cancel = Cancel
+ *   roles.delete.description = Are you sure you want to delete this role? This action cannot be undone.
+ *   roles.delete.error = Failed to delete role
+ *   roles.delete.notManageable = This role can't be modified by your tenant — global base roles are managed by the system tenant.
+ *   roles.delete.permissionCount = Permissions: {count}
+ *   roles.delete.submit = Delete Role
+ *   roles.delete.submitting = Deleting...
+ *   roles.delete.success = Role deleted successfully
+ *   roles.delete.title = Delete Role
+ *   roles.delete.warning = If this role is assigned to users, they will lose the permissions associated with this role.
+ * @i18n-keys common
+ *   ui.dialog.close = Close
+ */
+
 import { useState } from 'react';
 import {
   Dialog,
@@ -12,7 +35,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconAlertCircle } from '@tabler/icons-react';
-import type { Role, RolesAdapter, TranslateFn } from './types';
+import type { Role, RolesAdapter, RolesTranslate } from './types';
 
 interface DeleteRoleModalProps {
   isOpen: boolean;
@@ -22,7 +45,7 @@ interface DeleteRoleModalProps {
   /** Injected data-source adapter. */
   adapter: RolesAdapter;
   /** Injected translator (resolved by RolesScreen). */
-  t: TranslateFn;
+  t: RolesTranslate;
   /** Optional notifier. */
   onNotify?: (message: string, type: 'success' | 'error') => void;
 }

@@ -1,17 +1,37 @@
 'use client';
 
+/**
+ * Injected-translator keys this file renders through `t`. Declared here for
+ * the i18n catalogue extractor: it cannot infer a domain from a prop-injected
+ * translator (see RolesTranslate — deliberately NOT typed `TranslateFn`, so
+ * these files stay unscanned like DemoCatalog does via NavTranslate), so the
+ * keys are enumerated below instead. Feature copy resolves in the `admin`
+ * domain, shared UI chrome in `common`.
+ *
+ * @i18n-keys admin
+ *   roles.permissions.deselectAll = Deselect All
+ *   roles.permissions.filterPlaceholder = Filter permissions…
+ *   roles.permissions.noMatch = No permissions match.
+ *   roles.permissions.placeholder = Select permissions...
+ *   roles.permissions.selectAll = Select All
+ *   roles.permissions.selectAllGroup = Select all {group} permissions
+ *   roles.permissions.selected.one = 1 permission selected
+ *   roles.permissions.selected.other = {count} permissions selected
+ *   roles.permissions.summary = {selected} of {total} selected
+ */
+
 import { useMemo, useState } from 'react';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { IconChevronDown, IconSearch } from '@tabler/icons-react';
-import type { Permission, TranslateFn } from './types';
+import type { Permission, RolesTranslate } from './types';
 
 interface PermissionCheckboxProps {
   permissions: Permission[];
   selectedIds: number[];
   onChange: (selectedIds: number[]) => void;
   /** Injected translator (resolved by RolesScreen). */
-  t: TranslateFn;
+  t: RolesTranslate;
 }
 
 /**
