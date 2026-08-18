@@ -430,6 +430,111 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         'label' => 'Interactive',
                         'children' => $this->interactiveTab(),
                     ],
+                    [
+                        'type' => 'tab',
+                        'label' => 'Overlays',
+                        'children' => $this->overlaysTab(),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The "Overlays" tab: `modal` (→ Dialog) and `drawer` (→ Sheet). Each holds
+     * overlay content — a modal wraps a `form`, a drawer a data-bound detail.
+     * Both are opened either by their own `trigger` button or by a `dataTable`
+     * row action of kind `open`, which publishes the clicked row into the
+     * master-detail context; the overlay's content then reads that row — a form
+     * input via `defaultFrom`, a data-bound child via a dotted `params.from`
+     * (`{targetId}.{field}`). This is the in-place edit/detail pattern.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function overlaysTab(): array
+    {
+        return [
+            [
+                'type' => 'heading',
+                'level' => 2,
+                'text' => 'Overlays — in-place edit & detail',
+            ],
+            [
+                'type' => 'text',
+                'value' => 'A modal (Dialog) and a drawer (Sheet) hold overlay content. Open them from '
+                    . 'their own trigger button, or from a dataTable row action of kind `open`, which '
+                    . 'publishes the clicked row into the master-detail context. Overlay content reads '
+                    . 'that row: a form input via `defaultFrom`, a data-bound child via a dotted '
+                    . '`params.from` (`{targetId}.{field}`). A form inside an overlay closes it on '
+                    . 'submit-success.',
+                'tone' => 'muted',
+            ],
+            // The master: a dataTable whose row actions OPEN an overlay, publishing
+            // the row under the target's id for the overlay to read.
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+                'columns' => [
+                    ['key' => 'name', 'label' => 'Name', 'sortable' => true, 'filterable' => true],
+                    ['key' => 'role', 'label' => 'Role', 'sortable' => true],
+                ],
+                'rowActions' => [
+                    ['label' => 'Edit', 'open' => 'demo-edit-modal'],
+                    ['label' => 'Details', 'open' => 'demo-detail-drawer'],
+                ],
+            ],
+            // A modal wrapping a form. Its `trigger` also opens it standalone (a
+            // blank "New row"); when opened from a row action, `defaultFrom` seeds
+            // each input from the published row (`{id}.{field}`).
+            [
+                'type' => 'modal',
+                'id' => 'demo-edit-modal',
+                'title' => 'Edit row',
+                'trigger' => 'New row',
+                'variant' => 'primary',
+                'size' => 'md',
+                'children' => [
+                    [
+                        'type' => 'form',
+                        'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                        'requiredPermission' => 'uikit:view',
+                        'children' => [
+                            [
+                                'type' => 'textInput',
+                                'name' => 'name',
+                                'label' => 'Name',
+                                'required' => true,
+                                'defaultFrom' => 'demo-edit-modal.name',
+                            ],
+                            [
+                                'type' => 'textInput',
+                                'name' => 'role',
+                                'label' => 'Role',
+                                'defaultFrom' => 'demo-edit-modal.role',
+                            ],
+                            ['type' => 'submitButton', 'label' => 'Save'],
+                        ],
+                    ],
+                ],
+            ],
+            // A drawer showing the opened row's detail. Its data-bound child binds
+            // a query param to the published row via a dotted `params.from`.
+            [
+                'type' => 'drawer',
+                'id' => 'demo-detail-drawer',
+                'title' => 'Row detail',
+                'trigger' => 'Open detail',
+                'side' => 'right',
+                'children' => [
+                    [
+                        'type' => 'dataStat',
+                        'source' => '/api/uikit/demo/metric',
+                        'label' => 'Metric for the selected row',
+                        'valueField' => 'value',
+                        'params' => [
+                            ['param' => 'name', 'from' => 'demo-detail-drawer.name'],
+                        ],
+                    ],
                 ],
             ],
         ];

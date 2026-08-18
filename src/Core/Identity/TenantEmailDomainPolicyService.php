@@ -95,7 +95,10 @@ final class TenantEmailDomainPolicyService
                     // Check-then-insert race: two verifications of the same email
                     // (or a verification concurrent with a JIT/federated provision)
                     // can both pass the findByProfile() null-check above and both
-                    // INSERT. The second loses on UNIQUE(profile_id, tenant_id).
+                    // INSERT. The second loses on the partial unique index over
+                    // the primary rows (migration 094 relocated the table-wide
+                    // UNIQUE(profile_id, tenant_id) onto it); insert() leaves
+                    // is_primary at its TRUE default, so both rows are covered.
                     // That collision is benign — the member row now exists, which
                     // is exactly the desired end state — so swallow ONLY a unique
                     // violation. Any other DB error (bad role FK, connection, etc.)

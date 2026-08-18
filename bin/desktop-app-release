@@ -1,0 +1,208 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Register a signed, published desktop app release (WC-app-self-update).
+ *
+ * Run by CI (.github/workflows/tauri-desktop-release.yml) or an operator
+ * AFTER a tagged build has already been compiled, signed, and its installer
+ * + `.sig` published (e.g. as GitHub Release assets) — this script only
+ * WRITES the catalog row `Whity\Api\DesktopAppUpdateApiHandler` serves from.
+ * It builds nothing and signs nothing itself.
+ *
+ * Because this product is self-hosted per instance, this script targets
+ * WHATEVER database the invoking environment resolves (via --db-dsn or the
+ * app's own DB_* environment) — CI cannot reach into a specific customer's
+ * database, so registering a release against a given deployment is that
+ * deployment's own operator step (the same posture the sibling desktop-
+ * plugin release pipeline already has).
+ *
+ * Usage:
+ *   php bin/desktop-app-release --version=0.2.0 --target=windows-x86_64 \
+ *     --url=https://github.com/OWNER/REPO/releases/download/tauri-desktop-v0.2.0/whity-desktop_0.2.0_x64.msi \
+ *     --signature-file=./whity-desktop_0.2.0_x64.msi.sig \
+ *     [--notes="..."] [--pub-date=2026-08-16T12:00:00Z] [--force]
+ *     [--db-dsn=... --db-user=... --db-password=...]
+ *
+ * Options:
+ *   --version           Required. The app version this release is (e.g. 0.2.0) —
+ *                       must match tauri.conf.json/Cargo.toml/package.json for the tag.
+ *   --target            Required. Rust target-triple-derived key (e.g. windows-x86_64) —
+ *                       must match what tauri-plugin-updater reports for the platform.
+ *   --url               Required. Public URL of the signed installer artifact.
+ *   --signature-file    Required. Path to the .sig file `tauri-action` produced
+ *                       alongside the installer — its CONTENTS (not the path) are stored.
+ *   --notes             Optional release notes shown by the updater UI.
+ *   --pub-date          Optional ISO 8601 publish date; defaults to now.
+ *   --force             Update an existing (version, target) row instead of refusing.
+ *   --db-dsn / --db-user / --db-password
+ *                       Target a specific database instead of the app's own DB_*
+ *                       environment (e.g. to register against a customer's instance).
+ */
+
+$projectRoot = dirname(__DIR__);
+require_once $projectRoot . '/vendor/autoload.php';
+require_once $projectRoot . '/src/helpers.php';
+
+use Whity\Database\Database;
+
+load_env_file($projectRoot . '/.env');
+
+/**
+ * Minimal `.env` loader for local/operator convenience — CI sets DB_*
+ * directly as job/secret environment variables and doesn't need this.
+ * KEY=VALUE per line, `#` comments, optional quotes, last assignment wins.
+ * A THIRD near-identical copy of this loop now exists (bin/whity-cli,
+ * bin/desktop-plugin-release, this file) with no shared helper to extract
+ * into yet — flagged as existing cleanup debt, not solved here.
+ */
+function load_env_file(string $path): void
+{
+    if (!is_file($path)) {
+        return;
+    }
+    foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        [$key, $value] = explode('=', $line, 2);
+        $key = trim($key);
+        $value = trim(trim($value), "\"'");
+        if ($key === '' || isset($_ENV[$key])) {
+            continue; // an already-set env var (e.g. from CI) always wins over .env
+        }
+        $_ENV[$key] = $value;
+        putenv("{$key}={$value}");
+    }
+}
+
+/**
+ * @param list<string> $argv
+ * @return array<string, string|true>
+ */
+function parse_options(array $argv): array
+{
+    $options = [];
+    for ($i = 1; $i < count($argv); $i++) {
+        $arg = $argv[$i];
+        if ($arg === '--help' || $arg === '-h') {
+            $options['help'] = true;
+            continue;
+        }
+        if (!str_starts_with($arg, '--')) {
+            fwrite(STDERR, "Unexpected argument: {$arg}\n");
+            exit(2);
+        }
+        $body = substr($arg, 2);
+        if (str_contains($body, '=')) {
+            [$key, $value] = explode('=', $body, 2);
+            $options[$key] = $value;
+            continue;
+        }
+        $options[$body] = true; // boolean flag, e.g. --force
+    }
+    return $options;
+}
+
+function print_help(): void
+{
+    $doc = (string) file_get_contents(__FILE__);
+    if (preg_match('/\/\*\*(.*?)\*\//s', $doc, $m) === 1) {
+        echo preg_replace('/^\s*\* ?/m', '', trim($m[1])), "\n";
+    }
+}
+
+function fail(string $message): never
+{
+    fwrite(STDERR, "{$message}\n");
+    exit(1);
+}
+
+$options = parse_options($argv);
+if (isset($options['help'])) {
+    print_help();
+    exit(0);
+}
+
+$version = is_string($options['version'] ?? null) ? trim($options['version']) : '';
+$target = is_string($options['target'] ?? null) ? trim($options['target']) : '';
+$url = is_string($options['url'] ?? null) ? trim($options['url']) : '';
+$signatureFile = is_string($options['signature-file'] ?? null) ? trim($options['signature-file']) : '';
+$notes = is_string($options['notes'] ?? null) ? $options['notes'] : null;
+$pubDate = is_string($options['pub-date'] ?? null) ? trim($options['pub-date']) : null;
+$force = isset($options['force']);
+
+if ($version === '' || $target === '' || $url === '' || $signatureFile === '') {
+    fail('--version, --target, --url and --signature-file are all required. Try --help.');
+}
+if (preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', $version) !== 1) {
+    fail("Invalid --version '{$version}': must be a bare semver (e.g. 0.2.0).");
+}
+if (preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $target) !== 1) {
+    fail("Invalid --target '{$target}': must match ^[a-z0-9][a-z0-9_-]{0,63}$ (the key tauri-plugin-updater reports for the platform).");
+}
+if (!is_file($signatureFile)) {
+    fail("Signature file not found: {$signatureFile}");
+}
+$signature = trim((string) file_get_contents($signatureFile));
+if ($signature === '') {
+    fail("Signature file is empty: {$signatureFile}");
+}
+if ($pubDate !== null && $pubDate !== '' && strtotime($pubDate) === false) {
+    fail("Invalid --pub-date '{$pubDate}': must be parseable (ISO 8601 recommended).");
+}
+
+if (isset($options['db-dsn'])) {
+    $dsn = is_string($options['db-dsn']) ? $options['db-dsn'] : '';
+    $dbUser = is_string($options['db-user'] ?? null) ? $options['db-user'] : '';
+    $dbPassword = is_string($options['db-password'] ?? null) ? $options['db-password'] : '';
+    try {
+        $pdo = new PDO($dsn, $dbUser, $dbPassword, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+    } catch (\Throwable $e) {
+        fail('Could not connect via --db-dsn: ' . $e->getMessage());
+    }
+} else {
+    try {
+        $pdo = Database::connect()->getPdo();
+    } catch (\Throwable $e) {
+        fail('Could not connect to the database (set DB_* env vars or pass --db-dsn): ' . $e->getMessage());
+    }
+}
+
+$pubDateSql = $pubDate !== null && $pubDate !== '' ? date('c', (int) strtotime($pubDate)) : date('c');
+
+if ($force) {
+    $stmt = $pdo->prepare(
+        'INSERT INTO desktop_app_releases (version, target, url, signature, notes, pub_date, released_at)
+         VALUES (:version, :target, :url, :signature, :notes, :pub_date, NOW())
+         ON CONFLICT (version, target) DO UPDATE SET
+             url = EXCLUDED.url, signature = EXCLUDED.signature,
+             notes = EXCLUDED.notes, pub_date = EXCLUDED.pub_date'
+    );
+} else {
+    $stmt = $pdo->prepare(
+        'INSERT INTO desktop_app_releases (version, target, url, signature, notes, pub_date, released_at)
+         VALUES (:version, :target, :url, :signature, :notes, :pub_date, NOW())
+         ON CONFLICT (version, target) DO NOTHING'
+    );
+}
+$stmt->execute([
+    ':version' => $version,
+    ':target' => $target,
+    ':url' => $url,
+    ':signature' => $signature,
+    ':notes' => $notes,
+    ':pub_date' => $pubDateSql,
+]);
+
+if ($stmt->rowCount() === 0 && !$force) {
+    fail("Release {$version}@{$target} already exists. Pass --force to overwrite it.");
+}
+
+fwrite(STDOUT, "Registered desktop app release {$version} ({$target}).\n");

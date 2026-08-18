@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api/client';
+import { fetchAllPagesTyped } from '@/lib/api/fetch-all-pages';
 import { useToast } from '@/lib/toast-context';
 import {
   Dialog,
@@ -64,6 +65,12 @@ export function CreateDelegationModal({
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [ous, setOus] = useState<OuOption[]>([]);
+  // Set when the OU list could not be walked to the end. Non-null disables the
+  // scope picker — see the OU field below for why the dialog stays usable.
+  const [ousFailure, setOusFailure] = useState<{
+    loaded: number;
+    total: number | null;
+  } | null>(null);
 
   // Form state. The parent remounts this component (via `key`) each time the
   // dialog opens, so these defaults reset on open — no synchronous setState in
@@ -83,7 +90,12 @@ export function CreateDelegationModal({
         api.GET('/api/v1/permissions', { params: { query: { per_page: 100 } } }),
         api.GET('/api/v1/roles'),
         api.GET('/api/v1/users'),
-        api.GET('/api/v1/ous'),
+        // The OU scope narrows a delegation, so a unit that is merely on page 2
+        // reads as "that OU does not exist" and pushes the grantor towards the
+        // only remaining option — tenant-wide, a strictly broader grant.
+        fetchAllPagesTyped<OuOption>((query) =>
+          api.GET('/api/v1/ous', { params: { query } })
+        ),
       ]);
 
       if (permsRes.data !== undefined) {
@@ -95,10 +107,18 @@ export function CreateDelegationModal({
       if (usersRes.data !== undefined) {
         setUsers(usersRes.data.data);
       }
-      if (ousRes.data !== undefined) {
-        setOus(ousRes.data.data);
+      if (ousRes.complete) {
+        setOus(ousRes.items);
+      } else {
+        setOus([]);
+        setOusFailure({ loaded: ousRes.items.length, total: ousRes.total });
       }
     } catch {
+      // A rejection here loses the OU list too, and an empty scope dropdown is
+      // the same lie as a short one — mark it failed rather than let the toast
+      // scroll away and leave a picker that looks merely empty.
+      setOus([]);
+      setOusFailure({ loaded: 0, total: null });
       addToast(
         t('delegations.create.optionsError', 'Failed to load delegation options'),
         'error'
@@ -278,6 +298,7 @@ export function CreateDelegationModal({
                 )}
               </label>
               <Select
+                disabled={ousFailure !== null}
                 value={ouId === '' ? 'none' : ouId}
                 onValueChange={(value) => setOuId(value === 'none' ? '' : value)}
               >
@@ -297,15 +318,41 @@ export function CreateDelegationModal({
                   ))}
                 </SelectContent>
               </Select>
-              <Alert variant="info">
-                <AlertDescription>
-                  {t(
-                    'delegations.create.ou.hint',
-                    'When set, the delegation applies only to grantees within that OU ' +
-                      'or its descendants.'
-                  )}
-                </AlertDescription>
-              </Alert>
+              {/*
+                Scoping is optional, so the dialog stays usable — a tenant-wide
+                delegation is still a complete, deliberate choice, and blocking
+                it would remove a working capability over an unrelated fetch.
+                But the fallback is BROADER than what the grantor was reaching
+                for, so the reason has to be stated rather than left as an
+                empty-looking dropdown they shrug past.
+              */}
+              {ousFailure !== null ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {ousFailure.total === null
+                      ? t('ous.error.load', 'Failed to fetch organizational units')
+                      : t(
+                          'ous.error.partial',
+                          'Loaded only {loaded} of {total} organizational units.',
+                          { loaded: ousFailure.loaded, total: ousFailure.total }
+                        )}{' '}
+                    {t(
+                      'delegations.create.ou.loadFailed',
+                      'Scoping is unavailable: a partial list would hide units that exist, and delegating tenant-wide instead grants more than an OU scope would.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="info">
+                  <AlertDescription>
+                    {t(
+                      'delegations.create.ou.hint',
+                      'When set, the delegation applies only to grantees within that OU ' +
+                        'or its descendants.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
 
             {/* Permissions */}

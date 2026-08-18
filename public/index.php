@@ -47,6 +47,17 @@ if ($isCli && isset($argv[1])) {
     // Require composer autoloader
     require dirname(__DIR__) . '/vendor/autoload.php';
 
+    // The service-container helpers (\Whity\app / \Whity\register_service), as
+    // bin/whity-cli has always loaded them. They are NOT autoloaded — helpers.php
+    // is a plain function file, and the HTTP path below requires it explicitly —
+    // so without this line every command dispatched through THIS entry point ran
+    // with no container at all: `queue:work` could not register the Database
+    // service a plugin's job handler resolves, and any plugin using the
+    // documented container seam fatalled on an undefined function rather than
+    // failing through the loader's error boundary. Same command reached through
+    // whity-cli worked, which is what made it invisible.
+    require_once dirname(__DIR__) . '/src/helpers.php';
+
     if ($command === 'generate:openapi') {
         $className = 'Whity\Console\GenerateOpenApiSchemaCommand';
         exit($className::execute($argv));
@@ -244,7 +255,7 @@ if (file_exists($envFile)) {
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 // Require helpers
-require dirname(__DIR__) . '/src/helpers.php';
+require_once dirname(__DIR__) . '/src/helpers.php';
 
 // 0. Capture the worker boot timestamp (drives the health endpoint's uptime).
 //    A FrankenPHP worker survives across many requests, so this is the start of
@@ -417,6 +428,9 @@ $queueService = new \Whity\Core\Queue\QueueService(
 // handlers already fire (no per-handler audit code), while the auth/2FA paths —
 // which do not fire hooks — receive the same logger and call record() directly.
 // It is process-scoped infrastructure; per-request actor/IP live in AuditContext.
+// A PLUGIN's own events reach the same trail by declaring them (SDK 1.29): the
+// plugin loader is handed this instance below and subscribes it to each
+// declaring plugin's events, namespaced under that plugin.
 $auditLogger = new AuditLogger($db->getPdo(), $logger);
 $auditLogger->subscribe($hookManager);
 
@@ -464,8 +478,12 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'building-community',
         'group' => 'admin',
         'order' => 4,
-        // WC-175 (#191): mirrors GET /api/ous, gated on the 'admin' ROLE.
-        'requiredRole' => 'admin',
+        // Mirrors GET /api/ous, now gated on ous:read. requiredRole is cleared so
+        // the item follows the route it mirrors rather than drifting from it —
+        // that drift is what left the ous:* grants vestigial in the first place.
+        // Not a visibility change: the only non-admin holder of ous:read was the
+        // base `user` role, whose inert grant the revoke migration removes.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::OUS_READ,
     ];
     $items[] = [
         'id' => 'delegations',
@@ -831,7 +849,13 @@ $pluginLoader = new PluginLoader(
     $healthProbeRegistry,
     $tableOwnershipRegistry,
     $dataTypeRegistry,
-    $pluginSettingsRegistry
+    $pluginSettingsRegistry,
+    // Plugin-declared audited events (SDK 1.29): the loader subscribes this
+    // writer to each declaring plugin's own events, beside that plugin's other
+    // hook subscriptions, so a plugin's actions land in the SAME audit trail as
+    // core's — namespaced under the plugin, and removed again when it is
+    // disabled. Built at step 4c above, long before this point.
+    $auditLogger
 );
 
 // 9b. Initialize deployment manager
@@ -1383,6 +1407,27 @@ $router->register('POST', '/api/plugins/install-from-store', [$installFromStoreH
 $router->register('GET', '/api/plugins/store/allowed', [$installFromStoreHandler, 'allowedStores'], null, null, CorePermissions::PLUGINS_READ);
 $router->register('GET', '/api/plugins/store/catalog', [$installFromStoreHandler, 'browseCatalog'], null, null, CorePermissions::PLUGINS_READ);
 
+// Desktop plugin release catalog/download (WC-desktop-plugins). Consumed by an
+// already-enrolled desktop device using the SAME bearer access token it uses
+// for every other authenticated call (issued by POST /api/v1/devices/token) —
+// no new auth mechanism, just the standard RBAC route pipeline gated on the
+// distinct DESKTOP_PLUGINS_READ permission (a different trust boundary than
+// PLUGINS_READ, which is the server's own installed-plugin list). Global
+// catalog in v1 (no tenant scoping); per-tenant entitlement is a deferred
+// follow-up.
+$desktopPluginsHandler = new \Whity\Api\DesktopPluginsApiHandler(__DIR__ . '/../storage/desktop-plugins', $db->getPdo());
+$router->register('GET', '/api/desktop-plugins', [$desktopPluginsHandler, 'catalog'], null, null, CorePermissions::DESKTOP_PLUGINS_READ);
+$router->register('GET', '/api/desktop-plugins/{name}/versions/{version}/download', [$desktopPluginsHandler, 'download'], null, null, CorePermissions::DESKTOP_PLUGINS_READ);
+
+// Desktop app self-update manifest (WC-app-self-update). Same authenticated-
+// endpoint posture as the desktop-plugins routes above (device bearer token,
+// a dedicated permission) rather than a public unauthenticated manifest —
+// consistent with this instance's existing trust model for this exact
+// client. Checked BEFORE plugin sync on the desktop side, since a plugin
+// package assumes a compatible app runtime.
+$desktopAppUpdateHandler = new \Whity\Api\DesktopAppUpdateApiHandler($db->getPdo());
+$router->register('GET', '/api/desktop-app-updates/latest', [$desktopAppUpdateHandler, 'latest'], null, null, CorePermissions::DESKTOP_APP_UPDATES_READ);
+
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
 // Only allow read-only access to migration status via API
 // Mutations (run/rollback) are performed via CLI only for security
@@ -1391,17 +1436,31 @@ $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin
 $adminHandler = new AdminApiHandler($db, __DIR__ . '/../database/migrations');
 $router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], 'admin');
 
-// 12. Register OUs API handler
+// 12. Register OUs API handler. Gated on the seeded ous:* PERMISSIONS (6th
+// positional arg; requiredRole stays null so RbacMiddleware enforces the
+// permission alone). The bare `admin` role gate these routes used to carry left
+// a downstream plugin that aliases OU management with no slug to reuse: it had
+// to mirror the role or invent its own, and an invented slug would let a caller
+// holding only that plugin's permissions mutate platform-wide OUs while holding
+// no OU permission at all. The permission is deliberately the WHOLE gate —
+// keeping the role alongside it would make core stricter than any plugin
+// aliasing the same slug, which is that same hazard in mirror image.
+//
+// ous:create/ous:update are seeded by migration 005 but are absent from
+// CorePermissions, so the registry does not know them and RoleChecker refuses
+// them outright; ous:write is the create/update slug the admin UI's capability
+// check already uses. ous:assign gates the two routes that ASSIGN roles to an
+// OU — verbatim what migration 005 seeded it for.
 $ousHandler = new OusApiHandler($db->getPdo(), $hookManager);
-$router->register('GET', '/api/ous', [$ousHandler, 'list'], 'admin');
-$router->register('POST', '/api/ous', [$ousHandler, 'create'], 'admin');
-$router->register('GET', '/api/ous/{id:\d+}', [$ousHandler, 'get'], 'admin');
-$router->register('PATCH', '/api/ous/{id:\d+}', [$ousHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/ous/{id:\d+}', [$ousHandler, 'delete'], 'admin');
-$router->register('GET', '/api/ous/{id:\d+}/roles', [$ousHandler, 'roles'], 'admin');
-$router->register('GET', '/api/ous/{id:\d+}/members', [$ousHandler, 'members'], 'admin');
-$router->register('POST', '/api/ous/{id:\d+}/roles', [$ousHandler, 'assignRole'], 'admin');
-$router->register('DELETE', '/api/ous/{ouId:\d+}/roles/{roleId:\d+}', [$ousHandler, 'removeRole'], 'admin');
+$router->register('GET', '/api/ous', [$ousHandler, 'list'], null, null, CorePermissions::OUS_READ);
+$router->register('POST', '/api/ous', [$ousHandler, 'create'], null, null, CorePermissions::OUS_WRITE);
+$router->register('GET', '/api/ous/{id:\d+}', [$ousHandler, 'get'], null, null, CorePermissions::OUS_READ);
+$router->register('PATCH', '/api/ous/{id:\d+}', [$ousHandler, 'update'], null, null, CorePermissions::OUS_WRITE);
+$router->register('DELETE', '/api/ous/{id:\d+}', [$ousHandler, 'delete'], null, null, CorePermissions::OUS_DELETE);
+$router->register('GET', '/api/ous/{id:\d+}/roles', [$ousHandler, 'roles'], null, null, CorePermissions::OUS_READ);
+$router->register('GET', '/api/ous/{id:\d+}/members', [$ousHandler, 'members'], null, null, CorePermissions::OUS_READ);
+$router->register('POST', '/api/ous/{id:\d+}/roles', [$ousHandler, 'assignRole'], null, null, CorePermissions::OUS_ASSIGN);
+$router->register('DELETE', '/api/ous/{ouId:\d+}/roles/{roleId:\d+}', [$ousHandler, 'removeRole'], null, null, CorePermissions::OUS_ASSIGN);
 
 // 12b. Register permission delegations API handler (WC-34). Gated on the
 // delegation:manage permission (6th positional arg; requiredRole stays null so
@@ -2209,6 +2268,12 @@ $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']
 // shadowed by a plugin claiming the same path.
 $pluginLoader->load();
 $pluginLoader->collectMcpPrompts($promptRegistry);
+// The producer end of the queue learns the plugin handlers too. $jobsRegistry is
+// the SAME object JobsApiHandler already holds, so registering into it now is
+// what makes a plugin's submittable job acceptable at POST /api/jobs — and, just
+// as importantly, keeps the two ends agreeing: a name the API accepts is a name
+// the worker (which discovers the same declarations) can actually run.
+$pluginLoader->collectJobs($jobsRegistry);
 
 // Descriptor-derived navigation (WC-169): every validated plugin frontend
 // feature gets a menu entry pointing at the dynamic screen route /admin/x/{id}.

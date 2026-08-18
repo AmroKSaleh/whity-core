@@ -16,6 +16,8 @@ export interface AuthStatus {
   credentialExpiresAt: string | null
   lastOnlineAuthAt: number | null
   maxLoginSeconds: number | null
+  /** The backend this device last enrolled against; null before first enrollment. */
+  serverUrl: string | null
 }
 
 /** Mirrors `auth::lock::LockState`. */

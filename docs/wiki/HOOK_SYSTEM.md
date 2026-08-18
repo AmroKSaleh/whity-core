@@ -159,6 +159,12 @@ Throw `HookVetoException` from either hook to refuse the deletion deliberately; 
 
 > **Core subscriber — the audit trail (WC-34).** `AuditLogger` (`src/Core/Audit/AuditLogger.php`) subscribes (at priority 50) to the post-action `role.*`, `user.*`, `tenant.*` and `ou.*` lifecycle hooks and writes a row to `audit_log` for each — so security-relevant mutations are audited without per-handler code. To support this, `UsersApiHandler::update()`/`delete()` now also fire `user.updated` / `user.deleted` (carrying `id` + `tenant_id`). The listeners return `$data` unchanged. See [AUDIT_TRAIL](AUDIT_TRAIL.md).
 
+## Events fired by a plugin
+
+The event space is flat and shared, so a plugin's own events are **namespaced under the plugin**: dispatch `Events::forPlugin($this->getName(), 'task.completed')` — `acme:task.completed` — rather than a bare name. Two plugins that both dispatch `item.created` otherwise run each other's listeners, which is a bug neither author can see in their own repository.
+
+That prefix is also how the audit trail attributes a plugin's activity. A plugin declaring the event via [`PluginEventsInterface`](../../sdk/src/PluginEventsInterface.php) (SDK 1.29) has it recorded as action `acme:task.completed` against target type `acme:task`; the host binds its listener to the namespaced name precisely so a row can only ever be credited to the plugin whose prefix it carries. See [Plugin-Development](Plugin-Development.md) Step 11.
+
 ## Best practices
 
 1. **Always return data from sync hooks** — a missing `return` breaks the filter chain for downstream listeners.
@@ -173,6 +179,7 @@ Throw `HookVetoException` from either hook to refuse the deletion deliberately; 
 - `HookManager` is an instance-based Mediator/Observer; `dispatch()` is a synchronous filter chain, `dispatchAsync()` queues background work.
 - Listeners run in ascending priority (default 10); every dispatch injects `{tenant_id, timestamp}` context.
 - Plugins declare hooks via `PluginInterface::getHooks()`; the loader subscribes them through `HookManager::listen()` inside a per-plugin error boundary and unsubscribes them on disable/reload via `removeListener()`.
+- A plugin's OWN events are namespaced under it (`Events::forPlugin(…)` → `acme:task.completed`); declaring them via `PluginEventsInterface` puts them in the audit trail under that same prefix, and the loader unsubscribes those listeners on disable alongside the plugin's other hooks.
 - Core fires worker lifecycle, navigation, permission-registration, and role lifecycle events; confirm `user.*`/`tenant.*`/`ou.*` payload shapes in their handlers.
 - Entity deletion (`tenant`/`ou`/`role`) runs `*.deleting` → DELETE → `*.deleted` in one transaction; a throwing listener rolls it back, `HookVetoException` turns that into a 409, and `*.deleted.async` fires only after commit.
 </content>

@@ -47,3 +47,16 @@ packages/*/storybook-static
 !templates
 templates/*
 !templates/*/package.json
+
+# ONE file out of src/, for the bundle's identity.
+#
+# next.config.ts reads CoreVersion::VERSION so /web-build can report the core
+# version the bundle was built alongside — the value that makes an API/UI
+# mismatch detectable. Without it the field is null and the endpoint answers
+# but cannot do its job, which is how v0.2.2 shipped.
+#
+# Every ancestor is re-included one level at a time, per the note above; a bare
+# `!src/Core/CoreVersion.php` after `*` matches nothing.
+!src
+!src/Core
+!src/Core/CoreVersion.php

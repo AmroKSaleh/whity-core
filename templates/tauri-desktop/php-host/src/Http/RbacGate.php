@@ -17,8 +17,8 @@ use Whity\Sdk\Rbac\PermissionResolver;
  * OfflineIdentity, not a per-request authenticated caller.
  *
  * A route with neither requiredRole nor requiredPermission stays fail-open,
- * exactly like production and exactly like this host's own Phase-1 behavior
- * for such routes (e.g. PrintDemo's unprotected print route).
+ * exactly like production — a plugin route declaring no requirement is
+ * intentionally public even offline.
  */
 final class RbacGate
 {

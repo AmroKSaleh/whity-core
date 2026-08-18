@@ -6,6 +6,9 @@ namespace Whity\Core;
 
 use ReflectionClass;
 use Throwable;
+use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Audit\InvalidPluginAuditEventException;
+use Whity\Sdk\PluginEventsInterface;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\InvalidPermissionException;
 use Whity\Core\RBAC\InvalidResourceTypeException;
@@ -18,6 +21,8 @@ use Whity\Core\DataType\DataTypeRegistry;
 use Whity\Core\DataType\InvalidDataTypeException;
 use Whity\Core\Tenant\TableOwnershipException;
 use Whity\Core\Tenant\TableOwnershipRegistry;
+use Whity\Core\Queue\InvalidPluginJobException;
+use Whity\Core\Queue\JobRegistry;
 use Whity\Core\Settings\InvalidSettingDeclarationException;
 use Whity\Core\Settings\PluginSettingsRegistry;
 use Whity\Sdk\Settings\PluginSettingsInterface;
@@ -36,6 +41,7 @@ use Whity\Mcp\Prompts\Prompt;
 use Whity\Mcp\Prompts\PromptRegistry;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginJobsInterface;
 use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
@@ -134,6 +140,17 @@ class PluginLoader
      * rather than failing, matching how a null permission registry behaves.
      */
     private ?PluginSettingsRegistry $pluginSettingsRegistry = null;
+
+    /**
+     * Optional audit writer that plugin-declared events are subscribed to
+     * ({@see \Whity\Sdk\PluginEventsInterface}, SDK 1.29).
+     *
+     * Null in hosts that have not wired one (the CLI, the plugin smoke test),
+     * where declarations are skipped rather than failing — the same behaviour a
+     * null permission registry has. Wired together with the hook manager or not
+     * at all: a logger with no hook manager has nothing to subscribe to.
+     */
+    private ?AuditLogger $auditLogger = null;
 
     /**
      * @var HookManager|null Hook manager instance
@@ -328,6 +345,7 @@ class PluginLoader
      * @param TableOwnershipRegistry|null $tableOwnershipRegistry Optional loader-stamped table-ownership map
      * @param DataTypeRegistry|null $dataTypeRegistry   Optional catalogue of plugin-declared data types
      * @param PluginSettingsRegistry|null $pluginSettingsRegistry Optional catalogue of plugin-declared settings
+     * @param AuditLogger|null $auditLogger Optional audit writer for plugin-declared events
      */
     public function __construct(
         string $pluginDir,
@@ -340,7 +358,8 @@ class PluginLoader
         ?HealthProbeRegistry $healthProbeRegistry = null,
         ?TableOwnershipRegistry $tableOwnershipRegistry = null,
         ?DataTypeRegistry $dataTypeRegistry = null,
-        ?PluginSettingsRegistry $pluginSettingsRegistry = null
+        ?PluginSettingsRegistry $pluginSettingsRegistry = null,
+        ?AuditLogger $auditLogger = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
@@ -350,6 +369,7 @@ class PluginLoader
         $this->tableOwnershipRegistry = $tableOwnershipRegistry;
         $this->dataTypeRegistry = $dataTypeRegistry;
         $this->pluginSettingsRegistry = $pluginSettingsRegistry;
+        $this->auditLogger = $auditLogger;
         $this->hookManager = $hookManager;
         $this->logger = $logger;
         $this->roleSeeder = $roleSeeder;
@@ -1081,6 +1101,67 @@ class PluginLoader
             }
             foreach ($descriptors as $descriptor) {
                 $this->registerMcpPrompt($registry, $descriptor, $pluginKey);
+            }
+        }
+    }
+
+    /**
+     * Register the async-job handlers contributed by plugins.
+     *
+     * The same shape as {@see collectMcpPrompts()}, and separate from
+     * {@see registerPluginCapabilities()} for the same reason: the registry the
+     * handlers go into is not built at plugin-load time. The queue has two ends
+     * — the web request path validates submittable names, the `queue:work`
+     * worker RUNS them — and each builds its own registry after loading plugins,
+     * so the loader hands its declarations to whichever one asks.
+     *
+     * Rules:
+     * - A plugin that is administratively disabled, auto-failed, or otherwise
+     *   not in the active lifecycle state contributes NOTHING. A disabled plugin
+     *   that kept processing queued work would still be running, which is not
+     *   what disabling one means.
+     * - Names are namespaced under the plugin (see
+     *   {@see JobRegistry::registerFromSource()}), so no plugin can shadow a core
+     *   handler or claim another plugin's.
+     * - A malformed declaration is refused WHOLE and logged; the plugin
+     *   contributes no jobs and every other plugin is unaffected.
+     * - A getJobs() call that THROWS goes through the lifecycle error boundary —
+     *   the worker runs core's notification delivery and error alerting too, so
+     *   no plugin defect may stop it.
+     */
+    public function collectJobs(JobRegistry $registry): void
+    {
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            $plugin = $info['plugin'];
+            if (!$plugin instanceof PluginJobsInterface) {
+                continue;
+            }
+
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            try {
+                // Read BOTH declarations inside the boundary: an exposure list
+                // is worthless without the handlers it names, so half a
+                // declaration is no declaration.
+                $jobs = $plugin->getJobs();
+                $submittable = array_values($plugin->getSubmittableJobs());
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getJobs');
+                continue;
+            }
+
+            try {
+                $registry->registerFromSource($plugin->getName(), $jobs, $submittable);
+            } catch (InvalidPluginJobException $e) {
+                $this->logWarning("Plugin {$pluginKey} declares invalid jobs: " . $e->getMessage());
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getJobs');
             }
         }
     }
@@ -2550,6 +2631,53 @@ class PluginLoader
             foreach ($plugin->getHooks() as $eventName => $hookData) {
                 foreach ($this->registerHook($pluginKey, $eventName, $hookData) as $callback) {
                     $registeredHooks[] = ['event' => $eventName, 'callback' => $callback];
+                }
+            }
+        }
+
+        // 3b. Subscribe the audit writer to the events this plugin declared
+        //     audited ({@see PluginEventsInterface}, SDK 1.29). Optional
+        //     interface, so a plugin declaring nothing is skipped and every
+        //     existing plugin is unaffected.
+        //
+        //     Registered HERE, with the plugin's own hooks, and not in a
+        //     collect*() method of its own like jobs: the audit subscription IS
+        //     a hook subscription, and the hook manager exists at plugin-load
+        //     time (the job registry does not — it is built later by whichever
+        //     of the two queue ends asked for it). Being part of the tracked
+        //     subscription set is what makes disablePlugin() remove these
+        //     listeners and reEnablePlugin() restore them, so a disabled plugin
+        //     contributes nothing without a lifecycle check written twice.
+        //
+        //     The source is $plugin->getName() — supplied here, never taken from
+        //     the plugin's return value — so an event is filed under its real
+        //     owner and can neither be attributed to another plugin nor shadow a
+        //     core audit action such as `user.deleted`.
+        //
+        //     Two boundaries for two different failures, matching settings: a
+        //     malformed DECLARATION is a logged warning (the plugin keeps
+        //     serving, its events simply are not audited), while a
+        //     getAuditedEvents() that THROWS is plugin code misbehaving and goes
+        //     through the lifecycle error boundary that can eventually fail it.
+        //     Either way the refusal is whole — a plugin with half its events
+        //     audited would ship a trail that looks complete.
+        if ($this->auditLogger !== null && $this->hookManager !== null && $plugin instanceof PluginEventsInterface) {
+            try {
+                $declaration = $plugin->getAuditedEvents();
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getAuditedEvents');
+                $declaration = null;
+            }
+
+            if ($declaration !== null) {
+                try {
+                    foreach ($this->auditLogger->subscribeFromSource($this->hookManager, $plugin->getName(), $declaration) as $subscription) {
+                        $registeredHooks[] = $subscription;
+                    }
+                } catch (InvalidPluginAuditEventException $e) {
+                    $this->logWarning("Plugin {$pluginKey} declares an invalid audited event: " . $e->getMessage());
+                } catch (Throwable $e) {
+                    $this->handlePluginThrowable($pluginKey, $e, 'getAuditedEvents');
                 }
             }
         }

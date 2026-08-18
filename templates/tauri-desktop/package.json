@@ -1,7 +1,7 @@
 {
   "name": "whity-tauri-desktop-template",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Boilerplate Tauri v2 desktop app consuming @amroksaleh/ui + @amroksaleh/features. Start here, then add crates for native capabilities (see src-tauri/src/commands/printer.rs for a worked example).",
   "type": "module",
   "scripts": {
@@ -14,11 +14,14 @@
     "@amroksaleh/features": "file:../../packages/features",
     "@amroksaleh/tokens": "file:../../packages/tokens",
     "@amroksaleh/ui": "file:../../packages/ui",
+    "@hookform/resolvers": "^5.7.1",
     "@tabler/icons-react": "^3.46.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-hook-form": "^7.85.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

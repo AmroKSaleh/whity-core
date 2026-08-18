@@ -1,129 +1,105 @@
 /**
- * WC-222: the Edit/Delete role modals show a FRIENDLY toast (not a generic
- * error / raw console noise) when the API returns 404 — the by-design response
- * for a global base role that the caller's tenant may not manage (WC-110). This
- * is a safety net behind the per-row UI gate.
+ * WC-222 (post Path-B extraction): a PATCH/DELETE that returns 404 — the
+ * by-design response for a global base role the caller's tenant may not manage
+ * (WC-110) — must NOT surface as a raw error. The behaviour is now split across
+ * the extraction seam:
+ *
+ *   1. web's `createRolesAdapter` maps a 404 → the sentinel 'not-manageable'
+ *      (this file's adapter unit tests), and
+ *   2. the extracted `RolesScreen`/modals map 'not-manageable' → a FRIENDLY
+ *      toast (this file's end-to-end test), never the generic failure copy.
+ *
+ * Together they preserve the safety net behind the per-row UI gate.
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { EditRoleModal } from '@/app/(protected)/admin/roles/edit-modal';
-import { DeleteRoleModal } from '@/app/(protected)/admin/roles/delete-modal';
-import { useAuth } from '@/lib/auth-context';
-import { useToast } from '@/lib/toast-context';
-import type { Role } from '@/app/(protected)/admin/roles/types';
-
-jest.mock('@/lib/auth-context', () => ({
-  useAuth: jest.fn(),
-}));
-jest.mock('@/lib/toast-context', () => ({
-  useToast: jest.fn(),
-}));
-
-const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
-const mockUseToast = useToast as jest.MockedFunction<typeof useToast>;
+import { RolesScreen } from '@amroksaleh/features/roles';
+import type { Role, RolesAdapter, Transport } from '@amroksaleh/features/roles';
+import { createRolesAdapter } from '@/lib/roles-adapter';
 
 const FRIENDLY_404 =
   "This role can't be modified by your tenant — global base roles are managed by the system tenant.";
 
-const ROLE: Role = {
-  id: 1,
-  name: 'admin',
-  description: 'Global base role',
-  createdAt: '2026-01-01',
-  permissionCount: 3,
-  manageable: false,
-};
+const ROLE_INPUT = { name: 'admin', description: 'Global base role', permissions: [] };
 
-const addToast = jest.fn();
-
-function makeApiClient(
-  handler: (url: string, init?: RequestInit) => Promise<unknown>
-): jest.Mock {
-  const apiClient = jest.fn(handler);
-  mockUseAuth.mockReturnValue({ apiClient } as unknown as ReturnType<
-    typeof useAuth
-  >);
-  return apiClient;
+/** A transport that always answers with one fixed `{ status, body }`. */
+function transportReturning(status: number, body: unknown = {}): Transport {
+  return { request: jest.fn().mockResolvedValue({ status, body }) };
 }
 
-beforeEach(() => {
-  jest.clearAllMocks();
-  mockUseToast.mockReturnValue({ addToast } as unknown as ReturnType<
-    typeof useToast
-  >);
-});
+describe('web roles adapter — 404 → not-manageable (WC-222)', () => {
+  it('maps a 404 PATCH to the "not-manageable" sentinel', async () => {
+    const adapter = createRolesAdapter(transportReturning(404));
+    await expect(adapter.updateRole(1, ROLE_INPUT)).resolves.toBe('not-manageable');
+  });
 
-describe('EditRoleModal 404 safety net (WC-222)', () => {
-  it('shows the friendly toast when PATCH returns 404', async () => {
-    const user = userEvent.setup();
-    // GET permissions, GET role detail succeed; PATCH 404s.
-    makeApiClient(async (url, init) => {
-      if (init?.method === 'PATCH') {
-        return { ok: false, status: 404, json: async () => ({}) };
-      }
-      if (url.endsWith('/permissions')) {
-        return { ok: true, json: async () => ({ data: [] }) };
-      }
-      // role detail
-      return {
-        ok: true,
-        json: async () => ({
-          data: { ...ROLE, permissions: [] },
-        }),
-      };
-    });
+  it('maps a 404 DELETE to the "not-manageable" sentinel', async () => {
+    const adapter = createRolesAdapter(transportReturning(404));
+    await expect(adapter.deleteRole(1)).resolves.toBe('not-manageable');
+  });
 
-    render(
-      <EditRoleModal
-        isOpen
-        onOpenChange={jest.fn()}
-        role={ROLE}
-        onSuccess={jest.fn()}
-      />
-    );
+  it('resolves "ok" on a successful PATCH', async () => {
+    const adapter = createRolesAdapter(transportReturning(200, { data: {} }));
+    await expect(adapter.updateRole(1, ROLE_INPUT)).resolves.toBe('ok');
+  });
 
-    // Wait for the form (role details loaded) and submit it.
-    const save = await screen.findByRole('button', { name: /save changes/i });
-    await user.click(save);
-
-    await waitFor(() =>
-      expect(addToast).toHaveBeenCalledWith(FRIENDLY_404, 'error')
-    );
-    // The generic "Failed to update role" message must NOT be used.
-    expect(addToast).not.toHaveBeenCalledWith(
-      expect.stringMatching(/failed to update/i),
-      'error'
-    );
+  it('throws (does NOT swallow) a non-404 failure, surfacing the server message', async () => {
+    const adapter = createRolesAdapter(transportReturning(500, { message: 'boom' }));
+    await expect(adapter.updateRole(1, ROLE_INPUT)).rejects.toThrow('boom');
   });
 });
 
-describe('DeleteRoleModal 404 safety net (WC-222)', () => {
-  it('shows the friendly toast when DELETE returns 404', async () => {
+// ---------------------------------------------------------------------------
+
+const MANAGEABLE_ROLE: Role = {
+  id: 10,
+  name: 'TenantCustom',
+  description: 'A tenant-owned role',
+  createdAt: '2026-01-01',
+  permissionCount: 2,
+  manageable: true,
+};
+
+const t = (_key: string, fallback?: string) => fallback ?? _key;
+const can = () => true;
+
+function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
+  return {
+    listRoles: jest.fn().mockResolvedValue([MANAGEABLE_ROLE]),
+    getRole: jest.fn().mockResolvedValue({ ...MANAGEABLE_ROLE, permissions: [] }),
+    getRolePermissions: jest.fn().mockResolvedValue([]),
+    listPermissions: jest.fn().mockResolvedValue([]),
+    createRole: jest.fn().mockResolvedValue(undefined),
+    updateRole: jest.fn().mockResolvedValue('ok'),
+    deleteRole: jest.fn().mockResolvedValue('ok'),
+    getCapabilities: jest.fn().mockResolvedValue([]),
+    ...over,
+  };
+}
+
+describe('RolesScreen surfaces the friendly toast on not-manageable (WC-222)', () => {
+  it('shows the friendly message (not the generic failure) when deleteRole reports not-manageable', async () => {
     const user = userEvent.setup();
-    makeApiClient(async () => ({
-      ok: false,
-      status: 404,
-      json: async () => ({}),
-    }));
+    const onNotify = jest.fn();
+    const adapter = fakeAdapter({ deleteRole: jest.fn().mockResolvedValue('not-manageable') });
 
-    render(
-      <DeleteRoleModal
-        isOpen
-        onOpenChange={jest.fn()}
-        role={ROLE}
-        onSuccess={jest.fn()}
-      />
-    );
+    render(<RolesScreen adapter={adapter} can={can} t={t} onNotify={onNotify} />);
+    await screen.findByText('TenantCustom');
 
-    const del = await screen.findByRole('button', { name: /delete role/i });
-    await user.click(del);
+    // Open the row menu and choose Delete (enabled — the role is manageable).
+    const row = screen.getByText('TenantCustom').closest('tr');
+    await user.click(within(row as HTMLElement).getByRole('button'));
+    const menu = await screen.findByRole('menu');
+    await user.click(within(menu).getByText('Delete'));
 
-    await waitFor(() =>
-      expect(addToast).toHaveBeenCalledWith(FRIENDLY_404, 'error')
-    );
-    expect(addToast).not.toHaveBeenCalledWith(
+    // Confirm in the delete dialog.
+    const confirm = await screen.findByRole('button', { name: 'Delete Role' });
+    await user.click(confirm);
+
+    await waitFor(() => expect(onNotify).toHaveBeenCalledWith(FRIENDLY_404, 'error'));
+    expect(onNotify).not.toHaveBeenCalledWith(
       expect.stringMatching(/failed to delete/i),
       'error'
     );

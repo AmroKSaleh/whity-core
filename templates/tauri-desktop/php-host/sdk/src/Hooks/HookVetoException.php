@@ -20,11 +20,11 @@ use RuntimeException;
  *
  * Where it is honoured
  * --------------------
- * On the entity-deletion paths (`tenant.*`, `ou.*`, `role.*`) the host runs the
- * `*.deleting` hook, the DELETE, and the `*.deleted` hook inside ONE database
- * transaction. Throwing this from either hook rolls the whole transaction back —
- * the row survives — and the caller receives `409 Conflict` with `reason` echoed
- * in the error details. Concretely:
+ * ENTITY DELETION (`tenant.*`, `ou.*`, `role.*`). The host runs the `*.deleting`
+ * hook, the DELETE, and the `*.deleted` hook inside ONE database transaction.
+ * Throwing this from either hook rolls the whole transaction back — the row
+ * survives — and the caller receives `409 Conflict` with `reason` echoed in the
+ * error details. Concretely:
  *
  *  - from `*.deleting` — a VETO: "this record still has dependants of mine".
  *    Nothing has been written yet; the delete simply does not happen.
@@ -32,11 +32,28 @@ use RuntimeException;
  *    transaction but not yet committed, so aborting here restores it rather than
  *    leaving the plugin's own tables orphaned.
  *
+ * DATA-TYPE LIFECYCLE (`datatype.lifecycle.changing`). The host dispatches this
+ * hook before the write, for every mutating action — `trash`, `restore`,
+ * `retire` and `delete` alike — and inside the same transaction as the write.
+ * Throwing this aborts the transition with nothing written, and the caller
+ * receives `409 Conflict` with `reason: "blocked_by_plugin"` and this
+ * exception's {@see reason()} as the message. Use it for a rule the host cannot
+ * derive: a declared `blocks_delete` guard counts rows and governs DELETE only,
+ * so "this record is depended on and must not be TRASHED" has no other
+ * expression. The post-transition `datatype.lifecycle.changed` hook is
+ * observation only — it fires after the write committed, so there is nothing
+ * left for a veto to stop.
+ *
  * Anywhere else this behaves like any other exception (i.e. it is isolated by
  * the error boundary), so throwing it from an unrelated hook is a no-op the host
  * logs. Never throw it from an `*.async` listener: those run in the relay worker,
  * long after the originating request committed, and there is nothing left to
  * veto.
+ *
+ * A veto is never counted as a plugin FAILURE. It is a healthy plugin doing
+ * exactly what this contract invites it to do, so it does not tick the host's
+ * consecutive-error breaker — a plugin disabled for refusing correctly would
+ * stop refusing, silently.
  *
  * The {@see reason()} text is shown to the API caller, so write it for a human
  * administrator ("3 devices are still assigned to this unit"), never as a raw

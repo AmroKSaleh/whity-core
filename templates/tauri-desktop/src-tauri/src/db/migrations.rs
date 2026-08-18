@@ -18,6 +18,28 @@
 //!   conflict snapshot store (`item_conflicts`).
 //! - v6: per-row push-retry bookkeeping (`push_attempts` / `next_attempt_at` /
 //!   `last_push_error`) so a flaky push backs off.
+//! - v7: `auth_state.server_url` — records which backend this device
+//!   enrolled against, for informational display only (the account footer
+//!   shows it); the backend itself is fixed for the whole build (see
+//!   `config.rs`), never chosen per device. Lives on `auth_state` (not a
+//!   separate table) because it's a device-level fact, not a per-session
+//!   one — logout deliberately does NOT clear it (see `auth_repo::clear()`).
+//! - v8: the singleton `plugin_sync_state` row (WC-plugin-sync) — bookkeeping
+//!   for the last automatic plugin reconcile pass (see `plugins::reconcile`),
+//!   so the UI can show sync status without needing a fresh sync to answer it.
+//! - v9 (WC-sync-generalize): `item_conflicts` gains a `resource` column
+//!   (composite PK `(resource, client_uuid)`) — the sync engine now serves
+//!   more than one resource (see `sync::resource::ResourceDescriptor`), and a
+//!   bare `client_uuid` primary key would let two resources' conflicts
+//!   collide. Existing rows backfill as `'demo-catalog/items'`, the only
+//!   resource that existed before this version.
+//! - v10 (WC-plugin-data-bridge): `bridge_resource_state` (per
+//!   `(resource, client_uuid)`, the last-known id/version on each side of a
+//!   `sync::bridge` relay) and `bridge_cursor_kv` (the local-host and
+//!   remote-server changes-feed cursors, tracked independently per
+//!   resource). No local domain-row mirror — a bridged resource's data lives
+//!   entirely in the PHP host's own SQLite file or the real server; Rust
+//!   only remembers enough to relay between them (see `sync::bridge`).
 //!
 //! `run()` applies each pending step then stamps its version, so a partially
 //! migrated DB always resumes correctly. Add later steps as another
@@ -53,6 +75,26 @@ pub fn run(conn: &Connection) -> rusqlite::Result<()> {
     if version < 6 {
         migrate_to_v6(conn)?;
         conn.pragma_update(None, "user_version", 6)?;
+        version = 6;
+    }
+    if version < 7 {
+        migrate_to_v7(conn)?;
+        conn.pragma_update(None, "user_version", 7)?;
+        version = 7;
+    }
+    if version < 8 {
+        migrate_to_v8(conn)?;
+        conn.pragma_update(None, "user_version", 8)?;
+        version = 8;
+    }
+    if version < 9 {
+        migrate_to_v9(conn)?;
+        conn.pragma_update(None, "user_version", 9)?;
+        version = 9;
+    }
+    if version < 10 {
+        migrate_to_v10(conn)?;
+        conn.pragma_update(None, "user_version", 10)?;
     }
     Ok(())
 }
@@ -218,6 +260,91 @@ fn migrate_to_v6(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// v7: which backend this device enrolled against, persisted on the
+/// `auth_state` singleton purely for informational display (the account
+/// footer). NULL until the user enrolls at least once.
+const V7_SERVER_URL: &str = "ALTER TABLE auth_state ADD COLUMN server_url TEXT;";
+
+fn migrate_to_v7(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V7_SERVER_URL)
+}
+
+/// v8 (WC-plugin-sync): the singleton `plugin_sync_state` row — bookkeeping
+/// for the last automatic reconcile pass (see `plugins::reconcile` and
+/// `commands::post_login`), so the Plugins page can show "last synced at"
+/// and any per-plugin failures without needing a fresh sync to answer that.
+/// `last_failed_json` is a JSON-encoded `list<PluginSyncFailure>` (empty
+/// array when nothing failed) rather than a normalized table — this is a
+/// small, purely-informational snapshot, not queried by anything else.
+const V8_PLUGIN_SYNC_STATE: &str = "
+    CREATE TABLE plugin_sync_state (
+        id                INTEGER PRIMARY KEY CHECK (id = 1),
+        last_synced_at    INTEGER,
+        last_installed    INTEGER NOT NULL DEFAULT 0,
+        last_updated      INTEGER NOT NULL DEFAULT 0,
+        last_removed      INTEGER NOT NULL DEFAULT 0,
+        last_failed_json  TEXT NOT NULL DEFAULT '[]',
+        last_error        TEXT
+    )";
+
+fn migrate_to_v8(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V8_PLUGIN_SYNC_STATE)?;
+    conn.execute("INSERT INTO plugin_sync_state (id) VALUES (1)", [])?;
+    Ok(())
+}
+
+/// v9 (WC-sync-generalize): `item_conflicts` needs a `resource` column now
+/// that the engine serves more than one resource — SQLite can't add a column
+/// into a PRIMARY KEY via ALTER, so this is the same rename -> create -> copy
+/// -> drop technique v2 already used for `demo_catalog_items`. Every existing
+/// row backfills as `'demo-catalog/items'`, the only resource that could have
+/// produced a conflict before this version existed.
+const V9_ITEM_CONFLICTS_RESOURCE: &str = "
+    ALTER TABLE item_conflicts RENAME TO item_conflicts_v8;
+    CREATE TABLE item_conflicts (
+        resource       TEXT    NOT NULL DEFAULT 'demo-catalog/items',
+        client_uuid    TEXT    NOT NULL,
+        base_version   INTEGER NOT NULL,
+        server_version INTEGER NOT NULL,
+        mine_json      TEXT    NOT NULL,
+        theirs_json    TEXT    NOT NULL,
+        detected_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+        PRIMARY KEY (resource, client_uuid)
+    );
+    INSERT INTO item_conflicts (resource, client_uuid, base_version, server_version, mine_json, theirs_json, detected_at)
+      SELECT 'demo-catalog/items', client_uuid, base_version, server_version, mine_json, theirs_json, detected_at
+      FROM item_conflicts_v8;
+    DROP TABLE item_conflicts_v8;";
+
+fn migrate_to_v9(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V9_ITEM_CONFLICTS_RESOURCE)
+}
+
+/// v10 (WC-plugin-data-bridge): bookkeeping for `sync::bridge`'s local-host
+/// <-> remote-server relay. No local domain-row mirror — see the module doc
+/// on `sync::bridge` for why (an HTTP relay through `php_host::proxy`, not
+/// `ATTACH DATABASE`).
+const V10_BRIDGE_STATE: &str = "
+    CREATE TABLE bridge_resource_state (
+        resource       TEXT    NOT NULL,
+        client_uuid    TEXT    NOT NULL,
+        local_id       INTEGER,
+        local_version  INTEGER,
+        remote_id      INTEGER,
+        remote_version INTEGER,
+        PRIMARY KEY (resource, client_uuid)
+    );
+    CREATE TABLE bridge_cursor_kv (
+        resource      TEXT PRIMARY KEY,
+        local_cursor  TEXT,
+        remote_cursor TEXT,
+        last_relay_at TEXT
+    )";
+
+fn migrate_to_v10(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V10_BRIDGE_STATE)
+}
+
 fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -274,7 +401,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 6);
+        assert_eq!(ver, 10);
 
         let (id, uuid, sync_state, dirty, deleted): (i64, String, String, i64, i64) = conn
             .query_row(
@@ -306,22 +433,29 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 6);
+        assert_eq!(ver, 10);
         assert!(column_exists(&conn, "demo_catalog_items", "client_uuid").unwrap());
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
         assert!(table_exists(&conn, "sync_state_kv").unwrap());
         assert!(table_exists(&conn, "item_conflicts").unwrap());
         assert!(column_exists(&conn, "demo_catalog_items", "next_attempt_at").unwrap());
+        assert!(column_exists(&conn, "auth_state", "server_url").unwrap());
+        assert!(table_exists(&conn, "plugin_sync_state").unwrap());
+        assert!(column_exists(&conn, "item_conflicts", "resource").unwrap());
+        assert!(table_exists(&conn, "bridge_resource_state").unwrap());
+        assert!(table_exists(&conn, "bridge_cursor_kv").unwrap());
 
-        // The auth_state singleton exists and starts un-enrolled.
-        let (id, enrolled): (i64, i64) = conn
-            .query_row("SELECT id, enrolled FROM auth_state", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
+        // The auth_state singleton exists and starts un-enrolled, with no
+        // server_url recorded yet (nothing has enrolled).
+        let (id, enrolled, server_url): (i64, i64, Option<String>) = conn
+            .query_row("SELECT id, enrolled, server_url FROM auth_state", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
             })
             .unwrap();
         assert_eq!(id, 1);
         assert_eq!(enrolled, 0);
+        assert_eq!(server_url, None);
 
         conn.execute(
             "INSERT INTO demo_catalog_items (client_uuid, name) VALUES ('u1','X')",
@@ -351,17 +485,95 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 6);
+        assert_eq!(ver, 10);
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
+    }
+
+    #[test]
+    fn migrates_pre_v9_conflicts_backfilling_the_resource_column() {
+        // Simulate a DB at v8: item_conflicts in its OLD shape (bare
+        // client_uuid PK, no resource column) holding one real row.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(V2_ITEMS).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE item_conflicts (
+                client_uuid    TEXT PRIMARY KEY,
+                base_version   INTEGER NOT NULL,
+                server_version INTEGER NOT NULL,
+                mine_json      TEXT NOT NULL,
+                theirs_json    TEXT NOT NULL,
+                detected_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            )",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO item_conflicts (client_uuid, base_version, server_version, mine_json, theirs_json)
+             VALUES ('pre-v9', 1, 2, '{}', '{}')",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 8).unwrap();
+
+        run(&conn).unwrap();
+
+        assert!(column_exists(&conn, "item_conflicts", "resource").unwrap());
+        let resource: String = conn
+            .query_row("SELECT resource FROM item_conflicts WHERE client_uuid = 'pre-v9'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(resource, "demo-catalog/items", "the only resource that could have produced a pre-v9 conflict");
     }
 
     #[test]
     fn run_is_idempotent() {
         let conn = v1_conn();
         run(&conn).unwrap();
-        run(&conn).unwrap(); // version already 6 → no-op
+        run(&conn).unwrap(); // version already latest → no-op
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 6);
+        assert_eq!(ver, 10);
+    }
+
+    #[test]
+    fn server_url_survives_logout() {
+        let conn = migrated_for_auth_tests();
+        conn.execute(
+            "UPDATE auth_state SET server_url = 'https://staging.example.com' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+        // clear() (logout) resets enrollment/session state but must NOT null
+        // server_url — it's a device-level fact ("which server"), not a
+        // per-session one, so re-enrolling pre-fills the same trusted server.
+        crate::db::auth_repo::clear(&conn).unwrap();
+
+        let server_url: Option<String> = conn
+            .query_row("SELECT server_url FROM auth_state WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(server_url.as_deref(), Some("https://staging.example.com"));
+    }
+
+    #[test]
+    fn plugin_sync_state_singleton_seeded_on_fresh_install() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+
+        let (id, last_synced_at, last_installed, last_failed_json): (i64, Option<i64>, i64, String) = conn
+            .query_row(
+                "SELECT id, last_synced_at, last_installed, last_failed_json FROM plugin_sync_state",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(id, 1);
+        assert_eq!(last_synced_at, None, "no sync has run yet");
+        assert_eq!(last_installed, 0);
+        assert_eq!(last_failed_json, "[]");
+    }
+
+    fn migrated_for_auth_tests() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+        conn
     }
 }

@@ -3,10 +3,12 @@ mod commands;
 mod config;
 mod db;
 mod php_host;
+mod plugins;
+mod self_update;
 mod sync;
 
 use db::Db;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -14,16 +16,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let cfg = config::Config::from_env();
             let connection = db::open(app.handle())?;
+            // Fixed for the process lifetime (see config.rs) — there is no
+            // per-device override anymore, only .env/WHITY_BACKEND_URL at
+            // build time. Shared (Arc, not a lock — nothing ever mutates it)
+            // with sync::scheduler's background loop purely so both read the
+            // exact same resolved value.
+            let shared_cfg = Arc::new(config::Config::resolve());
             app.manage(Db(Mutex::new(connection)));
-            app.manage(auth::AuthManager::new(cfg.clone())?);
+            app.manage(auth::AuthManager::new(shared_cfg.clone())?);
 
             // Background sync loop on its OWN WAL connection so a cycle's network
             // I/O never blocks the UI connection's reads (see sync::scheduler).
             let sync_conn = db::open_sync_connection(app.handle())?;
-            let sync_handle = sync::scheduler::spawn(app.handle().clone(), cfg, sync_conn)?;
+            let sync_handle = sync::scheduler::spawn(app.handle().clone(), shared_cfg, sync_conn)?;
             app.manage(sync_handle);
 
             // Bundled PHP plugin host: a native bridge (Rust -> hardware) plus
@@ -54,6 +62,9 @@ pub fn run() {
             commands::printer::print_text,
             commands::php_host::php_request,
             commands::php_host::php_host_status,
+            commands::plugins::plugin_sync_status,
+            commands::plugins::reconcile_plugins_now,
+            commands::remote::remote_request,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

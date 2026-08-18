@@ -1,6 +1,6 @@
 [package]
 name = "whity-tauri-desktop-template"
-version = "0.1.0"
+version = "0.2.0"
 description = "Whity Tauri desktop boilerplate: @amroksaleh/ui + @amroksaleh/features wired to real local SQLite, plus a worked example of adding a native-crate command (printing)."
 authors = ["you"]
 edition = "2021"
@@ -64,6 +64,25 @@ printers = "~2.3"
 # and a single loopback-only, low-throughput endpoint doesn't justify a
 # second, inconsistent async runtime.
 tiny_http = "0.12"
+
+# Safe extraction of a downloaded plugin package (src/plugins/installer.rs,
+# WC-desktop-plugins) — a pure-Rust zip reader, no system libzip dependency,
+# matching this template's "just works out of the box" bar.
+zip = "2"
+
+# SHA-256 verification of a downloaded plugin package against the server-
+# declared checksum, before anything touches disk.
+sha2 = "0.10"
+
+# Whole-app self-update (WC-app-self-update, src/self_update.rs), checked
+# before every plugin sync since a plugin package assumes a compatible app
+# runtime. Fetches/verifies (minisign)/applies a signed release from an
+# endpoint resolved at RUNTIME via app.updater_builder() (this app's backend
+# URL and access token are both only known at runtime — see self_update.rs —
+# never tauri.conf.json's static endpoint). Relaunching after an update uses
+# `AppHandle::request_restart()`, part of core `tauri` itself — no separate
+# process-control plugin needed for a Rust-side-triggered restart.
+tauri-plugin-updater = "2"
 
 # OS-native secure storage for the long-lived (90-day) device credential
 # (WC-desktop-sync) — the short-lived access token stays in memory only. Each

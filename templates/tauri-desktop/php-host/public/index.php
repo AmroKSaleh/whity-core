@@ -39,12 +39,14 @@ spl_autoload_register(static function (string $class): void {
 
 require_once __DIR__ . '/../src/helpers.php';
 
+use Whity\Api\FrontendFeaturesHandler;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\DeviceRoleChecker;
 use Whity\Core\RBAC\RoleSeeder;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
+use Whity\Database\SequenceCounters;
 use Whity\Database\SqliteCompatPdo;
 use Whity\Http\RbacGate;
 use Whity\Native\NativeBridgeClient;
@@ -54,6 +56,7 @@ use Whity\PluginHost\PluginRuntimeLoader;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\Rbac\PermissionResolver;
+use Whity\Sdk\Sql\SequenceAllocator;
 
 // ---- Boot (runs once per worker process start) ----------------------------
 
@@ -71,8 +74,17 @@ $offlineProfileId = (int) ($_ENV['WHITY_OFFLINE_PROFILE_ID'] ?? 1);
 // deliberately exercise the 403 path offline.
 $deviceRole = (string) ($_ENV['WHITY_DEVICE_ROLE'] ?? 'admin');
 
+// Bundled (read-only, shipped with the installer) first, then — when the Rust
+// sidecar sets it — the writable root a device downloads new plugins into at
+// runtime (WC-desktop-plugins). Bundled-first ordering means a downloaded
+// plugin can never shadow a bundled one (see PluginRuntimeLoader).
 $pluginsRoot = $_ENV['PLUGINS_ROOT'] ?? (__DIR__ . '/../plugins');
-$loader = new PluginRuntimeLoader($pluginsRoot);
+$downloadedPluginsRoot = $_ENV['WHITY_DOWNLOADED_PLUGINS_ROOT'] ?? null;
+$pluginsRoots = array_values(array_filter(
+    [$pluginsRoot, $downloadedPluginsRoot],
+    static fn ($root) => $root !== null && $root !== ''
+));
+$loader = new PluginRuntimeLoader($pluginsRoots);
 
 // WHITY_PLUGINS set (non-empty) pins an explicit FQCN list; unset means
 // "discover whatever plugin directories are actually there" — the
@@ -87,6 +99,7 @@ if ($explicitPlugins !== '') {
 
 $migrationRunner = new MigrationRunner();
 $migrationRunner->bootstrapHostSkeleton($pdo);
+\Whity\register_service(SequenceAllocator::class, new SequenceCounters($pdo));
 
 // Quarantines any plugin whose getPermissions() throws or is malformed
 // BEFORE its migrations/roles/hooks/routes are registered.
@@ -114,13 +127,14 @@ if (!$deviceRoleChecker->hasRole($offlineProfileId, $offlineTenantId, $deviceRol
 $offlineIdentity = new OfflineIdentity($offlineProfileId, $offlineTenantId);
 \Whity\register_service(OfflineIdentity::class, $offlineIdentity);
 $rbacGate = new RbacGate($deviceRoleChecker, $offlineIdentity);
+$frontendFeaturesHandler = new FrontendFeaturesHandler($loader, $deviceRoleChecker, $offlineProfileId, $offlineTenantId);
 
 // ---- Request loop -----------------------------------------------------
 
 $isWorker = function_exists('frankenphp_handle_request');
 $maxRequests = (int) ($_ENV['MAX_REQUESTS'] ?? 0); // 0 = unbounded
 
-$handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate) {
+$handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate, $frontendFeaturesHandler) {
     try {
         $request = Request::fromGlobals();
 
@@ -139,6 +153,17 @@ $handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate)
                 ),
                 'quarantined' => $loader->getQuarantined(),
             ])->send();
+
+            return;
+        }
+
+        // WC-plugin-block-renderer: an installed plugin's declared UI features
+        // (screen:'blocks' today), permission-filtered for this device's
+        // profile — see Whity\Api\FrontendFeaturesHandler. Infrastructure
+        // endpoint like /__whity/plugins above, not a plugin route, so it
+        // bypasses $router/$rbacGate the same way.
+        if ($request->getMethod() === 'GET' && $request->getPath() === '/__whity/frontend-features') {
+            Response::json(['data' => $frontendFeaturesHandler->list()])->send();
 
             return;
         }

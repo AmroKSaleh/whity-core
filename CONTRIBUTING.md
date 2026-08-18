@@ -249,6 +249,20 @@ Why it is shaped this way:
 Pushing a `vX.Y.Z` tag by hand still works, as an escape hatch for re-running a
 release whose publish step failed.
 
+**The back-merge PR has a window.** Strict protection requires a PR's HEAD to be
+up to date with its BASE. The back-merge's head is `main` against a base of
+`develop`, so it is mergeable only while nothing new has landed on `develop` —
+merge it immediately, or close it.
+
+Closing it is fine. The commit it carries has a tree identical to its
+develop-side parent, which `develop` already contains, so `main` introduces no
+content `develop` lacks and every later `develop → main` merge is still clean.
+The only cost is cosmetic: `git` reports `develop` as N behind after N releases,
+which misleads a reader but breaks nothing.
+
+Do NOT "fix" a stale one with `gh pr update-branch` — that merges `develop` into
+`main`, pushing unreleased work onto the release line.
+
 ### Branch naming
 
 Branches follow `type/WC-XX-short-description`, where `WC-XX` is the tracking
@@ -503,8 +517,12 @@ seeded accounts and shared-database discipline.
    - [`automated-tests.yml`](.github/workflows/automated-tests.yml):
      - **Unit, static analysis & plugin smoke (SQLite)** — `phpunit`, the
        OpenAPI-spec drift check, `phpstan analyse src tests plugins sdk`, the
-       plugin-load smoke, the tenant-predicate guard, and the plugin
-       tenant-isolation conformance check.
+       plugin-load smoke, the tenant-predicate guard, the plugin
+       tenant-isolation conformance check, and the vendored-SDK parity guard
+       (`scripts/ci-vendored-sdk-parity.php` — the Tauri desktop template
+       carries its own copy of `sdk/src`, and a change to either tree must
+       update both in the SAME commit or a device runs an older plugin
+       contract than the one core publishes).
      - **i18n catalogue drift** — regenerates the English catalogue from the
        `t()` calls in the source and fails if it differs from
        `database/i18n/`. Runs on frontend changes too, because that is where

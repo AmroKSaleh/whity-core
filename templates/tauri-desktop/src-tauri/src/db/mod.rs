@@ -15,6 +15,7 @@ pub mod auth_repo;
 pub mod conflicts_repo;
 pub mod drafts_repo;
 pub mod items_repo;
+pub mod plugin_sync_repo;
 
 use rusqlite::Connection;
 use std::fs;

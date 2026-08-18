@@ -32,6 +32,7 @@ import type {
   DataStatBlock,
   DataTableBlock,
   DateInputBlock,
+  DrawerBlock,
   FieldArrayBlock,
   FileInputBlock,
   FormBlock,
@@ -43,6 +44,7 @@ import type {
   LocalizedTextValue,
   MarkdownBlock,
   MathBlock,
+  ModalBlock,
   NumberInputBlock,
   ReferenceSelectBlock,
   RichTextInputBlock,
@@ -89,6 +91,20 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@amroksaleh/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@amroksaleh/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@amroksaleh/ui/sheet';
 import { PermissionButton } from '@/components/rbac/permission-button';
 import {
   FormProvider,
@@ -271,11 +287,12 @@ function isOneOfNumber<T extends number>(value: unknown, allowed: readonly T[]):
 }
 
 
-function isValidSubmitSpec(value: unknown): value is { method: 'POST' | 'PUT'; endpoint: string } {
+function isValidSubmitSpec(value: unknown): value is { method: 'POST' | 'PUT' | 'PATCH'; endpoint: string } {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    (v.method === 'POST' || v.method === 'PUT') &&
+    // WC-block-submit-templating: PATCH (the sync update verb) joins POST/PUT.
+    (v.method === 'POST' || v.method === 'PUT' || v.method === 'PATCH') &&
     typeof v.endpoint === 'string' &&
     v.endpoint !== ''
   );
@@ -635,6 +652,15 @@ function MarkdownRenderer({ block }: { block: MarkdownBlock }) {
 interface MasterDetail {
   selections: Record<string, string>;
   setSelection: (name: string, value: string) => void;
+  // WC-block-modal-drawer: rows published by `open` row actions, keyed by the
+  // opened overlay's id; and which overlays are currently open.
+  rows: Record<string, Record<string, unknown>>;
+  openTargets: Record<string, boolean>;
+  openTarget: (id: string, row?: Record<string, unknown>) => void;
+  // `options.refresh` bumps `refreshSignal` (passed ONLY from a form's
+  // submit-success path) so a plain dismiss/cancel never triggers a refetch.
+  closeTarget: (id: string, options?: { refresh?: boolean }) => void;
+  refreshSignal: number;
 }
 
 const MasterDetailContext = React.createContext<MasterDetail | null>(null);
@@ -643,26 +669,71 @@ function useMasterDetail(): MasterDetail | null {
   return React.useContext(MasterDetailContext);
 }
 
+// WC-block-modal-drawer: the id of the nearest enclosing modal/drawer, or null
+// at the top level — a form inside an overlay reads this to close it (and
+// refetch) on submit-success.
+const ModalScopeContext = React.createContext<string | null>(null);
+
+function useModalScope(): string | null {
+  return React.useContext(ModalScopeContext);
+}
+
 /**
- * Provides the shared selection state that `selector` blocks write and
- * data-bound blocks' `params` read. Rendered once at the BlockRenderer root, so
- * a selection is visible to every sibling block on the screen.
+ * WC-block-modal-drawer: resolve a master-detail context reference. A dotted
+ * `{targetId}.{field}` reads the row published under `targetId` by an `open`
+ * row action; a bare name reads the current selection of the selector so named.
+ * Returns undefined when unresolved — an unresolvable reference is a no-op,
+ * matching the SDK validator's "no cross-reference validation" stance.
+ */
+export function resolveContextRef(md: MasterDetail | null, ref: string): string | undefined {
+  if (md === null || ref === '') return undefined;
+  const dot = ref.indexOf('.');
+  if (dot === -1) {
+    const v = md.selections[ref];
+    return v !== undefined && v !== '' ? v : undefined;
+  }
+  const row = md.rows[ref.slice(0, dot)];
+  if (row === undefined) return undefined;
+  const v = row[ref.slice(dot + 1)];
+  return v === undefined || v === null ? undefined : String(v);
+}
+
+/**
+ * Provides the shared selection/row state that `selector` and `open` row actions
+ * write and data-bound blocks' `params` / form `defaultFrom` read. Rendered once
+ * at the BlockRenderer root, so state is visible to every block on the screen.
  */
 function MasterDetailProvider({ children }: { children: React.ReactNode }) {
   const [selections, setSelections] = React.useState<Record<string, string>>({});
+  const [rows, setRows] = React.useState<Record<string, Record<string, unknown>>>({});
+  const [openTargets, setOpenTargets] = React.useState<Record<string, boolean>>({});
+  const [refreshSignal, setRefreshSignal] = React.useState(0);
+
   const setSelection = React.useCallback(
     (name: string, value: string) => setSelections((prev) => ({ ...prev, [name]: value })),
     []
   );
-  const value = React.useMemo<MasterDetail>(() => ({ selections, setSelection }), [selections, setSelection]);
+  const openTarget = React.useCallback((id: string, row?: Record<string, unknown>) => {
+    setOpenTargets((prev) => ({ ...prev, [id]: true }));
+    if (row !== undefined) setRows((prev) => ({ ...prev, [id]: row }));
+  }, []);
+  const closeTarget = React.useCallback((id: string, options?: { refresh?: boolean }) => {
+    setOpenTargets((prev) => ({ ...prev, [id]: false }));
+    if (options?.refresh === true) setRefreshSignal((s) => s + 1);
+  }, []);
+
+  const value = React.useMemo<MasterDetail>(
+    () => ({ selections, setSelection, rows, openTargets, openTarget, closeTarget, refreshSignal }),
+    [selections, setSelection, rows, openTargets, openTarget, closeTarget, refreshSignal]
+  );
   return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>;
 }
 
 /**
  * Compute a data-bound block's EFFECTIVE source: its base `source` plus any
- * `params` whose named selector currently has a value, appended as URL-encoded
- * query params. Returns the base source unchanged when there are no params or
- * no selections yet. usePluginData keys on this string, so a selection change
+ * `params` whose reference currently resolves, appended as URL-encoded query
+ * params. Returns the base source unchanged when there are no params or nothing
+ * resolves yet. usePluginData keys on this string, so a selection/row change
  * re-fetches the block.
  */
 function useEffectiveSource(baseSource: string, params?: SourceParam[]): string {
@@ -670,13 +741,32 @@ function useEffectiveSource(baseSource: string, params?: SourceParam[]): string 
   if (!params || params.length === 0 || md === null) return baseSource;
   const qs = params
     .map((p) => {
-      const v = md.selections[p.from];
+      const v = resolveContextRef(md, p.from);
       return v !== undefined && v !== '' ? `${encodeURIComponent(p.param)}=${encodeURIComponent(v)}` : null;
     })
     .filter((x): x is string => x !== null)
     .join('&');
   if (qs === '') return baseSource;
   return baseSource + (baseSource.includes('?') ? '&' : '?') + qs;
+}
+
+/**
+ * WC-block-modal-drawer: refetch a data-bound block when the master-detail
+ * `refreshSignal` bumps — i.e. after an overlay form submits successfully.
+ * Wired into every data-bound renderer (dataTable/dataList/dataStat/chart) so an
+ * edit through an overlay is reflected in the whole feature tree, not just the
+ * opener. Skips the initial render; `refetch` is undefined only while loading.
+ */
+function useRefetchOnSignal(refetch: (() => void) | undefined): void {
+  const md = useMasterDetail();
+  const signal = md?.refreshSignal ?? 0;
+  const seen = React.useRef(signal);
+  React.useEffect(() => {
+    if (seen.current !== signal) {
+      seen.current = signal;
+      refetch?.();
+    }
+  }, [signal, refetch]);
 }
 
 // WC-532 A7: the master selector — a dropdown fed from an owned collection
@@ -807,6 +897,25 @@ function RowActionButton({
   );
 }
 
+// WC-block-modal-drawer: an `open` row action — publishes the row into the
+// master-detail context under the target overlay's id and opens it. The overlay
+// (a modal/drawer elsewhere in the tree) reads the row via `defaultFrom` /
+// `params.from`. A no-op if rendered outside a MasterDetailProvider.
+function RowOpenButton({
+  action,
+  row,
+}: {
+  action: Extract<RowAction, { open: string }>;
+  row: Record<string, string>;
+}) {
+  const md = useMasterDetail();
+  return (
+    <Button type="button" variant="ghost" size="sm" onClick={() => md?.openTarget(action.open, row)}>
+      {action.label}
+    </Button>
+  );
+}
+
 function InteractiveDataTable({
   columns,
   rows,
@@ -837,6 +946,8 @@ function InteractiveDataTable({
                 <Button key={i} asChild variant="ghost" size="sm">
                   <Link href={applyRowTemplate(action.href, row)}>{action.label}</Link>
                 </Button>
+              ) : 'open' in action ? (
+                <RowOpenButton key={i} action={action} row={row} />
               ) : (
                 <RowActionButton key={i} action={action} row={row} onMutated={onMutated} />
               )
@@ -868,6 +979,11 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
     if (!Array.isArray(body) || body.length === 0) return null;
     return body as Rows;
   });
+
+  useRefetchOnSignal(
+    state.status === 'ready' || state.status === 'empty' ? state.refresh
+      : state.status === 'error' ? state.retry : undefined
+  );
 
   if (state.status === 'loading') {
     return (
@@ -964,6 +1080,11 @@ function DataStatRenderer({ block }: { block: DataStatBlock }) {
     if (!(block.valueField in obj)) return null;
     return obj;
   });
+
+  useRefetchOnSignal(
+    state.status === 'ready' || state.status === 'empty' ? state.refresh
+      : state.status === 'error' ? state.retry : undefined
+  );
 
   if (state.status === 'loading') {
     return (
@@ -1155,6 +1276,11 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
     return body as Rows;
   });
 
+  useRefetchOnSignal(
+    state.status === 'ready' || state.status === 'empty' ? state.refresh
+      : state.status === 'error' ? state.retry : undefined
+  );
+
   if (state.status === 'loading') {
     return (
       <div className="space-y-2" data-slot="block-data-loading">
@@ -1252,6 +1378,11 @@ function ChartRenderer({ block }: { block: ChartBlock }) {
     return body as Rows;
   });
 
+  useRefetchOnSignal(
+    state.status === 'ready' || state.status === 'empty' ? state.refresh
+      : state.status === 'error' ? state.retry : undefined
+  );
+
   if (state.status === 'loading') {
     return (
       <div className="space-y-2" data-slot="block-data-loading">
@@ -1342,8 +1473,20 @@ function InputLabel({ inputId, label, required, error }: { inputId: string; labe
 }
 
 function FormRenderer({ block }: { block: FormBlock }) {
+  const md = useMasterDetail();
+  const scopeId = useModalScope();
+  // WC-block-modal-drawer: seed inputs' `defaultFrom` from the master-detail
+  // context (a row published by an `open` action, or a selector's value), and —
+  // when this form lives inside an overlay — close it + refetch on success.
+  const resolveRef = React.useCallback(
+    (ref: string) => resolveContextRef(md, ref),
+    [md]
+  );
+  const onSubmitSuccess = React.useCallback(() => {
+    if (scopeId !== null) md?.closeTarget(scopeId, { refresh: true });
+  }, [scopeId, md]);
   return (
-    <FormProvider block={block}>
+    <FormProvider block={block} resolveRef={resolveRef} onSubmitSuccess={onSubmitSuccess}>
       <BlockList blocks={block.children} />
     </FormProvider>
   );
@@ -1852,6 +1995,70 @@ function isBlockVisible(block: Block, form: FormBlockContextValue | null): boole
  * subtree are hidden). This is presentational only; hidden inputs still exist
  * in the form's value map, and the server remains authoritative on validation.
  */
+// WC-block-modal-drawer: modal size → the DialogContent max-width utility.
+const MODAL_SIZE: Record<'sm' | 'md' | 'lg', string> = {
+  sm: 'sm:max-w-sm',
+  md: 'sm:max-w-lg',
+  lg: 'sm:max-w-2xl',
+};
+
+/**
+ * An overlay container (→ Dialog). Open state lives in the shared master-detail
+ * context (`openTargets[id]`), so a row action's `openTarget()` and the optional
+ * self-`trigger` button drive the same Dialog. A form nested inside closes it
+ * (and triggers a refetch) on submit-success via `ModalScopeContext` — see
+ * `FormRenderer`. A plain dismiss/cancel closes WITHOUT refetching.
+ */
+function ModalRenderer({ block }: { block: ModalBlock }) {
+  const md = useMasterDetail();
+  const open = md?.openTargets[block.id] ?? false;
+  const triggerVariant = block.variant ? BUTTON_VARIANT[block.variant] : 'default';
+  return (
+    <Dialog open={open} onOpenChange={(next) => (next ? md?.openTarget(block.id) : md?.closeTarget(block.id))}>
+      {isNonEmptyString(block.trigger) && (
+        <DialogTrigger asChild>
+          <Button type="button" variant={triggerVariant}>{block.trigger}</Button>
+        </DialogTrigger>
+      )}
+      <DialogContent className={MODAL_SIZE[block.size ?? 'md']}>
+        <DialogHeader>
+          <DialogTitle>{block.title}</DialogTitle>
+        </DialogHeader>
+        <ModalScopeContext.Provider value={block.id}>
+          <div className="space-y-3">
+            <BlockList blocks={block.children} />
+          </div>
+        </ModalScopeContext.Provider>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** An overlay container (→ Sheet). Same open/close/refetch model as {@link ModalRenderer}. */
+function DrawerRenderer({ block }: { block: DrawerBlock }) {
+  const md = useMasterDetail();
+  const open = md?.openTargets[block.id] ?? false;
+  return (
+    <Sheet open={open} onOpenChange={(next) => (next ? md?.openTarget(block.id) : md?.closeTarget(block.id))}>
+      {isNonEmptyString(block.trigger) && (
+        <SheetTrigger asChild>
+          <Button type="button" variant="outline">{block.trigger}</Button>
+        </SheetTrigger>
+      )}
+      <SheetContent side={block.side ?? 'right'}>
+        <SheetHeader>
+          <SheetTitle>{block.title}</SheetTitle>
+        </SheetHeader>
+        <ModalScopeContext.Provider value={block.id}>
+          <div className="space-y-3 px-4 pb-4">
+            <BlockList blocks={block.children} />
+          </div>
+        </ModalScopeContext.Provider>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function BlockNode({ block }: { block: Block }): React.ReactElement | null {
   const form = useFormBlockContext();
   if (!isBlockVisible(block, form)) {
@@ -2051,6 +2258,10 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return isNonEmptyString(block.label) ? <SubmitButtonRenderer block={block} /> : <UnsupportedBlock type="submitButton" />;
     case 'actionButton':
       return isNonEmptyString(block.label) && isValidSubmitSpec(block.action) ? <ActionButtonRenderer block={block} /> : <UnsupportedBlock type="actionButton" />;
+    case 'modal':
+      return isNonEmptyString(block.id) && isNonEmptyString(block.title) && Array.isArray(block.children) ? <ModalRenderer block={block} /> : <UnsupportedBlock type="modal" />;
+    case 'drawer':
+      return isNonEmptyString(block.id) && isNonEmptyString(block.title) && Array.isArray(block.children) ? <DrawerRenderer block={block} /> : <UnsupportedBlock type="drawer" />;
     default: {
       // Unknown type: TypeScript narrows `block` to `never`, but a malformed
       // payload at runtime still reaches here — degrade quietly.

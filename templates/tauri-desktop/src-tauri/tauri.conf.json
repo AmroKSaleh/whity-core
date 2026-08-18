@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "whity-tauri-desktop-template",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.whity.tauri-desktop-template",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -34,6 +34,15 @@
     "resources": {
       "resources/frankenphp/": "frankenphp",
       "../php-host/": "php-host"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "_comment": "WC-app-self-update: pubkey below is a PLACEHOLDER — a real minisign keypair must be generated (`npx tauri signer generate`) and its public key substituted before this can verify anything (see docs/wiki/Desktop-App-Updates.md). The endpoint here is a build-time fallback only, matching config.rs/build.rs's own compile-time default backend (https://whity.jameedium.org) for consistency; src-tauri/src/self_update.rs's runtime `app.updater_builder()` call always overrides it with this device's own chosen backend URL + bearer token, since both are only known at runtime. Must stay https:// — Tauri's updater refuses http:// in release builds.",
+      "pubkey": "REPLACE_WITH_MINISIGN_PUBLIC_KEY",
+      "endpoints": [
+        "https://whity.jameedium.org/api/desktop-app-updates/latest?target={{target}}&current_version={{current_version}}"
+      ]
     }
   }
 }

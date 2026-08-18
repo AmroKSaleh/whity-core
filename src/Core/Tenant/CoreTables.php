@@ -53,6 +53,8 @@ final class CoreTables
         'core_schema_migrations' => '003_create_core_schema_migrations.php',
         'data_type_restore_states' => '089_create_data_type_restore_states.php',
         'deployments' => '004_create_deployment_tables.php',
+        'desktop_app_releases' => '099_create_desktop_app_releases.php',
+        'desktop_plugin_releases' => '097_create_desktop_plugin_releases.php',
         'devices' => '044_create_devices.php',
         'document_blocks' => '059_create_document_designer_tables.php',
         'document_templates' => '059_create_document_designer_tables.php',

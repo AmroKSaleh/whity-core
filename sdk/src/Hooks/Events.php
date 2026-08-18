@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Sdk\Hooks;
 
+use Whity\Sdk\PluginNamespace;
+
 /**
  * Catalogue of hook event names dispatched by the Whity platform (SDK v1.0).
  *
@@ -98,6 +100,38 @@ final class Events
     public const WORKER_BOOT = 'worker.boot';
     public const WORKER_REQUEST_START = 'worker.request.start';
     public const WORKER_REQUEST_END = 'worker.request.end';
+
+    /**
+     * The event name to dispatch for one of THIS plugin's own events (SDK 1.29).
+     *
+     * The constants above name events the HOST dispatches. A plugin's own
+     * events live in the same flat event space and are namespaced under the
+     * plugin, so `Events::forPlugin('Acme', 'task.completed')` is
+     * `acme:task.completed` — the name to dispatch, and the name
+     * {@see \Whity\Sdk\PluginEventsInterface} declarations are bound to.
+     *
+     * Spelling it by hand is the thing this method exists to prevent. The
+     * prefix is a SLUG of the plugin name rather than the name itself
+     * ({@see \Whity\Sdk\PluginNamespace::slug()}), so `Acme\Widgets\Plugin`
+     * prefixes as `plugin` and a hand-written `Acme\Widgets\Plugin:…` matches
+     * no listener at all — silently, since a dispatch nobody listens to is
+     * indistinguishable from one whose listeners did nothing.
+     *
+     * Namespacing a plugin's events is worth doing even without an audit
+     * declaration: two plugins that both dispatch `item.created` otherwise run
+     * each other's listeners, which is a bug neither author can see in their
+     * own repository.
+     *
+     * @param string $pluginName The declaring plugin's name ({@see \Whity\Sdk\PluginInterface::getName()}).
+     * @param string $bareEvent  The BARE event name, e.g. `task.completed`.
+     * @return string The namespaced event name, e.g. `acme:task.completed`.
+     *
+     * @throws \InvalidArgumentException When the plugin name yields no usable namespace slug.
+     */
+    public static function forPlugin(string $pluginName, string $bareEvent): string
+    {
+        return PluginNamespace::qualify($pluginName, $bareEvent);
+    }
 
     /**
      * Static catalogue only — never instantiated.

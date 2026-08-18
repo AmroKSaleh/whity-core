@@ -226,7 +226,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -255,7 +255,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -399,6 +399,33 @@ final class BlockValidator
             case 'sourceParamList':
                 // WC-532 A7: master-detail query-param bindings.
                 self::validateSourceParamList($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'blockId':
+                // WC-relations-ui: a modal/drawer identifier a row action can
+                // target and `{id}.{field}` addressing can key on. A non-empty
+                // string with NO dot (the `{id}.{field}` separator) and no
+                // whitespace, so the addressing stays unambiguous.
+                if (
+                    !\is_string($value) || $value === ''
+                    || str_contains($value, '.')
+                    || preg_match('/\s/', $value) === 1
+                ) {
+                    $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty string with no '.' or whitespace, got "
+                        . self::describeScalar($value);
+                }
+
+                break;
+
+            case 'contextPath':
+                // WC-relations-ui: a master-detail context reference. Either a
+                // bare selector name (resolves against the selection scalars) or
+                // a dotted `{targetId}.{field}` (resolves against a row published
+                // by an `open` row action). Shape only — like `from`, an
+                // unresolvable reference is a runtime no-op, never validated
+                // against the tree.
+                self::validateContextPath($value, $type, $prop, $path, $errors);
 
                 break;
         }
@@ -602,8 +629,16 @@ final class BlockValidator
 
     /**
      * `form.submit` / `actionButton.action` (SP3, WC-233):
-     * an array with `method` ∈ ['POST','PUT'] and `endpoint` satisfying
+     * an array with `method` ∈ ['POST','PUT','PATCH'] and `endpoint` satisfying
      * the existing apiPath predicate (/api/ prefix, no ///../\whitespace).
+     *
+     * WC-block-submit-templating: PATCH is accepted (the sync update verb), and
+     * the `endpoint` may carry `{targetId.field}` / `{selector}` context tokens —
+     * the SAME addressing as `params.from` / `defaultFrom` — which the renderer
+     * interpolates from the master-detail context at submit time (e.g. a modal
+     * edit form PATCHing `/api/persons/{edit-person.id}` for the opened row). The
+     * `{`/`}`/`.` in a single-dot token pass the path predicate; an unresolved
+     * token is a runtime no-op, consistent with the contract's no-cross-reference stance.
      *
      * @param mixed        $value
      * @param list<string> $errors by reference
@@ -625,8 +660,8 @@ final class BlockValidator
         $method   = $value['method']   ?? null;
         $endpoint = $value['endpoint'] ?? null;
 
-        if (!\is_string($method) || !\in_array($method, ['POST', 'PUT'], true)) {
-            $errors[] = "{$path}.method: '{$type}.{$prop}.method' must be 'POST' or 'PUT', got "
+        if (!\is_string($method) || !\in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
+            $errors[] = "{$path}.method: '{$type}.{$prop}.method' must be 'POST', 'PUT', or 'PATCH', got "
                 . self::describeScalar($method);
         }
 
@@ -671,12 +706,60 @@ final class BlockValidator
             if (
                 !\is_array($item)
                 || !isset($item['param']) || !\is_string($item['param']) || $item['param'] === ''
-                || !isset($item['from']) || !\is_string($item['from']) || $item['from'] === ''
+                || !isset($item['from']) || self::isMalformedContextPath($item['from'])
             ) {
                 $errors[] = "{$path}[{$i}]: each '{$type}.{$prop}' entry must be a "
-                    . '{param: non-empty string, from: non-empty string} object';
+                    . '{param: non-empty string, from: a selector name or "{targetId}.{field}"} object';
             }
         }
+    }
+
+    /**
+     * `<input>.defaultFrom` (WC-relations-ui): seed an input's initial value from
+     * the master-detail context — the same addressing as `params.from` (a bare
+     * selector name, or a dotted `{targetId}.{field}` published by an `open` row
+     * action). Shape only; an unresolvable reference is a runtime no-op.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateContextPath(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (self::isMalformedContextPath($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a selector name or a dotted '{targetId}.{field}' reference, got "
+                . self::describeScalar($value);
+        }
+    }
+
+    /**
+     * A master-detail context reference is a bare selector name OR a dotted
+     * `{targetId}.{field}` (exactly one dot, both sides non-empty). No whitespace
+     * either way — the dot is the sole discriminator, and `blockId` forbids dots,
+     * so `{targetId}.{field}` can never be mistaken for a bare name.
+     */
+    private static function isMalformedContextPath(mixed $value): bool
+    {
+        if (!\is_string($value) || $value === '' || \preg_match('/\s/', $value) === 1) {
+            return true;
+        }
+
+        if (\substr_count($value, '.') > 1) {
+            return true;
+        }
+
+        if (\str_contains($value, '.')) {
+            [$id, $field] = \explode('.', $value, 2);
+            if ($id === '' || $field === '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -685,7 +768,10 @@ final class BlockValidator
      *   - `href`: an internal relative path (may carry `{field}` placeholders
      *     the renderer substitutes from the row) — an internal-nav link, OR
      *   - `endpoint` (apiPath, `{field}`-templatable) + `method` ∈
-     *     POST|PUT|DELETE — a mutation, with an optional `confirm` prompt.
+     *     POST|PUT|DELETE — a mutation, with an optional `confirm` prompt, OR
+     *   - `open` (WC-relations-ui): a modal/drawer block id to open, publishing
+     *     this row into the master-detail context for the overlay's content to
+     *     read (form `defaultFrom`, data-bound `params.from`).
      *
      * Placeholders are validated loosely (the path predicates already permit
      * `{`/`}`); the renderer URL-encodes each substituted row value. A `{field}`
@@ -723,9 +809,10 @@ final class BlockValidator
 
             $hasHref     = \array_key_exists('href', $item);
             $hasEndpoint = \array_key_exists('endpoint', $item);
+            $hasOpen     = \array_key_exists('open', $item);
 
-            if ($hasHref === $hasEndpoint) {
-                $errors[] = "{$at}: each '{$type}.{$prop}' entry must carry exactly one of 'href' or 'endpoint'";
+            if ((int) $hasHref + (int) $hasEndpoint + (int) $hasOpen !== 1) {
+                $errors[] = "{$at}: each '{$type}.{$prop}' entry must carry exactly one of 'href', 'endpoint', or 'open'";
 
                 continue;
             }
@@ -735,6 +822,23 @@ final class BlockValidator
                 if (!\is_string($href) || $href === '' || $href[0] !== '/' || str_starts_with($href, '//')) {
                     $errors[] = "{$at}.href: '{$type}.{$prop}' href must be an internal path starting with '/' "
                         . '(absolute and protocol-relative URLs are rejected), got ' . self::describeScalar($href);
+                }
+
+                continue;
+            }
+
+            if ($hasOpen) {
+                // WC-relations-ui: open a modal/drawer, publishing this row into
+                // the master-detail context under the target's id. `open` is that
+                // target's blockId (no dot/whitespace, matching the `blockId` rule).
+                $open = $item['open'];
+                if (
+                    !\is_string($open) || $open === ''
+                    || str_contains($open, '.')
+                    || preg_match('/\s/', $open) === 1
+                ) {
+                    $errors[] = "{$at}.open: '{$type}.{$prop}' open must be a modal/drawer block id "
+                        . '(non-empty, no "." or whitespace), got ' . self::describeScalar($open);
                 }
 
                 continue;

@@ -1,6 +1,7 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
+import { IconLogout, IconMoon, IconSun, IconUserCog } from "@tabler/icons-react"
 
-import { AppSidebar } from "@amroksaleh/ui/app-sidebar"
+import { Button } from "@amroksaleh/ui/button"
 import { PageHeader } from "@amroksaleh/ui/page-header"
 import { PageShell } from "@amroksaleh/ui/page-shell"
 import { resolveNavGroups } from "@amroksaleh/features/nav"
@@ -13,12 +14,18 @@ import {
 } from "@amroksaleh/features/sync"
 
 import { navConfig } from "./nav-config"
-import { HashLinkAdapter } from "./hash-link"
+import { Sidebar } from "./sidebar"
 import { useHashPath } from "./use-hash-path"
 import { demoCatalogAdapter } from "./demo-catalog-tauri-adapter"
 import { PrinterDemo } from "./printer-demo"
-import { PhpHostDemo } from "./php-host-demo"
-import { AppStateProvider, AuthGate, useAppState } from "./app-state-provider"
+import { PluginsPage } from "./plugins-page"
+import { PluginStorePage } from "./plugin-store-page"
+import { RolesPage } from "./roles-page"
+import { BlockRenderer } from "./plugin-blocks/block-renderer"
+import { PluginFeaturesProvider, usePluginFeatures, usePluginNavGroups } from "./plugin-nav-provider"
+import { AppStateProvider, AuthGate, useAppState, useAuthGateState } from "./app-state-provider"
+import { authClient } from "./auth-client"
+import { useThemeMode } from "./theme-mode-context"
 import { appT } from "./sync-i18n"
 
 function navigate(path: string) {
@@ -34,16 +41,55 @@ export function App() {
 }
 
 function AppInner() {
+  const state = useAuthGateState()
+
+  // Matches the website's split between `/login` (app/login/page.tsx, no
+  // sidebar at all) and `app/(protected)/layout.tsx` (sidebar only once
+  // authenticated): the enroll form and the locked/relogin screen render
+  // full-screen with zero chrome, exactly like an anonymous caller bounced to
+  // `/login` there. The sidebar mounts ONLY once there is an authenticated,
+  // unlocked session to show it around.
+  if (state !== "ready") {
+    return <AuthGate>{null}</AuthGate>
+  }
+
+  // Plugin features (and therefore their nav entries + /plugins/x/:id routes)
+  // only make sense once there's a device to fetch them FROM — see
+  // plugin-nav-provider.tsx's own dual php:status/plugin-sync:status
+  // listeners for when it (re)fetches.
+  return (
+    <PluginFeaturesProvider>
+      <AuthenticatedApp />
+    </PluginFeaturesProvider>
+  )
+}
+
+function AuthenticatedApp() {
   const path = useHashPath()
-  const navGroups = useMemo(() => resolveNavGroups(navConfig, path), [path])
-  const { controller, auth } = useAppState()
+  const pluginNavGroups = usePluginNavGroups()
+  const pluginFeatures = usePluginFeatures()
+  const mergedNav = useMemo(() => ({ groups: [...navConfig.groups, ...pluginNavGroups] }), [pluginNavGroups])
+  const navGroups = useMemo(() => resolveNavGroups(mergedNav, path), [mergedNav, path])
+  const { controller, auth, reloadAuth } = useAppState()
   const status = useSyncStatus(controller)
 
+  // Mirrors ReloginScreen's onReenroll (app-state-provider.tsx): clear the
+  // keychain credential + auth_state (local DATA stays intact), then refresh
+  // both the auth gate and the sync controller so the app falls back to
+  // EnrollForm — the only screen with a Server field, which is otherwise
+  // unreachable once a device is enrolled.
+  const handleLogout = async () => {
+    await authClient.logout()
+    await reloadAuth()
+    await controller.refresh()
+  }
+
   const sidebar = (
-    <AppSidebar
+    <Sidebar
       groups={navGroups}
-      linkComponent={HashLinkAdapter}
-      header={<span className="px-2 text-sm font-semibold">Whity Desktop</span>}
+      siteName="Whity"
+      subtitle="Desktop"
+      footer={auth?.enrolled ? <AccountFooter email={auth.email} serverUrl={auth.serverUrl} onLogout={handleLogout} /> : undefined}
     />
   )
 
@@ -115,15 +161,46 @@ function AppInner() {
         <PrinterDemo />
       </>
     )
-  } else if (path === "/php-host-demo") {
+  } else if (path === "/plugins") {
     body = (
       <>
         <PageHeader
-          title="PHP plugin host"
-          description="A bundled FrankenPHP process running real whity plugins offline, with a native bridge back into Rust."
+          title="Plugins"
+          description="Plugins your organization has enabled sync automatically when you sign in — nothing to install or manage here. See src-tauri/src/plugins/reconcile.rs."
         />
-        <PhpHostDemo />
+        <PluginsPage />
       </>
+    )
+  } else if (path === "/plugin-store") {
+    body = (
+      <>
+        <PageHeader
+          title="Plugin store"
+          description="Plugins your organization has enabled for this device, from the connected server's catalog. Install/update converges the whole set at once — see src-tauri/src/plugins/reconcile.rs."
+        />
+        <PluginStorePage />
+      </>
+    )
+  } else if (path === "/roles") {
+    // Server-owned admin surface rendered by the SHARED @amroksaleh/features/roles
+    // page over the remote transport (Path B). RolesScreen renders its own
+    // PageHeader, so no wrapping header here.
+    body = <RolesPage />
+  } else if (path.startsWith("/plugins/x/")) {
+    // Generic route for ANY installed plugin's screen:'blocks' feature — one
+    // provider + one route + one renderer serve every plugin, with zero
+    // per-feature TypeScript (see plugin-nav-provider.tsx / plugin-blocks/).
+    // Deliberately namespaced under /plugins/x/ so it can never collide with
+    // /plugins above, mirroring the website's own /admin/x/[featureId].
+    const featureId = path.slice("/plugins/x/".length)
+    const feature = pluginFeatures.find((f) => f.id === featureId)
+    body = feature ? (
+      <>
+        <PageHeader title={feature.label} />
+        <BlockRenderer feature={feature} />
+      </>
+    ) : (
+      <PageHeader title="Not found" description="This plugin feature isn't installed on this device." />
     )
   } else {
     body = (
@@ -135,9 +212,76 @@ function AppInner() {
   }
 
   return (
-    <PageShell sidebar={sidebar} topBar={topBar}>
-      <AuthGate>{body}</AuthGate>
+    // Matches the website's protected layout (web/app/(protected)/layout.tsx),
+    // which caps page content at max-w-7xl rather than letting it stretch
+    // full-bleed on a wide window. `AuthenticatedApp` only ever mounts once
+    // `AppInner`'s `useAuthGateState()` is already "ready", so there's no
+    // second gate check needed here.
+    <PageShell sidebar={sidebar} topBar={topBar} contentClassName="max-w-7xl">
+      {body}
     </PageShell>
+  )
+}
+
+/**
+ * Sidebar footer shown only once enrolled — mirrors the website's footer row
+ * stack (web/components/sidebar.tsx: account row, theme toggle, logout
+ * button), minus the tenant/language switcher rows the website has (not
+ * applicable to a single-tenant device with no i18n here). This is also the
+ * ONLY place in the app to log out (which clears the keychain credential +
+ * auth_state, dropping the gate back to EnrollForm).
+ */
+function AccountFooter({
+  email,
+  serverUrl,
+  onLogout,
+}: {
+  email: string | null
+  serverUrl: string | null
+  onLogout: () => void | Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const { resolved, toggle } = useThemeMode()
+  const isDark = resolved === "dark"
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 rounded-lg bg-background px-2 py-2">
+        <IconUserCog className="size-5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <span className="block truncate text-xs text-muted-foreground">Logged in as</span>
+          {email && <span className="block truncate text-sm font-medium">{email}</span>}
+          {serverUrl && <span className="block truncate text-[11px] text-muted-foreground/70">{serverUrl}</span>}
+        </div>
+      </div>
+
+      <Button
+        onClick={toggle}
+        variant="outline"
+        className="w-full justify-start"
+        aria-label="Toggle color scheme"
+      >
+        {isDark ? <IconSun className="size-5 me-3 shrink-0" /> : <IconMoon className="size-5 me-3 shrink-0" />}
+        {isDark ? "Light mode" : "Dark mode"}
+      </Button>
+
+      <Button
+        variant="outline"
+        className="w-full justify-start"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          try {
+            await onLogout()
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        <IconLogout className="size-5 me-3 shrink-0" />
+        {busy ? "Logging out…" : "Log out"}
+      </Button>
+    </div>
   )
 }
 

@@ -19,12 +19,17 @@ pub struct AuthStatus {
     pub last_online_auth_at: Option<i64>,
     /// The server-echoed desktop-login TTL (seconds); the offline-lock window.
     pub max_login_seconds: Option<i64>,
+    /// The backend this device enrolled against — informational only (the
+    /// account footer displays it), never user-editable: the backend is
+    /// fixed for the whole build (see `config.rs`). `None` before the first
+    /// enrollment.
+    pub server_url: Option<String>,
 }
 
 pub fn status(conn: &Connection) -> rusqlite::Result<AuthStatus> {
     conn.query_row(
         "SELECT enrolled, email, device_id, active_tenant_id,
-                credential_expires_at, last_online_auth_at, max_login_seconds
+                credential_expires_at, last_online_auth_at, max_login_seconds, server_url
          FROM auth_state WHERE id = 1",
         [],
         |r| {
@@ -36,25 +41,28 @@ pub fn status(conn: &Connection) -> rusqlite::Result<AuthStatus> {
                 credential_expires_at: r.get(4)?,
                 last_online_auth_at: r.get(5)?,
                 max_login_seconds: r.get(6)?,
+                server_url: r.get(7)?,
             })
         },
     )
 }
 
-/// Mark the device enrolled and record its identity/credential metadata.
+/// Mark the device enrolled and record its identity/credential metadata,
+/// including the backend it just enrolled against.
 pub fn set_enrolled(
     conn: &Connection,
     device_id: i64,
     email: &str,
     active_tenant_id: Option<i64>,
     credential_expires_at: &str,
+    server_url: &str,
 ) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE auth_state
          SET enrolled = 1, device_id = ?1, email = ?2,
-             active_tenant_id = ?3, credential_expires_at = ?4
+             active_tenant_id = ?3, credential_expires_at = ?4, server_url = ?5
          WHERE id = 1",
-        params![device_id, email, active_tenant_id, credential_expires_at],
+        params![device_id, email, active_tenant_id, credential_expires_at, server_url],
     )?;
     Ok(())
 }
@@ -109,7 +117,15 @@ mod tests {
         assert!(s0.email.is_none());
         assert!(s0.last_online_auth_at.is_none());
 
-        set_enrolled(&conn, 7, "admin@example.com", Some(1), "2026-08-01T00:00:00+00:00").unwrap();
+        set_enrolled(
+            &conn,
+            7,
+            "admin@example.com",
+            Some(1),
+            "2026-08-01T00:00:00+00:00",
+            "https://whity.example.com",
+        )
+        .unwrap();
         record_online_auth(&conn, 1_700_000_000, Some(259_200)).unwrap();
 
         let s1 = status(&conn).unwrap();
@@ -119,6 +135,7 @@ mod tests {
         assert_eq!(s1.active_tenant_id, Some(1));
         assert_eq!(s1.last_online_auth_at, Some(1_700_000_000));
         assert_eq!(s1.max_login_seconds, Some(259_200));
+        assert_eq!(s1.server_url.as_deref(), Some("https://whity.example.com"));
 
         // A later exchange with no echoed TTL keeps the prior max_login_seconds.
         record_online_auth(&conn, 1_700_100_000, None).unwrap();
@@ -128,9 +145,9 @@ mod tests {
     }
 
     #[test]
-    fn clear_resets_to_unenrolled() {
+    fn clear_resets_to_unenrolled_but_keeps_server_url() {
         let conn = migrated();
-        set_enrolled(&conn, 1, "a@b.c", None, "x").unwrap();
+        set_enrolled(&conn, 1, "a@b.c", None, "x", "https://whity.example.com").unwrap();
         record_online_auth(&conn, 123, Some(3600)).unwrap();
 
         clear(&conn).unwrap();
@@ -139,5 +156,8 @@ mod tests {
         assert!(!s.enrolled);
         assert!(s.email.is_none());
         assert!(s.max_login_seconds.is_none());
+        // server_url is informational history, not session state — logout
+        // must not erase which backend this device was last talking to.
+        assert_eq!(s.server_url.as_deref(), Some("https://whity.example.com"));
     }
 }

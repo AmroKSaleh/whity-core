@@ -164,12 +164,122 @@ final class SdkPackageContractTest extends TestCase
         $this->assertSame('array', (string) $return);
     }
 
+    /**
+     * SDK 1.28: the OPTIONAL async-job contribution point. Same sibling shape as
+     * PluginRolesInterface — a declaration map plus a second method keyed by the
+     * same names carrying the extra policy (here: which of them the public
+     * submission API may enqueue).
+     */
+    public function testPluginJobsInterfaceLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\PluginJobsInterface::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\PluginJobsInterface::class))->getMethods()
+        );
+        sort($methods);
+        $this->assertSame(['getJobs', 'getSubmittableJobs'], $methods);
+
+        foreach (['getJobs', 'getSubmittableJobs'] as $method) {
+            $return = (new \ReflectionMethod(\Whity\Sdk\PluginJobsInterface::class, $method))->getReturnType();
+            $this->assertSame('array', (string) $return);
+        }
+    }
+
+    /**
+     * SDK 1.29: the OPTIONAL audited-event contribution point. One declaration
+     * method, like PluginFrontendInterface — the policy that would have gone in
+     * a second method (which audit action to record) is the declaration KEY, so
+     * an event and the action it is filed under can never disagree.
+     */
+    public function testPluginEventsInterfaceLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\PluginEventsInterface::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\PluginEventsInterface::class))->getMethods()
+        );
+        $this->assertSame(['getAuditedEvents'], $methods);
+
+        $return = (new \ReflectionMethod(\Whity\Sdk\PluginEventsInterface::class, 'getAuditedEvents'))
+            ->getReturnType();
+        $this->assertSame('array', (string) $return);
+    }
+
+    /**
+     * SDK 1.29 publishes the namespacing rule the host has always applied, so a
+     * plugin can spell a namespaced name for itself. Nothing else is allowed to
+     * derive it independently: two implementations of "who is this?" is how the
+     * name a plugin dispatches and the name the host listens for drift apart,
+     * and a dispatch nobody listens to reports nothing at all.
+     */
+    public function testTheHostsSlugRuleIsTheSdksSlugRule(): void
+    {
+        foreach (['Acme', 'Acme\\Widgets\\Plugin', 'Hello-World', '_odd_', '', '!!!', '9lives'] as $name) {
+            $this->assertSame(
+                \Whity\Sdk\PluginNamespace::slug($name),
+                \Whity\Core\Support\SourceSlug::from($name),
+                "core and the SDK must agree on the slug for '{$name}'"
+            );
+        }
+    }
+
+    /**
+     * A plugin name yielding no slug must not degrade into an UNPREFIXED name:
+     * unprefixed is exactly the shape of a core event, so the fallback would
+     * hand a plugin the ability to dispatch `user.deleted` by naming itself
+     * badly.
+     */
+    public function testQualifyingUnderAnUnusableNameThrowsRatherThanReturningABareName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        \Whity\Sdk\Hooks\Events::forPlugin('!!!', 'user.deleted');
+    }
+
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.27.0',
+            '1.29.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.27 adds the offline-host conformance kit '
+            'SDK 1.29 adds the audited-event contribution point (PluginEventsInterface): '
+            . 'the audit writer subscribed to a HARDCODED map of core event names, so a '
+            . 'plugin\'s own domain events reached the platform audit trail never — an '
+            . 'operator opening the one screen that answers "who did what" saw core\'s '
+            . 'mutations and a silence where every plugin-side action had been. Both '
+            . 'workarounds are worse than the gap: writing to audit_log directly puts a '
+            . 'second writer on a table whose whole design is that it has one, and a private '
+            . 'activity table is a second audit surface nobody is looking at. Names are '
+            . 'declared BARE and the host stamps the plugin prefix onto BOTH halves of the '
+            . 'record (action acme:task.completed, target type acme:task), because an '
+            . 'attributable action beside a target type of `user` still reads as something '
+            . 'core did to a core record. The TRIGGER is namespaced too, which is the '
+            . 'load-bearing part: the hook manager tells a listener nothing about who '
+            . 'dispatched, so listening on the bare name would write a row for every plugin '
+            . 'declaring task.completed whenever any one of them fired it, and a trail that '
+            . 'records an event which did not happen is worse than one that records nothing. '
+            . 'A declaration that throws or is malformed costs that plugin its subscriptions '
+            . 'and costs core\'s own auditing nothing, whole-declaration rather than per '
+            . 'entry, because a plugin with half its events audited ships a trail that looks '
+            . 'complete; '
+            . 'SDK 1.28 adds the async-job contribution point (PluginJobsInterface): '
+            . 'JobInterface has been public since 1.0 and the host job registry has always '
+            . 'taken a handler, but nothing DISCOVERED a plugin\'s — so the shipped '
+            . 'queue:work worker knew only the core handlers and dead-lettered anything a '
+            . 'plugin enqueued as "No handler registered for job". The workaround was for '
+            . 'every plugin to ship a queue:work of its own that re-registered the core '
+            . 'handlers beside its own, which puts one worker per plugin in front of one '
+            . 'queue. Declared names are BARE and the host stamps the plugin prefix on, as '
+            . 'it already does for resource types, health probes and settings keys: two '
+            . 'plugins declaring `sync` get different canonical names and none can produce '
+            . 'a core.-prefixed one. Submittability is declared separately and fails '
+            . 'CLOSED, matching core — a handler the worker can run is not thereby '
+            . 'reachable from the public submission API. A declaration that throws or is '
+            . 'malformed costs that plugin its jobs and costs the worker nothing, because '
+            . 'the worker also delivers core\'s notifications and error alerts; '
+            . 'SDK 1.27 adds the offline-host conformance kit '
             . '(Testing\OfflinePluginHostConformanceTestCase): the tenant-isolation kit '
             . '(1.3) proves a plugin\'s queries stay tenant-scoped, but says nothing about '
             . 'whether the plugin actually BOOTS under an offline PHP host with no server '

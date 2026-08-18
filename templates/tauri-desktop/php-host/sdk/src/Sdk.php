@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.20).
+ * SDK identity (v1.29).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -99,13 +99,171 @@ namespace Whity\Sdk;
  * {@see \Whity\Sdk\DataType\DataTypeGuard} exposes the host's own guard
  * evaluation so a plugin's custom delete route enforces through the same path
  * the generated one does. Trashed and retired are kept distinct: reversible-and
- * -pending-removal versus permanent-and-closed-to-new-references, WC-723).
+ * -pending-removal versus permanent-and-closed-to-new-references, WC-723) ->
+ * 1.21 (plugin-declared SETTINGS: {@see \Whity\Sdk\Settings\PluginSettingsInterface},
+ * by which a plugin contributes typed, validated, defaulted configuration keys to
+ * the HOST'S own settings store instead of rebuilding one as a private table with
+ * no declared keys and no validation. Host-namespaced under the plugin name the
+ * loader supplies, resolved through the same per-tenant ?? global ?? default chain
+ * as a core key, and published on the host's own settings screens only on an
+ * explicit `admin => true` opt-in — those screens are gated on core permissions,
+ * which are not the plugin's. Secret-shaped declarations are REFUSED rather than
+ * downgraded to a readable string, #713 item 1) ->
+ * 1.22 (RESOURCE-SCOPED ROLE checks: the optional `$resourceType`/`$resourceId`
+ * pair 1.17 gave {@see \Whity\Sdk\Rbac\PermissionResolver::hasPermission()} is
+ * now on {@see \Whity\Sdk\Rbac\PermissionResolver::hasRole()} too. Host role
+ * resolution has honoured a resource scope since 1.17, but `hasRole()` asked the
+ * tenant-wide question regardless — so a role granted at ONE record through
+ * `resource_role_assignments` was resolvable and not askable, and reads as
+ * needing a schema change to `memberships` that it does not need. Additive:
+ * omitting them preserves 1.21 behaviour exactly, WC-712 §2) ->
+ * 1.23 (PORTABLE SCHEMA PREDICATES: {@see \Whity\Sdk\Schema\SchemaInspector}
+ * and the {@see \Whity\Sdk\Schema\MigrationSchema} trait that puts it on
+ * `$this` inside a migration. The SDK asks every migration to be idempotent and
+ * the host runs them on PostgreSQL and SQLite, but `ALTER TABLE … ADD COLUMN IF
+ * NOT EXISTS` is a PostgreSQL extension SQLite rejects — so the moment a plugin
+ * adds a column to a table it already shipped, the author has to hand-write a
+ * driver-branching `tableExists()`/`columnExists()` over `information_schema`
+ * and `PRAGMA table_info`. That pair has been written four times in one session
+ * in a single adopter's codebase, identically each time, and a wrong answer
+ * gates DDL: it passes on the engine the author develops against and fails on
+ * the other one, at enable time, on somebody else's deployment. Written once
+ * here, proven on both engines, and correct in two places the hand-written copy
+ * is not — lookups are confined to the connection's own search path rather than
+ * matching a same-named table in any schema, and read from `pg_catalog` rather
+ * than the privilege-filtered `information_schema`.
+ * `addColumnIfMissing()`/`dropColumnIfExists()` go one step further and remove
+ * the branch entirely: the migration states the shape it wants instead of
+ * asking a question and acting on the answer. Additive; no SQL is hidden behind
+ * a builder, so the tenant-isolation guards still read every statement) ->
+ * 1.24 (the lifecycle WRITE contract: {@see \Whity\Sdk\DataType\DataTypeLifecycle}
+ * and the {@see \Whity\Sdk\DataType\LifecycleOutcome} it answers with. The host
+ * told adopters to route their lifecycle writes through it and then published
+ * only {@see \Whity\Sdk\DataType\DataTypeGuard} — read-only, deliberately, since
+ * its whole guarantee is that holding it confers no authority. So a plugin that
+ * needed to actually trash a record duck-typed a host-internal service: no
+ * contract, no compatibility promise, no obligation to keep its shape. Reads
+ * keep their guarantee — the guard is untouched and gains no mutators — and
+ * writes get a second contract instead of being smuggled into the first.
+ * The host binds it to the SAME object its generated endpoints authorize
+ * through, so an in-process call cannot skip a check the endpoint enforces:
+ * a type the caller may not read is UNKNOWN rather than forbidden, an action
+ * the type does not offer is refused, and the action's declared permission is
+ * resolved through the host's own checker. `$actorProfileId` is required for
+ * exactly that reason — it is the subject of the check, not a decoration.
+ * The outcome is the vocabulary the HTTP layer already publishes (`reason` as
+ * the stable key, `message` as the fallback sentence, `blockers`, and the
+ * status), so one branch serves both call paths. Bulk work is a LOOP over these
+ * calls; a bulk statement bypasses every guard, veto and hook at once) ->
+ * 1.25 (PORTABLE WRITES: {@see \Whity\Sdk\Sql\Upsert}, and
+ * {@see \Whity\Sdk\Sql\SequenceAllocator} — the host-provided contract for
+ * "hand me the next number, and never hand the same one twice".
+ * `INSERT … ON CONFLICT … DO UPDATE … RETURNING` is the most repeated statement
+ * shape in an adopting plugin — one codebase carries 58 — and each one
+ * hand-builds four lists that must stay in step. `Upsert::tenantScoped()` builds
+ * them, and takes the tenant id as a REQUIRED separate argument that it writes
+ * into the value list AND prepends to the conflict target: an
+ * `ON CONFLICT (client_uuid)` where the intent was
+ * `ON CONFLICT (tenant_id, client_uuid)` is cross-tenant data loss written as an
+ * ordinary create, and it is now unrepresentable. `Upsert::unscoped()` serves
+ * declared-global tables, and its name is a declaration a reviewer can grep for.
+ * `buildSql()` is public, so nothing is hidden: the exact statement is
+ * inspectable, loggable and assertable.
+ * SequenceAllocator goes further than a helper and deletes the SQL entirely — a
+ * plugin that needs uniquely numbered records now declares nothing, migrates
+ * nothing and writes no SQL; it asks the host for a number, and the host
+ * allocates it in one statement with no read-then-write window for two clients
+ * to both observe. Gaps are possible and documented; duplicates are not) ->
+ * 1.26 (UNDECLARED-REFERENCE LINTING:
+ * {@see \Whity\Sdk\Schema\UndeclaredReferenceLinter} and
+ * {@see \Whity\Sdk\Schema\ReferenceDeclarations}. With no foreign keys between
+ * plugin tables — the convention here, and the reason `blocks_delete` /
+ * `cascade_delete` are declared as data at all — nothing at the database level
+ * stops a delete orphaning a record's children. An adopter's schema had zero
+ * foreign keys and deleting a parent silently left its children pointing at an
+ * id that no longer resolved; the delete answered 200.
+ * The linter flags a `<something>_id` column that points at a table that really
+ * exists, carries NO foreign key, AND appears in NEITHER declaration list —
+ * "you have a relationship core cannot see". It deliberately does NOT flag an
+ * `*_id` column merely for lacking a foreign key: that rule fires on the
+ * intended design of nearly every plugin table, is muted within a day, and
+ * takes the credibility of the tenant linters with it. A schema with zero
+ * foreign keys passes completely, provided its relationships are declared.
+ * `tenant_id` is never flagged — that is a different invariant with its own two
+ * linters — and a column naming no known table is not treated as a reference at
+ * all. The escape hatch mirrors `@tenant-guard-ignore`:
+ * `-- @reference-lint-ignore: <reason>` on the column, with the REASON
+ * required, because a decision nobody wrote down is indistinguishable from a
+ * muted alarm) ->
+ * 1.27 ({@see \Whity\Sdk\Testing\OfflinePluginHostConformanceTestCase}, the
+ * offline-host conformance kit. {@see \Whity\Sdk\Testing\TenantIsolationConformanceTestCase}
+ * proves a plugin's queries stay tenant-scoped; it says nothing about whether
+ * the plugin actually BOOTS under a real offline PHP host with no server
+ * framework behind it — no JWT/memberships/OU hierarchy, a single fixed
+ * device role, and a deliberately narrow SQLite dialect shim (the shape the
+ * Tauri desktop template's bundled FrankenPHP host runs plugins under). Every
+ * real gap that shim surfaced (a migration using `SERIAL` that SQLite
+ * silently mis-parses, an un-seeded `admin` role that left existing grant
+ * migrations silently inert, a route requiring a permission its plugin never
+ * declared) was found only by manually exercising a running host and
+ * watching it fail. This kit catches that class of defect in a plugin
+ * author's own CI, with no FrankenPHP process required: migrations apply
+ * cleanly against the same dialect shim; declared permissions are
+ * well-formed and every route's `requiredPermission` is one of them; a role
+ * granted one permission holds exactly that one and nothing else; and every
+ * declared hook runs cleanly on a synthetic payload — a generic `Throwable`
+ * fails the test loudly, since the real host's per-plugin error boundary
+ * would otherwise swallow it silently and ship the bug invisibly. Additive;
+ * a plugin ignoring it is unaffected) ->
+ * 1.28 ({@see PluginJobsInterface}, the async-job contribution point.
+ * {@see JobInterface} has been public since 1.0 and the host's job registry has
+ * always taken a handler, but nothing DISCOVERED a plugin's — so the shipped
+ * `queue:work` worker knew only the core handlers and dead-lettered anything a
+ * plugin enqueued as "No handler registered for job". A plugin's only remaining
+ * option was to ship a `queue:work` of its own that re-registered the core
+ * handlers beside its own, which means the operator runs one worker per plugin
+ * and every one of them is a place core's own queued work can be duplicated or
+ * dropped. Declared names are BARE and the host stamps the plugin's prefix onto
+ * them, exactly as it does for resource types, health probes and settings keys:
+ * two plugins declaring `sync` get different canonical names, and no
+ * declaration can produce a `core.`-prefixed one. Submittability is declared
+ * separately and fails CLOSED, matching core — a handler the worker can run is
+ * not thereby reachable from the public submission API. A declaration that
+ * throws or is malformed costs that plugin its jobs and costs the worker
+ * nothing: it is the process that also delivers core's notifications and error
+ * alerts, so one bad plugin must not stop it. Additive) ->
+ * 1.29 ({@see PluginEventsInterface}, the audited-event contribution point,
+ * plus {@see \Whity\Sdk\Hooks\Events::forPlugin()} and the now-published
+ * namespacing rule {@see PluginNamespace}. The host's audit writer subscribed
+ * to a HARDCODED map of core event names, so a plugin's own domain events
+ * reached the platform audit trail never — an operator opening the one screen
+ * that answers "who did what" saw core's mutations and a silence where every
+ * plugin-side action had been. Both workarounds are worse than the gap: writing
+ * to `audit_log` directly puts a second writer on a table whose entire design
+ * is that it has one (no metadata sanitising, no tenant resolution, and nothing
+ * stopping a row that claims to be `user.deleted`), and a private activity table
+ * is a second audit surface in a second place nobody is looking at. A plugin now
+ * declares which of its events belong in the trail and the host records them
+ * through the SAME path core's go through. Names are declared BARE and the host
+ * stamps the plugin's prefix onto BOTH halves of the record — action
+ * `acme:task.completed`, target type `acme:task` — because an attributable
+ * action beside a target type of `user` still reads as something core did to a
+ * core record. The trigger is namespaced too, and that is the load-bearing part:
+ * the hook manager tells a listener nothing about who dispatched, so listening
+ * on the bare name would have written a row for EVERY plugin declaring
+ * `task.completed` whenever any one of them fired it, and an audit trail that
+ * records an event which did not happen is worse than one that records nothing.
+ * A declaration that throws or is malformed costs that plugin its subscriptions
+ * and costs core's own auditing nothing; the refusal is whole-declaration,
+ * because a plugin with half its events audited ships a trail that looks
+ * complete. The subscriptions are registered with the plugin's other hooks, so
+ * disabling a plugin removes them and re-enabling it restores them. Additive).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.20.0';
+    public const VERSION = '1.29.0';
 
     /**
      * Static identity only — never instantiated.

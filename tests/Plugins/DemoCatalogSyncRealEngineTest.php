@@ -11,6 +11,7 @@ use Whity\Core\Tenant\TenantContext;
 use Whity\Database\SequenceCounters;
 use Whity\Sdk\Http\Request;
 
+require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/Api/DemoCatalogResource.php';
 require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/Api/DemoCatalogApiHandler.php';
 
 /**

@@ -46,11 +46,21 @@ foreach ($lintViolations as $v) {
 }
 
 // 2. Handler-scoping scanner: every tenant-table query binds a tenant_id predicate.
-$scanViolations = (new TenantPredicateScanner($registry))->scanDirectory($pluginDir . '/Api');
-foreach ($scanViolations as $v) {
-    $relative = str_replace(dirname(__DIR__) . DIRECTORY_SEPARATOR, '', $v['file']);
-    $relative = str_replace('\\', '/', $relative);
-    $failures[] = sprintf('  [handler] %s:%d [%s]  %s', $relative, $v['line'], implode(', ', $v['tables']), $v['sql']);
+//    Api/ AND Jobs/: an async handler queries the same tenant tables a route
+//    handler does, and does it with NO request behind it — so an unscoped query
+//    there produces a cross-tenant read that no client ever asked for and no
+//    response body would reveal. Scanning only the HTTP surface would have left
+//    the queue as the one door into these tables the guard did not watch.
+$scanner = new TenantPredicateScanner($registry);
+foreach (['Api', 'Jobs'] as $surface) {
+    if (!is_dir($pluginDir . '/' . $surface)) {
+        continue;
+    }
+    foreach ($scanner->scanDirectory($pluginDir . '/' . $surface) as $v) {
+        $relative = str_replace(dirname(__DIR__) . DIRECTORY_SEPARATOR, '', $v['file']);
+        $relative = str_replace('\\', '/', $relative);
+        $failures[] = sprintf('  [handler] %s:%d [%s]  %s', $relative, $v['line'], implode(', ', $v['tables']), $v['sql']);
+    }
 }
 
 if ($failures !== []) {

@@ -29,6 +29,16 @@ use Whity\Sdk\PluginInterface;
  * A plugin whose constructor throws, or that fails the requirements gate, is
  * QUARANTINED (excluded, with a logged reason) rather than crashing the whole
  * boot — see getQuarantined().
+ *
+ * MULTI-ROOT (WC-desktop-plugins): takes a LIST of plugin roots, bundled first
+ * — the read-only `plugins/` shipped with the installer, then (when set) the
+ * writable `WHITY_DOWNLOADED_PLUGINS_ROOT` a device fetches new plugins into
+ * at runtime (see the Rust `plugins` module). Every root is discovered and
+ * PSR-4-registered, then ALL candidates across every root are gated together
+ * in one `instantiateAndGate()` call — a plugin with the same declared name in
+ * two roots is quarantined as a duplicate by {@see PluginRequirementsGate}
+ * (first-registered wins), which is why roots are always iterated bundled
+ * FIRST: a downloaded plugin can never shadow a bundled one.
  */
 final class PluginRuntimeLoader
 {
@@ -43,7 +53,8 @@ final class PluginRuntimeLoader
     /** @var list<array{fqcn: string, name: string, reason: string}> */
     private array $quarantined = [];
 
-    public function __construct(private readonly string $pluginsRoot)
+    /** @param list<string> $pluginsRoots Bundled root first, then any writable roots. */
+    public function __construct(private readonly array $pluginsRoots)
     {
     }
 
@@ -64,7 +75,8 @@ final class PluginRuntimeLoader
         $candidates = [];
         foreach ($fqcns as $fqcn) {
             if (!class_exists($fqcn)) {
-                throw new \RuntimeException("Plugin class {$fqcn} could not be autoloaded from {$this->pluginsRoot}");
+                $roots = implode(', ', $this->pluginsRoots);
+                throw new \RuntimeException("Plugin class {$fqcn} could not be autoloaded from [{$roots}]");
             }
             if (!is_subclass_of($fqcn, PluginInterface::class) && !in_array(PluginInterface::class, class_implements($fqcn) ?: [], true)) {
                 throw new \RuntimeException("{$fqcn} does not implement " . PluginInterface::class);
@@ -77,15 +89,61 @@ final class PluginRuntimeLoader
     }
 
     /**
-     * Load whatever plugins {@see PluginDiscovery} finds under the plugins
-     * root (WHITY_PLUGINS unset) — the "arbitrary plugin" default.
+     * Load whatever plugins {@see PluginDiscovery} finds across every plugins
+     * root (WHITY_PLUGINS unset) — the "arbitrary plugin" default. Each root is
+     * discovered independently, then every candidate is merged into ONE
+     * `instantiateAndGate()` call so cross-root duplicate names are caught by
+     * the existing gate rather than needing bespoke merge logic here.
+     *
+     * A directory name already seen in an earlier (bundled-first) root is
+     * passed to PluginDiscovery::discover() to skip entirely — same
+     * first-root-wins rule registerPluginNamespaces() already applies to the
+     * PSR-4 mapping, extended here to the require_once step itself. Without
+     * this, two roots that legitimately ship a same-named plugin (e.g. a
+     * bundled copy and that same plugin also present in the connected
+     * server's catalog) would both get require_once'd and PHP would fatal
+     * with "Cannot redeclare class" instead of quarantining the shadowed one.
      */
     public function loadDiscovered(): void
     {
         $this->registerPluginNamespaces();
         $this->registerAutoloader();
 
-        $this->instantiateAndGate(PluginDiscovery::discover($this->pluginsRoot));
+        $fqcns = [];
+        $claimedDirectoryNames = [];
+        foreach ($this->pluginsRoots as $root) {
+            array_push($fqcns, ...PluginDiscovery::discover($root, $claimedDirectoryNames));
+            array_push($claimedDirectoryNames, ...self::directoryNamesUnder($root));
+        }
+
+        $this->instantiateAndGate($fqcns);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function directoryNamesUnder(string $root): array
+    {
+        if (!is_dir($root)) {
+            return [];
+        }
+
+        $items = scandir($root);
+        if ($items === false) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($items as $item) {
+            if (str_starts_with($item, '.')) {
+                continue;
+            }
+            if (is_dir($root . '/' . $item)) {
+                $names[] = $item;
+            }
+        }
+
+        return $names;
     }
 
     /**
@@ -221,29 +279,41 @@ final class PluginRuntimeLoader
     }
 
     /**
-     * Scan direct subdirectories of the plugins root and map each one's name
-     * to a PSR-4 namespace prefix — identical technique to production's
-     * PluginLoader::registerPluginNamespaces().
+     * Scan direct subdirectories of EVERY plugins root (bundled first) and map
+     * each one's name to a PSR-4 namespace prefix — identical technique to
+     * production's PluginLoader::registerPluginNamespaces(), extended to loop
+     * roots. On a basename collision across roots, the FIRST registration wins
+     * (bundled iterated first, so a downloaded directory can never shadow a
+     * bundled one) — later duplicates are skipped with a logged reason.
      */
     private function registerPluginNamespaces(): void
     {
-        if (!is_dir($this->pluginsRoot)) {
-            return;
-        }
-
-        $items = scandir($this->pluginsRoot);
-        if ($items === false) {
-            return;
-        }
-
-        foreach ($items as $item) {
-            if (str_starts_with($item, '.')) {
+        foreach ($this->pluginsRoots as $root) {
+            if (!is_dir($root)) {
                 continue;
             }
 
-            $dirPath = $this->pluginsRoot . '/' . $item;
-            if (is_dir($dirPath)) {
+            $items = scandir($root);
+            if ($items === false) {
+                continue;
+            }
+
+            foreach ($items as $item) {
+                if (str_starts_with($item, '.')) {
+                    continue;
+                }
+
+                $dirPath = $root . '/' . $item;
+                if (!is_dir($dirPath)) {
+                    continue;
+                }
+
                 $prefix = $item . '\\';
+                if (isset(self::$psr4Mappings[$prefix])) {
+                    error_log("[php-host] plugin directory '{$item}' in '{$root}' skipped — a plugin with the same directory name is already registered from an earlier root");
+                    continue;
+                }
+
                 self::$psr4Mappings[$prefix] = rtrim(str_replace('\\', '/', (string) realpath($dirPath)), '/') . '/';
             }
         }
