@@ -173,6 +173,16 @@ jobs:
       # hang on the mirror's IPv6 route). Applied once for both install paths below.
       - name: Harden apt against transient CI mirror failures
         run: |
+          # 1) Route apt OFF the azure-local mirror to the canonical archive.
+          #    azure.archive.ubuntu.com intermittently black-holes (a silent hang
+          #    with no timeout — the shard sat 22 min then hit the 25-min cap), so
+          #    rewrite it out of the runner's mirror list and sources entirely
+          #    rather than letting apt discover it is dead on every run.
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt 2>/dev/null || true
+          sudo find /etc/apt/sources.list.d -type f -exec sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' {} + 2>/dev/null || true
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true
+          # 2) Bound apt's per-request timeout + force IPv4 as a backstop so any
+          #    remaining flaky route fails fast to the fallback instead of stalling.
           printf 'Acquire::http::Timeout "12";\nAcquire::https::Timeout "12";\nAcquire::Retries "1";\nAcquire::ForceIPv4 "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-timeouts
 
