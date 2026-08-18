@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-18
+
 ### Added
 
 - **Offline-first, two-way sync is now a contract a plugin declares, not a protocol a plugin re-implements.** `Whity\Sdk\Sync\SyncController` drives the entire sync lifecycle against any table described by the new `Whity\Sdk\Sync\SyncableResource` descriptor. Until now exactly one table on the planet spoke the wire contract the desktop sync engine expects — `demo_catalog_items` — and it did so through ~500 lines of bespoke tenant-scoped CRUD/sync SQL inside `DemoCatalogApiHandler`. Any second feature that wanted to work offline had to copy that file and get every one of its edge cases right again: the idempotency key, the conflict status, the tombstone semantics, the cursor arithmetic, the tenant predicate on every statement. A copy that got one of them subtly wrong would not fail loudly — it would sync, and lose a row. `DemoCatalog` is now the engine's **first consumer** rather than its only implementation (behaviour preserved, proven by its existing items + sync real-engine suites), and `Relations` is the second. This is the rail the whole desktop/offline story runs on, so it is worth reading as documentation: a plugin author who implements the five-method descriptor gets all of the following and writes none of it.
