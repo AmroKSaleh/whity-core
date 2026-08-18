@@ -163,18 +163,43 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
 
+      # `playwright install-deps` shells out to apt. GitHub's noble runners front
+      # the archive with a fast azure-local mirror (azure.archive.ubuntu.com) that
+      # intermittently goes dark; with apt's default long timeouts a dead mirror
+      # makes `apt-get update` hang through several retries and blows the 25-minute
+      # job cap (WC-ci-e2e-flake — a shard was CANCELLED at 25m on exactly this).
+      # Bound apt's per-request timeout so a dead mirror fails fast to the public
+      # fallback instead of stalling, and force IPv4 (Azure runners intermittently
+      # hang on the mirror's IPv6 route). Applied once for both install paths below.
+      - name: Harden apt against transient CI mirror failures
+        run: |
+          printf 'Acquire::http::Timeout "12";\nAcquire::https::Timeout "12";\nAcquire::Retries "1";\nAcquire::ForceIPv4 "true";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci-mirror-timeouts
+
       # Cache miss: install the browser plus its OS-level dependencies. Cache
       # hit: the binaries are already restored, so only (re)install the system
       # deps — those are apt packages that live outside the cached directory.
+      # Both shell out to apt, so wrap in a bounded retry to ride out a transient
+      # mirror blip rather than failing the whole shard on it.
       - name: Install Playwright Chromium + system deps
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: |
+          for i in 1 2 3; do
+            npx playwright install --with-deps chromium && exit 0
+            echo "install --with-deps attempt $i failed — retrying in 10s..."; sleep 10
+          done
+          exit 1
 
       - name: Install Playwright system deps (cached browser)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: |
+          for i in 1 2 3; do
+            npx playwright install-deps chromium && exit 0
+            echo "install-deps attempt $i failed — retrying in 10s..."; sleep 10
+          done
+          exit 1
 
       # The Playwright config starts the Next dev server itself (webServer on
       # port 3010) and proxies /api/* to the stack at localhost:8000.
