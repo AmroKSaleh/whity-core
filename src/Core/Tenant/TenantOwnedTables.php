@@ -226,6 +226,16 @@ final class TenantOwnedTables
         // token-driven statements run on the public accept endpoint, where
         // there is no tenant context, and carry an explicit guard annotation.
         'invitations' => '096_create_invitations.php',
+
+        // #822 — the tenant's own organizational-unit TYPE vocabulary
+        // (migration 102): the campus/faculty/department (or region/branch/team)
+        // levels its tree is made of. Tenant-owned precisely because that
+        // vocabulary is not universal — a university tenant and a hospital
+        // tenant hold different levels in one install — so every read and write
+        // binds tenant_id, and the LEFT JOIN the OU list uses to expose a unit's
+        // type joins on `ou_types.tenant_id = organizational_units.tenant_id`
+        // rather than on the id alone.
+        'ou_types' => '102_create_ou_types.php',
     ];
 
     /**

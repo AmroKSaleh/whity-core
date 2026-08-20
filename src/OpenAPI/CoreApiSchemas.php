@@ -84,6 +84,7 @@ final class CoreApiSchemas
             self::roleRoutes(),
             self::tenantRoutes(),
             self::ouRoutes(),
+            self::ouTypeRoutes(),
             self::delegationRoutes(),
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
@@ -701,10 +702,11 @@ final class CoreApiSchemas
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). This is the platform-wide name; `perPage` and `limit` are not accepted.'),
                     self::queryParam('parent_id', 'integer', 'Return only the direct children of this OU. Use 0 for the roots. Omit or leave empty for the whole tenant; a non-numeric value is a 422.'),
+                    self::queryParam('type', 'string', 'Return only units of this KIND, by the stable type key (e.g. faculty, acme:clinic). Use `none` for units with no type. Omit or leave empty for every unit; a malformed key is a 422, and a well-formed key this tenant has not defined matches nothing.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The tenant\'s organizational units', 'OuListResponse'),
-                    422 => self::errorResponse('parent_id is not a non-negative integer'),
+                    422 => self::errorResponse('parent_id is not a non-negative integer, or type is not a valid type key'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('POST', '/api/ous', 'ous:write', [
@@ -714,7 +716,8 @@ final class CoreApiSchemas
                 'responses' => [
                     201 => self::jsonResponse('The created organizational unit', 'OuResponse'),
                     400 => self::errorResponse('Validation failed'),
-                    409 => self::errorResponse('Name or slug already exists in the tenant'),
+                    409 => self::errorResponse('A sibling unit already has this name, or no unique slug could be derived'),
+                    422 => self::errorResponse('The requested organizational unit type is unknown or belongs to another tenant'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('GET', '/api/ous/{id:\d+}', 'ous:read', [
@@ -731,7 +734,8 @@ final class CoreApiSchemas
                 'request' => 'OuUpdateRequest',
                 'responses' => [
                     200 => self::jsonResponse('Update confirmation', 'MutationResponse'),
-                    422 => self::errorResponse('The re-parent would create a cycle'),
+                    409 => self::errorResponse('A sibling unit already has this name'),
+                    422 => self::errorResponse('The re-parent would create a cycle, or the requested type is unknown'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('DELETE', '/api/ous/{id:\d+}', 'ous:delete', [
@@ -775,6 +779,89 @@ final class CoreApiSchemas
                 'responses' => [
                     204 => ['description' => 'Assignment removed'],
                     404 => self::errorResponse('Assignment not found'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * The tenant's OU TYPE vocabulary (#822) — the campus/faculty/department
+     * levels its tree is built from.
+     *
+     * Gated on the SAME `ous:*` permissions as the OU routes above rather than a
+     * new `ou_types:*` pair: a new permission ships with a grant migration that
+     * reaches only the seeded `admin` role, so every operator running a custom
+     * administrative role would silently lose the capability (#834). DELETE takes
+     * `ous:write`, not `ous:delete`, because it destroys no unit — its forced
+     * path is an UPDATE that clears `ou_type_id`.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function ouTypeRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/ou-types', 'ous:read', [
+                'summary' => "List the tenant's organizational unit types",
+                'description' => 'Returned in rank order (`sort_order`, then key): a campus outranks a '
+                    . 'faculty outranks a department, and that ordering is data rather than presentation.',
+                'tags' => ['ous'],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's OU type vocabulary", 'OuTypeListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/ou-types/catalog', 'ous:read', [
+                'summary' => 'List the OU types declared in code, with this tenant\'s adoption state',
+                'description' => 'Core and plugin declarations. A plugin\'s keys are namespaced under the '
+                    . 'plugin (`acme:clinic`); adopting one with POST /api/ou-types copies its declared '
+                    . 'label and rank in as the tenant\'s starting values.',
+                'tags' => ['ous'],
+                'responses' => [
+                    200 => self::jsonResponse('The declared catalogue', 'OuTypeCatalogResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/ou-types', 'ous:write', [
+                'summary' => 'Author a new OU type, or adopt a declared one',
+                'tags' => ['ous'],
+                'request' => 'OuTypeCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created type', 'OuTypeResponse'),
+                    409 => self::errorResponse('The tenant already holds this key'),
+                    422 => self::errorResponse('Malformed key, a namespaced key no plugin declares, or the reserved key `none`'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/ou-types/{id:\d+}', 'ous:read', [
+                'summary' => 'Get one OU type',
+                'tags' => ['ous'],
+                'responses' => [
+                    200 => self::jsonResponse('The type', 'OuTypeResponse'),
+                    404 => self::errorResponse('Organizational unit type not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/ou-types/{id:\d+}', 'ous:write', [
+                'summary' => 'Relabel or re-rank an OU type',
+                'description' => 'The `key` is immutable — a routing rule binds to it, so editing it in '
+                    . 'place would silently repoint every such rule at a type that no longer exists.',
+                'tags' => ['ous'],
+                'request' => 'OuTypeUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated type', 'OuTypeResponse'),
+                    404 => self::errorResponse('Organizational unit type not found'),
+                    422 => self::errorResponse('No updatable field supplied, or an attempt to change the key'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/ou-types/{id:\d+}', 'ous:write', [
+                'summary' => 'Delete an OU type',
+                'description' => 'Refused while any unit still carries the type, since deleting it would '
+                    . 'untype them and make them invisible to every `?type=` rule that used to match. '
+                    . 'Repeat with `?force=true` to untype them explicitly.',
+                'tags' => ['ous'],
+                'parameters' => [
+                    self::queryParam('force', 'boolean', 'Untype the units that still carry this type instead of refusing.'),
+                ],
+                'responses' => [
+                    204 => ['description' => 'Deleted'],
+                    404 => self::errorResponse('Organizational unit type not found'),
+                    409 => self::errorResponse('Units still carry this type; retry with ?force=true'),
                 ] + self::authErrors(),
             ]),
         ];
@@ -1963,6 +2050,9 @@ final class CoreApiSchemas
             'createdAt' => self::str(true),
         ], ['id', 'name', 'slug', 'userCount', 'createdAt']);
 
+        // #822: a unit's KIND travels with it as both the per-tenant id and the
+        // stable key a consumer's rule is written against. All three are nullable
+        // because typing is OPTIONAL — an existing untyped tree keeps working.
         $ou = self::object([
             'id' => self::int(),
             'tenant_id' => self::int(),
@@ -1971,7 +2061,13 @@ final class CoreApiSchemas
             'slug' => self::str(),
             'description' => self::str(true),
             'created_at' => self::str(true),
-        ], ['id', 'tenant_id', 'parent_id', 'name', 'slug', 'description', 'created_at']);
+            'ou_type_id' => self::int(true),
+            'ou_type_key' => self::str(true),
+            'ou_type_label' => self::str(true),
+        ], [
+            'id', 'tenant_id', 'parent_id', 'name', 'slug', 'description', 'created_at',
+            'ou_type_id', 'ou_type_key', 'ou_type_label',
+        ]);
 
         $delegation = self::object([
             'id' => self::int(),
@@ -2978,21 +3074,33 @@ final class CoreApiSchemas
                 'slug' => self::str(),
                 'description' => self::str(true),
                 'created_at' => self::str(true),
+                'ou_type_id' => self::int(true),
+                'ou_type_key' => self::str(true),
+                'ou_type_label' => self::str(true),
                 'children' => [
                     'type' => 'array',
                     'items' => self::object(['id' => self::int()], ['id']),
                 ],
-            ], ['id', 'tenant_id', 'parent_id', 'name', 'slug', 'description', 'created_at', 'children']),
+            ], [
+                'id', 'tenant_id', 'parent_id', 'name', 'slug', 'description', 'created_at',
+                'ou_type_id', 'ou_type_key', 'ou_type_label', 'children',
+            ]),
             'OuDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('OuDetail')),
             'OuCreateRequest' => self::object([
                 'name' => self::str(),
                 'description' => self::str(),
                 'parent_id' => self::int(true),
+                // #822: the unit's kind, addressed by id OR by stable key.
+                // Supplying both is a 422 rather than a silent preference.
+                'ou_type_id' => self::int(true),
+                'type' => self::str(true),
             ], ['name']),
             'OuUpdateRequest' => self::object([
                 'name' => self::str(),
                 'description' => self::str(),
                 'parent_id' => self::int(true),
+                'ou_type_id' => self::int(true),
+                'type' => self::str(true),
             ], []),
             'OuRoleAssignRequest' => self::object(['role_id' => self::int()], ['role_id']),
             'OuRoleAssignment' => self::object([
@@ -3002,6 +3110,49 @@ final class CoreApiSchemas
                 'tenant_id' => self::int(),
             ], ['id', 'ou_id', 'role_id', 'tenant_id']),
             'OuRoleAssignmentResponse' => self::dataEnvelope(SchemaBuilder::ref('OuRoleAssignment')),
+
+            // #822. `key` is the stable identifier a routing rule binds to —
+            // bare for a tenant's own vocabulary, `plugin:slug` for a type a
+            // plugin contributed. `label` is the tenant's rendering of it, so
+            // one install's `faculty` reads as School and another's as
+            // Kulliyyah. `source` records provenance: `tenant`, `core`, or the
+            // plugin that declared it.
+            'OuType' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'key' => self::str(),
+                'label' => self::str(),
+                'sort_order' => self::int(),
+                'source' => self::str(),
+                'created_at' => self::str(true),
+                'updated_at' => self::str(true),
+            ], ['id', 'tenant_id', 'key', 'label', 'sort_order', 'source', 'created_at', 'updated_at']),
+            'OuTypeResponse' => self::dataEnvelope(SchemaBuilder::ref('OuType')),
+            'OuTypeListResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('OuType'),
+            ]),
+            'OuTypeCatalogEntry' => self::object([
+                'key' => self::str(),
+                'source' => self::str(),
+                'label' => self::str(),
+                'sort_order' => self::int(true),
+                'adopted' => ['type' => 'boolean'],
+                'ou_type_id' => self::int(true),
+            ], ['key', 'source', 'label', 'sort_order', 'adopted', 'ou_type_id']),
+            'OuTypeCatalogResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('OuTypeCatalogEntry'),
+            ]),
+            'OuTypeCreateRequest' => self::object([
+                'key' => self::str(),
+                'label' => self::str(),
+                'sort_order' => self::int(),
+            ], ['key']),
+            'OuTypeUpdateRequest' => self::object([
+                'label' => self::str(),
+                'sort_order' => self::int(),
+            ], []),
 
             'Delegation' => $delegation,
             'DelegationListResponse' => self::paginatedListEnvelope('Delegation'),

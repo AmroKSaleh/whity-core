@@ -1614,6 +1614,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ou-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the tenant's organizational unit types */
+        get: operations["get_api_v1_ou_types"];
+        put?: never;
+        /** Author a new OU type, or adopt a declared one */
+        post: operations["post_api_v1_ou_types"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ou-types/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the OU types declared in code, with this tenant's adoption state */
+        get: operations["get_api_v1_ou_types_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ou-types/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one OU type */
+        get: operations["get_api_v1_ou_types_id"];
+        put?: never;
+        post?: never;
+        /** Delete an OU type */
+        delete: operations["delete_api_v1_ou_types_id"];
+        options?: never;
+        head?: never;
+        /** Relabel or re-rank an OU type */
+        patch: operations["patch_api_v1_ou_types_id"];
+        trace?: never;
+    };
     "/api/v1/ous": {
         parameters: {
             query?: never;
@@ -3703,11 +3757,16 @@ export interface components {
             slug: string;
             description: string | null;
             created_at: string | null;
+            ou_type_id: number | null;
+            ou_type_key: string | null;
+            ou_type_label: string | null;
         };
         OuCreateRequest: {
             name: string;
             description?: string;
             parent_id?: number | null;
+            ou_type_id?: number | null;
+            type?: string | null;
         };
         OuDetail: {
             id: number;
@@ -3717,6 +3776,9 @@ export interface components {
             slug: string;
             description: string | null;
             created_at: string | null;
+            ou_type_id: number | null;
+            ou_type_key: string | null;
+            ou_type_label: string | null;
             children: {
                 id: number;
             }[];
@@ -3743,10 +3805,48 @@ export interface components {
         OuRoleAssignmentResponse: {
             data: components["schemas"]["OuRoleAssignment"];
         };
+        OuType: {
+            id: number;
+            tenant_id: number;
+            key: string;
+            label: string;
+            sort_order: number;
+            source: string;
+            created_at: string | null;
+            updated_at: string | null;
+        };
+        OuTypeCatalogEntry: {
+            key: string;
+            source: string;
+            label: string;
+            sort_order: number | null;
+            adopted: boolean;
+            ou_type_id: number | null;
+        };
+        OuTypeCatalogResponse: {
+            data: components["schemas"]["OuTypeCatalogEntry"][];
+        };
+        OuTypeCreateRequest: {
+            key: string;
+            label?: string;
+            sort_order?: number;
+        };
+        OuTypeListResponse: {
+            data: components["schemas"]["OuType"][];
+        };
+        OuTypeResponse: {
+            data: components["schemas"]["OuType"];
+        };
+        OuTypeUpdateRequest: {
+            label?: string;
+            sort_order?: number;
+        };
         OuUpdateRequest: {
             name?: string;
             description?: string;
             parent_id?: number | null;
+            ou_type_id?: number | null;
+            type?: string | null;
         };
         Pagination: {
             page: number;
@@ -13558,6 +13658,465 @@ export interface operations {
             };
         };
     };
+    get_api_v1_ou_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant's OU type vocabulary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OuTypeListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_ou_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OuTypeCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created type */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OuTypeResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The tenant already holds this key */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Malformed key, a namespaced key no plugin declares, or the reserved key `none` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_ou_types_catalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The declared catalogue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OuTypeCatalogResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_ou_types_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The type */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OuTypeResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Organizational unit type not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_ou_types_id: {
+        parameters: {
+            query?: {
+                /** @description Untype the units that still carry this type instead of refusing. */
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Organizational unit type not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Units still carry this type; retry with ?force=true */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_ou_types_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OuTypeUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated type */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OuTypeResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Organizational unit type not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No updatable field supplied, or an attempt to change the key */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_ous: {
         parameters: {
             query?: {
@@ -13567,6 +14126,8 @@ export interface operations {
                 per_page?: number;
                 /** @description Return only the direct children of this OU. Use 0 for the roots. Omit or leave empty for the whole tenant; a non-numeric value is a 422. */
                 parent_id?: number;
+                /** @description Return only units of this KIND, by the stable type key (e.g. faculty, acme:clinic). Use `none` for units with no type. Omit or leave empty for every unit; a malformed key is a 422, and a well-formed key this tenant has not defined matches nothing. */
+                type?: string;
             };
             header?: never;
             path?: never;
@@ -13619,7 +14180,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description parent_id is not a non-negative integer */
+            /** @description parent_id is not a non-negative integer, or type is not a valid type key */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -13706,8 +14267,17 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Name or slug already exists in the tenant */
+            /** @description A sibling unit already has this name, or no unique slug could be derived */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The requested organizational unit type is unknown or belongs to another tenant */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13936,7 +14506,16 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The re-parent would create a cycle */
+            /** @description A sibling unit already has this name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The re-parent would create a cycle, or the requested type is unknown */
             422: {
                 headers: {
                     [name: string]: unknown;

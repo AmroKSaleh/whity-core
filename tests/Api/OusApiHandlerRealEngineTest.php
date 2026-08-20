@@ -833,6 +833,535 @@ final class OusApiHandlerRealEngineTest extends TestCase
         );
     }
 
+    // ==================== ?type= filter and OU typing (#822) ====================
+
+    /**
+     * The question the issue exists to make answerable: "give me the faculties".
+     * Depth cannot answer it — a single-campus institution has its faculties at
+     * depth 0 and a multi-campus one at depth 1 — so the filter is on the KIND.
+     */
+    public function testListFiltersByTypeKey(): void
+    {
+        $faculty = $this->seedOuType(1, 'faculty', 'Faculty', 20);
+        $department = $this->seedOuType(1, 'department', 'Department', 30);
+        $this->typeOu(11, $faculty);
+        $this->typeOu(13, $faculty);
+        $this->typeOu(12, $department);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->list(new Request('GET', '/api/ous?type=faculty'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $ids = array_map(static fn (array $ou): int => (int) $ou['id'], $body['data']);
+        sort($ids);
+        $this->assertSame([11, 13], $ids);
+        $this->assertSame(2, $body['pagination']['total'], 'The envelope must describe the FILTERED set.');
+    }
+
+    /**
+     * Typing is OPTIONAL: the units a live deployment already has stay untyped
+     * and keep working. `?type=none` is the only way a query string can express
+     * `ou_type_id IS NULL`, exactly as `parent_id=0` expresses the roots.
+     */
+    public function testUntypedUnitsKeepWorkingAndAreSelectableWithTheNoneSentinel(): void
+    {
+        $faculty = $this->seedOuType(1, 'faculty', 'Faculty', 20);
+        $this->typeOu(11, $faculty);
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        // Unfiltered: every unit, typed or not, exactly as before this feature.
+        $all = json_decode($handler->list(new Request('GET', '/api/ous'))->getBody(), true)['data'];
+        $this->assertCount(5, $all);
+        $untypedRow = array_values(array_filter($all, static fn (array $ou): bool => (int) $ou['id'] === 10))[0];
+        $this->assertNull($untypedRow['ou_type_id']);
+        $this->assertNull($untypedRow['ou_type_key']);
+
+        $response = $handler->list(new Request('GET', '/api/ous?type=none'));
+        $ids = array_map(
+            static fn (array $ou): int => (int) $ou['id'],
+            json_decode($response->getBody(), true)['data']
+        );
+        sort($ids);
+        $this->assertSame([10, 12, 13, 14], $ids);
+    }
+
+    /**
+     * A unit's KEY travels with it, not just the opaque per-tenant id — the id
+     * alone would leave a consumer holding a number it cannot interpret without
+     * a second call, which is the parallel unit-id to kind map this feature
+     * exists to delete.
+     */
+    public function testTheTypeKeyAndLabelAreExposedOnTheOuRepresentation(): void
+    {
+        $faculty = $this->seedOuType(1, 'faculty', 'Kulliyyah', 20);
+        $this->typeOu(11, $faculty);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->get(new Request('GET', '/api/ous/11'), ['id' => 11]);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame($faculty, $data['ou_type_id']);
+        $this->assertSame('faculty', $data['ou_type_key']);
+        $this->assertSame('Kulliyyah', $data['ou_type_label']);
+    }
+
+    /**
+     * Same contract `?parent_id=` got in #823: a malformed value is refused
+     * rather than ignored. Silently returning the whole tenant is what made the
+     * original defect invisible — the caller believes it filtered.
+     */
+    public function testListRejectsMalformedTypeRatherThanReturningTheWholeTenant(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?type=Faculty%20Level'));
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertStringContainsString('type must be', json_decode($response->getBody(), true)['error']);
+    }
+
+    /** An empty value is "no filter", matching `?parent_id=`. */
+    public function testListTreatsEmptyTypeAsNoFilter(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?type='));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertCount(5, json_decode($response->getBody(), true)['data']);
+    }
+
+    /**
+     * A well-formed key this tenant never defined is a correct empty answer, not
+     * an error — and emphatically not a full-tenant read.
+     */
+    public function testAWellFormedButUndefinedTypeMatchesNothing(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous?type=clinic'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame([], json_decode($response->getBody(), true)['data']);
+    }
+
+    /**
+     * The filter must not become a cross-tenant read primitive. Both tenants
+     * hold a `faculty` — that is the normal case, since the vocabulary is
+     * per-tenant — and tenant 1 must see only its own.
+     */
+    public function testTypeFilterStaysTenantScopedWhenBothTenantsShareAKey(): void
+    {
+        $ourFaculty = $this->seedOuType(1, 'faculty', 'Faculty', 20);
+        $theirFaculty = $this->seedOuType(2, 'faculty', 'Faculty', 20);
+        $this->typeOu(11, $ourFaculty);
+        $this->typeOu(30, $theirFaculty);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->list(new Request('GET', '/api/ous?type=faculty'));
+
+        $ids = array_map(
+            static fn (array $ou): int => (int) $ou['id'],
+            json_decode($response->getBody(), true)['data']
+        );
+        $this->assertSame([11], $ids, "Another tenant's identically-keyed type must never bleed in.");
+    }
+
+    public function testCreateAcceptsTheTypeByStableKey(): void
+    {
+        $faculty = $this->seedOuType(1, 'faculty', 'Faculty', 20);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Science',
+            'type' => 'faculty',
+        ])));
+
+        $this->assertSame(201, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame($faculty, $data['ou_type_id']);
+        $this->assertSame('faculty', $data['ou_type_key']);
+    }
+
+    public function testCreateRejectsATypeBelongingToAnotherTenant(): void
+    {
+        $theirType = $this->seedOuType(2, 'branch', 'Branch', 20);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Science',
+            'ou_type_id' => $theirType,
+        ])));
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->scalar("SELECT COUNT(*) FROM organizational_units WHERE name = 'Science'"),
+            'A refused type must not leave a half-created, silently untyped unit behind.'
+        );
+    }
+
+    /**
+     * Two spellings of one thing, so a client that disagrees with itself is a
+     * 422 rather than a coin flip.
+     */
+    public function testSupplyingBothOuTypeIdAndTypeIsRefused(): void
+    {
+        $faculty = $this->seedOuType(1, 'faculty', 'Faculty', 20);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Science',
+            'ou_type_id' => $faculty,
+            'type' => 'faculty',
+        ])));
+
+        $this->assertSame(422, $response->getStatusCode());
+    }
+
+    public function testUpdateCanRetypeAndUntypeAUnit(): void
+    {
+        $faculty = $this->seedOuType(1, 'faculty', 'Faculty', 20);
+        $department = $this->seedOuType(1, 'department', 'Department', 30);
+        $this->typeOu(11, $faculty);
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $handler->update(
+            new Request('PATCH', '/api/ous/11', [], (string) json_encode(['ou_type_id' => $department])),
+            ['id' => 11]
+        );
+        $this->assertSame(
+            $department,
+            (int) $this->scalar('SELECT ou_type_id FROM organizational_units WHERE id = 11')
+        );
+
+        // array_key_exists, not isset: an explicit null means "no kind after
+        // all" and must not be silently dropped the way isset() would drop it.
+        $handler->update(
+            new Request('PATCH', '/api/ous/11', [], (string) json_encode(['ou_type_id' => null])),
+            ['id' => 11]
+        );
+        $this->assertNull(
+            $this->scalar('SELECT ou_type_id FROM organizational_units WHERE id = 11') ?: null
+        );
+    }
+
+    /**
+     * The SYSTEM tenant (id 0) lists across every tenant, and the type join must
+     * hold there too.
+     *
+     * This branch is a separate statement with its own `@tenant-guard-ignore`,
+     * so it is the one place a mistake in the `ou_types` join would not be
+     * caught by any tenant-scoped test — and an unqualified column in it is a
+     * SQL error rather than a wrong answer, which is exactly the failure a
+     * SQLite-only or PostgreSQL-only run can differ on.
+     */
+    public function testSystemTenantListsEveryTenantsUnitsWithTheirTypes(): void
+    {
+        $ourFaculty = $this->seedOuType(1, 'faculty', 'Faculty', 20);
+        $theirBranch = $this->seedOuType(2, 'branch', 'Branch', 20);
+        $this->typeOu(11, $ourFaculty);
+        $this->typeOu(30, $theirBranch);
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->list(new Request('GET', '/api/ous?per_page=100'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $rows = json_decode($response->getBody(), true)['data'];
+        $byId = array_column($rows, null, 'id');
+
+        $this->assertArrayHasKey(11, $byId);
+        $this->assertArrayHasKey(30, $byId, 'The system tenant sees every tenant\'s units.');
+        $this->assertSame('faculty', $byId[11]['ou_type_key']);
+        $this->assertSame('branch', $byId[30]['ou_type_key'], 'Each unit resolves its OWN tenant\'s type.');
+    }
+
+    /**
+     * `?type=` for the system tenant filters across tenants — and each unit's
+     * key still resolves through its own tenant, because the join binds
+     * `ou_types.tenant_id = organizational_units.tenant_id` rather than matching
+     * on the id alone.
+     */
+    public function testSystemTenantTypeFilterMatchesTheKeyAcrossTenants(): void
+    {
+        $ourFaculty = $this->seedOuType(1, 'faculty', 'Faculty', 20);
+        $theirFaculty = $this->seedOuType(2, 'faculty', 'Kulliyyah', 20);
+        $this->typeOu(11, $ourFaculty);
+        $this->typeOu(30, $theirFaculty);
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->list(new Request('GET', '/api/ous?type=faculty&per_page=100'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $ids = array_map(static fn (array $ou): int => (int) $ou['id'], $body['data']);
+        sort($ids);
+        $this->assertSame([11, 30], $ids);
+        $this->assertSame(2, $body['pagination']['total']);
+    }
+
+    // ============ sibling-unique names (#822, migration 103) ============
+
+    /**
+     * THE reported landmine. Migration 005's `UNIQUE(tenant_id, name)` refused
+     * the second Computer Science department with a 409 that described no real
+     * conflict — and campus to faculty to department is the normal shape of the
+     * thing being modelled, so every realistic tree hits it.
+     */
+    public function testTwoFacultiesMayEachHoldAComputerScienceDepartment(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $first = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Computer Science',
+            'parent_id' => 11,
+        ])));
+        $second = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Computer Science',
+            'parent_id' => 13,
+        ])));
+
+        $this->assertSame(201, $first->getStatusCode());
+        $this->assertSame(201, $second->getStatusCode(), 'Siblings of DIFFERENT parents do not collide.');
+        $this->assertSame(
+            2,
+            (int) $this->scalar(
+                "SELECT COUNT(*) FROM organizational_units WHERE name = 'Computer Science'"
+            )
+        );
+    }
+
+    /** The rule that survives: real siblings still cannot share a name. */
+    public function testTwoChildrenOfTheSameParentStillCannotShareAName(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Computer Science',
+            'parent_id' => 11,
+        ])));
+        $second = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Computer Science',
+            'parent_id' => 11,
+        ])));
+
+        $this->assertSame(409, $second->getStatusCode());
+        $this->assertStringContainsString('same parent', json_decode($second->getBody(), true)['error']);
+    }
+
+    /**
+     * The case a plain `UNIQUE(tenant_id, parent_id, name)` would MISS.
+     *
+     * PostgreSQL treats NULLs as distinct, so every root (`parent_id IS NULL`)
+     * would fall outside that constraint entirely and a tenant could end up with
+     * two Main Campus roots. Migration 103 covers the roots with a SECOND
+     * partial index for exactly this reason, and this test is what proves the
+     * pair is a rule rather than half a rule.
+     */
+    public function testTwoRootsCannotShareANameEvenThoughTheirParentIdIsNull(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $first = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Main Campus',
+            'parent_id' => null,
+        ])));
+        $second = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Main Campus',
+            'parent_id' => null,
+        ])));
+
+        $this->assertSame(201, $first->getStatusCode());
+        $this->assertSame(409, $second->getStatusCode(), 'The roots are one sibling set.');
+        $this->assertSame(
+            1,
+            (int) $this->scalar(
+                "SELECT COUNT(*) FROM organizational_units WHERE name = 'Main Campus'"
+            )
+        );
+    }
+
+    /**
+     * The DATABASE must enforce it too, not just the handler's guard SELECT: a
+     * direct INSERT of a second identically-named ROOT has to be refused by the
+     * partial index. This is the assertion that matters most across engines,
+     * since partial indexes are exactly where SQLite and PostgreSQL diverge.
+     */
+    public function testThePartialIndexItselfRefusesASecondIdenticallyNamedRoot(): void
+    {
+        $this->pdo->exec(
+            "INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
+             VALUES (1, NULL, 'Main Campus', 'main-campus', '', NOW())"
+        );
+
+        $this->expectException(\PDOException::class);
+        $this->pdo->exec(
+            "INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
+             VALUES (1, NULL, 'Main Campus', 'main-campus-2', '', NOW())"
+        );
+    }
+
+    /** ...and a second identically-named CHILD of one parent. */
+    public function testThePartialIndexItselfRefusesASecondIdenticallyNamedSibling(): void
+    {
+        $this->pdo->exec(
+            "INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
+             VALUES (1, 11, 'Computer Science', 'cs-a', '', NOW())"
+        );
+
+        $this->expectException(\PDOException::class);
+        $this->pdo->exec(
+            "INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
+             VALUES (1, 11, 'Computer Science', 'cs-b', '', NOW())"
+        );
+    }
+
+    /** The old tenant-wide rule really is gone at the DATABASE level. */
+    public function testTheTenantWideNameConstraintIsNoLongerEnforced(): void
+    {
+        $this->pdo->exec(
+            "INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
+             VALUES (1, 11, 'Computer Science', 'cs-a', '', NOW()),
+                    (1, 13, 'Computer Science', 'cs-b', '', NOW())"
+        );
+
+        $this->assertSame(
+            2,
+            (int) $this->scalar(
+                "SELECT COUNT(*) FROM organizational_units WHERE tenant_id = 1 AND name = 'Computer Science'"
+            )
+        );
+    }
+
+    /**
+     * Relaxing the NAME rule would have achieved nothing if the derived slug
+     * still collided — the 409 would simply have moved from the name check to
+     * the slug check. The slug stays unique per TENANT (URL identity) and the
+     * second one is disambiguated instead.
+     */
+    public function testTheSecondSiblingLegalUnitGetsADisambiguatedSlug(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $first = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Computer Science',
+            'parent_id' => 11,
+        ])));
+        $second = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Computer Science',
+            'parent_id' => 13,
+        ])));
+
+        $this->assertSame('computer-science', json_decode($first->getBody(), true)['data']['slug']);
+        $this->assertSame('computer-science-2', json_decode($second->getBody(), true)['data']['slug']);
+    }
+
+    /**
+     * An Arabic-only name reduces to the empty string under the slug generator,
+     * and an empty slug is both a broken URL and an instant collision with the
+     * next such name. Arabic names are a first-class requirement here, not an
+     * edge case.
+     */
+    public function testANonLatinNameStillYieldsAUsableUniqueSlug(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $first = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'كلية الهندسة',
+            'parent_id' => 11,
+        ])));
+        $second = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'كلية العلوم',
+            'parent_id' => 13,
+        ])));
+
+        $this->assertSame(201, $first->getStatusCode());
+        $this->assertSame(201, $second->getStatusCode());
+        $slugs = [
+            json_decode($first->getBody(), true)['data']['slug'],
+            json_decode($second->getBody(), true)['data']['slug'],
+        ];
+        $this->assertNotContains('', $slugs, 'An empty slug is not a URL.');
+        $this->assertSame($slugs, array_unique($slugs));
+    }
+
+    /**
+     * A pure RE-PARENT can move a unit into a sibling set that already holds its
+     * name. Without checking the TARGET pair that write would reach the partial
+     * unique index and surface as a 500 instead of the 409 it is.
+     */
+    public function testReParentingIntoACollidingSiblingSetIsA409NotA500(): void
+    {
+        $this->seedOu(20, 1, 'Frontend', 11);
+
+        MockRequestFactory::setTestTenant(1);
+        // OU 13 is already named Frontend under parent 10; moving 20 (also
+        // Frontend, currently under 11) to 10 would collide.
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/ous/20', [], (string) json_encode(['parent_id' => 10])),
+            ['id' => 20]
+        );
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertSame(
+            11,
+            (int) $this->scalar('SELECT parent_id FROM organizational_units WHERE id = 20'),
+            'A refused move must not change parent_id.'
+        );
+    }
+
+    /** Renaming a unit to a name a SIBLING already holds is a 409. */
+    public function testRenamingOntoASiblingsNameIsA409(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        // 11 Backend and 13 Frontend are both children of 10.
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/ous/11', [], (string) json_encode(['name' => 'Frontend'])),
+            ['id' => 11]
+        );
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertSame(
+            'Backend',
+            (string) $this->scalar('SELECT name FROM organizational_units WHERE id = 11')
+        );
+    }
+
+    /** Renaming to a name held only by a NON-sibling is fine. */
+    public function testRenamingOntoANonSiblingsNameSucceeds(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        // 12 Platform is a child of 11; 14 Sales is a root. No sibling clash.
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/ous/12', [], (string) json_encode(['name' => 'Sales'])),
+            ['id' => 12]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            'Sales',
+            (string) $this->scalar('SELECT name FROM organizational_units WHERE id = 12')
+        );
+        $this->assertSame(
+            'sales-2',
+            (string) $this->scalar('SELECT slug FROM organizational_units WHERE id = 12'),
+            'The tenant-global slug rule still holds, so the derived slug is disambiguated.'
+        );
+    }
+
     // ==================== Helpers ====================
 
     private function handler(): OusApiHandler
@@ -851,6 +1380,49 @@ final class OusApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, ?, ?, ?, '', datetime('now'))"
         );
         $stmt->execute([$id, $tenantId, $parentId, $name, 'ou-' . $id]);
+    }
+
+    /**
+     * Fetch one scalar from a literal query.
+     *
+     * PDO::query() is typed `PDOStatement|false`, so every inline
+     * `->query(...)->fetchColumn()` is a static-analysis error. Asserting the
+     * statement prepared before reading it is also the better failure: a typo in
+     * the SQL reports itself instead of surfacing as a null comparison three
+     * lines later.
+     */
+    private function scalar(string $sql): mixed
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertNotFalse($stmt, 'Query failed: ' . $sql);
+
+        return $stmt->fetchColumn();
+    }
+
+    /**
+     * Seed one row of a tenant's OU type vocabulary (#822) and return its id.
+     *
+     * Ids are left to the engine rather than pinned: `ou_types` is created by
+     * migration 102 with a SERIAL/AUTOINCREMENT key, and pinning ids here would
+     * need a syncSequences() pass on the PostgreSQL path for no benefit.
+     */
+    private function seedOuType(int $tenantId, string $key, string $label, int $sortOrder): int
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO ou_types (tenant_id, type_key, label, sort_order, source, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, NOW(), NOW())'
+        );
+        $stmt->execute([$tenantId, $key, $label, $sortOrder, 'tenant']);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /** Point an existing seeded OU at a type. */
+    private function typeOu(int $ouId, int $typeId): void
+    {
+        $this->pdo
+            ->prepare('UPDATE organizational_units SET ou_type_id = ? WHERE id = ?')
+            ->execute([$typeId, $ouId]);
     }
 
     private function seedUser(int $id, int $tenantId, string $email, string $role, int $ouId): void
