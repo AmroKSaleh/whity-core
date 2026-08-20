@@ -529,12 +529,13 @@ final class BlockValidatorTest extends TestCase
         sort($types);
 
         // SP1 display types + SP2 data-bound types + SP3 interactive types
-        // (WC-233) + SP4 chart type (WC-240) + workflow types (#868)
+        // (WC-233) + SP4 chart type (WC-240) + workflow types and the OU scope
+        // picker (#868)
         $expected = [
             'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider', 'drawer',
             'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'inbox', 'keyValue', 'list', 'markdown', 'math',
-            'modal', 'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
+            'modal', 'numberInput', 'ouScopePicker', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput', 'timeline',
         ];
         sort($expected);
@@ -1997,5 +1998,293 @@ final class BlockValidatorTest extends TestCase
              'params' => [['param' => 'p', 'from' => 'sel']]],
         ];
         $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+    // ==================== #868: ouScopePicker ====================
+
+    /**
+     * Wrap a candidate input in the minimal valid form the contract requires,
+     * so each test below asserts the picker's own rules rather than re-proving
+     * the form-ancestor one.
+     *
+     * @param array<string, mixed> $input
+     * @return list<array<string, mixed>>
+     */
+    private static function inForm(array $input): array
+    {
+        return [[
+            'type'     => 'form',
+            'submit'   => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [$input, ['type' => 'submitButton', 'label' => 'Save']],
+        ]];
+    }
+
+    public function testOuScopePickerIsInTheWhitelistAsALeaf(): void
+    {
+        $this->assertTrue(BlockContract::isKnown('ouScopePicker'));
+        $this->assertFalse(BlockContract::isContainer('ouScopePicker'));
+    }
+
+    /**
+     * The structural property the whole design rests on: this is the only
+     * fetching leaf with NO `source`. The loader's ownership walk keys off
+     * `props.source.type === 'apiPath'`, so a `source` here would put the picker
+     * behind a plugin-owned route — the exact republishing of core's hierarchy
+     * the block exists to avoid.
+     */
+    public function testOuScopePickerDeclaresNoSourceProp(): void
+    {
+        $rule = BlockContract::rulesFor('ouScopePicker');
+
+        $this->assertIsArray($rule);
+        $this->assertArrayNotHasKey(
+            'source',
+            $rule['props'],
+            'ouScopePicker must declare no source: its units come from core, not from a plugin route'
+        );
+    }
+
+    public function testMinimalOuScopePickerInsideAFormIsValid(): void
+    {
+        $tree = self::inForm(['type' => 'ouScopePicker', 'name' => 'appliesTo', 'label' => 'Applies to']);
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testFullyDeclaredOuScopePickerIsValid(): void
+    {
+        $tree = self::inForm([
+            'type'        => 'ouScopePicker',
+            'name'        => 'appliesTo',
+            'label'       => 'Applies to',
+            'scopes'      => ['subtree', 'children'],
+            'anchorType'  => 'faculty',
+            'memberType'  => 'acme:department',
+            'required'    => true,
+            'placeholder' => 'Choose a faculty',
+        ]);
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testOuScopePickerAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'ouScopePicker', 'name' => 'x', 'label' => 'X'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString(
+            "'ouScopePicker' is only valid inside a 'form'",
+            implode(' | ', $result['errors'])
+        );
+    }
+
+    public function testOuScopePickerMissingNameOrLabelIsRejected(): void
+    {
+        $result = BlockValidator::validate(self::inForm(['type' => 'ouScopePicker']));
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString("missing required prop 'name'", $joined);
+        $this->assertStringContainsString("missing required prop 'label'", $joined);
+    }
+
+    /**
+     * The picker's `name` participates in the per-form duplicate registry like
+     * any other input leaf: its value occupies one payload key, so a collision
+     * would silently overwrite a sibling's.
+     */
+    public function testOuScopePickerNameCollidesWithASiblingInput(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'     => 'form',
+            'submit'   => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'scope', 'label' => 'Scope'],
+                ['type' => 'ouScopePicker', 'name' => 'scope', 'label' => 'Applies to'],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate input name 'scope'", implode(' | ', $result['errors']));
+    }
+
+    // ---- scopes (the `ouScopeList` prop-rule kind) ----
+
+    public function testEachScopeKindIsAcceptedOnItsOwn(): void
+    {
+        foreach (BlockValidator::OU_SCOPES as $scope) {
+            $result = BlockValidator::validate(self::inForm([
+                'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'scopes' => [$scope],
+            ]));
+
+            $this->assertTrue($result['ok'], "scope '{$scope}' must be accepted: " . implode(' | ', $result['errors']));
+        }
+    }
+
+    public function testUnknownScopeIsRejected(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'scopes' => ['ancestors'],
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be one of [unit, subtree, children]', implode(' | ', $result['errors']));
+    }
+
+    public function testEmptyScopeListIsRejected(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'scopes' => [],
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be a non-empty list of [unit, subtree, children]', implode(' | ', $result['errors']));
+    }
+
+    /**
+     * Order is meaningful (the first entry is the control's opening state), so a
+     * repeated entry is an author error rather than a set operation to absorb.
+     */
+    public function testDuplicateScopeIsRejected(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'scopes' => ['subtree', 'subtree'],
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate 'ouScopePicker.scopes' entry 'subtree'", implode(' | ', $result['errors']));
+    }
+
+    public function testScopesMustBeAListNotAMap(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'scopes' => ['first' => 'unit'],
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be a non-empty list of', implode(' | ', $result['errors']));
+    }
+
+    // ---- anchorType / memberType (the `ouTypeKey` prop-rule kind) ----
+
+    public function testBareAndNamespacedOuTypeKeysAreAccepted(): void
+    {
+        foreach (['faculty', 'sub_unit', 'acme:clinic', 'none'] as $key) {
+            $result = BlockValidator::validate(self::inForm([
+                'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'anchorType' => $key,
+            ]));
+
+            $this->assertTrue($result['ok'], "type key '{$key}' must be accepted: " . implode(' | ', $result['errors']));
+        }
+    }
+
+    /**
+     * The same grammar `GET /api/ous?type=` enforces — a key this accepts is a
+     * key that endpoint accepts, so a picker cannot be configured with something
+     * the filter would 422 on.
+     */
+    public function testMalformedOuTypeKeysAreRejected(): void
+    {
+        foreach (['Faculty', 'faculty:', ':clinic', 'a:b:c', '9lives', 'has space', 'kebab-case', ''] as $key) {
+            $result = BlockValidator::validate(self::inForm([
+                'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'memberType' => $key,
+            ]));
+
+            $this->assertFalse($result['ok'], "type key '{$key}' must be rejected");
+            $this->assertStringContainsString(
+                'must be a lowercase organizational-unit type key',
+                implode(' | ', $result['errors'])
+            );
+        }
+    }
+
+    public function testOverlongOuTypeKeyIsRejected(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A',
+            'anchorType' => str_repeat('a', 129),
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString(
+            'must be a lowercase organizational-unit type key',
+            implode(' | ', $result['errors'])
+        );
+    }
+
+    public function testNonStringOuTypeKeyIsRejected(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'anchorType' => 42,
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString(
+            'must be a lowercase organizational-unit type key',
+            implode(' | ', $result['errors'])
+        );
+    }
+
+    // ---- the cross-prop rule ----
+
+    /**
+     * A kind filter over a scope that resolves to exactly the unit the user
+     * picked can only ever remove it. Refused rather than ignored: the author
+     * meant something, and it is not what the declaration does.
+     */
+    public function testMemberTypeWithUnitOnlyScopesIsRejected(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A',
+            'scopes' => ['unit'], 'memberType' => 'department',
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString(
+            "'ouScopePicker.memberType' cannot apply when 'scopes' is exactly ['unit']",
+            implode(' | ', $result['errors'])
+        );
+    }
+
+    public function testMemberTypeWithAWiderScopeListIsAccepted(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A',
+            'scopes' => ['unit', 'subtree'], 'memberType' => 'department',
+        ]));
+
+        $this->assertTrue($result['ok'], implode(' | ', $result['errors']));
+    }
+
+    /**
+     * `scopes` omitted means all three, which includes scopes a kind filter
+     * applies to — so the cross-prop rule must NOT fire on the default.
+     */
+    public function testMemberTypeWithDefaultScopesIsAccepted(): void
+    {
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A', 'memberType' => 'department',
+        ]));
+
+        $this->assertTrue($result['ok'], implode(' | ', $result['errors']));
+    }
+
+    public function testUnknownPropOnOuScopePickerIsIgnoredButKnownOnesAreChecked(): void
+    {
+        // The whitelist checks DECLARED props; an undeclared one is not a prop
+        // rule the contract knows, and `source` is precisely the one an author
+        // might reach for out of habit. It must not turn into a fetch.
+        $result = BlockValidator::validate(self::inForm([
+            'type' => 'ouScopePicker', 'name' => 'a', 'label' => 'A',
+            'source' => '/api/v1/ous',
+        ]));
+
+        $this->assertTrue($result['ok'], implode(' | ', $result['errors']));
+
+        $rule = BlockContract::rulesFor('ouScopePicker');
+        $this->assertIsArray($rule);
+        $this->assertArrayNotHasKey('source', $rule['props']);
     }
 }

@@ -26,12 +26,31 @@ namespace Whity\Sdk\Frontend\Blocks;
 final class BlockValidator
 {
     /**
+     * The three scope kinds an `ouScopePicker` value may carry, and the order
+     * they are offered in when the block declares no `scopes` of its own.
+     *
+     * Public because it is the vocabulary, not an implementation detail: a
+     * consumer resolving a stored rule switches on exactly these three strings,
+     * and a renderer offers exactly these three controls.
+     *
+     * @var list<string>
+     */
+    public const OU_SCOPES = ['unit', 'subtree', 'children'];
+
+    /**
+     * Longest organizational-unit type key accepted (#822's `ou_types.type_key`
+     * column width). Restated rather than imported for the same reason the key
+     * grammar is: the SDK may not reference a core symbol.
+     */
+    private const OU_TYPE_KEY_MAX_LENGTH = 128;
+
+    /**
      * The input leaf types that are only valid inside a `form` ancestor.
      */
     private const INPUT_LEAF_TYPES = [
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-        'bilingualText', 'referenceSelect', 'richTextInput',
+        'bilingualText', 'referenceSelect', 'richTextInput', 'ouScopePicker',
     ];
 
     /**
@@ -41,8 +60,8 @@ final class BlockValidator
     private const FORM_ONLY_TYPES = [
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-        'bilingualText', 'referenceSelect', 'richTextInput', 'submitButton',
-        'fieldArray',
+        'bilingualText', 'referenceSelect', 'richTextInput', 'ouScopePicker',
+        'submitButton', 'fieldArray',
     ];
 
     /**
@@ -194,6 +213,15 @@ final class BlockValidator
             self::validateInboxScoping($node, $path, $errors);
         }
 
+        // #868: a `memberType` on an `ouScopePicker` whose only permitted scope
+        // is 'unit' is a filter that can never do anything but subtract the one
+        // unit the user just chose by hand. Cross-prop, so it cannot live in the
+        // per-prop rules. Refused rather than quietly ignored: an author who
+        // wrote it meant something, and what they meant is not what it does.
+        if ($type === 'ouScopePicker') {
+            self::validateOuScopePicker($node, $path, $errors);
+        }
+
         $isContainer = $rule['container'];
         $hasChildren = \array_key_exists('children', $node);
 
@@ -237,7 +265,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -266,7 +294,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -432,6 +460,25 @@ final class BlockValidator
             case 'itemActionList':
                 // #868: `inbox.actions` — the candidate actions per item.
                 self::validateItemActionList($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'ouScopeList':
+                // #868: `ouScopePicker.scopes` — which of the three scope kinds
+                // the author permits, in offer order.
+                self::validateOuScopeList($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'ouTypeKey':
+                // #868: an organizational-unit TYPE key (#822) — bare for core
+                // and tenant vocabulary, `plugin:slug` for a plugin's. The
+                // grammar is restated here rather than imported because the SDK
+                // may not reference a core symbol (SdkPackageContractTest pins
+                // that); it is a KEY GRAMMAR, not a value, and it is the same
+                // grammar `GET /api/ous?type=` validates against, so a key this
+                // accepts is one that endpoint accepts.
+                self::validateOuTypeKey($value, $type, $prop, $path, $errors);
 
                 break;
 
@@ -1027,6 +1074,109 @@ final class BlockValidator
                     . '[primary, secondary, outline, ghost, destructive], got ' . self::describeScalar($item['variant']);
             }
         }
+    }
+
+    /**
+     * `ouScopePicker.scopes` (#868): a non-empty, duplicate-free list drawn from
+     * {@see self::OU_SCOPES}, in the order the author wants them offered.
+     *
+     * Order is meaningful — the first entry is the control's opening state — so
+     * this is a list rather than a set, and a duplicate is an error rather than
+     * a no-op: two identical options in a dropdown is a mistake, and silently
+     * collapsing them would hide it.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateOuScopeList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value) || $value === []) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty list of ["
+                . implode(', ', self::OU_SCOPES) . ']';
+
+            return;
+        }
+
+        $seen = [];
+        foreach ($value as $i => $scope) {
+            if (!\is_string($scope) || !\in_array($scope, self::OU_SCOPES, true)) {
+                $errors[] = "{$path}[{$i}]: each '{$type}.{$prop}' entry must be one of ["
+                    . implode(', ', self::OU_SCOPES) . '], got ' . self::describeScalar($scope);
+
+                continue;
+            }
+            if (isset($seen[$scope])) {
+                $errors[] = "{$path}[{$i}]: duplicate '{$type}.{$prop}' entry '{$scope}'";
+
+                continue;
+            }
+            $seen[$scope] = true;
+        }
+    }
+
+    /**
+     * An organizational-unit TYPE key (#822): lowercase, letter-initial,
+     * `[a-z0-9_]` thereafter, optionally namespaced once as `plugin:slug`, and
+     * no longer than the column holds.
+     *
+     * Shape only. Whether a tenant has actually defined the key is a question
+     * about tenant DATA, and this validator runs at plugin load against a tree
+     * that will be served to every tenant on the installation — a key one tenant
+     * has adopted and another has not is correct for the first and merely
+     * matches nothing for the second, which is the same answer
+     * `GET /api/ous?type=` gives.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateOuTypeKey(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (
+            !\is_string($value)
+            || \strlen($value) > self::OU_TYPE_KEY_MAX_LENGTH
+            || \preg_match('/^[a-z][a-z0-9_]*(?::[a-z][a-z0-9_]*)?$/', $value) !== 1
+        ) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a lowercase organizational-unit type key, "
+                . "optionally namespaced once as 'plugin:slug', got " . self::describeScalar($value);
+        }
+    }
+
+    /**
+     * `ouScopePicker` (#868): a `memberType` is a filter over the units a scope
+     * RESOLVES to, so it needs a scope that can resolve to more than the anchor
+     * itself. A block whose only permitted scope is `unit` has no such scope,
+     * and the declaration is refused rather than ignored.
+     *
+     * Cross-prop, so it cannot live in the per-prop rules — `validateOuScopeList`
+     * sees the list, not its siblings.
+     *
+     * @param array<mixed> $node
+     * @param list<string> $errors by reference
+     */
+    private static function validateOuScopePicker(array $node, string $path, array &$errors): void
+    {
+        if (!\array_key_exists('memberType', $node)) {
+            return;
+        }
+
+        $scopes = $node['scopes'] ?? null;
+        if (!\is_array($scopes) || $scopes !== ['unit']) {
+            return; // absent (all three permitted), malformed (already reported), or wider than ['unit']
+        }
+
+        $errors[] = "{$path}: 'ouScopePicker.memberType' cannot apply when 'scopes' is exactly ['unit'] "
+            . '— a kind filter over a scope that resolves to the single unit the user picked can only '
+            . 'ever remove it';
     }
 
     /**

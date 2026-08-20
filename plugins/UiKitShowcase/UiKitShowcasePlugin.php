@@ -1367,6 +1367,21 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     'valueField' => 'role',
                                     'labelField' => 'role',
                                 ],
+                                // #868: the organizational-unit SCOPE picker.
+                                // The live instance the every-type coverage gate
+                                // requires, and deliberately inside this form:
+                                // it is a form input, and its whole output is
+                                // one value in the submitted payload. Note the
+                                // absence of a `source` — the units and the type
+                                // vocabulary come from CORE's own OU endpoints
+                                // under the caller's `ous:read` gate, and there
+                                // is no prop with which to point it elsewhere.
+                                // Label avoids "name" (the e2e's getByLabel).
+                                [
+                                    'type' => 'ouScopePicker',
+                                    'name' => 'appliesTo',
+                                    'label' => 'Applies to',
+                                ],
                                 // WC-532 A5: Markdown-aware input with a live
                                 // preview. Label avoids "name" (e2e getByLabel).
                                 [
@@ -1413,6 +1428,7 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                  ['type' => 'dateInput',   'name' => 'since', 'label' => 'Member since'],
                                  ['type' => 'fileInput',   'name' => 'avatar','label' => 'Avatar', 'accept' => 'image/*'],
                                  ['type' => 'colorInput',  'name' => 'accent','label' => 'Accent colour', 'default' => '#6366f1'],
+                                 ['type' => 'ouScopePicker','name' => 'appliesTo', 'label' => 'Applies to'],
                                  ['type' => 'submitButton','label' => 'Submit','requiredPermission' => 'uikit:view','variant' => 'primary'],
                              ]]
                             PHP,
@@ -1469,6 +1485,107 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                             // In a real plugin, use a dedicated endpoint per action.
                             PHP,
                     ),
+                    // #868: the OU scope picker's own card. The LIVE instance is
+                    // in the form above (it is a form input and has to be), so
+                    // this one documents the half a plugin author actually has
+                    // to get right: the shape of the value they will persist and
+                    // the rule for resolving it.
+                    [
+                        'type' => 'card',
+                        'title' => 'ouScopePicker',
+                        'description' => 'Choose a SCOPE over the organizational-unit tree — '
+                            . 'a rule resolved at execution time, not a pinned list of unit ids. '
+                            . 'The live instance is the "Applies to" control in the form above.',
+                        'children' => [
+                            [
+                                'type' => 'text',
+                                'value' => 'The block declares no `source`. Every other data-bound '
+                                    . 'block names a route the plugin registered, and the host '
+                                    . 'ownership-checks it — so a plugin cannot name core\'s OU '
+                                    . 'endpoint at all, and republishing the hierarchy through a '
+                                    . 'route of its own is exactly the drift #822 exists to delete. '
+                                    . 'The renderer reads the units and the type vocabulary from '
+                                    . 'core, under the caller\'s own ous:read gate.',
+                                'tone' => 'muted',
+                            ],
+                            [
+                                'type' => 'code',
+                                'language' => 'php',
+                                'content' => <<<'PHP'
+                                    ['type'       => 'ouScopePicker',
+                                     'name'       => 'appliesTo',
+                                     'label'      => 'Applies to',
+                                     // optional — which scopes are offered, in order.
+                                     // The FIRST is the opening state. Default: all three.
+                                     'scopes'     => ['subtree', 'children', 'unit'],
+                                     // optional — restrict which units may ANCHOR the rule
+                                     // (`?type=` on the picker's own unit fetch).
+                                     'anchorType' => 'faculty',
+                                     // optional — PIN the kind filter and hide the control.
+                                     // Omit it and the user chooses (including "any kind").
+                                     'memberType' => 'department',
+                                     // optional — drop the tenant-wide option, so the rule
+                                     // must be anchored at a unit.
+                                     'required'   => true]
+                                    PHP,
+                            ],
+                            [
+                                'type' => 'text',
+                                'value' => 'The value submitted under `name` is one object. `scope` '
+                                    . 'is ALWAYS written: "this unit" and "this unit\'s subtree" are '
+                                    . 'different answers, and nothing else in the object tells them '
+                                    . 'apart, so the discriminator is never inferred.',
+                                'tone' => 'muted',
+                            ],
+                            [
+                                'type' => 'code',
+                                'language' => 'json',
+                                'content' => <<<'JSON'
+                                    { "appliesTo": { "unit": 42, "scope": "subtree", "type": "department" } }
+                                    JSON,
+                            ],
+                            [
+                                'type' => 'table',
+                                'columns' => [
+                                    ['key' => 'unit', 'label' => 'unit'],
+                                    ['key' => 'scope', 'label' => 'scope'],
+                                    ['key' => 'resolves', 'label' => 'resolves to'],
+                                ],
+                                'rows' => [
+                                    ['unit' => 'id', 'scope' => 'unit', 'resolves' => 'exactly that unit'],
+                                    ['unit' => 'id', 'scope' => 'children', 'resolves' => 'its direct children (?parent_id=<id>)'],
+                                    ['unit' => 'id', 'scope' => 'subtree', 'resolves' => 'it AND every descendant (inclusive)'],
+                                    ['unit' => 'null', 'scope' => 'children', 'resolves' => 'the root units (?parent_id=0)'],
+                                    ['unit' => 'null', 'scope' => 'subtree', 'resolves' => 'every unit in the tenant'],
+                                    ['unit' => 'null', 'scope' => 'unit', 'resolves' => 'never produced — the nothing-selected state'],
+                                ],
+                            ],
+                            [
+                                'type' => 'text',
+                                'value' => '`type`, when non-null, narrows whatever that produced to '
+                                    . 'units of that kind (`?type=<key>`) — applied AFTER the scope '
+                                    . 'expands, never instead of it. It is meaningless for a `unit` '
+                                    . 'scope, so the renderer hides the control and writes null there.',
+                                'tone' => 'muted',
+                            ],
+                            [
+                                'type' => 'code',
+                                'language' => 'php',
+                                'content' => <<<'PHP'
+                                    // Resolving a stored rule, in the plugin's own handler.
+                                    // `scope` is the switch; nothing is guessed from the other fields.
+                                    $query = match ($rule['scope']) {
+                                        'unit'     => ['id' => $rule['unit']],
+                                        'children' => ['parent_id' => $rule['unit'] ?? 0],
+                                        'subtree'  => ['descendants_of' => $rule['unit']], // walk, inclusive
+                                    };
+                                    if ($rule['type'] !== null) {
+                                        $query['type'] = $rule['type']; // narrows the set, never replaces it
+                                    }
+                                    PHP,
+                            ],
+                        ],
+                    ],
                 ],
             ],
         ];

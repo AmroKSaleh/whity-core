@@ -369,9 +369,12 @@ final class UiKitShowcasePluginTest extends TestCase
      * WC-236 / WC-240: interactive and chart demos are now in the tree, so the
      * coverage assertion is restored to ALL BlockContract::types()
      * (SP1 + SP2 + SP3 interactive + SP4 chart).
-     * Total: 45 types (21 SP1+SP2 + 12 SP3 interactive + 1 SP4 chart
+     * Total: 46 types (21 SP1+SP2 + 12 SP3 interactive + 1 SP4 chart
      * + 2 overlay containers: modal + drawer + 2 workflow leaves: timeline +
-     * inbox, #868 — and the rest the whitelist has grown since).
+     * inbox + 1 ouScopePicker, #868 — and the rest the whitelist has grown
+     * since). The count is written out rather than derived because a type added
+     * to the whitelist WITHOUT a showcase instance is precisely what this test
+     * exists to catch.
      */
     public function testTheBlocksTreeCoversEveryBlockType(): void
     {
@@ -435,6 +438,65 @@ final class UiKitShowcasePluginTest extends TestCase
                 "The tree must contain at least one '{$type}' block with a plugin-owned source"
             );
         }
+    }
+
+    /**
+     * #868: the OU scope picker is deliberately NOT a data-bound block.
+     *
+     * The loader decides what to ownership-check generically — any type whose
+     * contract rule carries a `source` prop of kind `apiPath`. The picker
+     * declares none, so it is skipped, and that skip is the point: its units
+     * come from CORE's own OU endpoints under the caller's `ous:read` gate
+     * rather than from a route the plugin republished. A `source` added here
+     * later would silently move the hierarchy back behind a plugin route, which
+     * is the drift #822 exists to delete — so the absence is asserted rather
+     * than assumed.
+     */
+    public function testOuScopePickerIsNotDataBoundAndNamesNoPluginRoute(): void
+    {
+        $rule = BlockContract::rulesFor('ouScopePicker');
+        $this->assertIsArray($rule);
+        $this->assertArrayNotHasKey('source', $rule['props']);
+
+        $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
+        /** @var array<mixed> $blocks */
+        $blocks = $feature['blocks'];
+
+        $pickers = $this->collectNodesOfType($blocks, 'ouScopePicker');
+        $this->assertNotEmpty($pickers, 'The showcase must contain a live ouScopePicker');
+
+        foreach ($pickers as $picker) {
+            $this->assertArrayNotHasKey(
+                'source',
+                $picker,
+                'An ouScopePicker must not carry a source — its data comes from core, not the plugin'
+            );
+        }
+    }
+
+    /**
+     * Every node of one type anywhere in the tree.
+     *
+     * @param array<mixed> $blocks
+     * @return list<array<string, mixed>>
+     */
+    private function collectNodesOfType(array $blocks, string $type): array
+    {
+        $found = [];
+        foreach ($blocks as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            /** @var array<string, mixed> $node */
+            if (($node['type'] ?? null) === $type) {
+                $found[] = $node;
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                $found = array_merge($found, $this->collectNodesOfType($node['children'], $type));
+            }
+        }
+
+        return $found;
     }
 
     // ---- WC-232: loader integration — versioned sources ----
