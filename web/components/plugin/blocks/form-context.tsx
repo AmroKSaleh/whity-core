@@ -14,7 +14,8 @@
  */
 
 import * as React from 'react';
-import type { Block, FormBlock, LocalizedTextValue } from '@/lib/plugin-features';
+import type { Block, FormBlock, LocalizedTextValue, OuScopeValue } from '@/lib/plugin-features';
+import { isOuScopeValue } from '@/lib/plugin-features';
 import { apiClient } from '@/lib/api-client';
 import { submitPluginAction, type ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
@@ -25,14 +26,16 @@ import { useTranslation } from '@amroksaleh/features/i18n';
 export const SENSITIVE_SENTINEL = '••••••';
 
 /** A `fieldArray` (WC-532 A2) value: an ordered list of per-row sub-records. */
-export type FieldArrayValue = Record<string, string | boolean | LocalizedTextValue>[];
+export type FieldArrayValue = Record<string, string | boolean | LocalizedTextValue | OuScopeValue>[];
 
 /**
  * A single form field's value. Most inputs are `string | boolean`; a
  * `bilingualText` input (WC-532 A4) holds a `{ar?, en?}` object; a `fieldArray`
- * (WC-532 A2) holds an array of row records.
+ * (WC-532 A2) holds an array of row records; an `ouScopePicker` (#868) holds a
+ * `{unit, scope, type}` rule — the picker always writes the WHOLE object, so a
+ * value in this map can never be a rule missing its `scope`.
  */
-export type FormValue = string | boolean | LocalizedTextValue | FieldArrayValue;
+export type FormValue = string | boolean | LocalizedTextValue | FieldArrayValue | OuScopeValue;
 
 /** The value shape exposed to all form descendants via context. */
 export interface FormBlockContextValue {
@@ -144,6 +147,7 @@ const FORM_INPUT_TYPES = [
   'bilingualText',
   'referenceSelect',
   'richTextInput',
+  'ouScopePicker',
 ] as const;
 
 /**
@@ -344,6 +348,7 @@ export function FormProvider({
           val !== null &&
           typeof val === 'object' &&
           !Array.isArray(val) &&
+          !isOuScopeValue(val) &&
           ((val.ar ?? '').trim() !== '' || (val.en ?? '').trim() !== '');
         if (!filled) {
           newErrors[child.name] = t('form.error.required', '{label} is required', {

@@ -242,9 +242,29 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.31.0',
+            '1.32.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.31 adds the workflow block types `timeline` and `inbox`, plus the '
+            'SDK 1.32 adds the organizational-unit SCOPE PICKER block type '
+            . '(`ouScopePicker`, with the ouScopeList and ouTypeKey prop-rule kinds): a form '
+            . 'input whose value is a RULE over the OU tree — {unit, scope, type} — rather than '
+            . 'a pinned list of unit ids, which goes stale the first time a unit is reparented, '
+            . 'silently, and is the parallel unit-id map #822 exists to delete. `scope` is one of '
+            . 'unit/subtree/children and is ALWAYS written: "this unit" and "this unit and its '
+            . 'subtree" are different answers and nothing else in the object tells them apart, so the '
+            . 'discriminator is never inferred. The type declares NO source, and that is '
+            . 'structural rather than a convenience — every source in the block contract is '
+            . 'ownership-checked by the loader against the routes the declaring plugin '
+            . 'registered, so a plugin cannot name the OU endpoint core owns at all, and the only way '
+            . 'to satisfy that gate would be to republish the hierarchy through a plugin route, '
+            . 'which is the drift being prevented. The host renderer reads the units and the '
+            . 'vocabulary from core under the ous:read gate the caller already holds, so a caller '
+            . 'who may not read the org chart cannot build a rule over it. anchorType and the type '
+            . 'carried in the value are deliberately separate questions — which unit may ANCHOR the rule versus '
+            . 'which units the resolved SET keeps — because "every department under a faculty" '
+            . 'needs both; and a memberType declared beside a scopes list of exactly [unit] is '
+            . 'refused, since a kind filter over the single unit the user just picked can only '
+            . 'ever remove it; '
+            . 'SDK 1.31 adds the workflow block types `timeline` and `inbox`, plus the '
             . 'itemActionList prop-rule kind behind inbox.actions. timeline is the '
             . 'audit-trail shape every product was hand-rolling, so the same history '
             . 'rendered differently on every screen; it declares no endpoint and no verb, '

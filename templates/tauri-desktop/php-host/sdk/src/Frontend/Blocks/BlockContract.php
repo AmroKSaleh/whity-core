@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -509,6 +509,97 @@ final class BlockContract
                 'placeholder' => ['type' => 'string',     'required' => false],
                 'default'     => ['type' => 'string',     'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
+            ]],
+            // ---- organizational-unit SCOPE picker (#868) ----
+            // A form input whose value is a RULE over the organizational-unit
+            // tree — "every unit of kind X under this parent" — rather than a
+            // pinned list of unit ids.
+            //
+            // Why this is not `referenceSelect` pointed at the OU endpoint.
+            // Two reasons, and the second is structural:
+            //
+            //  1. A reference select submits ONE id. A rule that says "the
+            //     departments under this faculty" cannot be expressed as an id,
+            //     and pinning the ids it resolves to today is exactly the
+            //     parallel unit-id → kind map #822 exists to delete: it goes
+            //     stale the first time a unit is added, removed or reparented,
+            //     silently, with nothing to tell the consumer it happened.
+            //  2. Every `source` prop in this contract is an apiPath the LOADER
+            //     ownership-checks against the routes the declaring plugin
+            //     actually registered. `/api/ous` is core's, so a plugin cannot
+            //     name it — a `referenceSelect` aimed there drops the whole
+            //     feature. The only way to satisfy that gate is for the plugin
+            //     to republish core's hierarchy through a route of its own,
+            //     which is the drift this block exists to prevent.
+            //
+            // So this type declares NO `source`, deliberately, and it is the
+            // only leaf in the whitelist that fetches without one: the host
+            // renderer reads the units and the type vocabulary from CORE's own
+            // endpoints (`GET /api/ous`, `GET /api/ou-types`), under the
+            // caller's own session and the `ous:read` gate those routes already
+            // carry. A caller who may not read the org chart cannot build a rule
+            // over it, and a plugin cannot point the control anywhere else —
+            // there is no prop with which to say where.
+            //
+            // THE VALUE. One object, submitted under `name`:
+            //
+            //     ['unit' => 42|null, 'scope' => 'unit'|'subtree'|'children', 'type' => 'faculty'|null]
+            //
+            //  - `unit`  the anchor unit's id, or null for the whole tenant.
+            //  - `scope` ALWAYS present, never inferred. This is the whole point
+            //            of the shape: "this unit" and "this unit's subtree" are
+            //            different answers and a reader must never have to guess
+            //            which one was meant from the presence of another field.
+            //  - `type`  an OU type KEY (#822) filtering the RESOLVED set, or
+            //            null for any kind. Applied AFTER the scope expands,
+            //            never instead of it.
+            //
+            // How a consumer resolves it, exhaustively:
+            //
+            //     unit  scope       resolves to
+            //     ----  ----------  -------------------------------------------
+            //     id    unit        exactly that unit
+            //     id    children    its DIRECT children      (?parent_id=<id>)
+            //     id    subtree     it AND every descendant   (inclusive)
+            //     null  children    the root units            (?parent_id=0)
+            //     null  subtree     every unit in the tenant
+            //     null  unit        never produced — the renderer cannot offer
+            //                       "this unit" with no unit chosen; it is the
+            //                       nothing-selected state and is not submitted
+            //
+            // and `type`, when non-null, narrows whatever that produced —
+            // `?type=<key>` on the same core endpoint.
+            //
+            // THE PROPS.
+            //  - `scopes`     the subset of the three the author permits, in the
+            //                 order they are offered; the FIRST is the opening
+            //                 state. Omitted means all three in the canonical
+            //                 order. An author who only ever means subtrees says
+            //                 so here and removes the ambiguity at the source.
+            //  - `anchorType` restricts which units may be the ANCHOR, by kind
+            //                 (`?type=` on the picker's own unit fetch). Design
+            //                 time, and a different question from the value's
+            //                 `type`, which restricts the resolved SET: "every
+            //                 department under a faculty" is `anchorType` =>
+            //                 'faculty' with the user choosing 'department'.
+            //  - `memberType` PINS the value's `type` to one kind and hides the
+            //                 control. Absent, the user chooses (including "any
+            //                 kind"). Declaring it alongside a `scopes` list of
+            //                 exactly ['unit'] is refused: a kind filter over a
+            //                 set the user just picked by hand can only ever
+            //                 subtract the one thing in it.
+            //  - `required`   removes the tenant-wide option, so the rule must be
+            //                 anchored at a unit. Presentational, like every
+            //                 other `required` here — the server stays
+            //                 authoritative over what it accepts.
+            'ouScopePicker' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName',   'required' => true],
+                'label'       => ['type' => 'string',      'required' => true],
+                'scopes'      => ['type' => 'ouScopeList', 'required' => false],
+                'anchorType'  => ['type' => 'ouTypeKey',   'required' => false],
+                'memberType'  => ['type' => 'ouTypeKey',   'required' => false],
+                'required'    => ['type' => 'bool',        'required' => false],
+                'placeholder' => ['type' => 'string',      'required' => false],
             ]],
             'submitButton' => ['container' => false, 'props' => [
                 'label'              => ['type' => 'string', 'required' => true],

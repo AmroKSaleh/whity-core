@@ -404,6 +404,62 @@ export interface ReferenceSelectBlock {
   defaultFrom?: string
 }
 
+/**
+ * The three scope kinds an {@link OuScopeValue} may carry — the SDK's
+ * `BlockValidator::OU_SCOPES`, same strings, same canonical order. Must stay
+ * identical to `web/lib/plugin-features.ts`: a rule written on one host is read
+ * by the same consumer as one written on the other.
+ */
+export type OuScopeKind = "unit" | "subtree" | "children"
+
+/** The canonical scope order, and the default `scopes` when a block declares none. */
+export const OU_SCOPE_KINDS: readonly OuScopeKind[] = ["unit", "subtree", "children"]
+
+/**
+ * The value an `ouScopePicker` submits (#868): a RULE over the organizational-
+ * unit tree, resolved at execution time, never a pinned list of ids.
+ *
+ * | `unit` | `scope`    | resolves to                                 |
+ * |--------|------------|---------------------------------------------|
+ * | id     | `unit`     | exactly that unit                           |
+ * | id     | `children` | its direct children (`?parent_id=<id>`)     |
+ * | id     | `subtree`  | it **and** every descendant (inclusive)     |
+ * | `null` | `children` | the root units (`?parent_id=0`)             |
+ * | `null` | `subtree`  | every unit in the tenant                    |
+ * | `null` | `unit`     | never produced — the nothing-selected state |
+ *
+ * `scope` is ALWAYS present: "this unit" and "this unit's subtree" are different
+ * answers and nothing else in the object distinguishes them. `type`, when
+ * non-null, narrows whatever the scope produced to units of that kind.
+ */
+export interface OuScopeValue {
+  unit: number | null
+  scope: OuScopeKind
+  type: string | null
+}
+
+/**
+ * Leaf (form only): choose a scope over the organizational-unit tree.
+ *
+ * Carries no `source`, deliberately — the units and the type vocabulary come
+ * from the HOST's own OU endpoints under the caller's own `ous:read` gate, so a
+ * plugin has no prop with which to point this control anywhere else.
+ */
+export interface OuScopePickerBlock {
+  type: "ouScopePicker"
+  name: string
+  label: string
+  /** Permitted scopes, in offer order; the first is the opening state. Defaults to all three. */
+  scopes?: OuScopeKind[]
+  /** Restricts which units may ANCHOR the rule, by kind (`?type=` on the unit fetch). */
+  anchorType?: string
+  /** Pins the value's `type` to one kind and hides the kind control. */
+  memberType?: string
+  /** Removes the tenant-wide option, so the rule must be anchored at a unit. */
+  required?: boolean
+  placeholder?: string
+}
+
 export interface SubmitButtonBlock {
   type: "submitButton"
   label: string
@@ -506,6 +562,7 @@ export type Block =
   | ColorInputBlock
   | BilingualTextInputBlock
   | ReferenceSelectBlock
+  | OuScopePickerBlock
   | SubmitButtonBlock
   | ActionButtonBlock
   | ChartBlock

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.31).
+ * SDK identity (v1.32).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -307,13 +307,40 @@ namespace Whity\Sdk;
  * permitted actions per item. It is less code in core and it is exactly the
  * failure the block vocabulary exists to prevent: every product re-deriving
  * authorization beside the host's, each one drifting from the middleware in its
- * own direction, and the drift only visible as a 403 after a click. Additive).
+ * own direction, and the drift only visible as a 403 after a click. Additive) ->
+ * 1.32 (the ORGANIZATIONAL-UNIT SCOPE PICKER: `ouScopePicker` joins
+ * {@see \Whity\Sdk\Frontend\Blocks\BlockContract}, with the `ouScopeList` and
+ * `ouTypeKey` prop-rule kinds behind its `scopes` and `anchorType`/`memberType`.
+ * A form input whose value is a RULE over the OU tree rather than a pinned list
+ * of ids: `{unit, scope, type}`, where `scope` is one of `unit`/`subtree`/
+ * `children` and is ALWAYS written. That is the whole shape decision — "this
+ * unit" and "this unit's subtree" are different answers, and a consumer must
+ * never have to infer which was meant from the presence of some other field.
+ * `type` is an OU type key from 1.30, filtering the set the scope resolves to;
+ * pinning the ids that set contains today is the parallel unit-id → kind map
+ * #822 exists to delete, and it goes stale the first time a unit is reparented,
+ * silently.
+ * The type declares NO `source`, and that is structural rather than a
+ * convenience. Every `source` in this contract is ownership-checked by the
+ * loader against the routes the declaring plugin registered, so a plugin cannot
+ * name `/api/ous` at all — a `referenceSelect` aimed there drops the whole
+ * feature, and the only way to satisfy the gate is to republish core's hierarchy
+ * through a plugin route, which is exactly the drift being prevented. So the
+ * host renderer reads the units and the vocabulary from CORE's own endpoints
+ * under the caller's own `ous:read` gate: a caller who may not read the org
+ * chart cannot build a rule over it, and a plugin has no prop with which to
+ * point the control anywhere else.
+ * `anchorType` and the value's `type` are deliberately separate: the first
+ * restricts which unit may ANCHOR the rule, the second restricts the set it
+ * resolves to, and "every department under a faculty" needs both. A `memberType`
+ * declared beside a `scopes` list of exactly ['unit'] is refused — a kind filter
+ * over the single unit the user just picked can only ever remove it. Additive).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.31.0';
+    public const VERSION = '1.32.0';
 
     /**
      * Static identity only — never instantiated.

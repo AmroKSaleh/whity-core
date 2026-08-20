@@ -48,6 +48,9 @@ import type {
   MathBlock,
   ModalBlock,
   NumberInputBlock,
+  OuScopeKind,
+  OuScopePickerBlock,
+  OuScopeValue,
   ReferenceSelectBlock,
   RichTextInputBlock,
   RowAction,
@@ -68,6 +71,7 @@ import type {
   TimelineBlock,
   VisibleWhen,
 } from '@/lib/plugin-features';
+import { OU_SCOPE_KINDS, isOuScopeValue } from '@/lib/plugin-features';
 import { Chart } from '@amroksaleh/ui/chart';
 import { DataTable as SharedDataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
@@ -2243,7 +2247,11 @@ function BilingualTextRenderer({ block }: { block: BilingualTextInputBlock }) {
   if (ctx === null) return <UnsupportedBlock type="bilingualText" />;
   const inputId = `block-input-${block.name}`;
   const raw = ctx.values[block.name];
-  const value = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  // #868 widened FormValue with the OU scope rule, which is also a plain object
+  // — narrow it out explicitly rather than letting an unrelated shape reach the
+  // bilingual input as if it were `{ar, en}`.
+  const value =
+    raw !== null && typeof raw === 'object' && !Array.isArray(raw) && !isOuScopeValue(raw) ? raw : {};
   return (
     <div className="space-y-1.5">
       <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
@@ -2312,6 +2320,368 @@ function ReferenceSelectField({ block, ctx }: { block: ReferenceSelectBlock; ctx
             {options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
           </SelectContent>
         </Select>
+      )}
+    </div>
+  );
+}
+
+// ---- organizational-unit scope picker (#868) ----
+
+/**
+ * Core's own OU endpoints. This block is the one leaf in the contract that
+ * fetches without a `source`, and these two constants are the whole reason:
+ * the hierarchy and its type vocabulary belong to the PLATFORM, so the renderer
+ * reads them from the platform under the caller's own session and `ous:read`
+ * gate. A plugin has no prop with which to redirect either one — a rule built
+ * here is a rule over the units core actually knows about.
+ */
+const OU_SOURCE = '/api/v1/ous';
+const OU_TYPES_SOURCE = '/api/v1/ou-types';
+
+/** One row of `GET /api/v1/ous`, reduced to what the picker reads. */
+interface OuRow {
+  id: number;
+  name: string;
+  parent_id: number | null;
+}
+
+/** One row of `GET /api/v1/ou-types`. */
+interface OuTypeRow {
+  key: string;
+  label: string;
+}
+
+/** The permitted scopes for a block, defaulting to all three in canonical order. */
+function effectiveScopes(block: OuScopePickerBlock): OuScopeKind[] {
+  const declared = block.scopes;
+  if (!Array.isArray(declared) || declared.length === 0) return [...OU_SCOPE_KINDS];
+  const valid = declared.filter((s): s is OuScopeKind => OU_SCOPE_KINDS.includes(s));
+  return valid.length > 0 ? valid : [...OU_SCOPE_KINDS];
+}
+
+/**
+ * The rule the control shows before the user has touched it: no anchor, the
+ * first permitted scope that means anything without one, and the pinned
+ * `memberType` (or no kind filter).
+ *
+ * This value is NOT seeded into the form — an untouched picker contributes
+ * nothing to the payload, exactly as an untouched `referenceSelect` does, so a
+ * form that edits a stored rule never overwrites it with a blank one.
+ */
+function emptyRule(block: OuScopePickerBlock): OuScopeValue {
+  const scopes = effectiveScopes(block);
+  const anchorless = scopes.find((s) => s !== 'unit');
+  return {
+    unit: null,
+    scope: anchorless ?? scopes[0],
+    type: block.memberType ?? null,
+  };
+}
+
+/**
+ * Order the flat OU list as a depth-first walk of the tree, carrying each row's
+ * depth, so the dropdown reads as a hierarchy rather than an arbitrary id order.
+ *
+ * Cycle-safe and loss-free by construction, matching `buildOuTree`: a row whose
+ * parent is missing from the list (filtered out by `anchorType`, or simply not
+ * present) is promoted to a root rather than dropped, because a unit the user
+ * can see in the admin tree but not in this picker reads as missing data.
+ */
+function orderOuRows(rows: OuRow[]): { row: OuRow; depth: number }[] {
+  const childrenOf = new Map<number | null, OuRow[]>();
+  const present = new Set(rows.map((r) => r.id));
+  for (const row of rows) {
+    const key = row.parent_id !== null && present.has(row.parent_id) ? row.parent_id : null;
+    const bucket = childrenOf.get(key);
+    if (bucket) bucket.push(row);
+    else childrenOf.set(key, [row]);
+  }
+  for (const bucket of childrenOf.values()) {
+    bucket.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }
+
+  const out: { row: OuRow; depth: number }[] = [];
+  const visited = new Set<number>();
+  const walk = (parent: number | null, depth: number): void => {
+    for (const row of childrenOf.get(parent) ?? []) {
+      if (visited.has(row.id)) continue;
+      visited.add(row.id);
+      out.push({ row, depth });
+      walk(row.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  // Corrupt cyclic data leaves rows unreachable from any root; append them flat
+  // rather than losing them.
+  for (const row of rows) {
+    if (!visited.has(row.id)) {
+      visited.add(row.id);
+      out.push({ row, depth: 0 });
+    }
+  }
+  return out;
+}
+
+/** Coerce one `/api/v1/ous` row into the three fields the picker reads. */
+function toOuRow(raw: Record<string, unknown>): OuRow | null {
+  const id = Number(raw.id);
+  if (!Number.isFinite(id)) return null;
+  const parent = raw.parent_id;
+  return {
+    id,
+    name: raw.name === undefined || raw.name === null ? String(id) : String(raw.name),
+    parent_id: parent === undefined || parent === null ? null : Number(parent),
+  };
+}
+
+/** The sentinel option value for "no anchor" / "any kind" — Radix refuses ''. */
+const OU_ANY = '__any__';
+
+/** U+2007 FIGURE SPACE: a fixed-width blank that survives HTML whitespace collapsing. */
+const FIGURE_SPACE = '\u2007';
+
+/**
+ * The kind filter, split into its own component so its fetch is CONDITIONAL on
+ * being rendered: a block with a pinned `memberType` shows no kind control and
+ * must therefore cost no vocabulary request. Calling `usePluginData` in the
+ * parent and ignoring the result would fetch either way — a hook cannot be run
+ * conditionally, which is exactly why this is a component and not a branch.
+ */
+function OuKindSelect({
+  value,
+  onChange,
+  ariaLabel,
+  anyLabel,
+}: {
+  value: string | null;
+  onChange: (next: string | null) => void;
+  ariaLabel: string;
+  anyLabel: string;
+}) {
+  const types = usePluginData<Array<Record<string, unknown>>>(OU_TYPES_SOURCE, (body) =>
+    Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null
+  );
+
+  const options: OuTypeRow[] =
+    types.status === 'ready'
+      ? types.data.flatMap((raw) => {
+          const key = raw.key;
+          if (typeof key !== 'string' || key === '') return [];
+          return [
+            { key, label: raw.label === undefined || raw.label === null ? key : String(raw.label) },
+          ];
+        })
+      : [];
+
+  return (
+    <Select
+      value={value ?? OU_ANY}
+      onValueChange={(v) => onChange(v === OU_ANY ? null : v)}
+      disabled={types.status === 'loading'}
+    >
+      <SelectTrigger aria-label={ariaLabel} data-slot="ou-scope-picker-kind">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {/* "Any kind" is always offered: a tenant that has adopted no vocabulary
+            still has a usable picker, and the rule it writes (`type: null`) is
+            the correct one for "every unit, whatever it is". */}
+        <SelectItem value={OU_ANY}>{anyLabel}</SelectItem>
+        {options.map((option) => (
+          <SelectItem key={option.key} value={option.key}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function OuScopePickerRenderer({ block }: { block: OuScopePickerBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="ouScopePicker" />;
+  return <OuScopePickerField block={block} ctx={ctx} />;
+}
+
+/**
+ * The picker proper: three controls over one value.
+ *
+ * The invariant that makes the value shape trustworthy is here — every control
+ * writes the WHOLE rule (`{unit, scope, type}`), composed from the current one,
+ * never a partial patch. There is therefore no code path that can persist a rule
+ * without its `scope`, which is the one field a consumer cannot recover by
+ * guessing.
+ *
+ * A `unit` scope and a kind filter are mutually exclusive by construction: the
+ * kind control disappears when the scope resolves to the single unit the user
+ * just picked, and the rule written in that moment carries `type: null`.
+ */
+function OuScopePickerField({ block, ctx }: { block: OuScopePickerBlock; ctx: FormBlockContextValue }) {
+  const t = useTranslation('plugin');
+
+  // `anchorType` narrows the ANCHOR list at the source rather than client-side:
+  // core answers `?type=` itself, so a tenant with ten thousand units does not
+  // ship them all to filter nine thousand of them away in the browser.
+  const unitsSource =
+    block.anchorType !== undefined && block.anchorType !== ''
+      ? `${OU_SOURCE}?type=${encodeURIComponent(block.anchorType)}`
+      : OU_SOURCE;
+
+  // usePluginData exhausts pagination (#870). A truncated unit list is exactly
+  // what made this block unbuildable before — a picker missing unit 26 reads as
+  // "the department was never created" (#824).
+  const units = usePluginData<Array<Record<string, unknown>>>(unitsSource, (body) =>
+    Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null
+  );
+  // A pinned `memberType` shows no kind control at all — see `OuKindSelect`,
+  // which owns that fetch precisely so a pinned block never issues it.
+  const kindsPinned = block.memberType !== undefined && block.memberType !== '';
+
+  const scopes = effectiveScopes(block);
+  const stored = ctx.values[block.name];
+  const rule: OuScopeValue = isOuScopeValue(stored) ? stored : emptyRule(block);
+
+  /**
+   * Write a complete rule, normalising the two combinations the contract says
+   * cannot exist:
+   *   - dropping the anchor while the scope is `unit` moves to the next
+   *     permitted scope ("this unit" with no unit is not a rule);
+   *   - a `unit` scope carries no kind filter (it could only ever subtract the
+   *     unit the user just chose).
+   */
+  const write = (next: OuScopeValue): void => {
+    let scope = next.scope;
+    if (next.unit === null && scope === 'unit') {
+      scope = scopes.find((s) => s !== 'unit') ?? 'unit';
+    }
+    const type = scope === 'unit' ? null : (block.memberType ?? next.type);
+    ctx.setValue(block.name, { unit: next.unit, scope, type });
+  };
+
+  const orderedUnits =
+    units.status === 'ready'
+      ? orderOuRows(
+          units.data.flatMap((raw) => {
+            const row = toOuRow(raw);
+            return row === null ? [] : [row];
+          })
+        )
+      : [];
+
+  const scopeLabels: Record<OuScopeKind, string> = {
+    // The disambiguation lives in the option text, where the choice is made:
+    // "this unit" and "this subtree" are the two answers a stored rule must
+    // never be ambiguous between, so the control says which is which in words.
+    unit: t('blocks.ouScopePicker.scope.unit', 'This unit only'),
+    subtree: t('blocks.ouScopePicker.scope.subtree', 'This unit and everything below it'),
+    children: t('blocks.ouScopePicker.scope.children', 'Direct children only'),
+  };
+
+  if (units.status === 'error') {
+    return (
+      <div className="space-y-1.5" data-slot="ou-scope-picker">
+        <span className="text-sm font-medium">{block.label}</span>
+        <div
+          className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground"
+          data-slot="ou-scope-picker-error"
+        >
+          <span>{t('blocks.ouScopePicker.loadError', 'Failed to load organizational units.')}</span>
+          <Button type="button" variant="outline" size="sm" onClick={units.retry}>
+            {t('blocks.retry', 'Retry')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const loading = units.status === 'loading';
+  const unitValue = rule.unit === null ? OU_ANY : String(rule.unit);
+  // `scope: 'unit'` is only offerable once an anchor exists — see the contract's
+  // resolution table, where (null, unit) is the row that is never produced.
+  const offerableScopes = rule.unit === null ? scopes.filter((s) => s !== 'unit') : scopes;
+
+  // A GROUP, not a single labelled input: the rule is built from up to three
+  // controls, so there is no one element for a `<label for>` to point at.
+  // `aria-labelledby` names the whole group, and each control carries its own
+  // aria-label underneath it.
+  const groupLabelId = `block-input-${block.name}-label`;
+
+  return (
+    <div className="space-y-2" data-slot="ou-scope-picker" role="group" aria-labelledby={groupLabelId}>
+      <div className="flex items-center justify-between gap-2">
+        <span id={groupLabelId} className="text-sm font-medium">
+          {block.label}
+          {block.required === true && (
+            <span className="ms-0.5 text-destructive" aria-hidden>
+              *
+            </span>
+          )}
+        </span>
+        {ctx.errors[block.name] !== undefined && (
+          <p className="text-xs text-destructive" role="alert">
+            {ctx.errors[block.name]}
+          </p>
+        )}
+      </div>
+
+      <Select
+        value={unitValue}
+        onValueChange={(v) => write({ ...rule, unit: v === OU_ANY ? null : Number(v) })}
+        disabled={loading}
+      >
+        <SelectTrigger aria-label={block.label} data-slot="ou-scope-picker-unit">
+          {/* `block.placeholder` is the plugin's own copy — only our substitute is keyed. */}
+          <SelectValue
+            placeholder={
+              loading
+                ? t('blocks.loading', 'Loading…')
+                : (block.placeholder ??
+                  t('blocks.select.placeholder', 'Select {label}', { label: block.label }))
+            }
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {block.required !== true && (
+            <SelectItem value={OU_ANY}>
+              {t('blocks.ouScopePicker.wholeTenant', 'All organizational units')}
+            </SelectItem>
+          )}
+          {orderedUnits.map(({ row, depth }) => (
+            <SelectItem key={row.id} value={String(row.id)}>
+              {/* Figure-space indentation, not a nested menu: the list is one
+                  flat set of options and the depth is a reading aid. */}
+              {FIGURE_SPACE.repeat(depth * 2)}
+              {row.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {offerableScopes.length > 1 && (
+        <Select value={rule.scope} onValueChange={(v) => write({ ...rule, scope: v as OuScopeKind })}>
+          <SelectTrigger
+            aria-label={t('blocks.ouScopePicker.scopeLabel', 'Scope')}
+            data-slot="ou-scope-picker-scope"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {offerableScopes.map((scope) => (
+              <SelectItem key={scope} value={scope}>
+                {scopeLabels[scope]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      {!kindsPinned && rule.scope !== 'unit' && (
+        <OuKindSelect
+          value={rule.type}
+          onChange={(next) => write({ ...rule, type: next })}
+          ariaLabel={t('blocks.ouScopePicker.kindLabel', 'Kind')}
+          anyLabel={t('blocks.ouScopePicker.anyKind', 'Any kind')}
+        />
       )}
     </div>
   );
@@ -2429,15 +2799,16 @@ function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
  * `equals: 5` matches a form field holding the string `'5'`. Missing → `''`.
  */
 function normalizeVisibilityOperand(
-  value: string | number | boolean | LocalizedTextValue | FieldArrayValue | undefined
+  value: string | number | boolean | LocalizedTextValue | FieldArrayValue | OuScopeValue | undefined
 ): string {
   if (typeof value === 'boolean') {
     return value ? 'true' : 'false';
   }
   if (value !== null && typeof value === 'object') {
-    // A bilingualText field (WC-532 A4) holds a {ar,en} object — never a
-    // meaningful scalar equals/in target; normalize to a sentinel that matches
-    // no operand rather than '[object Object]'.
+    // A bilingualText field (WC-532 A4) holds a {ar,en} object and an
+    // ouScopePicker (#868) an {unit,scope,type} rule — neither is a meaningful
+    // scalar equals/in target; normalize to a sentinel that matches no operand
+    // rather than '[object Object]'.
     return ' object';
   }
   return value === undefined ? '' : String(value);
@@ -2758,6 +3129,8 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <BilingualTextRenderer block={block} /> : <UnsupportedBlock type="bilingualText" />;
     case 'referenceSelect':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isNonEmptyString(block.source) && isNonEmptyString(block.valueField) && isNonEmptyString(block.labelField) ? <ReferenceSelectRenderer block={block} /> : <UnsupportedBlock type="referenceSelect" />;
+    case 'ouScopePicker':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <OuScopePickerRenderer block={block} /> : <UnsupportedBlock type="ouScopePicker" />;
     case 'submitButton':
       return isNonEmptyString(block.label) ? <SubmitButtonRenderer block={block} /> : <UnsupportedBlock type="submitButton" />;
     case 'actionButton':

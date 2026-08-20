@@ -45,6 +45,9 @@ import type {
   InboxBlock,
   ItemAction,
   ModalBlock,
+  OuScopeKind,
+  OuScopePickerBlock,
+  OuScopeValue,
   PluginFeature,
   RowAction,
   SelectorBlock,
@@ -52,6 +55,7 @@ import type {
   TimelineBlock,
   VisibleWhen,
 } from "./types"
+import { OU_SCOPE_KINDS } from "./types"
 import { usePluginData, type PluginDataState } from "./use-plugin-data"
 import { usePermittedActions, type PermittedActionCheck } from "./use-permitted-actions"
 
@@ -486,6 +490,7 @@ function BlockNode({ block }: { block: Block }) {
     case "colorInput":
     case "bilingualText":
     case "referenceSelect":
+    case "ouScopePicker":
       if (!form) return <UnsupportedBlock reason={`${block.type} outside a form`} />
       if ("visibleWhen" in block && !isVisible(block.visibleWhen, form.values)) return null
       return <FormInput block={block} form={form} />
@@ -975,6 +980,273 @@ function DrawerRenderer({ block }: { block: DrawerBlock }) {
   )
 }
 
+// ------------------------------------------------- OU scope picker (#868)
+
+/**
+ * The host's own OU endpoints. The twin of web's `OU_SOURCE`/`OU_TYPES_SOURCE`,
+ * and the same paths on purpose: this block is the one leaf in the contract that
+ * fetches without a `source`, because the hierarchy and its type vocabulary
+ * belong to the PLATFORM rather than to any plugin. The request goes through the
+ * ordinary `php_request` proxy, so which routes exist is the HOST's answer, not
+ * this renderer's — an offline host that serves no organizational units answers
+ * 404 and the control reports that it could not load them, with a retry. It is
+ * the same code path as web, taking the branch its environment produces, rather
+ * than a hard-coded "not here" that would rot the day a host does serve them.
+ */
+const OU_SOURCE = "/api/v1/ous"
+const OU_TYPES_SOURCE = "/api/v1/ou-types"
+
+/** The sentinel option value for "no anchor" / "any kind" — Radix refuses "". */
+const OU_ANY = "__any__"
+
+/** U+2007 FIGURE SPACE: a fixed-width blank used to indent the tree in a flat list. */
+const FIGURE_SPACE = "\u2007"
+
+interface OuRow {
+  id: number
+  name: string
+  parent_id: number | null
+}
+
+/** The permitted scopes for a block, defaulting to all three in canonical order. */
+function effectiveScopes(block: OuScopePickerBlock): OuScopeKind[] {
+  const declared = block.scopes
+  if (!Array.isArray(declared) || declared.length === 0) return [...OU_SCOPE_KINDS]
+  const valid = declared.filter((s): s is OuScopeKind => OU_SCOPE_KINDS.includes(s))
+  return valid.length > 0 ? valid : [...OU_SCOPE_KINDS]
+}
+
+/**
+ * The rule the control shows before the user has touched it. NOT seeded into the
+ * form value map — `collectDefaults` deliberately seeds only what an input
+ * declares a default for, so an untouched picker contributes nothing to the
+ * payload and a form editing a stored rule never blanks it (#847's lesson,
+ * applied ahead of time here rather than after).
+ */
+function emptyRule(block: OuScopePickerBlock): OuScopeValue {
+  const scopes = effectiveScopes(block)
+  const anchorless = scopes.find((s) => s !== "unit")
+  return { unit: null, scope: anchorless ?? scopes[0], type: block.memberType ?? null }
+}
+
+/** Whether a stored form value is an OU scope rule. Mirrors web's `isOuScopeValue`. */
+function isOuScopeValue(value: unknown): value is OuScopeValue {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as OuScopeValue).scope === "string" &&
+    (OU_SCOPE_KINDS as readonly string[]).includes((value as OuScopeValue).scope)
+  )
+}
+
+/** Coerce one `/api/v1/ous` row into the three fields the picker reads. */
+function toOuRow(raw: Record<string, unknown>): OuRow | null {
+  const id = Number(raw.id)
+  if (!Number.isFinite(id)) return null
+  const parent = raw.parent_id
+  return {
+    id,
+    name: raw.name === undefined || raw.name === null ? String(id) : String(raw.name),
+    parent_id: parent === undefined || parent === null ? null : Number(parent),
+  }
+}
+
+/**
+ * Order the flat OU list as a depth-first walk of the tree, carrying each row's
+ * depth. Cycle-safe and loss-free: a row whose parent is absent from the list
+ * becomes a root rather than disappearing, because a unit the operator can see
+ * elsewhere but not here reads as missing data. Mirrors web's `orderOuRows`.
+ */
+function orderOuRows(rows: OuRow[]): { row: OuRow; depth: number }[] {
+  const childrenOf = new Map<number | null, OuRow[]>()
+  const present = new Set(rows.map((r) => r.id))
+  for (const row of rows) {
+    const key = row.parent_id !== null && present.has(row.parent_id) ? row.parent_id : null
+    const bucket = childrenOf.get(key)
+    if (bucket) bucket.push(row)
+    else childrenOf.set(key, [row])
+  }
+  for (const bucket of childrenOf.values()) {
+    bucket.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+  }
+
+  const out: { row: OuRow; depth: number }[] = []
+  const visited = new Set<number>()
+  const walk = (parent: number | null, depth: number): void => {
+    for (const row of childrenOf.get(parent) ?? []) {
+      if (visited.has(row.id)) continue
+      visited.add(row.id)
+      out.push({ row, depth })
+      walk(row.id, depth + 1)
+    }
+  }
+  walk(null, 0)
+  for (const row of rows) {
+    if (!visited.has(row.id)) {
+      visited.add(row.id)
+      out.push({ row, depth: 0 })
+    }
+  }
+  return out
+}
+
+/**
+ * The kind filter. Its own component so the vocabulary fetch is CONDITIONAL on
+ * being rendered — a block with a pinned `memberType` shows no kind control and
+ * must cost no request, and a hook cannot be run conditionally. Same split as
+ * web's `OuKindSelect`.
+ */
+function OuKindSelect({ value, onChange }: { value: string | null; onChange: (next: string | null) => void }) {
+  const types = usePluginData<Record<string, unknown>[]>(OU_TYPES_SOURCE, (data) => (Array.isArray(data) ? data : null))
+  const options = types.status === "ready" ? types.data : []
+  return (
+    <Select value={value ?? OU_ANY} onValueChange={(v) => onChange(v === OU_ANY ? null : v)} disabled={types.status === "loading"}>
+      <SelectTrigger aria-label="Kind">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {/* Always offered: a host with no adopted vocabulary still has a usable
+            picker, and `type: null` is the correct rule for "whatever kind". */}
+        <SelectItem value={OU_ANY}>Any kind</SelectItem>
+        {options.map((raw, i) => {
+          const key = raw.key
+          if (typeof key !== "string" || key === "") return null
+          return (
+            <SelectItem key={`${key}-${i}`} value={key}>
+              {raw.label === undefined || raw.label === null ? key : String(raw.label)}
+            </SelectItem>
+          )
+        })}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/**
+ * OuScopePickerRenderer — three controls over ONE value, the desktop twin of
+ * web's `OuScopePickerField`.
+ *
+ * The invariant that makes the value shape trustworthy is the same on both
+ * hosts: every control writes the WHOLE rule (`{unit, scope, type}`), composed
+ * from the current one, never a partial patch — so no code path can persist a
+ * rule missing its `scope`, the one field a consumer cannot recover by guessing.
+ * `unit` scope and a kind filter are mutually exclusive by construction.
+ */
+function OuScopePickerRenderer({ block, form }: { block: OuScopePickerBlock; form: FormScope }) {
+  // `anchorType` narrows the anchor list at the SOURCE: the host answers
+  // `?type=` itself, so a large tenant does not ship every unit to filter most
+  // of them away locally.
+  const source =
+    block.anchorType !== undefined && block.anchorType !== ""
+      ? `${OU_SOURCE}?type=${encodeURIComponent(block.anchorType)}`
+      : OU_SOURCE
+  // usePluginData exhausts pagination (#870); a truncated unit list is what made
+  // this block unbuildable before.
+  const units = usePluginData<Record<string, unknown>[]>(source, (data) => (Array.isArray(data) ? data : null))
+
+  const scopes = effectiveScopes(block)
+  const stored = form.values[block.name]
+  const rule: OuScopeValue = isOuScopeValue(stored) ? stored : emptyRule(block)
+  const kindsPinned = block.memberType !== undefined && block.memberType !== ""
+
+  const write = (next: OuScopeValue): void => {
+    let scope = next.scope
+    // "This unit" with no unit is not a rule — dropping the anchor moves to the
+    // next permitted scope.
+    if (next.unit === null && scope === "unit") {
+      scope = scopes.find((s) => s !== "unit") ?? "unit"
+    }
+    // A kind filter over the single unit the user just picked can only subtract it.
+    const type = scope === "unit" ? null : (block.memberType ?? next.type)
+    form.setValue(block.name, { unit: next.unit, scope, type })
+  }
+
+  if (units.status === "error") {
+    return (
+      <div className="space-y-1">
+        <span className="text-sm font-medium">{block.label}</span>
+        <ErrorState
+          title="Couldn't load organizational units"
+          action={<Button onClick={units.retry}>Retry</Button>}
+        />
+      </div>
+    )
+  }
+
+  const orderedUnits =
+    units.status === "ready"
+      ? orderOuRows(
+          units.data.flatMap((raw) => {
+            const row = toOuRow(raw)
+            return row === null ? [] : [row]
+          }),
+        )
+      : []
+  // `scope: 'unit'` is only offerable once an anchor exists — (null, unit) is the
+  // row of the resolution table that is never produced.
+  const offerableScopes = rule.unit === null ? scopes.filter((s) => s !== "unit") : scopes
+  const scopeLabels: Record<OuScopeKind, string> = {
+    // The disambiguation lives in the option text, where the choice is made.
+    unit: "This unit only",
+    subtree: "This unit and everything below it",
+    children: "Direct children only",
+  }
+
+  // A GROUP, not a single labelled input: the rule is built from up to three
+  // controls, so there is no one element a `<label>` could wrap. `aria-labelledby`
+  // names the whole group and each control carries its own aria-label underneath
+  // it — the same construct web uses.
+  const groupLabelId = `block-input-${block.name}-label`
+
+  return (
+    <div className="space-y-2" role="group" aria-labelledby={groupLabelId}>
+      <span id={groupLabelId} className="text-sm font-medium">
+        {block.label}
+        {block.required ? " *" : ""}
+      </span>
+
+      <Select
+        value={rule.unit === null ? OU_ANY : String(rule.unit)}
+        onValueChange={(v) => write({ ...rule, unit: v === OU_ANY ? null : Number(v) })}
+        disabled={units.status === "loading"}
+      >
+        <SelectTrigger aria-label={block.label}>
+          <SelectValue placeholder={units.status === "loading" ? "Loading…" : (block.placeholder ?? "Select…")} />
+        </SelectTrigger>
+        <SelectContent>
+          {block.required !== true && <SelectItem value={OU_ANY}>All organizational units</SelectItem>}
+          {orderedUnits.map(({ row, depth }) => (
+            <SelectItem key={row.id} value={String(row.id)}>
+              {FIGURE_SPACE.repeat(depth * 2)}
+              {row.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {offerableScopes.length > 1 && (
+        <Select value={rule.scope} onValueChange={(v) => write({ ...rule, scope: v as OuScopeKind })}>
+          <SelectTrigger aria-label="Scope">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {offerableScopes.map((scope) => (
+              <SelectItem key={scope} value={scope}>
+                {scopeLabels[scope]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      {!kindsPinned && rule.scope !== "unit" && (
+        <OuKindSelect value={rule.type} onChange={(next) => write({ ...rule, type: next })} />
+      )}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- form defaults
 
 /** The input-leaf block types that own a value in a form's value map — the
@@ -992,6 +1264,7 @@ const FORM_INPUT_TYPES: readonly string[] = [
   "bilingualText",
   "referenceSelect",
   "richTextInput",
+  "ouScopePicker",
 ]
 
 /** Flatten every input-leaf descendant of a form's children at ANY depth —
@@ -1454,6 +1727,8 @@ function FormInput({ block, form }: { block: Extract<Block, { type: string }>; f
     }
     case "referenceSelect":
       return <ReferenceSelectInput block={block} form={form} ctx={ctx} />
+    case "ouScopePicker":
+      return <OuScopePickerRenderer block={block} form={form} />
     default:
       return <UnsupportedBlock reason={block.type} />
   }
