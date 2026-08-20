@@ -62,6 +62,17 @@ final class ResourceRoleGrantAuditSinkTest extends TestCase
     protected function setUp(): void
     {
         $this->pdo = SchemaFromMigrations::make();
+
+        // `roles.tenant_id` is a real foreign key. SQLite does not enforce it and
+        // real PostgreSQL does, so seeding the tenants is not optional decoration
+        // — without it this file passes the SQLite gate and fails the dialect job.
+        $this->pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
+
+        // Those rows went in at EXPLICIT ids, which PostgreSQL's sequence does not
+        // notice; the next id-less INSERT would be handed 1 again and die on the
+        // primary key. SQLite hides it because its counter reads the table.
+        // Same reasoning as ResourceRoleGrantRealEngineTest::makeSchema().
+        SchemaFromMigrations::syncSequences($this->pdo);
     }
 
     /**
