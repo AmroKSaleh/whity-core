@@ -14,6 +14,7 @@ use Whity\Sdk\PluginEventsInterface;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginJobsInterface;
+use Whity\Sdk\Ou\PluginOuTypesInterface;
 use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
@@ -57,7 +58,7 @@ use Whity\Sdk\PluginRolesInterface;
  * time (see {@see self::resolvePdo()}), analogous to the migration runner
  * injecting a PDO into plugin migrations.
  */
-final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface, PluginJobsInterface, PluginEventsInterface
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface, PluginJobsInterface, PluginEventsInterface, PluginOuTypesInterface
 {
     /**
      * @inheritDoc
@@ -355,6 +356,40 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
     {
         return [
             'hello_viewer' => ['description' => 'Can view Hello World content'],
+        ];
+    }
+
+    /**
+     * Contribute two ORGANIZATIONAL-UNIT TYPES (PluginOuTypesInterface, #822).
+     *
+     * An OU type names what KIND of thing a unit in the tenant's tree is, so a
+     * consumer can ask for "every unit of kind X" instead of "every unit at
+     * depth N" — a question depth cannot answer, because the same depth holds a
+     * different kind of unit on every installation and changes the moment
+     * somebody inserts a parent above an existing unit.
+     *
+     * Two things this demonstrates, both of them enforced by the host rather
+     * than by convention:
+     *
+     *  - the slugs declared here are BARE. The host stores them namespaced under
+     *    this plugin, so they become `helloworld:hello_region` and
+     *    `helloworld:hello_branch`. The prefix comes from the plugin NAME the
+     *    loader supplies, never from anything returned here — which is why two
+     *    plugins may both declare `branch` without colliding, and why no plugin
+     *    can mint a bare key and squat on a name a tenant's own vocabulary wants.
+     *  - a declaration is a CATALOGUE ENTRY, not a write. Nothing is inserted
+     *    into any tenant's `ou_types`; the keys merely become adoptable, and an
+     *    administrator adopts one with `POST /api/v1/ou-types {"key": "..."}`,
+     *    at which point the label and rank below become that tenant's starting
+     *    values and stay overridable per tenant.
+     *
+     * @inheritDoc
+     */
+    public function getOuTypes(): array
+    {
+        return [
+            'hello_region' => ['label' => 'Hello Region', 'sort_order' => 10],
+            'hello_branch' => ['label' => 'Hello Branch', 'sort_order' => 20],
         ];
     }
 

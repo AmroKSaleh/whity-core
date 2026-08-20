@@ -6,6 +6,7 @@ namespace Whity\Api;
 
 use Whity\Api\Exception\OuHierarchyCycleException;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Ou\OuTypeRegistry;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Http\InputLimits;
@@ -32,6 +33,32 @@ use PDO;
  */
 class OusApiHandler
 {
+    /**
+     * The OU projection every read path returns, joined to `ou_types` (#822).
+     *
+     * The type is exposed as its KEY as well as its id. Returning only the
+     * opaque per-tenant id would leave a consumer holding a number it cannot
+     * interpret without a second call, which is precisely the parallel
+     * unit-id → kind map this feature exists to delete. The label rides along so
+     * a picker can be rendered from one request.
+     *
+     * Requires the `ou` / `t` aliases the read paths declare.
+     */
+    private const LIST_COLUMNS = 'SELECT ou.id, ou.tenant_id, ou.parent_id, ou.name, ou.slug,'
+        . ' ou.description, ou.created_at, ou.ou_type_id,'
+        . ' t.type_key AS ou_type_key, t.label AS ou_type_label';
+
+    /**
+     * Longest disambiguating suffix tried before a slug is declared unassignable.
+     *
+     * A bound rather than an unbounded loop: a pathological tenant must not turn
+     * one create into thousands of round trips. Reaching it is not a real
+     * scenario — it needs a thousand sibling-legal units whose names all reduce
+     * to one slug — so the ceiling exists to make the failure mode a 409 rather
+     * than a hang.
+     */
+    private const SLUG_MAX_ATTEMPTS = 1000;
+
     private PDO $db;
     private HookManager $hookManager;
 
@@ -50,6 +77,15 @@ class OusApiHandler
      * filtered and cannot tell an ignored filter from one that matched
      * everything. A malformed value is now a 422 rather than a silent
      * full-tenant read.
+     *
+     * Supports `?type=` to narrow the list to one KIND of unit (#822) —
+     * "every faculty", not "every unit at depth 1", which returns a different
+     * kind of thing on every installation. `?type=none` selects the units that
+     * carry no type at all. Same validation contract as `parent_id`: a malformed
+     * key is a 422, never a silent full-tenant read. A well-formed key this
+     * tenant has not defined matches nothing and returns an empty page — that is
+     * a correct answer, not an error, and it lets a consumer probe for a type
+     * without learning anything about other tenants.
      */
     public function list(Request $request): Response
     {
@@ -66,51 +102,75 @@ class OusApiHandler
                 $parentId = (int) $query['parent_id'];
             }
 
-            $parentClause = self::parentClause($parentId);
+            $typeKey = null;
+            if (isset($query['type']) && $query['type'] !== '') {
+                if (!OuTypeRegistry::isValidKey($query['type'])) {
+                    return Response::error(
+                        'type must be a lowercase type key, optionally namespaced as plugin:slug, '
+                        . "or '" . OuTypeRegistry::UNTYPED . "' for units with no type",
+                        422
+                    );
+                }
+                $typeKey = $query['type'];
+            }
+
+            $filters = self::parentClause($parentId) . self::typeClause($typeKey);
+            $bindParent = $parentId !== null && $parentId !== 0;
+            $bindType = $typeKey !== null && $typeKey !== OuTypeRegistry::UNTYPED;
 
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists OUs across all tenants; scoped else-branch binds tenant_id
-                $countSql = 'SELECT COUNT(*) AS cnt FROM organizational_units WHERE 1 = 1' . $parentClause;
+                $countSql = 'SELECT COUNT(*) AS cnt FROM organizational_units ou'
+                    . ' LEFT JOIN ou_types t ON t.id = ou.ou_type_id AND t.tenant_id = ou.tenant_id'
+                    . ' WHERE 1 = 1' . $filters;
                 $countStmt = $this->db->prepare($countSql);
-                if ($parentId !== null && $parentId !== 0) {
-                    $countStmt->bindValue(':parent_id', $parentId, PDO::PARAM_INT);
-                }
-                $countStmt->execute();
-                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
-                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
-
-                // @tenant-guard-ignore: system-tenant (id 0) lists all OUs; scoped else-branch binds tenant_id
-                $sql = 'SELECT id, tenant_id, parent_id, name, slug, description, created_at'
-                    . ' FROM organizational_units WHERE 1 = 1' . $parentClause
-                    . ' ORDER BY tenant_id, id LIMIT :limit OFFSET :offset';
-                $stmt = $this->db->prepare($sql);
             } else {
-                $countSql = 'SELECT COUNT(*) AS cnt FROM organizational_units'
-                    . ' WHERE tenant_id = :tenant_id' . $parentClause;
+                $countSql = 'SELECT COUNT(*) AS cnt FROM organizational_units ou'
+                    . ' LEFT JOIN ou_types t ON t.id = ou.ou_type_id AND t.tenant_id = ou.tenant_id'
+                    . ' WHERE ou.tenant_id = :tenant_id' . $filters;
                 $countStmt = $this->db->prepare($countSql);
                 $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
-                if ($parentId !== null && $parentId !== 0) {
-                    $countStmt->bindValue(':parent_id', $parentId, PDO::PARAM_INT);
-                }
-                $countStmt->execute();
-                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
-                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+            }
+            if ($bindParent) {
+                $countStmt->bindValue(':parent_id', $parentId, PDO::PARAM_INT);
+            }
+            if ($bindType) {
+                $countStmt->bindValue(':type_key', $typeKey, PDO::PARAM_STR);
+            }
+            $countStmt->execute();
+            $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+            $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-                $sql = 'SELECT id, tenant_id, parent_id, name, slug, description, created_at'
-                    . ' FROM organizational_units WHERE tenant_id = :tenant_id' . $parentClause
-                    . ' ORDER BY id LIMIT :limit OFFSET :offset';
+            if ($tenantId === 0) {
+                // @tenant-guard-ignore: system-tenant (id 0) lists all OUs; scoped else-branch binds tenant_id
+                $sql = self::LIST_COLUMNS . ' FROM organizational_units ou'
+                    . ' LEFT JOIN ou_types t ON t.id = ou.ou_type_id AND t.tenant_id = ou.tenant_id'
+                    . ' WHERE 1 = 1' . $filters
+                    . ' ORDER BY ou.tenant_id, ou.id LIMIT :limit OFFSET :offset';
+                $stmt = $this->db->prepare($sql);
+            } else {
+                $sql = self::LIST_COLUMNS . ' FROM organizational_units ou'
+                    . ' LEFT JOIN ou_types t ON t.id = ou.ou_type_id AND t.tenant_id = ou.tenant_id'
+                    . ' WHERE ou.tenant_id = :tenant_id' . $filters
+                    . ' ORDER BY ou.id LIMIT :limit OFFSET :offset';
                 $stmt = $this->db->prepare($sql);
                 $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
             }
 
-            if ($parentId !== null && $parentId !== 0) {
+            if ($bindParent) {
                 $stmt->bindValue(':parent_id', $parentId, PDO::PARAM_INT);
+            }
+            if ($bindType) {
+                $stmt->bindValue(':type_key', $typeKey, PDO::PARAM_STR);
             }
             $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
             $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
             $stmt->execute();
 
-            $ous = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $ous = array_map(
+                [self::class, 'withTypeFields'],
+                $stmt->fetchAll(PDO::FETCH_ASSOC)
+            );
 
             return Response::json(['data' => $ous, 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
@@ -140,7 +200,34 @@ class OusApiHandler
 
         // No OU can have id 0, so 0 is free to mean "the roots" — otherwise a
         // query string has no way to express parent_id IS NULL.
-        return $parentId === 0 ? ' AND parent_id IS NULL' : ' AND parent_id = :parent_id';
+        return $parentId === 0 ? ' AND ou.parent_id IS NULL' : ' AND ou.parent_id = :parent_id';
+    }
+
+    /**
+     * The `AND ...` fragment implementing the `?type=` filter, or '' for none.
+     *
+     * A separate method for the same reason as {@see self::parentClause()}: the
+     * tenant-predicate scanner stitches fragments assigned within one function
+     * into the statement that consumes them.
+     *
+     * The filter matches on the type KEY rather than its id, because the key is
+     * the stable, cross-installation identifier a consumer's rule is written
+     * against; the id is per tenant and means nothing outside it. The reserved
+     * `none` sentinel selects the units that carry no type — a query string has
+     * no other way to express `IS NULL`, exactly as `parent_id=0` exists to
+     * express it for the roots.
+     *
+     * @param string|null $typeKey Validated key, the untyped sentinel, or null.
+     */
+    private static function typeClause(?string $typeKey): string
+    {
+        if ($typeKey === null) {
+            return '';
+        }
+
+        return $typeKey === OuTypeRegistry::UNTYPED
+            ? ' AND ou.ou_type_id IS NULL'
+            : ' AND t.type_key = :type_key';
     }
 
     /**
@@ -191,7 +278,6 @@ class OusApiHandler
             $name = $body['name'];
             $parentId = $body['parent_id'] ?? null;
             $description = $body['description'] ?? '';
-            $slug = $this->generateSlug($name);
 
             // Bound the free-text fields before any DB write: name is VARCHAR(255),
             // description is an otherwise-unbounded TEXT column.
@@ -213,22 +299,35 @@ class OusApiHandler
                 }
             }
 
-            // Check if name already exists in tenant
-            $checkNameStmt = $this->db->prepare(
-                'SELECT id FROM organizational_units WHERE name = ? AND tenant_id = ?'
-            );
-            $checkNameStmt->execute([$name, $tenantId]);
-            if ($checkNameStmt->fetch()) {
-                return Response::error('Organizational unit name already exists in tenant', 409);
+            // Type resolution (#822). Accepts either the FK or the stable key;
+            // an unknown or foreign type is refused rather than stored as null.
+            $type = $this->resolveRequestedType($body, $tenantId);
+            if ($type instanceof Response) {
+                return $type;
+            }
+            $ouTypeId = $type['id'];
+
+            // Name uniqueness is scoped to the SIBLING SET, not the tenant
+            // (#822, migration 103): two faculties may each hold a Computer
+            // Science department, and forbidding that was the constraint being
+            // reported, not a rule anyone wanted.
+            if ($this->siblingNameTaken($tenantId, self::asNullableInt($parentId), (string) $name, null)) {
+                return Response::error(
+                    'An organizational unit with this name already exists under the same parent',
+                    409
+                );
             }
 
-            // Check if slug already exists in tenant
-            $checkSlugStmt = $this->db->prepare(
-                'SELECT id FROM organizational_units WHERE slug = ? AND tenant_id = ?'
-            );
-            $checkSlugStmt->execute([$slug, $tenantId]);
-            if ($checkSlugStmt->fetch()) {
-                return Response::error('Slug already exists in tenant', 409);
+            // The slug stays UNIQUE PER TENANT (see migration 103's docblock: it
+            // is URL identity, and scoping it to siblings would mean no URL
+            // resolves without the full ancestor path). Two sibling-legal units
+            // therefore have to share a name and not a slug, so the second one is
+            // disambiguated rather than refused — otherwise relaxing the name
+            // rule would have achieved nothing, the 409 simply moving from the
+            // name check to the slug check.
+            $slug = $this->uniqueSlug($tenantId, (string) $name, null);
+            if ($slug === null) {
+                return Response::error('Could not derive a unique slug for this name', 409);
             }
 
             // Dispatch filter hook before creating OU
@@ -237,6 +336,7 @@ class OusApiHandler
                 'parent_id' => $parentId,
                 'description' => $description,
                 'slug' => $slug,
+                'ou_type_id' => $ouTypeId,
             ]);
 
             // Extract potentially modified data from hook response
@@ -244,13 +344,17 @@ class OusApiHandler
             $parentId = $ouData['parent_id'] ?? $parentId;
             $description = $ouData['description'] ?? $description;
             $slug = $ouData['slug'] ?? $slug;
+            $ouTypeId = array_key_exists('ou_type_id', $ouData)
+                ? self::asNullableInt($ouData['ou_type_id'])
+                : $ouTypeId;
 
             // Insert OU
             $stmt = $this->db->prepare('
-                INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
-                VALUES (?, ?, ?, ?, ?, NOW())
+                INSERT INTO organizational_units
+                    (tenant_id, parent_id, name, slug, description, ou_type_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, NOW())
             ');
-            $stmt->execute([$tenantId, $parentId, $name, $slug, $description]);
+            $stmt->execute([$tenantId, $parentId, $name, $slug, $description, $ouTypeId]);
             $ouId = $this->db->lastInsertId();
 
             // Dispatch synchronous hook after OU is created
@@ -260,6 +364,7 @@ class OusApiHandler
                 'name' => $name,
                 'slug' => $slug,
                 'parent_id' => $parentId,
+                'ou_type_id' => $ouTypeId,
             ]);
 
             // Dispatch asynchronous hook for background tasks
@@ -269,6 +374,9 @@ class OusApiHandler
                 'name' => $name,
             ]);
 
+            // Resolved AFTER the hook: a listener may have retyped the unit, and
+            // echoing the pre-hook key would describe a row that was never
+            // written.
             return Response::json([
                 'data' => [
                     'id' => (int)$ouId,
@@ -277,8 +385,9 @@ class OusApiHandler
                     'name' => $name,
                     'slug' => $slug,
                     'description' => $description,
+                    'ou_type_id' => $ouTypeId,
                     'created_at' => date('Y-m-d H:i:s')
-                ]
+                ] + $this->typeFields($tenantId, $ouTypeId)
             ], 201);
         } catch (\Exception $e) {
             error_log('[OusApiHandler] create failed: ' . $e->getMessage());
@@ -300,10 +409,11 @@ class OusApiHandler
             $tenantId = TenantContext::getTenantId();
 
             // Get OU
-            $stmt = $this->db->prepare('
-                SELECT id, tenant_id, parent_id, name, slug, description, created_at
-                FROM organizational_units
-                WHERE id = ? AND tenant_id = ?
+            $stmt = $this->db->prepare(
+                self::LIST_COLUMNS . '
+                FROM organizational_units ou
+                LEFT JOIN ou_types t ON t.id = ou.ou_type_id AND t.tenant_id = ou.tenant_id
+                WHERE ou.id = ? AND ou.tenant_id = ?
             ');
             $stmt->execute([$id, $tenantId]);
             $ou = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -311,6 +421,7 @@ class OusApiHandler
             if (!$ou) {
                 return Response::error('Organizational unit not found', 404);
             }
+            $ou = self::withTypeFields($ou);
 
             // Get children
             $childrenStmt = $this->db->prepare('
@@ -371,17 +482,6 @@ class OusApiHandler
                 return $tooLong;
             }
 
-            // Handle name update - regenerate slug when name changes
-            if (isset($body['name']) && $body['name'] !== $ou['name']) {
-                $updates[] = 'name = ?';
-                $params_array[] = $body['name'];
-
-                // Regenerate slug when name changes
-                $newSlug = $this->generateSlug($body['name']);
-                $updates[] = 'slug = ?';
-                $params_array[] = $newSlug;
-            }
-
             // Handle description update
             if (isset($body['description']) && $body['description'] !== $ou['description']) {
                 $updates[] = 'description = ?';
@@ -397,8 +497,9 @@ class OusApiHandler
             $requestedParentId = array_key_exists('parent_id', $body) && $body['parent_id'] !== null
                 ? (int)$body['parent_id']
                 : null;
+            $parentChanged = array_key_exists('parent_id', $body) && $requestedParentId !== $currentParentId;
 
-            if (array_key_exists('parent_id', $body) && $requestedParentId !== $currentParentId) {
+            if ($parentChanged) {
                 $newParentId = $requestedParentId;
 
                 // Validate parent exists in same tenant
@@ -422,6 +523,53 @@ class OusApiHandler
 
                 $updates[] = 'parent_id = ?';
                 $params_array[] = $newParentId;
+            }
+
+            // Sibling-name check (#822). Both a rename AND a re-parent can move a
+            // unit into a sibling set that already holds its name, so the check
+            // runs against the TARGET pair rather than only when the name is the
+            // thing being edited — a pure re-parent that collides would otherwise
+            // hit the partial unique index and surface as a 500 instead of the
+            // 409 it is.
+            $targetName = isset($body['name']) ? (string) $body['name'] : (string) $ou['name'];
+            $targetParentId = $parentChanged ? $requestedParentId : $currentParentId;
+            $nameChanged = isset($body['name']) && $body['name'] !== $ou['name'];
+
+            if (($nameChanged || $parentChanged)
+                && $this->siblingNameTaken($tenantId, $targetParentId, $targetName, (int) $id)
+            ) {
+                return Response::error(
+                    'An organizational unit with this name already exists under the same parent',
+                    409
+                );
+            }
+
+            // Handle name update — regenerate the slug when the name changes.
+            // Disambiguated for the same reason as on create: the slug stays
+            // unique per TENANT while names are only unique among siblings, so
+            // the derived slug can legitimately already be taken.
+            if ($nameChanged) {
+                $updates[] = 'name = ?';
+                $params_array[] = $body['name'];
+
+                $newSlug = $this->uniqueSlug($tenantId, (string) $body['name'], (int) $id);
+                if ($newSlug === null) {
+                    return Response::error('Could not derive a unique slug for this name', 409);
+                }
+                $updates[] = 'slug = ?';
+                $params_array[] = $newSlug;
+            }
+
+            // Handle type update (#822). array_key_exists, not isset, so an
+            // explicit null — "this unit has no kind after all" — is honoured
+            // rather than silently dropped.
+            $type = $this->resolveRequestedType($body, $tenantId);
+            if ($type instanceof Response) {
+                return $type;
+            }
+            if ($type['present']) {
+                $updates[] = 'ou_type_id = ?';
+                $params_array[] = $type['id'];
             }
 
             if (!empty($updates)) {
@@ -932,6 +1080,242 @@ class OusApiHandler
             'tenantId' => (int)($row['tenant_id'] ?? 0),
             'createdAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
         ];
+    }
+
+    /**
+     * Resolve the OU type a write requests, from either `ou_type_id` or `type`.
+     *
+     * Two spellings because two callers need different ones: an admin UI holds
+     * the id it just rendered in a picker, while an integration provisioning
+     * units from outside knows only the stable KEY — which is the entire point
+     * of the key existing. Supplying both is refused rather than silently
+     * preferring one, since a client that disagrees with itself has a bug the
+     * platform should not paper over.
+     *
+     * An unknown or foreign-tenant type is a 422, never a silent null: storing
+     * "no type" in response to a request to set one is exactly the class of
+     * silent failure that made `?parent_id=` worth fixing in #823.
+     *
+     * The tenant is nullable for the same reason every other statement in this
+     * handler tolerates it: {@see TenantContext::getTenantId()} can be
+     * unresolved, and binding null scopes the lookup to no rows — so an
+     * unresolved tenant resolves no type and is refused, rather than being cast
+     * to 0 and silently addressing the SYSTEM tenant's vocabulary.
+     *
+     * @param array<string, mixed> $body
+     * @return Response|array{present: bool, id: int|null}
+     */
+    private function resolveRequestedType(array $body, ?int $tenantId): Response|array
+    {
+        $hasId = array_key_exists('ou_type_id', $body);
+        $hasKey = array_key_exists('type', $body);
+
+        if ($hasId && $hasKey) {
+            return Response::error('Supply either ou_type_id or type, not both', 422);
+        }
+        if (!$hasId && !$hasKey) {
+            return ['present' => false, 'id' => null];
+        }
+
+        $raw = $hasId ? $body['ou_type_id'] : $body['type'];
+        if ($raw === null || $raw === '') {
+            return ['present' => true, 'id' => null];
+        }
+
+        if ($hasId) {
+            if (!is_int($raw) && !(is_string($raw) && ctype_digit($raw))) {
+                return Response::error('ou_type_id must be an integer or null', 422);
+            }
+            $stmt = $this->db->prepare(
+                'SELECT id FROM ou_types WHERE id = ? AND tenant_id = ?'
+            );
+            $stmt->execute([(int) $raw, $tenantId]);
+            if ($stmt->fetchColumn() === false) {
+                return Response::error('Organizational unit type does not belong to current tenant', 422);
+            }
+
+            return ['present' => true, 'id' => (int) $raw];
+        }
+
+        if (!is_string($raw) || !OuTypeRegistry::isValidKey($raw)) {
+            return Response::error(
+                'type must be a lowercase type key, optionally namespaced as plugin:slug',
+                422
+            );
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT id FROM ou_types WHERE type_key = ? AND tenant_id = ?'
+        );
+        $stmt->execute([$raw, $tenantId]);
+        $found = $stmt->fetchColumn();
+        if ($found === false) {
+            return Response::error(
+                "This tenant has no organizational unit type '{$raw}'. Create it first via POST /api/ou-types.",
+                422
+            );
+        }
+
+        return ['present' => true, 'id' => (int) $found];
+    }
+
+    /**
+     * The joined type fields for one already-resolved type id.
+     *
+     * Used by write paths, which build their response row by hand rather than
+     * re-reading it, so the type they echo is resolved from the id actually
+     * written.
+     *
+     * @return array{ou_type_key: string|null, ou_type_label: string|null}
+     */
+    private function typeFields(?int $tenantId, ?int $ouTypeId): array
+    {
+        if ($ouTypeId === null) {
+            return ['ou_type_key' => null, 'ou_type_label' => null];
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT type_key, label FROM ou_types WHERE id = ? AND tenant_id = ?'
+        );
+        $stmt->execute([$ouTypeId, $tenantId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return [
+            'ou_type_key' => $row === false ? null : (string) $row['type_key'],
+            'ou_type_label' => $row === false ? null : (string) $row['label'],
+        ];
+    }
+
+    /**
+     * Whether another unit in the SAME sibling set already carries this name.
+     *
+     * The roots are one sibling set (`parent_id IS NULL`), matching the pair of
+     * partial unique indexes migration 103 installs — and matching them
+     * deliberately, so the 409 the API returns and the constraint the database
+     * enforces can never disagree about what a collision is.
+     *
+     * Written as two complete statements rather than one with a stitched-in
+     * predicate: `parent_id = ?` cannot express IS NULL, and the
+     * tenant-predicate scanner reads statement literals, so each one carries its
+     * own visible `tenant_id = ?`.
+     *
+     * @param int|null $parentId  The sibling set, or null for the roots.
+     * @param int|null $exceptId  A unit to exclude — the one being renamed.
+     */
+    private function siblingNameTaken(?int $tenantId, ?int $parentId, string $name, ?int $exceptId): bool
+    {
+        $except = $exceptId ?? 0;
+
+        if ($parentId === null) {
+            $stmt = $this->db->prepare(
+                'SELECT 1 FROM organizational_units
+                  WHERE tenant_id = ? AND name = ? AND parent_id IS NULL AND id <> ?
+                  LIMIT 1'
+            );
+            $stmt->execute([$tenantId, $name, $except]);
+        } else {
+            $stmt = $this->db->prepare(
+                'SELECT 1 FROM organizational_units
+                  WHERE tenant_id = ? AND name = ? AND parent_id = ? AND id <> ?
+                  LIMIT 1'
+            );
+            $stmt->execute([$tenantId, $name, $parentId, $except]);
+        }
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * A slug for this name that no OTHER unit in the tenant holds.
+     *
+     * Necessary because the two uniqueness rules now differ: a name is unique
+     * among siblings while a slug stays unique per tenant (migration 103
+     * explains why the slug keeps the wider rule). So the second *Computer
+     * Science* department is legal and its natural slug is not, and the choice
+     * is between refusing the unit and disambiguating the slug. Refusing it
+     * would have made relaxing the name rule pointless — the 409 would simply
+     * have moved from the name check to the slug check — so the suffix is
+     * appended: `computer-science`, `computer-science-2`, `computer-science-3`.
+     *
+     * Every candidate is gathered in ONE query rather than probed one at a time,
+     * so a tenth sibling costs one round trip rather than ten.
+     *
+     * Returns null when no free slug was found within
+     * {@see self::SLUG_MAX_ATTEMPTS}, which the caller reports as a 409.
+     *
+     * @param int|null $exceptId The unit being renamed, whose own slug is free to reuse.
+     */
+    private function uniqueSlug(?int $tenantId, string $name, ?int $exceptId): ?string
+    {
+        $base = $this->generateSlug($name);
+
+        // A name written entirely in a non-Latin script — Arabic is a first-class
+        // requirement here — reduces to the empty string, and an empty slug is
+        // both a broken URL and an instant collision with the next such name.
+        // Falling back to a generic stem keeps every unit addressable; the
+        // disambiguating suffix below does the rest.
+        if ($base === '') {
+            $base = 'ou';
+        }
+
+        $except = $exceptId ?? 0;
+        $stmt = $this->db->prepare(
+            'SELECT slug FROM organizational_units
+              WHERE tenant_id = ? AND id <> ? AND (slug = ? OR slug LIKE ?)'
+        );
+        // `_` and `%` are LIKE wildcards; generateSlug() emits only [a-z0-9-],
+        // so the pattern below can contain neither and needs no escaping.
+        $stmt->execute([$tenantId, $except, $base, $base . '-%']);
+
+        $taken = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $slug) {
+            $taken[(string) $slug] = true;
+        }
+
+        if (!isset($taken[$base])) {
+            return $base;
+        }
+        for ($n = 2; $n <= self::SLUG_MAX_ATTEMPTS; $n++) {
+            $candidate = $base . '-' . $n;
+            if (!isset($taken[$candidate])) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Attach the type fields to a joined row, typed.
+     *
+     * The type columns are cast here while the surrounding columns are passed
+     * through raw. That asymmetry is deliberate: PostgreSQL's PDO driver returns
+     * every integer column as a string, so `id` and `tenant_id` have always been
+     * strings on the wire despite the published schema calling them integers.
+     * Retyping those is an API-visible change for every existing consumer and
+     * belongs in its own change; a field introduced here has no such history and
+     * is made trustworthy from the start, because a consumer binding a routing
+     * rule to `ou_type_id` is the entire reason it exists.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function withTypeFields(array $row): array
+    {
+        $row['ou_type_id'] = self::asNullableInt($row['ou_type_id'] ?? null);
+        $row['ou_type_key'] = isset($row['ou_type_key']) ? (string) $row['ou_type_key'] : null;
+        $row['ou_type_label'] = isset($row['ou_type_label']) ? (string) $row['ou_type_label'] : null;
+
+        return $row;
+    }
+
+    /**
+     * Cast a nullable id that may arrive as an int, a numeric string (every
+     * integer column under PostgreSQL's PDO driver) or null.
+     */
+    private static function asNullableInt(mixed $value): ?int
+    {
+        return ($value === null || $value === '') ? null : (int) $value;
     }
 
     /**

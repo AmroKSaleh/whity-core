@@ -257,13 +257,27 @@ namespace Whity\Sdk;
  * and costs core's own auditing nothing; the refusal is whole-declaration,
  * because a plugin with half its events audited ships a trail that looks
  * complete. The subscriptions are registered with the plugin's other hooks, so
- * disabling a plugin removes them and re-enabling it restores them. Additive).
+ * disabling a plugin removes them and re-enabling it restores them. Additive) →
+ * 1.30 ({@see \Whity\Sdk\Ou\PluginOuTypesInterface}, the organizational-unit
+ * TYPE contribution point. An OU carried no kind, so the only thing a plugin
+ * could filter its tree on was DEPTH — which names a different kind of unit on
+ * every installation (a single-campus institution has its faculties at depth 0,
+ * a multi-campus one at depth 1) and shifts the moment somebody inserts a
+ * parent above an existing unit. Slugs are declared BARE and the host stamps
+ * the plugin's prefix, so two plugins may both declare `clinic` and neither can
+ * mint a bare key — the unprefixed namespace belongs to core and to the
+ * tenant's own vocabulary. A declaration is a CATALOGUE ENTRY, not a write:
+ * it makes a key adoptable, and an administrator adopts it into their tenant
+ * explicitly, inheriting the declared label and rank as overridable defaults.
+ * Force-seeding instead would have been a cross-tenant write driven by an
+ * install-wide plugin. A malformed declaration costs that plugin the one type.
+ * Additive).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.29.0';
+    public const VERSION = '1.30.0';
 
     /**
      * Static identity only — never instantiated.

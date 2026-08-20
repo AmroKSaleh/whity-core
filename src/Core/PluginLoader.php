@@ -16,6 +16,8 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Health\HealthProbeRegistry;
 use Whity\Core\Health\InvalidHealthProbeException;
+use Whity\Core\Ou\InvalidOuTypeException;
+use Whity\Core\Ou\OuTypeRegistry;
 use Whity\Sdk\Health\PluginHealthProbesInterface;
 use Whity\Core\DataType\DataTypeRegistry;
 use Whity\Core\DataType\InvalidDataTypeException;
@@ -27,6 +29,7 @@ use Whity\Core\Settings\InvalidSettingDeclarationException;
 use Whity\Core\Settings\PluginSettingsRegistry;
 use Whity\Sdk\Settings\PluginSettingsInterface;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
+use Whity\Sdk\Ou\PluginOuTypesInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 use Whity\Sdk\Tenant\PluginTablesInterface;
 use Whity\Core\Hooks\HookManager;
@@ -106,6 +109,14 @@ class PluginLoader
      * rather than failing, matching how a null permission registry behaves.
      */
     private ?ResourceTypeRegistry $resourceTypeRegistry = null;
+
+    /**
+     * Optional catalogue of plugin-contributed OU types (#822).
+     *
+     * Null in hosts that have not wired one; declarations are then skipped
+     * rather than failing, matching how a null permission registry behaves.
+     */
+    private ?OuTypeRegistry $ouTypeRegistry = null;
 
     /**
      * Optional catalogue of plugin-contributed status-page probes.
@@ -346,6 +357,7 @@ class PluginLoader
      * @param DataTypeRegistry|null $dataTypeRegistry   Optional catalogue of plugin-declared data types
      * @param PluginSettingsRegistry|null $pluginSettingsRegistry Optional catalogue of plugin-declared settings
      * @param AuditLogger|null $auditLogger Optional audit writer for plugin-declared events
+     * @param OuTypeRegistry|null $ouTypeRegistry Optional catalogue of plugin-contributed OU types
      */
     public function __construct(
         string $pluginDir,
@@ -359,12 +371,14 @@ class PluginLoader
         ?TableOwnershipRegistry $tableOwnershipRegistry = null,
         ?DataTypeRegistry $dataTypeRegistry = null,
         ?PluginSettingsRegistry $pluginSettingsRegistry = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?OuTypeRegistry $ouTypeRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
         $this->permissionRegistry = $permissionRegistry;
         $this->resourceTypeRegistry = $resourceTypeRegistry;
+        $this->ouTypeRegistry = $ouTypeRegistry;
         $this->healthProbeRegistry = $healthProbeRegistry;
         $this->tableOwnershipRegistry = $tableOwnershipRegistry;
         $this->dataTypeRegistry = $dataTypeRegistry;
@@ -2520,6 +2534,37 @@ class PluginLoader
                 } else {
                     error_log($warningMsg);
                 }
+            }
+        }
+
+        // 2a-pre. Register declared OU TYPES (#822). Same shape as (2a): an
+        //     OPTIONAL interface, so a plugin that contributes no vocabulary
+        //     implements nothing and is skipped, and the source is
+        //     $plugin->getName() — supplied here, never taken from the plugin's
+        //     own return value — so a key is namespaced under its real owner.
+        //     That is what stops two plugins colliding on `clinic`, and what
+        //     stops any plugin minting a BARE key and squatting on a name a
+        //     tenant's own vocabulary might want.
+        //
+        //     Registering a type does NOT write it into any tenant: the
+        //     vocabulary is tenant data (`ou_types`), and an administrator
+        //     adopts a declared key explicitly. This only makes the key
+        //     ADOPTABLE, and supplies the label/rank a tenant starts from.
+        //
+        //     Same per-plugin error boundary as permissions: a malformed
+        //     declaration is a logged warning, not a dead host.
+        //     Two boundaries, because two different things can go wrong: a
+        //     malformed DECLARATION is a logged warning (the plugin keeps
+        //     serving, it simply contributes no types), while a getOuTypes()
+        //     that THROWS is plugin code misbehaving and goes through the
+        //     lifecycle error boundary that can eventually fail the plugin.
+        if ($this->ouTypeRegistry !== null && $plugin instanceof PluginOuTypesInterface) {
+            try {
+                $this->ouTypeRegistry->register($plugin->getName(), $plugin->getOuTypes());
+            } catch (InvalidOuTypeException $e) {
+                $this->logWarning("Plugin {$pluginKey} declares an invalid OU type: " . $e->getMessage());
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getOuTypes');
             }
         }
 

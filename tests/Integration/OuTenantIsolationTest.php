@@ -123,10 +123,14 @@ class OuTenantIsolationTest extends TestCase
                         return $this->getQueryResults();
                     });
 
+                // PDO returns FALSE when a statement yields no row. The mock
+                // used to return 0, which every `=== false` existence check in
+                // the handler reads as "found" — so a lookup that missed would
+                // have been treated as a hit (#822 resolves an OU type that way).
                 $mockStmt->method('fetchColumn')
                     ->willReturnCallback(function($column = 0) {
                         $results = $this->getQueryResults();
-                        return !empty($results) ? $results[0][$column] : 0;
+                        return !empty($results) ? array_values($results[0])[$column] : false;
                     });
 
                 return $mockStmt;
@@ -149,11 +153,21 @@ class OuTenantIsolationTest extends TestCase
      * This simulates database query execution by parsing the SQL and
      * filtering the test database accordingly.
      *
+     * Predicates are matched against an ALIAS-NORMALISED copy of the statement
+     * (see {@see self::normalizeSql()}), because the handler's read paths join
+     * `ou_types` and therefore qualify their columns — `WHERE ou.id = ?`. A
+     * matcher keyed on the unqualified spelling silently stopped narrowing when
+     * that alias arrived, and a cross-tenant `get()` came back 200: the tenant
+     * filter still applied, so the query returned the OTHER tenant's first row
+     * rather than nothing. Anything this mock fails to model must fail LOUDLY —
+     * a tenant-isolation test that quietly stops testing the predicate it was
+     * written for is worse than one that breaks.
+     *
      * @return array Query results
      */
     private function getQueryResults(): array
     {
-        $sql = $this->lastExecutedSql ?? '';
+        $sql = self::normalizeSql($this->lastExecutedSql ?? '');
         $params = $this->lastExecutedParams ?? [];
         $tenantId = TenantContext::getTenantId();
 
@@ -164,31 +178,79 @@ class OuTenantIsolationTest extends TestCase
                 fn($ou) => $ou['tenant_id'] === $tenantId
             );
 
+            // Sibling-name probe (#822): WHERE tenant_id = ? AND name = ? AND
+            // parent_id {IS NULL | = ?} AND id <> ?. Listed FIRST because it also
+            // contains `name = ?`, and its parameters are ordered differently
+            // from the legacy name lookup below.
+            if (strpos($sql, 'WHERE tenant_id = ? AND name = ?') !== false) {
+                $name = $params[1] ?? null;
+                $rootScope = strpos($sql, 'parent_id IS NULL') !== false;
+                $parentId = $rootScope ? null : ($params[2] ?? null);
+                $exceptId = $rootScope ? ($params[2] ?? 0) : ($params[3] ?? 0);
+
+                return array_values(array_filter(
+                    $results,
+                    fn($ou) => $ou['name'] === $name
+                        && ($ou['parent_id'] ?? null) === $parentId
+                        && $ou['id'] !== $exceptId
+                ));
+            }
+
+            // Slug-disambiguation probe (#822): WHERE tenant_id = ? AND id <> ?
+            // AND (slug = ? OR slug LIKE ?). Returns every slug already taken so
+            // the handler can pick the first free suffix.
+            if (strpos($sql, 'AND (slug = ? OR slug LIKE ?)') !== false) {
+                $exceptId = $params[1] ?? 0;
+                $base = $params[2] ?? '';
+                $prefix = rtrim((string) ($params[3] ?? ''), '%');
+
+                return array_values(array_map(
+                    fn($ou) => ['slug' => $ou['slug']],
+                    array_filter(
+                        $results,
+                        fn($ou) => $ou['id'] !== $exceptId
+                            && ($ou['slug'] === $base || str_starts_with((string) $ou['slug'], $prefix))
+                    )
+                ));
+            }
+
             // Handle WHERE id = ? AND tenant_id = ?
             if (strpos($sql, 'WHERE id = ?') !== false) {
                 $ouId = $params[0] ?? null;
-                $results = array_filter($results, fn($ou) => $ou['id'] === $ouId);
+                return array_values(array_filter($results, fn($ou) => $ou['id'] === $ouId));
             }
 
             // Handle WHERE parent_id = ? AND tenant_id = ?
             if (strpos($sql, 'WHERE parent_id = ?') !== false) {
                 $parentId = $params[0] ?? null;
-                $results = array_filter($results, fn($ou) => $ou['parent_id'] === $parentId);
+                return array_values(array_filter($results, fn($ou) => $ou['parent_id'] === $parentId));
             }
 
             // Handle WHERE name = ? AND tenant_id = ?
             if (strpos($sql, 'WHERE name = ?') !== false) {
                 $name = $params[0] ?? null;
-                $results = array_filter($results, fn($ou) => $ou['name'] === $name);
+                return array_values(array_filter($results, fn($ou) => $ou['name'] === $name));
             }
 
             // Handle WHERE slug = ? AND tenant_id = ?
             if (strpos($sql, 'WHERE slug = ?') !== false) {
                 $slug = $params[0] ?? null;
-                $results = array_filter($results, fn($ou) => $ou['slug'] === $slug);
+                return array_values(array_filter($results, fn($ou) => $ou['slug'] === $slug));
             }
 
+            // No narrowing predicate: the unfiltered tenant list (list()).
+            self::assertModelled($sql);
+
             return array_values($results);
+        }
+
+        // SELECT FROM ou_types (#822). The fixture defines no type vocabulary, so
+        // every lookup legitimately misses — and MUST miss, because the handler
+        // reads a miss as "this type does not belong to the current tenant" and
+        // refuses the write. Returning [] here (rather than falling through) makes
+        // that explicit instead of incidental.
+        if (strpos($sql, 'ou_types') !== false) {
+            return [];
         }
 
         // SELECT FROM ou_role_assignments
@@ -230,6 +292,48 @@ class OuTenantIsolationTest extends TestCase
         }
 
         return [];
+    }
+
+    /**
+     * Strip table aliases so a predicate is matched by SHAPE rather than by the
+     * exact spelling a particular query happened to use.
+     *
+     * The handler qualifies its columns (`ou.id`, `t.type_key`) wherever it joins
+     * `ou_types`; without this, every matcher below would have to be duplicated
+     * in a qualified and an unqualified form, and forgetting one is invisible.
+     */
+    private static function normalizeSql(string $sql): string
+    {
+        $sql = (string) preg_replace('/\b(?:ou|t)\.(?=[a-z_]+\b)/', '', $sql);
+
+        return (string) preg_replace('/\s+/', ' ', $sql);
+    }
+
+    /**
+     * Fail loudly on an organizational_units SELECT that NARROWS in a way this
+     * mock does not model.
+     *
+     * The alternative is what actually happened: a query gained a predicate, the
+     * matcher stopped recognising it, the narrowing silently disappeared, and a
+     * cross-tenant read returned somebody else's row. An unmodelled predicate
+     * must break the suite, not quietly widen it.
+     */
+    private static function assertModelled(string $sql): void
+    {
+        // Only the WHERE clause narrows. The read paths JOIN `ou_types`, and
+        // that ON clause names `id` / `ou_type_id` without filtering anything —
+        // inspecting the whole statement would flag every joined query.
+        $parts = preg_split('/\bWHERE\b/i', $sql, 2);
+        if (!is_array($parts) || count($parts) < 2) {
+            return;
+        }
+
+        if (preg_match('/\b(id|parent_id|name|slug|type_key)\s*(?:=|<>|IS)\s*/i', $parts[1]) === 1) {
+            throw new \RuntimeException(
+                'OuTenantIsolationTest models no filter for this narrowing statement, so it would '
+                . 'have silently returned an UNFILTERED tenant list: ' . $sql
+            );
+        }
     }
 
     /**

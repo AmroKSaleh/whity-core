@@ -242,9 +242,28 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.29.0',
+            '1.30.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.29 adds the audited-event contribution point (PluginEventsInterface): '
+            'SDK 1.30 adds the organizational-unit TYPE contribution point '
+            . '(Ou\PluginOuTypesInterface): an OU carried no kind, so the only thing a '
+            . 'plugin could filter the OU tree on was DEPTH — which names a different '
+            . 'kind of unit on every installation (a single-campus institution has its '
+            . 'faculties at depth 0, a multi-campus one at depth 1) and shifts the moment '
+            . 'somebody inserts a parent above an existing unit, silently, with nothing to '
+            . 'tell a consumer it happened. The workaround two deployments reached '
+            . 'independently was a parallel unit-id → kind map in their own schema, which '
+            . 'drifts on every reparent. Slugs are declared BARE and the host stamps the '
+            . 'plugin prefix, as it already does for resource types, jobs and settings keys: '
+            . 'two plugins may both declare `clinic` and neither can mint a BARE key, since '
+            . 'the unprefixed namespace belongs to core and to the vocabulary a tenant owns '
+            . '— which is what stops an install-wide plugin squatting on a name a tenant '
+            . 'wants. A declaration is a CATALOGUE ENTRY, not a write: it makes a key '
+            . 'ADOPTABLE, and an administrator adopts it into their tenant explicitly, '
+            . 'inheriting the declared label and rank as overridable defaults. Force-seeding '
+            . 'instead would have been a cross-tenant write driven by an install-wide '
+            . 'plugin, putting a clinic type in the picker of a university tenant. A malformed '
+            . 'declaration costs that plugin the one type rather than all of them; '
+            . 'SDK 1.29 adds the audited-event contribution point (PluginEventsInterface): '
             . 'the audit writer subscribed to a HARDCODED map of core event names, so a '
             . 'plugin\'s own domain events reached the platform audit trail never — an '
             . 'operator opening the one screen that answers "who did what" saw core\'s '
