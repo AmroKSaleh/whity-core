@@ -22,7 +22,7 @@ namespace Whity\Core;
  */
 final class CoreVersion
 {
-    public const VERSION = '0.2.3';
+    public const VERSION = '0.2.4';
 
     private function __construct()
     {

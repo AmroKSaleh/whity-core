@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-20
+
 ### Added
 
 - **An organizational unit can now say what KIND of thing it is, and a rule written once works on every installation.** `organizational_units` was `(id, tenant_id, parent_id, name, slug, description)` — nothing on the row distinguished a campus from a faculty from a department, so the only thing left to filter on was DEPTH. Depth answers a different question than the one being asked: a single-campus institution has its faculties at depth 0 and a multi-campus one has the equivalent units at depth 1, so "every unit of level 1" returns faculties on one install and departments on the next. It is not stable *within* an install either — inserting a parent above an existing unit renumbers every depth beneath it, silently, with nothing to notify a consumer that it happened. Two separate deployments arrived at the same workaround independently: a parallel unit-id → kind map in their own schema, which drifts the moment a unit is reparented through our API, and drifts invisibly. Migration **102** adds `ou_types(id, tenant_id, type_key, label, sort_order, source, …)` with `UNIQUE(tenant_id, type_key)`, plus a NULLABLE `organizational_units.ou_type_id`. `GET /api/v1/ous?type=faculty` now returns the faculties; `?type=none` returns the units that carry no type.
