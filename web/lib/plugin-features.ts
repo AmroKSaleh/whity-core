@@ -258,6 +258,71 @@ export interface DataListBlock {
   params?: SourceParam[];
 }
 
+// ---- workflow blocks (#868) ----
+
+/**
+ * An ordered, append-only EVENT LIST — the audit-trail shape. Data-bound like
+ * `dataStat`: one ownership-checked `source`, then per-field mappings. Declares
+ * no endpoint and no verb, so read-only is a property of the type.
+ */
+export interface TimelineBlock {
+  type: 'timeline';
+  source: string;
+  actorField: string;
+  actionField: string;
+  timestampField: string;
+  noteField?: string;
+  fromField?: string;
+  toField?: string;
+  pageSize?: number;
+  emptyText?: string;
+  params?: SourceParam[];
+}
+
+/**
+ * One candidate action on an inbox item.
+ *
+ * There is deliberately NO prop for the permission `endpoint` is gated on: the
+ * host reads that off the route the endpoint dispatches to, so what the user is
+ * shown cannot disagree with what the middleware enforces.
+ *
+ * `scopedPermission` is a different question — the per-record predicate a
+ * plugin's handler applies inside the request, which no route table can express.
+ * It is resolved at (`InboxBlock.resourceType`, the item's id) and is an
+ * ADDITIONAL conjunct, so it can only ever hide an action, never reveal one.
+ */
+export interface ItemAction {
+  key: string;
+  label: string;
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  endpoint: string;
+  scopedPermission?: string;
+  confirm?: string;
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+}
+
+/**
+ * A TASK LIST: the items awaiting the current user, each carrying the actions
+ * that user may actually take on it.
+ *
+ * The plugin supplies the items (`source`); core resolves which actions are
+ * permitted, per item, via `POST /api/v1/me/permitted-actions`.
+ */
+export interface InboxBlock {
+  type: 'inbox';
+  source: string;
+  idField: string;
+  titleField: string;
+  subtitleField?: string;
+  timestampField?: string;
+  statusField?: string;
+  resourceType?: string;
+  actions: ItemAction[];
+  pageSize?: number;
+  emptyText?: string;
+  params?: SourceParam[];
+}
+
 // ---- SP3 interactive blocks (WC-235) ----
 
 /**
@@ -592,6 +657,8 @@ export type Block =
   | ActionButtonBlock
   | ChartBlock
   | SelectorBlock
+  | TimelineBlock
+  | InboxBlock
   | ModalBlock
   | DrawerBlock;
 

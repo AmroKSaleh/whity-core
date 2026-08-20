@@ -170,6 +170,7 @@ use Whity\Api\OuTypesApiHandler;
 use Whity\Api\DelegationsApiHandler;
 use Whity\Api\FrontendFeaturesApiHandler;
 use Whity\Api\MeCapabilitiesApiHandler;
+use Whity\Api\PermittedActionsApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
 use Whity\Api\OpenApiHandler;
@@ -1296,6 +1297,23 @@ $router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
 // keeps this distinct from /api/me (no prefix collision).
 $meCapabilitiesHandler = new MeCapabilitiesApiHandler($roleChecker);
 $router->register('GET', '/api/me/capabilities', [$meCapabilitiesHandler, 'list']);
+
+// Batch permitted-action resolution (#868). The server half of the `inbox`
+// block type: given the concrete {method, path} requests a screen is about to
+// render affordances for, answer which ones this caller may actually make.
+//
+// Registered with NO required role/permission for the same reason as
+// /api/me/capabilities directly above — any authenticated caller may ask about
+// their OWN authority — and the handler fails closed itself (unresolved tenant
+// or missing user => 403). Profile and tenant come from the resolved request,
+// never the body, so it cannot be used to probe another user's authority.
+//
+// It is handed the SAME $router the kernel dispatches through, deliberately:
+// the answer is derived from the live route table's RBAC descriptors and the
+// same $roleChecker RbacMiddleware enforces with, so "what the user is shown"
+// and "what the middleware admits" are one computation, not two that agree.
+$permittedActionsHandler = new PermittedActionsApiHandler($roleChecker, $router);
+$router->register('POST', '/api/me/permitted-actions', [$permittedActionsHandler, 'resolve']);
 
 // Plugin frontend feature descriptors (WC-169). Registered with NO required
 // role/permission — any authenticated caller may ask which screens they may

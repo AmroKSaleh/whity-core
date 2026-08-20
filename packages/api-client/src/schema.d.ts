@@ -1494,6 +1494,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/permitted-actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve which of a batch of requests the caller is permitted to make */
+        post: operations["post_api_v1_me_permitted_actions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/migrations": {
         parameters: {
             query?: never;
@@ -2723,6 +2740,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/uikit/demo/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Demo event history for the timeline block example */
+        get: operations["get_api_v1_uikit_demo_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uikit/demo/metric": {
         parameters: {
             query?: never;
@@ -2751,6 +2785,57 @@ export interface paths {
         get: operations["get_api_v1_uikit_demo_rows"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uikit/demo/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Demo task queue for the inbox block example */
+        get: operations["get_api_v1_uikit_demo_tasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uikit/demo/tasks/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Demo approve action for the inbox block example */
+        post: operations["post_api_v1_uikit_demo_tasks_id_approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uikit/demo/tasks/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Demo reject action for the inbox block example */
+        post: operations["post_api_v1_uikit_demo_tasks_id_reject"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3829,6 +3914,26 @@ export interface components {
             data: components["schemas"]["Permission"][];
             pagination: components["schemas"]["Pagination"];
         };
+        PermittedActionCheck: {
+            ref: string;
+            /** @enum {string} */
+            method: "POST" | "PUT" | "PATCH" | "DELETE";
+            path: string;
+            resourceType?: string | null;
+            resourceId?: number | null;
+            scopedPermission?: string | null;
+        };
+        PermittedActionResult: {
+            ref: string | null;
+            allowed: boolean;
+            required: string | null;
+        };
+        PermittedActionsRequest: {
+            checks: components["schemas"]["PermittedActionCheck"][];
+        };
+        PermittedActionsResponse: {
+            data: components["schemas"]["PermittedActionResult"][];
+        };
         Person: {
             id: number;
             tenantId: number;
@@ -4605,6 +4710,17 @@ export interface components {
                 received: Record<string, never>;
             };
         };
+        UiKitDemoEvent: {
+            actor: string;
+            action: string;
+            at: string;
+            note: string;
+            from: string;
+            to: string;
+        };
+        UiKitDemoEventsResponse: {
+            data: components["schemas"]["UiKitDemoEvent"][];
+        };
         UiKitDemoMetricResponse: {
             data: {
                 label: string;
@@ -4619,6 +4735,22 @@ export interface components {
         };
         UiKitDemoRowsResponse: {
             data: components["schemas"]["UiKitDemoRow"][];
+        };
+        UiKitDemoTask: {
+            id: number;
+            title: string;
+            requester: string;
+            submitted: string;
+            status: string;
+        };
+        UiKitDemoTaskActionResponse: {
+            data: {
+                id: string;
+                accepted: boolean;
+            };
+        };
+        UiKitDemoTasksResponse: {
+            data: components["schemas"]["UiKitDemoTask"][];
         };
         UnreadCountResponse: {
             unread_count: number;
@@ -12928,6 +13060,93 @@ export interface operations {
                 };
             };
             /** @description A valid notification id is required */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_me_permitted_actions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PermittedActionsRequest"];
+            };
+        };
+        responses: {
+            /** @description One allow/deny answer per check, in request order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermittedActionsResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing 'checks' list, or more than 200 checks */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -21333,6 +21552,69 @@ export interface operations {
             };
         };
     };
+    get_api_v1_uikit_demo_events: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoEventsResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoEventsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_uikit_demo_metric: {
         parameters: {
             query?: never;
@@ -21412,6 +21694,199 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UiKitDemoRowsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_uikit_demo_tasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoTasksResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoTasksResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_uikit_demo_tasks_id_approve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoTaskActionResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoTaskActionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_uikit_demo_tasks_id_reject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoTaskActionResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoTaskActionResponse"];
                 };
             };
             /** @description Unauthorized */

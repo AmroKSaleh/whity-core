@@ -183,6 +183,17 @@ final class BlockValidator
 
         self::validateProps($node, $type, $rule['props'], $path, $errors);
 
+        // #868: an `inbox` action's `scopedPermission` is a PER-RECORD predicate,
+        // so the block must say which kind of record its items are. Without a
+        // `resourceType` the host would have no resource to scope the question
+        // to and would silently answer the tenant-wide one instead — a check
+        // that reads as per-record, is not, and is wrong in the permissive
+        // direction relative to the author's intent. Refused at validation
+        // rather than degraded at runtime.
+        if ($type === 'inbox') {
+            self::validateInboxScoping($node, $path, $errors);
+        }
+
         $isContainer = $rule['container'];
         $hasChildren = \array_key_exists('children', $node);
 
@@ -226,7 +237,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -255,7 +266,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -415,6 +426,12 @@ final class BlockValidator
                     $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty string with no '.' or whitespace, got "
                         . self::describeScalar($value);
                 }
+
+                break;
+
+            case 'itemActionList':
+                // #868: `inbox.actions` — the candidate actions per item.
+                self::validateItemActionList($value, $type, $prop, $path, $errors);
 
                 break;
 
@@ -866,6 +883,148 @@ final class BlockValidator
 
             if (\array_key_exists('confirm', $item) && !\is_string($item['confirm'])) {
                 $errors[] = "{$at}.confirm: '{$type}.{$prop}' confirm must be a string";
+            }
+        }
+    }
+
+    /**
+     * `inbox` (#868): a `scopedPermission` anywhere in `actions` requires the
+     * block to declare `resourceType`. Cross-prop, so it cannot live in the
+     * per-prop rules — `validateItemActionList` sees the list, not its siblings.
+     *
+     * @param array<mixed>  $node
+     * @param list<string>  $errors by reference
+     */
+    private static function validateInboxScoping(array $node, string $path, array &$errors): void
+    {
+        $resourceType = $node['resourceType'] ?? null;
+        if (\is_string($resourceType) && $resourceType !== '') {
+            return;
+        }
+
+        $actions = $node['actions'] ?? null;
+        if (!\is_array($actions)) {
+            return; // shape errors already reported by validateItemActionList
+        }
+
+        foreach ($actions as $i => $action) {
+            if (\is_array($action) && \array_key_exists('scopedPermission', $action)) {
+                $errors[] = "{$path}.actions[{$i}]: 'inbox.actions' scopedPermission requires the block to declare "
+                    . "a 'resourceType' — a per-record permission check needs a record kind to scope to";
+            }
+        }
+    }
+
+    /**
+     * `inbox.actions` (#868): the candidate actions an item may carry. Each entry is
+     *
+     *     {
+     *       key:               non-empty string, unique within the list,
+     *       label:             non-empty string,
+     *       method:            'POST' | 'PUT' | 'PATCH' | 'DELETE',
+     *       endpoint:          an apiPath, `{field}`-templatable from the item,
+     *       scopedPermission?: a `resource:action` slug, resolved AT the item,
+     *       confirm?:          string,
+     *       variant?:          primary|secondary|outline|ghost|destructive,
+     *     }
+     *
+     * There is deliberately no `permission` prop for the endpoint's own gate.
+     * The host reads that off the route the endpoint dispatches to; a plugin
+     * restating it would create a second answer to a question the route table
+     * already answers, and the renderer would then show what the plugin
+     * believes rather than what the middleware enforces.
+     *
+     * `scopedPermission` is a different question and is therefore askable: the
+     * per-record predicate a plugin's handler applies INSIDE the request, which
+     * no route table can express. The host resolves it at the item's
+     * (`resourceType`, id) through resource-scoped grants and treats it as an
+     * ADDITIONAL conjunct — it can only remove an action from the set the route
+     * gate already permitted, never add one, so a wrong declaration costs the
+     * user an affordance and can never widen access.
+     *
+     * `key` is the renderer's per-item identity for the resolved answer, so it
+     * must be unique: two actions sharing a key are one action to the resolver
+     * and whichever resolved last would decide both.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateItemActionList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value) || $value === []) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty list of item-action objects";
+
+            return;
+        }
+
+        $seenKeys = [];
+
+        foreach ($value as $i => $item) {
+            $at = "{$path}[{$i}]";
+            if (!\is_array($item)) {
+                $errors[] = "{$at}: each '{$type}.{$prop}' entry must be an object";
+
+                continue;
+            }
+
+            $key = $item['key'] ?? null;
+            if (!\is_string($key) || $key === '' || \preg_match('/\s/', $key) === 1) {
+                $errors[] = "{$at}.key: each '{$type}.{$prop}' entry must carry a non-empty 'key' with no whitespace, got "
+                    . self::describeScalar($key);
+            } elseif (isset($seenKeys[$key])) {
+                $errors[] = "{$at}.key: duplicate '{$type}.{$prop}' key '{$key}'";
+            } else {
+                $seenKeys[$key] = true;
+            }
+
+            $label = $item['label'] ?? null;
+            if (!\is_string($label) || $label === '') {
+                $errors[] = "{$at}.label: each '{$type}.{$prop}' entry must carry a non-empty 'label'";
+            }
+
+            $method = $item['method'] ?? null;
+            if (!\is_string($method) || !\in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+                $errors[] = "{$at}.method: '{$type}.{$prop}' method must be 'POST', 'PUT', 'PATCH', or 'DELETE', got "
+                    . self::describeScalar($method);
+            }
+
+            $endpoint = $item['endpoint'] ?? null;
+            if (
+                !\is_string($endpoint)
+                || !str_starts_with($endpoint, '/api/')
+                || str_contains($endpoint, '//')
+                || str_contains($endpoint, '..')
+                || str_contains($endpoint, '\\')
+                || preg_match('/[\s\x00-\x1f\x7f]/', $endpoint) === 1
+            ) {
+                $errors[] = "{$at}.endpoint: '{$type}.{$prop}' endpoint must be a relative API path starting with '/api/' "
+                    . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($endpoint);
+            }
+
+            if (\array_key_exists('scopedPermission', $item)) {
+                $scoped = $item['scopedPermission'];
+                if (!\is_string($scoped) || $scoped === '' || \preg_match('/\s/', $scoped) === 1) {
+                    $errors[] = "{$at}.scopedPermission: '{$type}.{$prop}' scopedPermission must be a non-empty "
+                        . 'permission slug with no whitespace, got ' . self::describeScalar($scoped);
+                }
+            }
+
+            if (\array_key_exists('confirm', $item) && !\is_string($item['confirm'])) {
+                $errors[] = "{$at}.confirm: '{$type}.{$prop}' confirm must be a string";
+            }
+
+            if (
+                \array_key_exists('variant', $item)
+                && (!\is_string($item['variant'])
+                    || !\in_array($item['variant'], ['primary', 'secondary', 'outline', 'ghost', 'destructive'], true))
+            ) {
+                $errors[] = "{$at}.variant: '{$type}.{$prop}' variant must be one of "
+                    . '[primary, secondary, outline, ghost, destructive], got ' . self::describeScalar($item['variant']);
             }
         }
     }

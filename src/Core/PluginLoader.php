@@ -2427,6 +2427,14 @@ class PluginLoader
         // requiredPermission — the ownership basis for an 'action' frontend
         // screen, exactly as $registeredGetRoutes backs a 'crud' screen.
         $registeredActionRoutes = [];
+        // #868: EVERY write route the router accepted (POST/PUT/PATCH/DELETE),
+        // keyed "METHOD /normalized/path" with each `{param}` collapsed to `{}`.
+        // This is the ownership basis for an `inbox` action's endpoint, which —
+        // unlike a form's `submit` — is a TEMPLATE the renderer substitutes a row
+        // value into, so a declared `{taskId}` and a registered `{id}` name the
+        // same segment and must compare equal. Values only, no permission: an
+        // inbox action declares no permission to pin (see the walk below).
+        $registeredWriteRoutes = [];
         // GET path => the SAME wrapped handler passed to Router::register(),
         // so a theme-override route (WC-242) can be invoked in-process
         // without a second HTTP round-trip; keyed identically to
@@ -2493,6 +2501,10 @@ class PluginLoader
                     $registeredGetHandlers[$path] = $wrappedHandler;
                 } elseif ($upperMethod === 'POST' || $upperMethod === 'PUT') {
                     $registeredActionRoutes["{$upperMethod} {$path}"] = $requiredPermission;
+                }
+
+                if (in_array($upperMethod, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+                    $registeredWriteRoutes[self::normalizeRouteKey($upperMethod, $path)] = true;
                 }
             }
         }
@@ -2735,7 +2747,8 @@ class PluginLoader
             $plugin,
             $pluginKey,
             $registeredGetRoutes,
-            $registeredActionRoutes
+            $registeredActionRoutes,
+            $registeredWriteRoutes
         );
 
         // 5. Collect the plugin's optional theme-override route (WC-242),
@@ -2852,13 +2865,15 @@ class PluginLoader
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
      * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
+     * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
      * @return list<array<string, mixed>> The validated, normalized descriptors.
      */
     private function collectFrontendFeatures(
         PluginInterface $plugin,
         string $pluginKey,
         array $registeredGetRoutes,
-        array $registeredActionRoutes = []
+        array $registeredActionRoutes = [],
+        array $registeredWriteRoutes = []
     ): array {
         if (!$plugin instanceof PluginFrontendInterface) {
             return [];
@@ -2884,7 +2899,8 @@ class PluginLoader
                 $pluginKey,
                 $ownPermissions,
                 $registeredGetRoutes,
-                $registeredActionRoutes
+                $registeredActionRoutes,
+                $registeredWriteRoutes
             );
             if ($normalized !== null) {
                 $validated[] = $normalized;
@@ -2892,6 +2908,25 @@ class PluginLoader
         }
 
         return $validated;
+    }
+
+    /**
+     * The comparison key for a write route (#868): `METHOD /path` with every
+     * `{param}` collapsed to `{}`.
+     *
+     * @param string $method HTTP method (case-insensitive).
+     * @param string $path   A route path or a block endpoint template.
+     * @return string The normalized key.
+     */
+    private static function normalizeRouteKey(string $method, string $path): string
+    {
+        // Every `{…}` segment collapses to `{}`: a route path and a block's
+        // endpoint TEMPLATE name the same parameter with different words
+        // (`/tasks/{id}/approve` vs `/tasks/{taskId}/approve`), and the renderer
+        // substitutes a concrete value there in either case. Comparing the
+        // literal strings would reject a correct declaration for a naming
+        // difference the dispatcher does not care about.
+        return strtoupper($method) . ' ' . (string) preg_replace('/\{[^}]*\}/', '{}', $path);
     }
 
     /**
@@ -2907,6 +2942,7 @@ class PluginLoader
      * @param array<int|string, mixed> $ownPermissions The plugin's own declared permissions.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
      * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
+     * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
      * @return array<string, mixed>|null The normalized descriptor, or null when dropped.
      */
     private function validateFrontendFeature(
@@ -2915,7 +2951,8 @@ class PluginLoader
         string $pluginKey,
         array $ownPermissions,
         array $registeredGetRoutes,
-        array $registeredActionRoutes = []
+        array $registeredActionRoutes = [],
+        array $registeredWriteRoutes = []
     ): ?array {
         $drop = function (string $reason, ?string $id) use ($pluginKey): null {
             $idLabel = $id !== null ? "'{$id}'" : '(no id)';
@@ -3223,6 +3260,7 @@ class PluginLoader
             $walkNode = static function (array $node) use (
                 $registeredGetRoutes,
                 $registeredActionRoutes,
+                $registeredWriteRoutes,
                 $vp,
                 &$walkNode,
                 &$dropSource,
@@ -3272,6 +3310,59 @@ class PluginLoader
                             'endpoint' => $node['action']['endpoint'] ?? '',
                             'perm'     => $node['requiredPermission'] ?? null,
                         ];
+                    }
+
+                    // (c3-d) #868: an `inbox` node's `actions` each declare a
+                    // write endpoint the block submits to, templated with
+                    // `{field}` tokens from the item. Ownership-checked like a
+                    // form's `submit` — the METHOD + path must be a route THIS
+                    // plugin registered, compared with route params normalized so
+                    // a declared `{taskId}` matches a registered `{id}` — and
+                    // version-rewritten the same way, so both the renderer and
+                    // the host's permitted-actions resolver (which matches the
+                    // CONCRETE path against the live route table) address the
+                    // route that actually exists. An unversioned endpoint would
+                    // match no route and resolve to "not permitted": fail-closed,
+                    // but silently, and every action would be invisible.
+                    //
+                    // Deliberately NOT permission-pinned the way `form` and
+                    // `actionButton` are. Those pin the route's
+                    // requiredPermission to the block's declared one because the
+                    // block declares one. An inbox action declares NO permission
+                    // — the host resolves the route's own gate per caller at
+                    // render time — so there is no second value here that could
+                    // fall out of step with the route.
+                    if ($type === 'inbox' && isset($node['actions']) && is_array($node['actions'])) {
+                        $rewrittenActions = [];
+                        foreach ($node['actions'] as $action) {
+                            if (!is_array($action)
+                                || !is_string($action['endpoint'] ?? null)
+                                || !is_string($action['method'] ?? null)
+                            ) {
+                                // Shape is BlockValidator's job; leave it alone.
+                                $rewrittenActions[] = $action;
+                                continue;
+                            }
+
+                            $actionMethod = strtoupper($action['method']);
+                            $actionEndpoint = $action['endpoint'];
+                            $routeKey = self::normalizeRouteKey($actionMethod, $actionEndpoint);
+                            if (!array_key_exists($routeKey, $registeredWriteRoutes)) {
+                                $dropReason = "inbox action endpoint '{$actionMethod} {$actionEndpoint}' "
+                                    . 'is not a write route this plugin registered';
+                                return null;
+                            }
+
+                            if ($vp !== '') {
+                                $pos = strpos($actionEndpoint, '/', 1);
+                                $action['endpoint'] = $pos === false
+                                    ? $actionEndpoint . $vp
+                                    : substr($actionEndpoint, 0, $pos) . $vp . substr($actionEndpoint, $pos);
+                            }
+
+                            $rewrittenActions[] = $action;
+                        }
+                        $node['actions'] = $rewrittenActions;
                     }
 
                     if ($endpointSpec !== null) {
