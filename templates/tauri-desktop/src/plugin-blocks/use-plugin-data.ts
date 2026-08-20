@@ -9,10 +9,17 @@
  * local, a hang guard is still worth keeping (an unhealthy plugin route
  * could still never answer), implemented as a `Promise.race` rather than a
  * real `AbortController` signal (`invoke` has no abort mechanism).
+ *
+ * #867: same pagination rule as web, and for the same reason. One request is
+ * one page, every core list endpoint is paginated at 25, and a block presents
+ * its `source` as the whole collection — so a source that turns out to be
+ * paginated is exhausted, and a walk that could not finish surfaces as `error`
+ * rather than rendering a short list the operator would read as missing data.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { invoke } from "@tauri-apps/api/core"
+
+import { fetchAllPages, isPaginationEnvelope, phpRequest, type PhpResponse } from "./fetch-all-pages"
 
 export type PluginDataState<T> =
   | { status: "loading" }
@@ -22,26 +29,58 @@ export type PluginDataState<T> =
 
 type ResolvedResult<T> = { key: number; status: "error" } | { key: number; status: "empty" } | { key: number; status: "ready"; data: T }
 
-interface PhpResponse {
-  status: number
-  body: unknown
-}
-
 const HANG_GUARD_MS = 15_000
 
-async function fetchSource(source: string): Promise<unknown> {
+/**
+ * One request, bounded. The guard is per request rather than per load so a
+ * multi-page walk is not capped at one request's budget; the timer is cleared
+ * once the request settles, which matters now that a single load can arm it a
+ * hundred times.
+ */
+function guardedRequest(path: string): Promise<PhpResponse> {
+  let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error("timed out")), HANG_GUARD_MS)
+    timer = setTimeout(() => reject(new Error("timed out")), HANG_GUARD_MS)
   })
-  const response = await Promise.race([invoke<PhpResponse>("php_request", { method: "GET", path: source, body: null }), timeout])
+  return Promise.race([phpRequest(path), timeout]).finally(() => clearTimeout(timer))
+}
+
+/**
+ * Whether the response we already have is a page of a larger set. Web's
+ * `usePluginData` asks the identical question of the identical envelope: keyed
+ * off the `pagination` block (so anything else — a plugin's own unpaginated
+ * route, a `dataStat`'s single object — takes the single-request path
+ * unchanged) and off the row count rather than `totalPages`, because the row
+ * count is what the walk treats as the contract when the two disagree.
+ */
+function hasUnfetchedPages(body: { data: unknown; pagination?: unknown }): boolean {
+  return Array.isArray(body.data) && isPaginationEnvelope(body.pagination) && body.data.length < body.pagination.total
+}
+
+async function fetchSource(source: string): Promise<unknown> {
+  const response = await guardedRequest(source)
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`request failed (${response.status})`)
   }
-  const body = response.body as { data?: unknown }
+  const body = response.body as { data: unknown; pagination?: unknown }
   if (typeof body !== "object" || body === null || !("data" in body)) {
     throw new Error("malformed response")
   }
-  return body.data
+
+  if (!hasUnfetchedPages(body)) return body.data
+
+  // Re-walk from page 1 rather than continuing from page 2: one extra request,
+  // in exchange for the walk being used exactly as written and at the server's
+  // maximum page size — fewer total requests than continuing at the default 25.
+  const all = await fetchAllPages<unknown>(source, guardedRequest)
+  if (!all.complete) {
+    // A page failed or the walk hit its request cap. Throwing lands in the
+    // hook's catch and shows the error state with its retry, which is the
+    // whole point: what we hold is a short list, and a short list rendered as
+    // a complete one is the defect (#824), not a degraded success.
+    throw new Error("could not load every page")
+  }
+  return all.items
 }
 
 /**
