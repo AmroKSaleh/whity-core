@@ -24,7 +24,7 @@
 type ApiClient = (url: string, options?: RequestInit) => Promise<Response>;
 
 /** The `pagination` block every paginated core endpoint returns. */
-interface PaginationEnvelope {
+export interface PaginationEnvelope {
   page: number;
   perPage: number;
   total: number;
@@ -55,7 +55,17 @@ export const MAX_PER_PAGE = 100;
  */
 const MAX_REQUESTS = 100;
 
-function isEnvelope(value: unknown): value is PaginationEnvelope {
+/**
+ * Whether a response's `pagination` field is one of those envelopes.
+ *
+ * Exported because a caller that fetches the first page itself — `usePluginData`
+ * requests a plugin's `source` verbatim before it knows anything about it —
+ * needs the SAME test the walk uses to decide whether more pages exist. Two
+ * tests would be two chances to disagree about what "paginated" means.
+ */
+export function isPaginationEnvelope(
+  value: unknown
+): value is PaginationEnvelope {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -94,7 +104,7 @@ async function walkPages<T>(
     const { rows, pagination } = outcome;
     items.push(...(Array.isArray(rows) ? rows : []));
 
-    if (!isEnvelope(pagination)) {
+    if (!isPaginationEnvelope(pagination)) {
       // No envelope means the endpoint is not paginated; what we have is all
       // there is. Treating this as incomplete would break unpaginated callers.
       return { complete: true, items, total: items.length };

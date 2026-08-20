@@ -13,6 +13,12 @@
  * `@tauri-apps/api` for desktop); both renderers are otherwise the shipping
  * code.
  *
+ * #867 added the other half of the same question — same tree ⇒ same REQUESTS,
+ * not just the same payload — after both renderers turned out to render page 1
+ * of a paginated source as the whole set. A twin that fetches differently is
+ * the same class of divergence as one that submits differently, and it stayed
+ * invisible for the same reason.
+ *
  * KNOWN DIVERGENCES, deliberately not asserted here — each is a contract
  * question rather than a renderer bug, and each deserves its own change:
  *  - `numberInput`/`slider` values: web stores strings, desktop stores numbers,
@@ -230,5 +236,129 @@ describe('web ⇄ desktop submitted-payload parity', () => {
     expect(equivalent(desktop)).toEqual(equivalent(web));
     expect(desktop.displayName).toBe('Ada King');
     expect(desktop.bio).toBe('Analytical engine');
+  });
+});
+
+// ---- fetch parity (#867) ----
+
+/** A dataset big enough that one request cannot hold it at any page size. */
+const PEOPLE = Array.from({ length: 120 }, (_, i) => ({
+  id: i + 1,
+  displayName: `Row ${i + 1}`,
+}));
+
+/** One page of `dataset`, sliced and clamped exactly as the API clamps it. */
+function servePage(dataset: Payload[], url: string) {
+  const query = new URLSearchParams(url.split('?')[1] ?? '');
+  const perPage = Math.min(Number(query.get('per_page') ?? 25), 100);
+  const page = Number(query.get('page') ?? '1');
+  const offset = (page - 1) * perPage;
+  return {
+    data: dataset.slice(offset, offset + perPage),
+    pagination: {
+      page,
+      perPage,
+      total: dataset.length,
+      totalPages: Math.ceil(dataset.length / perPage),
+    },
+  };
+}
+
+/** A table over a paginated source — the shape every plugin picker uses. */
+const TABLE_TREE = [
+  {
+    type: 'dataTable',
+    source: '/api/v1/people',
+    columns: [{ key: 'displayName', label: 'Name' }],
+  },
+];
+
+/** Renders the table in the web renderer and returns the paths it requested. */
+async function webRequestPaths(): Promise<string[]> {
+  cleanup();
+  mockApiClient.mockImplementation((url) =>
+    Promise.resolve(stubResponse(200, servePage(PEOPLE, String(url))))
+  );
+  render(<WebBlockRenderer blocks={TABLE_TREE as unknown as WebBlock[]} />, {
+    wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+  });
+
+  // The row that used to be missing — page 1 ended at 25.
+  await screen.findByText('Row 120');
+  return mockApiClient.mock.calls
+    .filter((call) => call[1]?.method === undefined)
+    .map((call) => String(call[0]));
+}
+
+/** The same table through the desktop renderer's PHP-host transport. */
+async function desktopRequestPaths(): Promise<string[]> {
+  cleanup();
+  mockInvoke.mockImplementation((_command: string, args?: unknown) => {
+    const { path } = args as { method: string; path: string };
+    return Promise.resolve({ status: 200, body: servePage(PEOPLE, path) });
+  });
+  render(
+    <DesktopBlockRenderer
+      feature={{ ...FEATURE, blocks: TABLE_TREE as unknown as DesktopBlock[] }}
+    />
+  );
+
+  await screen.findByText('Row 120');
+  return mockInvoke.mock.calls
+    .filter(([, args]) => (args as { method: string }).method === 'GET')
+    .map(([, args]) => String((args as { path: string }).path));
+}
+
+describe('web ⇄ desktop fetched-collection parity', () => {
+  it('agrees on the requests a paginated source costs', async () => {
+    const web = await webRequestPaths();
+    const desktop = await desktopRequestPaths();
+
+    expect(desktop).toEqual(web);
+    // Pinned literally too, so a shared regression back to one request still
+    // fails here rather than agreeing on the wrong walk.
+    expect(web).toEqual([
+      '/api/v1/people',
+      '/api/v1/people?page=1&per_page=100',
+      '/api/v1/people?page=2&per_page=100',
+    ]);
+  });
+
+  it('agrees that a half-loaded collection is an error, not a short table', async () => {
+    // #824 in the block renderer: an operator who cannot see row 26 concludes
+    // the row does not exist. Neither renderer may draw the 100 rows it holds.
+    const failPageTwo = (url: string) =>
+      new URLSearchParams(url.split('?')[1] ?? '').get('page') === '2';
+
+    cleanup();
+    mockApiClient.mockImplementation((url) =>
+      Promise.resolve(
+        failPageTwo(String(url))
+          ? stubResponse(500, { error: 'boom' })
+          : stubResponse(200, servePage(PEOPLE, String(url)))
+      )
+    );
+    render(<WebBlockRenderer blocks={TABLE_TREE as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findByRole('button', { name: 'Retry' });
+    expect(screen.queryByText('Row 1')).not.toBeInTheDocument();
+
+    cleanup();
+    mockInvoke.mockImplementation((_command: string, args?: unknown) => {
+      const { path } = args as { path: string };
+      return Promise.resolve(
+        failPageTwo(path)
+          ? { status: 500, body: { error: 'boom' } }
+          : { status: 200, body: servePage(PEOPLE, path) }
+      );
+    });
+    render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: TABLE_TREE as unknown as DesktopBlock[] }}
+      />
+    );
+    await screen.findByRole('button', { name: 'Retry' });
+    expect(screen.queryByText('Row 1')).not.toBeInTheDocument();
   });
 });

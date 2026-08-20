@@ -10,8 +10,18 @@
  *     re-fetch, guarding against setState-after-unmount.
  *   - Expects the response to be a `{ data: unknown }` envelope; anything else
  *     maps to `error`.
+ *   - Exhausts pagination when that response turns out to be a paginated core
+ *     envelope, and maps a walk it could not finish to `error` (see below).
  *   - Delegates parse/validate to the caller-supplied `parse` function;
  *     `parse` returning `null` maps to `empty`.
+ *
+ * #867: one request is one page, and every core list endpoint is paginated at
+ * 25. A data-bound block presents its `source` as the whole collection — the
+ * DSL's only row limit, `pageSize`, is client-side paging over what was
+ * fetched — so page 1 rendered as the set is the #823/#824 defect reproduced
+ * for every plugin on the platform: an operator who cannot find row 26 reads
+ * it as missing data, not as a truncated list. That is how the original OU
+ * report reached us as "the department was never created".
  *
  * Loading is derived from a (requestKey, resolvedKey) pair, where requestKey
  * increments on each new fetch and resolvedKey tracks the last settled key.
@@ -21,6 +31,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { fetchAllPages, isPaginationEnvelope } from '@/lib/api/fetch-all-pages';
 
 export type PluginDataState<T> =
   | { status: 'loading' }
@@ -32,6 +43,33 @@ type ResolvedResult<T> =
   | { key: number; status: 'error' }
   | { key: number; status: 'empty' }
   | { key: number; status: 'ready'; data: T };
+
+/** How long any single request may take before the hang guard aborts it. */
+const HANG_GUARD_MS = 15_000;
+
+/**
+ * Whether the response we already have is a page of a larger set.
+ *
+ * Detection keys off the `pagination` block itself — via the same predicate the
+ * walk uses, so the two can never disagree about what "paginated" means — and
+ * off the row count rather than `totalPages`, because the row count is what
+ * `walkPages` treats as the contract when the two disagree.
+ *
+ * Everything else takes the single-request path unchanged, down to the URL
+ * requested: a plugin's own unpaginated route, a `dataStat`'s single object, an
+ * endpoint whose whole set fit in the first page. Only a body that says, in the
+ * platform's own envelope, that it withheld rows triggers a second look.
+ */
+function hasUnfetchedPages(body: {
+  data: unknown;
+  pagination?: unknown;
+}): boolean {
+  return (
+    Array.isArray(body.data) &&
+    isPaginationEnvelope(body.pagination) &&
+    body.data.length < body.pagination.total
+  );
+}
 
 /**
  * Fetch `source` via `apiClient` and map the result into a discriminated
@@ -75,7 +113,18 @@ export function usePluginData<T>(
     // route, so there is no bound on how long it might take an unhealthy
     // backend to answer (or never answer) without this — the block would
     // show its loading state forever with no way out.
-    const hangGuard = setTimeout(() => controller.abort(), 15_000);
+    let hangGuard = setTimeout(() => controller.abort(), HANG_GUARD_MS);
+
+    // Re-armed before each page request, so the guard stays what it was meant
+    // to be — a bound on one unanswered request — instead of becoming a budget
+    // for the whole set. A paginated source legitimately costs several
+    // round-trips, and failing a walk that is making steady progress would
+    // manufacture exactly the "could not load everything" error this change
+    // exists to make rare.
+    const armHangGuard = (): void => {
+      clearTimeout(hangGuard);
+      hangGuard = setTimeout(() => controller.abort(), HANG_GUARD_MS);
+    };
 
     const run = async (): Promise<void> => {
       try {
@@ -109,8 +158,36 @@ export function usePluginData<T>(
           return;
         }
 
-        const envelope = body as { data: unknown };
-        const parsed = parse(envelope.data);
+        const envelope = body as { data: unknown; pagination?: unknown };
+        let value: unknown = envelope.data;
+
+        if (hasUnfetchedPages(envelope)) {
+          // Re-walk from page 1 rather than continuing from page 2. It spends
+          // one extra request — this response is discarded — and buys the
+          // shared walk used verbatim plus the server's maximum page size,
+          // which is FEWER total requests than continuing at the default 25
+          // for any source big enough to reach here.
+          const all = await fetchAllPages<unknown>((url) => {
+            armHangGuard();
+            return apiClient(url, { signal: controller.signal });
+          }, source);
+
+          if (!mountedRef.current) return;
+
+          if (!all.complete) {
+            // A page failed, or the walk hit the helper's request cap. Both
+            // mean we hold a short list, and #824's finding is that a short
+            // list must never be presented as a complete one — so this
+            // surfaces as `error`, with the retry every consumer already
+            // renders, instead of quietly rendering what did arrive.
+            setResolved({ key, status: 'error' });
+            return;
+          }
+
+          value = all.items;
+        }
+
+        const parsed = parse(value);
 
         if (!mountedRef.current) return;
 
