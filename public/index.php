@@ -1871,7 +1871,7 @@ $router->register('DELETE', '/api/entity-tags/all', [$entityTagsHandler, 'detach
 // not have the feature.
 $resourceRoleGrantsHandler = new \Whity\Api\ResourceRoleGrantsApiHandler(
     $db->getPdo(),
-    new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($db->getPdo(), $resourceTypeRegistry),
+    new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($db->getPdo(), $resourceTypeRegistry, $logger),
     $resourceTypeRegistry,
     $roleChecker,
     $hookManager

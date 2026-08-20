@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Whity\Core\RBAC;
 
 use PDO;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Whity\Core\Tenant\TenantContext;
 
 /**
@@ -31,10 +33,35 @@ use Whity\Core\Tenant\TenantContext;
  */
 class ResourceRoleAssignmentRepository
 {
+    /**
+     * Audit sink for refused cross-tenant grants.
+     *
+     * Defaults to a {@see NullLogger} so the repository is silent unless a real
+     * PSR-3 logger is wired in — the same contract as
+     * {@see \Whity\Http\Middleware\EnforceTenantIsolation}. This is not a
+     * cosmetic preference: a refused grant is an EXPECTED, handled outcome that
+     * the test suite triggers deliberately, so writing it to the process-wide
+     * error log made a PASSING suite emit to STDERR. Infection stops its initial
+     * test run on the first byte of STDERR
+     * ({@see \Infection\Process\Runner\InitialTestsRunner}), which killed the
+     * scheduled mutation-testing job with a misleading "tests must be in a
+     * passing state / hidden dependencies" message. Production still gets the
+     * record — public/index.php injects the application logger.
+     */
+    private LoggerInterface $logger;
+
+    /**
+     * @param PDO                   $db            Connection owning `resource_role_assignments`.
+     * @param ResourceTypeRegistry  $resourceTypes Registry the resource type must be declared in.
+     * @param LoggerInterface|null  $logger        Optional PSR-3 audit sink for refused grants.
+     *                                             When null a {@see NullLogger} is used.
+     */
     public function __construct(
         private readonly PDO $db,
         private readonly ResourceTypeRegistry $resourceTypes,
+        ?LoggerInterface $logger = null,
     ) {
+        $this->logger = $logger ?? new NullLogger();
     }
 
     /**
@@ -254,11 +281,10 @@ class ResourceRoleAssignmentRepository
         $statement->execute([$roleId, $tenantId]);
 
         if ($statement->fetch() === false) {
-            error_log(sprintf(
-                '[rbac] denied resource role grant: tenant_id=%s role_id=%s',
-                var_export($tenantId, true),
-                var_export($roleId, true)
-            ));
+            $this->logger->warning(
+                'RBAC: resource role grant denied — role not visible to tenant',
+                ['tenant_id' => $tenantId, 'role_id' => $roleId]
+            );
 
             throw RoleNotVisibleException::forRole($roleId);
         }

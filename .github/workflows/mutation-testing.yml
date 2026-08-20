@@ -97,11 +97,40 @@ jobs:
             infection-summary.txt
           retention-days: 14
 
-# NOTE (WC-232ec317): a nightly whole-src "deep" Infection scan was prototyped
-# here but deferred — Infection forces executionOrder="random" for its initial
-# test run, which exposed an order-dependent test in the full `default` suite
-# ("[AdminApiHandler] stats failed: relation \"users\" does not exist"), so the
-# initial pass aborts before any mutation. The scoped run above is unaffected
-# (its `mutation-scope` suite is small and self-contained). Fixing the default
-# suite's test-isolation is a prerequisite and tracked as a follow-up; re-enable
-# the deep scan (infection.full.json5) once the suite is order-independent.
+# NOTE (WC-232ec317, corrected): a nightly whole-src "deep" Infection scan was
+# prototyped here but deferred. The original note blamed test-ORDER isolation.
+# That diagnosis was wrong, and it cost a later investigation a day, so the real
+# mechanism is written down here.
+#
+# Infection does NOT force executionOrder="random". The config it generates
+# (/tmp/infection/phpunitConfiguration.initial.infection.xml) copies phpunit.xml
+# verbatim — executionOrder="depends,defects" included — adding only
+# stopOnDefect and cacheResult="false". The initial run is DETERMINISTIC, which
+# is why it aborts at the identical test number on CI and locally.
+#
+# What actually aborts it is STDERR. Infection\Process\Runner\InitialTestsRunner
+# SIGTERMs the initial test process on the first byte written to STDERR:
+#
+#     $process->run(function (string $type) use ($process): void {
+#         if ($type === Process::ERR) { $process->stop(); }
+#
+# so the job dies with "PHPUnit reported an exit code of 143" and NO F/E marker
+# and no PHPUnit summary — while reporting the boilerplate "tests must be in a
+# passing state ... Infection runs the test suite in a RANDOM order ... hidden
+# dependencies". That message describes a bug this repository did not have.
+#
+# In the CLI SAPI error_log() writes to STDERR, so ANY error_log() reached by a
+# test aborts the run even when every test passes. The string this note used to
+# cite as evidence of an order-dependent test —
+# "[AdminApiHandler] stats failed: relation \"users\" does not exist" — is an
+# error_log() in an AdminApiHandler catch block: the same STDERR mechanism, and
+# a real defect in its own right rather than an isolation problem.
+#
+# The scoped run above was NOT "unaffected": it failed this way on every run
+# that actually executed from 5bc5c2f1 (#722, 2026-08-09) until the fix, hidden
+# because the `changes` gate above skips the job when main has not moved and
+# GitHub reports a run whose only real job was SKIPPED as green.
+#
+# Prerequisite for the deep scan (infection.full.json5) is therefore that the
+# `default` suite reach no error_log() on a green run — the tenant-scoping bug
+# behind the AdminApiHandler line included — not test-order independence.
