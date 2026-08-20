@@ -172,6 +172,75 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'components' => self::demoComponents(),
                 ],
             ],
+            // #868: fixture endpoint for the workflow `timeline` block demo.
+            [
+                'method' => 'GET',
+                'path' => '/api/uikit/demo/events',
+                'handler' => [$this, 'demoEvents'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo event history for the timeline block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoEventsResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+            // #868: the queue behind the `inbox` block demo, plus the two write
+            // routes its actions call. Each write route declares its OWN
+            // requiredPermission — the single source of truth the host resolves
+            // per caller when it decides whether to render that action.
+            [
+                'method' => 'GET',
+                'path' => '/api/uikit/demo/tasks',
+                'handler' => [$this, 'demoTasks'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo task queue for the inbox block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoTasksResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/uikit/demo/tasks/{id}/approve',
+                'handler' => [$this, 'demoTaskAction'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo approve action for the inbox block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoTaskActionResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/uikit/demo/tasks/{id}/reject',
+                'handler' => [$this, 'demoTaskAction'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo reject action for the inbox block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoTaskActionResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
             // WC-236: write endpoint for SP3 interactive block demos.
             [
                 'method' => 'POST',
@@ -254,6 +323,103 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 ['role' => 'Administrator', 'count' => 3, 'lastMonth' => 2],
                 ['role' => 'Editor', 'count' => 7, 'lastMonth' => 5],
                 ['role' => 'Viewer', 'count' => 12, 'lastMonth' => 9],
+            ],
+        ]);
+    }
+
+    /**
+     * Handle GET /api/uikit/demo/events (requires uikit:view).
+     *
+     * A static fixture history for the `timeline` block demo, newest first.
+     * No PDO, no side effects.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response Static demo events.
+     */
+    public function demoEvents(Request $request, array $params = []): Response
+    {
+        return Response::json([
+            'data' => [
+                [
+                    'actor' => 'Anika Patel',
+                    'action' => 'approved the request',
+                    'at' => '2026-08-17 09:12',
+                    'note' => 'Within the delegated limit.',
+                    'from' => 'in review',
+                    'to' => 'approved',
+                ],
+                [
+                    'actor' => 'Bjorn Larsen',
+                    'action' => 'moved it to review',
+                    'at' => '2026-08-16 17:40',
+                    'note' => '',
+                    'from' => 'submitted',
+                    'to' => 'in review',
+                ],
+                [
+                    'actor' => 'Camille Dupont',
+                    'action' => 'submitted the request',
+                    'at' => '2026-08-16 14:03',
+                    'note' => 'Conference travel, pre-approved by finance.',
+                    'from' => '',
+                    'to' => 'submitted',
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Handle GET /api/uikit/demo/tasks (requires uikit:view).
+     *
+     * A static fixture queue for the `inbox` block demo. Core has no notion of a
+     * task queue — this is exactly the half a plugin supplies. No PDO, no side
+     * effects.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response Static demo tasks.
+     */
+    public function demoTasks(Request $request, array $params = []): Response
+    {
+        return Response::json([
+            'data' => [
+                [
+                    'id' => 1,
+                    'title' => 'Expense claim #4821',
+                    'requester' => 'Bjorn Larsen',
+                    'submitted' => '2026-08-16 14:03',
+                    'status' => 'pending',
+                ],
+                [
+                    'id' => 2,
+                    'title' => 'Access request — Reporting',
+                    'requester' => 'Camille Dupont',
+                    'submitted' => '2026-08-15 08:55',
+                    'status' => 'pending',
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Handle POST /api/uikit/demo/tasks/{id}/approve and .../reject
+     * (both require uikit:view).
+     *
+     * The demo's write side. It does nothing durable — the point of the demo is
+     * that the button EXISTS only because the host resolved this route's own
+     * `requiredPermission` for this caller, not what the handler then does.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters (`id`).
+     * @return Response 200 echoing the addressed task id.
+     */
+    public function demoTaskAction(Request $request, array $params = []): Response
+    {
+        return Response::json([
+            'data' => [
+                'id' => (string) ($params['id'] ?? ''),
+                'accepted' => true,
             ],
         ]);
     }
@@ -434,6 +600,11 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         'type' => 'tab',
                         'label' => 'Overlays',
                         'children' => $this->overlaysTab(),
+                    ],
+                    [
+                        'type' => 'tab',
+                        'label' => 'Workflow',
+                        'children' => $this->workflowTab(),
                     ],
                 ],
             ],
@@ -1196,6 +1367,21 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     'valueField' => 'role',
                                     'labelField' => 'role',
                                 ],
+                                // #868: the organizational-unit SCOPE picker.
+                                // The live instance the every-type coverage gate
+                                // requires, and deliberately inside this form:
+                                // it is a form input, and its whole output is
+                                // one value in the submitted payload. Note the
+                                // absence of a `source` — the units and the type
+                                // vocabulary come from CORE's own OU endpoints
+                                // under the caller's `ous:read` gate, and there
+                                // is no prop with which to point it elsewhere.
+                                // Label avoids "name" (the e2e's getByLabel).
+                                [
+                                    'type' => 'ouScopePicker',
+                                    'name' => 'appliesTo',
+                                    'label' => 'Applies to',
+                                ],
                                 // WC-532 A5: Markdown-aware input with a live
                                 // preview. Label avoids "name" (e2e getByLabel).
                                 [
@@ -1242,6 +1428,7 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                  ['type' => 'dateInput',   'name' => 'since', 'label' => 'Member since'],
                                  ['type' => 'fileInput',   'name' => 'avatar','label' => 'Avatar', 'accept' => 'image/*'],
                                  ['type' => 'colorInput',  'name' => 'accent','label' => 'Accent colour', 'default' => '#6366f1'],
+                                 ['type' => 'ouScopePicker','name' => 'appliesTo', 'label' => 'Applies to'],
                                  ['type' => 'submitButton','label' => 'Submit','requiredPermission' => 'uikit:view','variant' => 'primary'],
                              ]]
                             PHP,
@@ -1298,8 +1485,266 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                             // In a real plugin, use a dedicated endpoint per action.
                             PHP,
                     ),
+                    // #868: the OU scope picker's own card. The LIVE instance is
+                    // in the form above (it is a form input and has to be), so
+                    // this one documents the half a plugin author actually has
+                    // to get right: the shape of the value they will persist and
+                    // the rule for resolving it.
+                    [
+                        'type' => 'card',
+                        'title' => 'ouScopePicker',
+                        'description' => 'Choose a SCOPE over the organizational-unit tree — '
+                            . 'a rule resolved at execution time, not a pinned list of unit ids. '
+                            . 'The live instance is the "Applies to" control in the form above.',
+                        'children' => [
+                            [
+                                'type' => 'text',
+                                'value' => 'The block declares no `source`. Every other data-bound '
+                                    . 'block names a route the plugin registered, and the host '
+                                    . 'ownership-checks it — so a plugin cannot name core\'s OU '
+                                    . 'endpoint at all, and republishing the hierarchy through a '
+                                    . 'route of its own is exactly the drift #822 exists to delete. '
+                                    . 'The renderer reads the units and the type vocabulary from '
+                                    . 'core, under the caller\'s own ous:read gate.',
+                                'tone' => 'muted',
+                            ],
+                            [
+                                'type' => 'code',
+                                'language' => 'php',
+                                'content' => <<<'PHP'
+                                    ['type'       => 'ouScopePicker',
+                                     'name'       => 'appliesTo',
+                                     'label'      => 'Applies to',
+                                     // optional — which scopes are offered, in order.
+                                     // The FIRST is the opening state. Default: all three.
+                                     'scopes'     => ['subtree', 'children', 'unit'],
+                                     // optional — restrict which units may ANCHOR the rule
+                                     // (`?type=` on the picker's own unit fetch).
+                                     'anchorType' => 'faculty',
+                                     // optional — PIN the kind filter and hide the control.
+                                     // Omit it and the user chooses (including "any kind").
+                                     'memberType' => 'department',
+                                     // optional — drop the tenant-wide option, so the rule
+                                     // must be anchored at a unit.
+                                     'required'   => true]
+                                    PHP,
+                            ],
+                            [
+                                'type' => 'text',
+                                'value' => 'The value submitted under `name` is one object. `scope` '
+                                    . 'is ALWAYS written: "this unit" and "this unit\'s subtree" are '
+                                    . 'different answers, and nothing else in the object tells them '
+                                    . 'apart, so the discriminator is never inferred.',
+                                'tone' => 'muted',
+                            ],
+                            [
+                                'type' => 'code',
+                                'language' => 'json',
+                                'content' => <<<'JSON'
+                                    { "appliesTo": { "unit": 42, "scope": "subtree", "type": "department" } }
+                                    JSON,
+                            ],
+                            [
+                                'type' => 'table',
+                                'columns' => [
+                                    ['key' => 'unit', 'label' => 'unit'],
+                                    ['key' => 'scope', 'label' => 'scope'],
+                                    ['key' => 'resolves', 'label' => 'resolves to'],
+                                ],
+                                'rows' => [
+                                    ['unit' => 'id', 'scope' => 'unit', 'resolves' => 'exactly that unit'],
+                                    ['unit' => 'id', 'scope' => 'children', 'resolves' => 'its direct children (?parent_id=<id>)'],
+                                    ['unit' => 'id', 'scope' => 'subtree', 'resolves' => 'it AND every descendant (inclusive)'],
+                                    ['unit' => 'null', 'scope' => 'children', 'resolves' => 'the root units (?parent_id=0)'],
+                                    ['unit' => 'null', 'scope' => 'subtree', 'resolves' => 'every unit in the tenant'],
+                                    ['unit' => 'null', 'scope' => 'unit', 'resolves' => 'never produced — the nothing-selected state'],
+                                ],
+                            ],
+                            [
+                                'type' => 'text',
+                                'value' => '`type`, when non-null, narrows whatever that produced to '
+                                    . 'units of that kind (`?type=<key>`) — applied AFTER the scope '
+                                    . 'expands, never instead of it. It is meaningless for a `unit` '
+                                    . 'scope, so the renderer hides the control and writes null there.',
+                                'tone' => 'muted',
+                            ],
+                            [
+                                'type' => 'code',
+                                'language' => 'php',
+                                'content' => <<<'PHP'
+                                    // Resolving a stored rule, in the plugin's own handler.
+                                    // `scope` is the switch; nothing is guessed from the other fields.
+                                    $query = match ($rule['scope']) {
+                                        'unit'     => ['id' => $rule['unit']],
+                                        'children' => ['parent_id' => $rule['unit'] ?? 0],
+                                        'subtree'  => ['descendants_of' => $rule['unit']], // walk, inclusive
+                                    };
+                                    if ($rule['type'] !== null) {
+                                        $query['type'] = $rule['type']; // narrows the set, never replaces it
+                                    }
+                                    PHP,
+                            ],
+                        ],
+                    ],
                 ],
             ],
+        ];
+    }
+
+    /**
+     * The "Workflow" tab (#868): `timeline` and `inbox`.
+     *
+     * `timeline` is the audit-trail shape — actor, action, timestamp, an optional
+     * note, an optional from/to. Read-only: the contract carries no endpoint and
+     * no verb, so there is nothing for a renderer to submit.
+     *
+     * `inbox` is the task list, and the demo exists to make its SEAM concrete.
+     * The plugin supplies the items from its own endpoint; the HOST resolves
+     * which of the declared `actions` the caller may take on each, from the
+     * route each action calls, through `POST /api/v1/me/permitted-actions`.
+     * Note what the declaration below does NOT contain: the permission each
+     * endpoint is gated on. That is read off the route, so what a reader sees
+     * here cannot drift from what the middleware enforces on click.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function workflowTab(): array
+    {
+        return [
+            [
+                'type' => 'heading',
+                'level' => 2,
+                'text' => 'Workflow — history and work awaiting you',
+            ],
+            [
+                'type' => 'text',
+                'value' => 'Two blocks every product with an approval step or an audit trail would '
+                    . 'otherwise re-implement, differently each time. The interesting one is `inbox`: '
+                    . 'the plugin supplies the items, and CORE resolves which actions the caller may '
+                    . 'take on each — from the route the action calls, with the same checks the RBAC '
+                    . 'middleware makes. An action is rendered only when the host answered that this '
+                    . 'caller may make that exact request.',
+                'tone' => 'muted',
+            ],
+            $this->dataBoundDemo(
+                'timeline',
+                'An ordered, append-only event list: actor, action, timestamp, optional note, optional from/to. Read-only.',
+                [
+                    'type' => 'timeline',
+                    'source' => '/api/uikit/demo/events',
+                    'actorField' => 'actor',
+                    'actionField' => 'action',
+                    'timestampField' => 'at',
+                    'noteField' => 'note',
+                    'fromField' => 'from',
+                    'toField' => 'to',
+                    'emptyText' => 'No events recorded yet.',
+                ],
+                <<<'PHP'
+                [
+                    'type'           => 'timeline',
+                    'source'         => '/api/uikit/demo/events', // ownership-checked + version-rewritten
+                    'actorField'     => 'actor',
+                    'actionField'    => 'action',
+                    'timestampField' => 'at',
+                    'noteField'      => 'note',   // optional
+                    'fromField'      => 'from',   // optional — a state change
+                    'toField'        => 'to',     // optional
+                    'pageSize'       => 10,       // optional, client-side over the fetched rows
+                    'emptyText'      => 'No events recorded yet.',
+                ]
+                PHP,
+                <<<'PHP'
+                // The endpoint returns the events newest-first. Nothing about the
+                // block is writable, so the route is a plain GET.
+                public function demoEvents(Request $r, array $p = []): Response {
+                    return Response::json(['data' => [
+                        ['actor' => 'Anika Patel', 'action' => 'approved the request',
+                         'at' => '2026-08-17 09:12', 'note' => '', 'from' => 'pending', 'to' => 'approved'],
+                        // ...
+                    ]]);
+                }
+                PHP,
+            ),
+            $this->dataBoundDemo(
+                'inbox',
+                'Items awaiting the current user. The plugin supplies the items; core resolves which actions this caller may take on each.',
+                [
+                    'type' => 'inbox',
+                    'source' => '/api/uikit/demo/tasks',
+                    'idField' => 'id',
+                    'titleField' => 'title',
+                    'subtitleField' => 'requester',
+                    'timestampField' => 'submitted',
+                    'statusField' => 'status',
+                    'actions' => [
+                        [
+                            'key' => 'approve',
+                            'label' => 'Approve',
+                            'method' => 'POST',
+                            'endpoint' => '/api/uikit/demo/tasks/{id}/approve',
+                            'variant' => 'primary',
+                        ],
+                        [
+                            'key' => 'reject',
+                            'label' => 'Reject',
+                            'method' => 'POST',
+                            'endpoint' => '/api/uikit/demo/tasks/{id}/reject',
+                            'confirm' => 'Reject this request? The requester is notified.',
+                            'variant' => 'destructive',
+                        ],
+                    ],
+                    'emptyText' => 'Nothing awaiting you.',
+                ],
+                <<<'PHP'
+                [
+                    'type'           => 'inbox',
+                    'source'         => '/api/uikit/demo/tasks', // the PLUGIN supplies the items
+                    'idField'        => 'id',
+                    'titleField'     => 'title',
+                    'subtitleField'  => 'requester',  // optional
+                    'timestampField' => 'submitted',  // optional
+                    'statusField'    => 'status',     // optional — rendered as a badge
+                    // 'resourceType' => 'task',      // optional — required by scopedPermission
+                    'actions'        => [
+                        [
+                            'key'      => 'approve',
+                            'label'    => 'Approve',
+                            'method'   => 'POST',
+                            'endpoint' => '/api/uikit/demo/tasks/{id}/approve',
+                            'variant'  => 'primary',
+                            // No permission here. CORE reads the route's own gate.
+                            // 'scopedPermission' => 'tasks:approve', // per-RECORD, needs resourceType
+                        ],
+                        [
+                            'key'      => 'reject',
+                            'label'    => 'Reject',
+                            'method'   => 'POST',
+                            'endpoint' => '/api/uikit/demo/tasks/{id}/reject',
+                            'confirm'  => 'Reject this request? The requester is notified.',
+                            'variant'  => 'destructive',
+                        ],
+                    ],
+                    'emptyText' => 'Nothing awaiting you.',
+                ]
+                PHP,
+                <<<'PHP'
+                // Three routes: the queue, and one per action. Each action route
+                // declares its OWN requiredPermission, and that declaration is the
+                // single source of truth — the block never restates it, and the
+                // host resolves it per caller when it renders the item.
+                //   GET  /api/uikit/demo/tasks               requiredPermission: uikit:view
+                //   POST /api/uikit/demo/tasks/{id}/approve  requiredPermission: uikit:view
+                //   POST /api/uikit/demo/tasks/{id}/reject   requiredPermission: uikit:view
+                public function demoTasks(Request $r, array $p = []): Response {
+                    return Response::json(['data' => [
+                        ['id' => 1, 'title' => 'Expense claim #4821', 'requester' => 'Bjorn Larsen',
+                         'submitted' => '2026-08-16 14:03', 'status' => 'pending'],
+                        // ...
+                    ]]);
+                }
+                PHP,
+            ),
         ];
     }
 
@@ -1399,6 +1844,63 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'data' => [
                         'type' => 'array',
                         'items' => ['$ref' => '#/components/schemas/UiKitDemoRow'],
+                    ],
+                ],
+            ],
+            'UiKitDemoEvent' => [
+                'type' => 'object',
+                'required' => ['actor', 'action', 'at', 'note', 'from', 'to'],
+                'properties' => [
+                    'actor' => ['type' => 'string'],
+                    'action' => ['type' => 'string'],
+                    'at' => ['type' => 'string'],
+                    'note' => ['type' => 'string'],
+                    'from' => ['type' => 'string'],
+                    'to' => ['type' => 'string'],
+                ],
+            ],
+            'UiKitDemoEventsResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'array',
+                        'items' => ['$ref' => '#/components/schemas/UiKitDemoEvent'],
+                    ],
+                ],
+            ],
+            'UiKitDemoTask' => [
+                'type' => 'object',
+                'required' => ['id', 'title', 'requester', 'submitted', 'status'],
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                    'title' => ['type' => 'string'],
+                    'requester' => ['type' => 'string'],
+                    'submitted' => ['type' => 'string'],
+                    'status' => ['type' => 'string'],
+                ],
+            ],
+            'UiKitDemoTasksResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'array',
+                        'items' => ['$ref' => '#/components/schemas/UiKitDemoTask'],
+                    ],
+                ],
+            ],
+            'UiKitDemoTaskActionResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'object',
+                        'required' => ['id', 'accepted'],
+                        'properties' => [
+                            'id' => ['type' => 'string'],
+                            'accepted' => ['type' => 'boolean'],
+                        ],
                     ],
                 ],
             ],

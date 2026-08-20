@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -305,6 +305,69 @@ final class BlockContract
                 'placeholder' => ['type' => 'string',     'required' => false],
             ]],
 
+            // ---- workflow blocks (#868) ----
+            // An ordered, append-only EVENT LIST — the audit-trail shape every
+            // product on the platform grows and, until now, hand-rolled: actor,
+            // action, timestamp, an optional note, and an optional from/to pair
+            // for a state change. Read-only by construction: it declares no
+            // action, no endpoint and no mutation verb, so there is nothing for
+            // a renderer to submit. Data-bound exactly like `dataStat` — one
+            // ownership-checked `source`, then per-field mappings — because an
+            // audit trail is never a literal the plugin can inline.
+            'timeline' => ['container' => false, 'props' => [
+                'source'         => ['type' => 'apiPath', 'required' => true],
+                'actorField'     => ['type' => 'string',  'required' => true],
+                'actionField'    => ['type' => 'string',  'required' => true],
+                'timestampField' => ['type' => 'string',  'required' => true],
+                'noteField'      => ['type' => 'string',  'required' => false],
+                'fromField'      => ['type' => 'string',  'required' => false],
+                'toField'        => ['type' => 'string',  'required' => false],
+                'pageSize'       => ['type' => 'int',     'required' => false],
+                'emptyText'      => ['type' => 'string',  'required' => false],
+                'params'         => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+            // A TASK LIST: the items awaiting the current user, each carrying
+            // the actions that user may actually take on it.
+            //
+            // The seam. Core has no notion of a task queue, so the ITEMS come
+            // from the plugin's own `source` — an ordinary ownership-checked
+            // apiPath, fetched exactly like a `dataTable`'s. What core owns is
+            // the other half: WHICH of the declared `actions` this caller may
+            // take on each item. That half is the entire reason the type lives
+            // here. A plugin that answered it itself would be re-deriving
+            // authorization beside the host's, and the two would drift.
+            //
+            // Note what an action does NOT declare: the permission its endpoint
+            // is gated on. That is not the plugin's to restate — the host reads
+            // it off the ROUTE the action actually calls and evaluates it with
+            // the same RoleChecker calls RbacMiddleware makes, so what the user
+            // is shown cannot disagree with what the middleware enforces. A
+            // restated slug would be a second source of truth for a question
+            // that already has an authoritative one.
+            //
+            // `scopedPermission` is the one thing a plugin CAN add, and it is
+            // not a restatement either: it is an ADDITIONAL per-record predicate
+            // the host resolves at (`resourceType`, the item's `idField` value)
+            // through the resource-scoped grants of SDK 1.17/1.22 — the check a
+            // plugin's own handler makes INSIDE the request, which no route
+            // table can expose. It can only ever hide an action, never reveal
+            // one: the route gate is evaluated regardless. Declaring it requires
+            // `resourceType`, since a per-record predicate with no record is a
+            // tenant-wide check wearing the wrong name.
+            'inbox' => ['container' => false, 'props' => [
+                'source'         => ['type' => 'apiPath',        'required' => true],
+                'idField'        => ['type' => 'string',         'required' => true],
+                'titleField'     => ['type' => 'string',         'required' => true],
+                'subtitleField'  => ['type' => 'string',         'required' => false],
+                'timestampField' => ['type' => 'string',         'required' => false],
+                'statusField'    => ['type' => 'string',         'required' => false],
+                'resourceType'   => ['type' => 'string',         'required' => false],
+                'actions'        => ['type' => 'itemActionList', 'required' => true],
+                'pageSize'       => ['type' => 'int',            'required' => false],
+                'emptyText'      => ['type' => 'string',         'required' => false],
+                'params'         => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+
             // ---- interactive blocks (SP3, WC-233) ----
             'form' => ['container' => true, 'props' => [
                 'submit'             => ['type' => 'submitSpec', 'required' => true],
@@ -446,6 +509,97 @@ final class BlockContract
                 'placeholder' => ['type' => 'string',     'required' => false],
                 'default'     => ['type' => 'string',     'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
+            ]],
+            // ---- organizational-unit SCOPE picker (#868) ----
+            // A form input whose value is a RULE over the organizational-unit
+            // tree — "every unit of kind X under this parent" — rather than a
+            // pinned list of unit ids.
+            //
+            // Why this is not `referenceSelect` pointed at the OU endpoint.
+            // Two reasons, and the second is structural:
+            //
+            //  1. A reference select submits ONE id. A rule that says "the
+            //     departments under this faculty" cannot be expressed as an id,
+            //     and pinning the ids it resolves to today is exactly the
+            //     parallel unit-id → kind map #822 exists to delete: it goes
+            //     stale the first time a unit is added, removed or reparented,
+            //     silently, with nothing to tell the consumer it happened.
+            //  2. Every `source` prop in this contract is an apiPath the LOADER
+            //     ownership-checks against the routes the declaring plugin
+            //     actually registered. `/api/ous` is core's, so a plugin cannot
+            //     name it — a `referenceSelect` aimed there drops the whole
+            //     feature. The only way to satisfy that gate is for the plugin
+            //     to republish core's hierarchy through a route of its own,
+            //     which is the drift this block exists to prevent.
+            //
+            // So this type declares NO `source`, deliberately, and it is the
+            // only leaf in the whitelist that fetches without one: the host
+            // renderer reads the units and the type vocabulary from CORE's own
+            // endpoints (`GET /api/ous`, `GET /api/ou-types`), under the
+            // caller's own session and the `ous:read` gate those routes already
+            // carry. A caller who may not read the org chart cannot build a rule
+            // over it, and a plugin cannot point the control anywhere else —
+            // there is no prop with which to say where.
+            //
+            // THE VALUE. One object, submitted under `name`:
+            //
+            //     ['unit' => 42|null, 'scope' => 'unit'|'subtree'|'children', 'type' => 'faculty'|null]
+            //
+            //  - `unit`  the anchor unit's id, or null for the whole tenant.
+            //  - `scope` ALWAYS present, never inferred. This is the whole point
+            //            of the shape: "this unit" and "this unit's subtree" are
+            //            different answers and a reader must never have to guess
+            //            which one was meant from the presence of another field.
+            //  - `type`  an OU type KEY (#822) filtering the RESOLVED set, or
+            //            null for any kind. Applied AFTER the scope expands,
+            //            never instead of it.
+            //
+            // How a consumer resolves it, exhaustively:
+            //
+            //     unit  scope       resolves to
+            //     ----  ----------  -------------------------------------------
+            //     id    unit        exactly that unit
+            //     id    children    its DIRECT children      (?parent_id=<id>)
+            //     id    subtree     it AND every descendant   (inclusive)
+            //     null  children    the root units            (?parent_id=0)
+            //     null  subtree     every unit in the tenant
+            //     null  unit        never produced — the renderer cannot offer
+            //                       "this unit" with no unit chosen; it is the
+            //                       nothing-selected state and is not submitted
+            //
+            // and `type`, when non-null, narrows whatever that produced —
+            // `?type=<key>` on the same core endpoint.
+            //
+            // THE PROPS.
+            //  - `scopes`     the subset of the three the author permits, in the
+            //                 order they are offered; the FIRST is the opening
+            //                 state. Omitted means all three in the canonical
+            //                 order. An author who only ever means subtrees says
+            //                 so here and removes the ambiguity at the source.
+            //  - `anchorType` restricts which units may be the ANCHOR, by kind
+            //                 (`?type=` on the picker's own unit fetch). Design
+            //                 time, and a different question from the value's
+            //                 `type`, which restricts the resolved SET: "every
+            //                 department under a faculty" is `anchorType` =>
+            //                 'faculty' with the user choosing 'department'.
+            //  - `memberType` PINS the value's `type` to one kind and hides the
+            //                 control. Absent, the user chooses (including "any
+            //                 kind"). Declaring it alongside a `scopes` list of
+            //                 exactly ['unit'] is refused: a kind filter over a
+            //                 set the user just picked by hand can only ever
+            //                 subtract the one thing in it.
+            //  - `required`   removes the tenant-wide option, so the rule must be
+            //                 anchored at a unit. Presentational, like every
+            //                 other `required` here — the server stays
+            //                 authoritative over what it accepts.
+            'ouScopePicker' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName',   'required' => true],
+                'label'       => ['type' => 'string',      'required' => true],
+                'scopes'      => ['type' => 'ouScopeList', 'required' => false],
+                'anchorType'  => ['type' => 'ouTypeKey',   'required' => false],
+                'memberType'  => ['type' => 'ouTypeKey',   'required' => false],
+                'required'    => ['type' => 'bool',        'required' => false],
+                'placeholder' => ['type' => 'string',      'required' => false],
             ]],
             'submitButton' => ['container' => false, 'props' => [
                 'label'              => ['type' => 'string', 'required' => true],

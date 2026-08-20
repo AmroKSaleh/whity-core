@@ -2,7 +2,7 @@
     "openapi": "3.0.0",
     "info": {
         "title": "Whity Core API",
-        "version": "0.2.3"
+        "version": "0.2.4"
     },
     "servers": [
         {
@@ -10049,6 +10049,107 @@
                 }
             }
         },
+        "/api/v1/me/permitted-actions": {
+            "post": {
+                "operationId": "post_api_v1_me_permitted_actions",
+                "summary": "Resolve which of a batch of requests the caller is permitted to make",
+                "tags": [
+                    "me"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PermittedActionsRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "One allow/deny answer per check, in request order",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PermittedActionsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Missing 'checks' list, or more than 200 checks",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/migrations": {
             "get": {
                 "operationId": "get_api_v1_migrations",
@@ -10640,6 +10741,568 @@
                 ]
             }
         },
+        "/api/v1/ou-types": {
+            "get": {
+                "operationId": "get_api_v1_ou_types",
+                "summary": "List the tenant's organizational unit types",
+                "tags": [
+                    "ous"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The tenant's OU type vocabulary",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OuTypeListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_ou_types",
+                "summary": "Author a new OU type, or adopt a declared one",
+                "tags": [
+                    "ous"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/OuTypeCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OuTypeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The tenant already holds this key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Malformed key, a namespaced key no plugin declares, or the reserved key `none`",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/ou-types/catalog": {
+            "get": {
+                "operationId": "get_api_v1_ou_types_catalog",
+                "summary": "List the OU types declared in code, with this tenant's adoption state",
+                "tags": [
+                    "ous"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The declared catalogue",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OuTypeCatalogResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/ou-types/{id}": {
+            "delete": {
+                "operationId": "delete_api_v1_ou_types_id",
+                "summary": "Delete an OU type",
+                "tags": [
+                    "ous"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "force",
+                        "in": "query",
+                        "required": false,
+                        "description": "Untype the units that still carry this type instead of refusing.",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Organizational unit type not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Units still carry this type; retry with ?force=true",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "get": {
+                "operationId": "get_api_v1_ou_types_id",
+                "summary": "Get one OU type",
+                "tags": [
+                    "ous"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OuTypeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Organizational unit type not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_ou_types_id",
+                "summary": "Relabel or re-rank an OU type",
+                "tags": [
+                    "ous"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/OuTypeUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The updated type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OuTypeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Organizational unit type not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "No updatable field supplied, or an attempt to change the key",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/ous": {
             "get": {
                 "operationId": "get_api_v1_ous",
@@ -10673,6 +11336,15 @@
                         "description": "Return only the direct children of this OU. Use 0 for the roots. Omit or leave empty for the whole tenant; a non-numeric value is a 422.",
                         "schema": {
                             "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "query",
+                        "required": false,
+                        "description": "Return only units of this KIND, by the stable type key (e.g. faculty, acme:clinic). Use `none` for units with no type. Omit or leave empty for every unit; a malformed key is a 422, and a well-formed key this tenant has not defined matches nothing.",
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 ],
@@ -10728,7 +11400,7 @@
                         }
                     },
                     "422": {
-                        "description": "parent_id is not a non-negative integer",
+                        "description": "parent_id is not a non-negative integer, or type is not a valid type key",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -10832,7 +11504,17 @@
                         }
                     },
                     "409": {
-                        "description": "Name or slug already exists in the tenant",
+                        "description": "A sibling unit already has this name, or no unique slug could be derived",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The requested organizational unit type is unknown or belongs to another tenant",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -11118,8 +11800,18 @@
                             }
                         }
                     },
+                    "409": {
+                        "description": "A sibling unit already has this name",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
                     "422": {
-                        "description": "The re-parent would create a cycle",
+                        "description": "The re-parent would create a cycle, or the requested type is unknown",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -19826,6 +20518,75 @@
                 ]
             }
         },
+        "/api/v1/uikit/demo/events": {
+            "get": {
+                "operationId": "get_api_v1_uikit_demo_events",
+                "summary": "Demo event history for the timeline block example",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoEventsResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoEventsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:view permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/uikit/demo/metric": {
             "get": {
                 "operationId": "get_api_v1_uikit_demo_metric",
@@ -19909,6 +20670,233 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/UiKitDemoRowsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:view permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/uikit/demo/tasks": {
+            "get": {
+                "operationId": "get_api_v1_uikit_demo_tasks",
+                "summary": "Demo task queue for the inbox block example",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoTasksResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoTasksResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:view permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/uikit/demo/tasks/{id}/approve": {
+            "post": {
+                "operationId": "post_api_v1_uikit_demo_tasks_id_approve",
+                "summary": "Demo approve action for the inbox block example",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoTaskActionResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoTaskActionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:view permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/uikit/demo/tasks/{id}/reject": {
+            "post": {
+                "operationId": "post_api_v1_uikit_demo_tasks_id_reject",
+                "summary": "Demo reject action for the inbox block example",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoTaskActionResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoTaskActionResponse"
                                 }
                             }
                         }
@@ -23910,6 +24898,18 @@
                     "created_at": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "ou_type_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "ou_type_key": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "ou_type_label": {
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -23919,7 +24919,10 @@
                     "name",
                     "slug",
                     "description",
-                    "created_at"
+                    "created_at",
+                    "ou_type_id",
+                    "ou_type_key",
+                    "ou_type_label"
                 ]
             },
             "OuCreateRequest": {
@@ -23933,6 +24936,14 @@
                     },
                     "parent_id": {
                         "type": "integer",
+                        "nullable": true
+                    },
+                    "ou_type_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "type": {
+                        "type": "string",
                         "nullable": true
                     }
                 },
@@ -23967,6 +24978,18 @@
                         "type": "string",
                         "nullable": true
                     },
+                    "ou_type_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "ou_type_key": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "ou_type_label": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "children": {
                         "type": "array",
                         "items": {
@@ -23990,6 +25013,9 @@
                     "slug",
                     "description",
                     "created_at",
+                    "ou_type_id",
+                    "ou_type_key",
+                    "ou_type_label",
                     "children"
                 ]
             },
@@ -24078,6 +25104,147 @@
                     "data"
                 ]
             },
+            "OuType": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "key": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "sort_order": {
+                        "type": "integer"
+                    },
+                    "source": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "key",
+                    "label",
+                    "sort_order",
+                    "source",
+                    "created_at",
+                    "updated_at"
+                ]
+            },
+            "OuTypeCatalogEntry": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "sort_order": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "adopted": {
+                        "type": "boolean"
+                    },
+                    "ou_type_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "key",
+                    "source",
+                    "label",
+                    "sort_order",
+                    "adopted",
+                    "ou_type_id"
+                ]
+            },
+            "OuTypeCatalogResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/OuTypeCatalogEntry"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "OuTypeCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "sort_order": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "key"
+                ]
+            },
+            "OuTypeListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/OuType"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "OuTypeResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/OuType"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "OuTypeUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string"
+                    },
+                    "sort_order": {
+                        "type": "integer"
+                    }
+                }
+            },
             "OuUpdateRequest": {
                 "type": "object",
                 "properties": {
@@ -24089,6 +25256,14 @@
                     },
                     "parent_id": {
                         "type": "integer",
+                        "nullable": true
+                    },
+                    "ou_type_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "type": {
+                        "type": "string",
                         "nullable": true
                     }
                 }
@@ -24362,6 +25537,92 @@
                 "required": [
                     "data",
                     "pagination"
+                ]
+            },
+            "PermittedActionCheck": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": [
+                            "POST",
+                            "PUT",
+                            "PATCH",
+                            "DELETE"
+                        ]
+                    },
+                    "path": {
+                        "type": "string"
+                    },
+                    "resourceType": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "resourceId": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "scopedPermission": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "ref",
+                    "method",
+                    "path"
+                ]
+            },
+            "PermittedActionResult": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "allowed": {
+                        "type": "boolean"
+                    },
+                    "required": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "ref",
+                    "allowed",
+                    "required"
+                ]
+            },
+            "PermittedActionsRequest": {
+                "type": "object",
+                "properties": {
+                    "checks": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PermittedActionCheck"
+                        }
+                    }
+                },
+                "required": [
+                    "checks"
+                ]
+            },
+            "PermittedActionsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PermittedActionResult"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "Person": {
@@ -27429,6 +28690,51 @@
                     }
                 }
             },
+            "UiKitDemoEvent": {
+                "type": "object",
+                "required": [
+                    "actor",
+                    "action",
+                    "at",
+                    "note",
+                    "from",
+                    "to"
+                ],
+                "properties": {
+                    "actor": {
+                        "type": "string"
+                    },
+                    "action": {
+                        "type": "string"
+                    },
+                    "at": {
+                        "type": "string"
+                    },
+                    "note": {
+                        "type": "string"
+                    },
+                    "from": {
+                        "type": "string"
+                    },
+                    "to": {
+                        "type": "string"
+                    }
+                }
+            },
+            "UiKitDemoEventsResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/UiKitDemoEvent"
+                        }
+                    }
+                }
+            },
             "UiKitDemoMetricResponse": {
                 "type": "object",
                 "required": [
@@ -27485,6 +28791,70 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/UiKitDemoRow"
+                        }
+                    }
+                }
+            },
+            "UiKitDemoTask": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "title",
+                    "requester",
+                    "submitted",
+                    "status"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "requester": {
+                        "type": "string"
+                    },
+                    "submitted": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    }
+                }
+            },
+            "UiKitDemoTaskActionResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "required": [
+                            "id",
+                            "accepted"
+                        ],
+                        "properties": {
+                            "id": {
+                                "type": "string"
+                            },
+                            "accepted": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            },
+            "UiKitDemoTasksResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/UiKitDemoTask"
                         }
                     }
                 }

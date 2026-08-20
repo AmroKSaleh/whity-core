@@ -131,6 +131,14 @@ abstract class BaseCommand
         $resourceTypeRegistry->registerCoreResourceTypes();
         \Whity\register_service(\Whity\Core\RBAC\ResourceTypeRegistry::class, $resourceTypeRegistry);
 
+        // OU-type catalogue (#822), registered as a service for exactly the same
+        // reason: a plugin's contributed types must be adoptable whether the
+        // request arrived over HTTP or through a command, and a CLI-only empty
+        // catalogue would report that a plugin's type simply does not exist.
+        $ouTypeRegistry = new \Whity\Core\Ou\OuTypeRegistry($hookManager);
+        $ouTypeRegistry->registerCoreOuTypes();
+        \Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry);
+
         // Status-page probe catalogue (WC-status-probes), registered as a service
         // exactly as public/index.php does. A divergence between the two entry
         // points here is the recurring bug class this repo has already paid for
@@ -246,7 +254,8 @@ abstract class BaseCommand
             $tableOwnershipRegistry,
             $dataTypeRegistry,
             $pluginSettingsRegistry,
-            $auditLogger
+            $auditLogger,
+            $ouTypeRegistry
         );
         $pluginLoader->load();
 

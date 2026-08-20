@@ -258,6 +258,71 @@ export interface DataListBlock {
   params?: SourceParam[];
 }
 
+// ---- workflow blocks (#868) ----
+
+/**
+ * An ordered, append-only EVENT LIST — the audit-trail shape. Data-bound like
+ * `dataStat`: one ownership-checked `source`, then per-field mappings. Declares
+ * no endpoint and no verb, so read-only is a property of the type.
+ */
+export interface TimelineBlock {
+  type: 'timeline';
+  source: string;
+  actorField: string;
+  actionField: string;
+  timestampField: string;
+  noteField?: string;
+  fromField?: string;
+  toField?: string;
+  pageSize?: number;
+  emptyText?: string;
+  params?: SourceParam[];
+}
+
+/**
+ * One candidate action on an inbox item.
+ *
+ * There is deliberately NO prop for the permission `endpoint` is gated on: the
+ * host reads that off the route the endpoint dispatches to, so what the user is
+ * shown cannot disagree with what the middleware enforces.
+ *
+ * `scopedPermission` is a different question — the per-record predicate a
+ * plugin's handler applies inside the request, which no route table can express.
+ * It is resolved at (`InboxBlock.resourceType`, the item's id) and is an
+ * ADDITIONAL conjunct, so it can only ever hide an action, never reveal one.
+ */
+export interface ItemAction {
+  key: string;
+  label: string;
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  endpoint: string;
+  scopedPermission?: string;
+  confirm?: string;
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+}
+
+/**
+ * A TASK LIST: the items awaiting the current user, each carrying the actions
+ * that user may actually take on it.
+ *
+ * The plugin supplies the items (`source`); core resolves which actions are
+ * permitted, per item, via `POST /api/v1/me/permitted-actions`.
+ */
+export interface InboxBlock {
+  type: 'inbox';
+  source: string;
+  idField: string;
+  titleField: string;
+  subtitleField?: string;
+  timestampField?: string;
+  statusField?: string;
+  resourceType?: string;
+  actions: ItemAction[];
+  pageSize?: number;
+  emptyText?: string;
+  params?: SourceParam[];
+}
+
 // ---- SP3 interactive blocks (WC-235) ----
 
 /**
@@ -465,6 +530,88 @@ export interface ReferenceSelectBlock {
   defaultFrom?: string;
 }
 
+// ---- organizational-unit scope picker (#868) ----
+
+/**
+ * The three scope kinds an {@link OuScopeValue} may carry — the SDK's
+ * `BlockValidator::OU_SCOPES`, in the same canonical order.
+ */
+export type OuScopeKind = 'unit' | 'subtree' | 'children';
+
+/** The canonical scope order, and the default `scopes` when a block declares none. */
+export const OU_SCOPE_KINDS: readonly OuScopeKind[] = ['unit', 'subtree', 'children'];
+
+/**
+ * The value an `ouScopePicker` submits: a RULE over the organizational-unit
+ * tree, resolved at execution time, never a pinned list of ids.
+ *
+ *     { unit: 42, scope: 'subtree', type: 'department' }
+ *       → that faculty and every unit beneath it, narrowed to departments
+ *
+ * `scope` is ALWAYS present. "This unit" and "this unit's subtree" are different
+ * answers, and nothing about the other two fields lets a reader tell them apart,
+ * so the discriminator is written every time rather than inferred.
+ *
+ * | `unit` | `scope`    | resolves to                                  |
+ * |--------|------------|----------------------------------------------|
+ * | id     | `unit`     | exactly that unit                            |
+ * | id     | `children` | its direct children (`?parent_id=<id>`)      |
+ * | id     | `subtree`  | it **and** every descendant (inclusive)      |
+ * | `null` | `children` | the root units (`?parent_id=0`)              |
+ * | `null` | `subtree`  | every unit in the tenant                     |
+ * | `null` | `unit`     | never produced — the nothing-selected state  |
+ *
+ * `type`, when non-null, filters whatever that produced to units of that kind
+ * (`?type=<key>`), applied AFTER the scope expands and never instead of it.
+ */
+export interface OuScopeValue {
+  /** Anchor unit id, or null for the whole tenant. */
+  unit: number | null;
+  /** Which units around the anchor the rule covers. Never omitted. */
+  scope: OuScopeKind;
+  /** OU type key (#822) narrowing the resolved set, or null for any kind. */
+  type: string | null;
+}
+
+/**
+ * Whether a form value is an OU scope rule. The discriminator is `scope`, which
+ * every rule carries — the same field a consumer switches on when it resolves
+ * one, so there is exactly one thing to look at in both places.
+ */
+export function isOuScopeValue(value: unknown): value is OuScopeValue {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as OuScopeValue).scope === 'string' &&
+    (OU_SCOPE_KINDS as readonly string[]).includes((value as OuScopeValue).scope)
+  );
+}
+
+/**
+ * Leaf (form only): choose a SCOPE over the organizational-unit tree.
+ *
+ * Deliberately carries no `source`. The units and the type vocabulary come from
+ * core's own `GET /api/v1/ous` and `GET /api/v1/ou-types`, under the caller's own
+ * `ous:read` gate — a plugin has no prop with which to point this control
+ * anywhere else, and could not name core's routes through the loader's
+ * `source`-ownership check even if it had one.
+ */
+export interface OuScopePickerBlock {
+  type: 'ouScopePicker';
+  name: string;
+  label: string;
+  /** Permitted scopes, in offer order; the first is the opening state. Defaults to all three. */
+  scopes?: OuScopeKind[];
+  /** Restricts which units may ANCHOR the rule, by kind (`?type=` on the unit fetch). */
+  anchorType?: string;
+  /** Pins the value's `type` to one kind and hides the kind control. */
+  memberType?: string;
+  /** Removes the tenant-wide option, so the rule must be anchored at a unit. */
+  required?: boolean;
+  placeholder?: string;
+}
+
 /** Leaf (form only): triggers form submission. */
 export interface SubmitButtonBlock {
   type: 'submitButton';
@@ -588,10 +735,13 @@ export type Block =
   | ColorInputBlock
   | BilingualTextInputBlock
   | ReferenceSelectBlock
+  | OuScopePickerBlock
   | SubmitButtonBlock
   | ActionButtonBlock
   | ChartBlock
   | SelectorBlock
+  | TimelineBlock
+  | InboxBlock
   | ModalBlock
   | DrawerBlock;
 

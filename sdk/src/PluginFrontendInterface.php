@@ -40,6 +40,14 @@ namespace Whity\Sdk;
  *     that are not CRUD resources, with zero per-app frontend code;
  *   - `'custom'` — the host application must register a bespoke component for
  *     this id in its UI registry, otherwise a placeholder renders.
+ *   - `'blocks'` — the host renders a platform-neutral block tree the plugin
+ *     declares in `blocks` (SDK 1.6, WC-225). Like `'embed'` it needs ZERO
+ *     host-application edits, but unlike `'embed'` the UI is DESCRIBED rather
+ *     than framed: the host renders it with its own components, so the screen
+ *     inherits the host's theme, RTL handling and every renderer improvement,
+ *     and the same declaration also renders on the desktop offline host.
+ *     Prefer it over `'embed'` for anything the block vocabulary can express,
+ *     and over `'custom'` whenever the plugin must work with no host edits.
  *   - `'embed'` — the host renders an iframe pointed at the plugin's own
  *     declared `embed.path` route (RBAC-protected like any other plugin
  *     route) — for a bespoke UI a backend-only, deploy-copied plugin can ship
@@ -88,6 +96,24 @@ namespace Whity\Sdk;
  *       core plugin-upload route already uses. A descriptor with no `'file'`
  *       field submits as JSON exactly as before (non-breaking).
  *     - `submitLabel` (string, optional): the submit button label.
+ * - `blocks` (array, REQUIRED when `screen` is `'blocks'`): the block tree,
+ *   validated against {@see \Whity\Sdk\Frontend\Blocks\BlockContract} by
+ *   {@see \Whity\Sdk\Frontend\Blocks\BlockValidator}. Declare it with the
+ *   builders in that namespace rather than hand-writing arrays — the contract
+ *   is a strict whitelist and an unknown type or prop is a rejection, not a
+ *   warning.
+ *   Two properties of the validation are worth knowing before you debug one:
+ *     - It runs at SERVE time, not at load time. A malformed tree does NOT
+ *       fail plugin discovery — the feature is simply OMITTED from
+ *       `/api/frontend-features` and the validator's errors are logged
+ *       server-side. So the symptom is a screen that silently does not appear
+ *       for anyone, and the diagnosis is in the host's log, never in the
+ *       response. The endpoint still returns 200 with every other feature; one
+ *       bad tree can never 500 the request or hide a sibling plugin's screens.
+ *     - It is FAIL-CLOSED and additional to the per-caller permission filter,
+ *       never a substitute for it. `requiredPermission` still gates the whole
+ *       descriptor, and a block's own `requiredPermission` still gates that
+ *       subtree, both enforced server-side before anything reaches a renderer.
  * - `embed` (array, REQUIRED when `screen` is `'embed'`):
  *     - `path` (string): the plugin's OWN GET route, starting with `'/api/'`.
  *       Validated identically to `resource.basePath` — the plugin must have

@@ -77,6 +77,7 @@ final class CoreTables
         'notifications' => '070_create_notifications.php',
         'organizational_units' => '005_create_organizational_units.php',
         'ou_role_assignments' => '008_create_ou_role_assignments.php',
+        'ou_types' => '102_create_ou_types.php',
         'password_resets' => '076_create_password_resets.php',
         'permission_delegations' => '014_create_permission_delegations.php',
         'permissions' => '002_create_permissions.php',

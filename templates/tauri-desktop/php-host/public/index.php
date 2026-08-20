@@ -40,6 +40,7 @@ spl_autoload_register(static function (string $class): void {
 require_once __DIR__ . '/../src/helpers.php';
 
 use Whity\Api\FrontendFeaturesHandler;
+use Whity\Api\PermittedActionsHandler;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\DeviceRoleChecker;
 use Whity\Core\RBAC\RoleSeeder;
@@ -128,13 +129,18 @@ $offlineIdentity = new OfflineIdentity($offlineProfileId, $offlineTenantId);
 \Whity\register_service(OfflineIdentity::class, $offlineIdentity);
 $rbacGate = new RbacGate($deviceRoleChecker, $offlineIdentity);
 $frontendFeaturesHandler = new FrontendFeaturesHandler($loader, $deviceRoleChecker, $offlineProfileId, $offlineTenantId);
+// #868: the server half of the `inbox` block type. Answers "would you let me
+// make this exact request?" from the SAME route table + PermissionResolver the
+// $rbacGate above enforces with, so an inbox never offers an action the gate
+// will refuse. Infrastructure endpoint like /__whity/frontend-features.
+$permittedActionsHandler = new PermittedActionsHandler($router, $deviceRoleChecker, $offlineIdentity);
 
 // ---- Request loop -----------------------------------------------------
 
 $isWorker = function_exists('frankenphp_handle_request');
 $maxRequests = (int) ($_ENV['MAX_REQUESTS'] ?? 0); // 0 = unbounded
 
-$handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate, $frontendFeaturesHandler) {
+$handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate, $frontendFeaturesHandler, $permittedActionsHandler) {
     try {
         $request = Request::fromGlobals();
 
@@ -164,6 +170,25 @@ $handle = static function () use ($router, $offlineTenantId, $loader, $rbacGate,
         // bypasses $router/$rbacGate the same way.
         if ($request->getMethod() === 'GET' && $request->getPath() === '/__whity/frontend-features') {
             Response::json(['data' => $frontendFeaturesHandler->list()])->send();
+
+            return;
+        }
+
+        // #868: batch permitted-action resolution behind the `inbox` block —
+        // the offline counterpart of POST /api/v1/me/permitted-actions. Answers
+        // for the one fixed OfflineIdentity, from the live route table, through
+        // the same resolver $rbacGate uses. Infrastructure endpoint, so it
+        // bypasses $router/$rbacGate dispatch — never their answer.
+        if ($request->getMethod() === 'POST' && $request->getPath() === '/__whity/permitted-actions') {
+            /** @var mixed $decoded */
+            $decoded = json_decode($request->getBody(), true);
+            $result = $permittedActionsHandler->resolve($decoded);
+            if ($result['ok'] === false) {
+                Response::error($result['error'], 422)->send();
+
+                return;
+            }
+            Response::json(['data' => $result['data']])->send();
 
             return;
         }

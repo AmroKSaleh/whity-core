@@ -166,9 +166,11 @@ use Whity\Api\PluginsApiHandler;
 use Whity\Api\MigrationsApiHandler;
 use Whity\Api\AdminApiHandler;
 use Whity\Api\OusApiHandler;
+use Whity\Api\OuTypesApiHandler;
 use Whity\Api\DelegationsApiHandler;
 use Whity\Api\FrontendFeaturesApiHandler;
 use Whity\Api\MeCapabilitiesApiHandler;
+use Whity\Api\PermittedActionsApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
 use Whity\Api\OpenApiHandler;
@@ -355,6 +357,24 @@ $hookManager = new HookManager(
 $resourceTypeRegistry = new \Whity\Core\RBAC\ResourceTypeRegistry($hookManager);
 $resourceTypeRegistry->registerCoreResourceTypes();
 \Whity\register_service(\Whity\Core\RBAC\ResourceTypeRegistry::class, $resourceTypeRegistry); // @phpstan-ignore-line
+
+// 4c-ante. Organizational-unit TYPE catalogue (#822): which KINDS of unit a
+// plugin may contribute to a tenant's tree (campus, faculty, clinic, ward).
+// Constructed after the hook manager so a registration is announced on the
+// durable spine; the plugin loader below fills it from the plugins actually
+// loaded, stamping each key with the plugin's own namespace.
+//
+// Registered as a service for the same reason as the resource-type catalogue:
+// a handler that built its own instance would see none of the plugins'
+// contributions, and `GET /api/ou-types/catalog` would tell an administrator
+// that the type their plugin ships does not exist.
+//
+// Note this catalogue is NOT the vocabulary — that is per-tenant data in
+// `ou_types` (migration 102), because one tenant's faculty is another's region.
+// This governs only which keys CODE may contribute.
+$ouTypeRegistry = new \Whity\Core\Ou\OuTypeRegistry($hookManager);
+$ouTypeRegistry->registerCoreOuTypes();
+\Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry); // @phpstan-ignore-line
 
 // 4c-bis. Status-page probe catalogue (WC-status-probes): WHICH components this
 // deployment samples for /status. Core's four (database, queue, scheduler,
@@ -855,7 +875,10 @@ $pluginLoader = new PluginLoader(
     // hook subscriptions, so a plugin's actions land in the SAME audit trail as
     // core's — namespaced under the plugin, and removed again when it is
     // disabled. Built at step 4c above, long before this point.
-    $auditLogger
+    $auditLogger,
+    // Plugin-contributed OU types (#822): built at step 4c-ante above. The
+    // loader stamps each declared slug with the plugin's own namespace.
+    $ouTypeRegistry
 );
 
 // 9b. Initialize deployment manager
@@ -1275,6 +1298,23 @@ $router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
 $meCapabilitiesHandler = new MeCapabilitiesApiHandler($roleChecker);
 $router->register('GET', '/api/me/capabilities', [$meCapabilitiesHandler, 'list']);
 
+// Batch permitted-action resolution (#868). The server half of the `inbox`
+// block type: given the concrete {method, path} requests a screen is about to
+// render affordances for, answer which ones this caller may actually make.
+//
+// Registered with NO required role/permission for the same reason as
+// /api/me/capabilities directly above — any authenticated caller may ask about
+// their OWN authority — and the handler fails closed itself (unresolved tenant
+// or missing user => 403). Profile and tenant come from the resolved request,
+// never the body, so it cannot be used to probe another user's authority.
+//
+// It is handed the SAME $router the kernel dispatches through, deliberately:
+// the answer is derived from the live route table's RBAC descriptors and the
+// same $roleChecker RbacMiddleware enforces with, so "what the user is shown"
+// and "what the middleware admits" are one computation, not two that agree.
+$permittedActionsHandler = new PermittedActionsApiHandler($roleChecker, $router);
+$router->register('POST', '/api/me/permitted-actions', [$permittedActionsHandler, 'resolve']);
+
 // Plugin frontend feature descriptors (WC-169). Registered with NO required
 // role/permission — any authenticated caller may ask which screens they may
 // see — but the handler fails closed itself (unresolved tenant or missing
@@ -1461,6 +1501,30 @@ $router->register('GET', '/api/ous/{id:\d+}/roles', [$ousHandler, 'roles'], null
 $router->register('GET', '/api/ous/{id:\d+}/members', [$ousHandler, 'members'], null, null, CorePermissions::OUS_READ);
 $router->register('POST', '/api/ous/{id:\d+}/roles', [$ousHandler, 'assignRole'], null, null, CorePermissions::OUS_ASSIGN);
 $router->register('DELETE', '/api/ous/{ouId:\d+}/roles/{roleId:\d+}', [$ousHandler, 'removeRole'], null, null, CorePermissions::OUS_ASSIGN);
+
+// 12a. Register the OU TYPE vocabulary API (#822) — the campus/faculty/department
+// levels a tenant's tree is built from, so a consumer can ask for "every faculty"
+// instead of "every unit at depth 1" (which returns a different kind of thing on
+// every installation, and changes the moment somebody inserts a parent above an
+// existing unit).
+//
+// Gated on the SAME ous:* permissions as the routes above, deliberately, and not
+// on a new `ou_types:*` pair. A new permission ships with a grant migration that
+// can only reach the seeded `admin` role, so every operator running a custom
+// administrative role would silently lose the capability on upgrade and discover
+// it as a 403 — #834 is that exact failure, here, already having happened once.
+// DELETE takes ous:write rather than ous:delete because it destroys no unit: its
+// forced path is an UPDATE that sets ou_type_id = NULL.
+$ouTypesHandler = new OuTypesApiHandler(
+    new \Whity\Core\Ou\OuTypeRepository($db->getPdo()),
+    $ouTypeRegistry
+);
+$router->register('GET', '/api/ou-types', [$ouTypesHandler, 'list'], null, null, CorePermissions::OUS_READ);
+$router->register('GET', '/api/ou-types/catalog', [$ouTypesHandler, 'catalog'], null, null, CorePermissions::OUS_READ);
+$router->register('POST', '/api/ou-types', [$ouTypesHandler, 'create'], null, null, CorePermissions::OUS_WRITE);
+$router->register('GET', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'get'], null, null, CorePermissions::OUS_READ);
+$router->register('PATCH', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'update'], null, null, CorePermissions::OUS_WRITE);
+$router->register('DELETE', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'delete'], null, null, CorePermissions::OUS_WRITE);
 
 // 12b. Register permission delegations API handler (WC-34). Gated on the
 // delegation:manage permission (6th positional arg; requiredRole stays null so
@@ -1807,7 +1871,7 @@ $router->register('DELETE', '/api/entity-tags/all', [$entityTagsHandler, 'detach
 // not have the feature.
 $resourceRoleGrantsHandler = new \Whity\Api\ResourceRoleGrantsApiHandler(
     $db->getPdo(),
-    new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($db->getPdo(), $resourceTypeRegistry),
+    new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($db->getPdo(), $resourceTypeRegistry, $logger),
     $resourceTypeRegistry,
     $roleChecker,
     $hookManager

@@ -369,8 +369,12 @@ final class UiKitShowcasePluginTest extends TestCase
      * WC-236 / WC-240: interactive and chart demos are now in the tree, so the
      * coverage assertion is restored to ALL BlockContract::types()
      * (SP1 + SP2 + SP3 interactive + SP4 chart).
-     * Total: 36 types (21 SP1+SP2 + 12 SP3 interactive + 1 SP4 chart
-     * + 2 overlay containers: modal + drawer).
+     * Total: 46 types (21 SP1+SP2 + 12 SP3 interactive + 1 SP4 chart
+     * + 2 overlay containers: modal + drawer + 2 workflow leaves: timeline +
+     * inbox + 1 ouScopePicker, #868 — and the rest the whitelist has grown
+     * since). The count is written out rather than derived because a type added
+     * to the whitelist WITHOUT a showcase instance is precisely what this test
+     * exists to catch.
      */
     public function testTheBlocksTreeCoversEveryBlockType(): void
     {
@@ -417,8 +421,14 @@ final class UiKitShowcasePluginTest extends TestCase
 
         // Walk the tree; for each data-bound node, assert its source is a
         // registered GET path (the ownership invariant that WC-230 enforces).
-        $dataBoundTypes = ['dataTable', 'dataStat', 'dataList', 'chart'];
-        $foundBound = ['dataTable' => false, 'dataStat' => false, 'dataList' => false, 'chart' => false];
+        // #868: `timeline` and `inbox` are data-bound leaves like the rest — the
+        // loader derives that generically from the contract rule, so the SAME
+        // ownership invariant applies and is asserted here.
+        $dataBoundTypes = ['dataTable', 'dataStat', 'dataList', 'chart', 'timeline', 'inbox'];
+        $foundBound = [
+            'dataTable' => false, 'dataStat' => false, 'dataList' => false,
+            'chart' => false, 'timeline' => false, 'inbox' => false,
+        ];
 
         $this->walkDataBound($blocks, $dataBoundTypes, $registeredGetPaths, $foundBound);
 
@@ -428,6 +438,65 @@ final class UiKitShowcasePluginTest extends TestCase
                 "The tree must contain at least one '{$type}' block with a plugin-owned source"
             );
         }
+    }
+
+    /**
+     * #868: the OU scope picker is deliberately NOT a data-bound block.
+     *
+     * The loader decides what to ownership-check generically — any type whose
+     * contract rule carries a `source` prop of kind `apiPath`. The picker
+     * declares none, so it is skipped, and that skip is the point: its units
+     * come from CORE's own OU endpoints under the caller's `ous:read` gate
+     * rather than from a route the plugin republished. A `source` added here
+     * later would silently move the hierarchy back behind a plugin route, which
+     * is the drift #822 exists to delete — so the absence is asserted rather
+     * than assumed.
+     */
+    public function testOuScopePickerIsNotDataBoundAndNamesNoPluginRoute(): void
+    {
+        $rule = BlockContract::rulesFor('ouScopePicker');
+        $this->assertIsArray($rule);
+        $this->assertArrayNotHasKey('source', $rule['props']);
+
+        $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
+        /** @var array<mixed> $blocks */
+        $blocks = $feature['blocks'];
+
+        $pickers = $this->collectNodesOfType($blocks, 'ouScopePicker');
+        $this->assertNotEmpty($pickers, 'The showcase must contain a live ouScopePicker');
+
+        foreach ($pickers as $picker) {
+            $this->assertArrayNotHasKey(
+                'source',
+                $picker,
+                'An ouScopePicker must not carry a source — its data comes from core, not the plugin'
+            );
+        }
+    }
+
+    /**
+     * Every node of one type anywhere in the tree.
+     *
+     * @param array<mixed> $blocks
+     * @return list<array<string, mixed>>
+     */
+    private function collectNodesOfType(array $blocks, string $type): array
+    {
+        $found = [];
+        foreach ($blocks as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            /** @var array<string, mixed> $node */
+            if (($node['type'] ?? null) === $type) {
+                $found[] = $node;
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                $found = array_merge($found, $this->collectNodesOfType($node['children'], $type));
+            }
+        }
+
+        return $found;
     }
 
     // ---- WC-232: loader integration — versioned sources ----
@@ -505,6 +574,135 @@ final class UiKitShowcasePluginTest extends TestCase
         // Verify the two specific paths.
         $this->assertContains('/api/v1/uikit/demo/rows', $servedSources);
         $this->assertContains('/api/v1/uikit/demo/metric', $servedSources);
+    }
+
+    /**
+     * #868: an `inbox` action's `endpoint` is a write route the plugin declared,
+     * and the served descriptor carries its VERSIONED form.
+     *
+     * This is load-bearing rather than cosmetic. The host's permitted-actions
+     * resolver matches the CONCRETE path a button would call against the live
+     * route table; an unversioned endpoint matches nothing, resolves to "not
+     * permitted", and every action on the block silently disappears. Fail-closed
+     * and invisible is exactly the failure mode worth a test.
+     */
+    public function testLoaderVersionsInboxActionEndpointsInTheServedDescriptor(): void
+    {
+        $pluginDir = dirname(__DIR__, 2) . '/plugins';
+
+        $loader = new PluginLoader(
+            $pluginDir,
+            new Router('/v1'),
+            new PermissionRegistry(),
+            new HookManager()
+        );
+        $loader->load();
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('ui-kit-reference', $byId);
+        $feature = $byId['ui-kit-reference'];
+        $this->assertIsArray($feature['blocks']);
+
+        $endpoints = $this->collectInboxActionEndpoints($feature['blocks']);
+
+        $this->assertNotEmpty($endpoints, 'The served descriptor must contain an inbox with actions');
+        foreach ($endpoints as $endpoint) {
+            $this->assertStringStartsWith(
+                '/api/v1/',
+                $endpoint,
+                "Served inbox action endpoint '{$endpoint}' must be the versioned form"
+            );
+        }
+        $this->assertContains('/api/v1/uikit/demo/tasks/{id}/approve', $endpoints);
+        $this->assertContains('/api/v1/uikit/demo/tasks/{id}/reject', $endpoints);
+    }
+
+    /**
+     * #868: every `inbox` action endpoint the showcase declares is a write route
+     * the plugin ACTUALLY registers — the ownership invariant, asserted against
+     * the declaration rather than the served (already-rewritten) descriptor.
+     */
+    public function testInboxActionEndpointsAreRoutesThePluginRegisters(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        $writeRoutes = [];
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            $method = strtoupper((string) ($r['method'] ?? ''));
+            if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true) && is_string($r['path'] ?? null)) {
+                $writeRoutes[] = $method . ' ' . (string) $r['path'];
+            }
+        }
+
+        $feature = $plugin->getFrontendFeatures()[0];
+        /** @var array<mixed> $blocks */
+        $blocks = $feature['blocks'];
+
+        $found = 0;
+        foreach ($this->collectInboxActions($blocks) as $action) {
+            $found++;
+            $this->assertContains(
+                strtoupper((string) $action['method']) . ' ' . (string) $action['endpoint'],
+                $writeRoutes,
+                'Every inbox action endpoint must be a write route the plugin registers'
+            );
+            // The permission an endpoint is gated on is NOT restated on the
+            // action: the host reads it off the route it dispatches to.
+            $this->assertArrayNotHasKey('permission', $action);
+        }
+
+        $this->assertGreaterThan(0, $found, 'The showcase must declare at least one inbox action');
+    }
+
+    /**
+     * Collect every `inbox` action endpoint in a tree.
+     *
+     * @param array<mixed> $nodes
+     * @return list<string>
+     */
+    private function collectInboxActionEndpoints(array $nodes): array
+    {
+        $endpoints = [];
+        foreach ($this->collectInboxActions($nodes) as $action) {
+            $endpoints[] = (string) $action['endpoint'];
+        }
+
+        return $endpoints;
+    }
+
+    /**
+     * Collect every `inbox` action object in a tree.
+     *
+     * @param array<mixed> $nodes
+     * @return list<array<string, mixed>>
+     */
+    private function collectInboxActions(array $nodes): array
+    {
+        $actions = [];
+        foreach ($nodes as $node) {
+            if (!is_array($node) || !isset($node['type']) || !is_string($node['type'])) {
+                continue;
+            }
+
+            if ($node['type'] === 'inbox' && isset($node['actions']) && is_array($node['actions'])) {
+                foreach ($node['actions'] as $action) {
+                    if (is_array($action)) {
+                        /** @var array<string, mixed> $action */
+                        $actions[] = $action;
+                    }
+                }
+            }
+
+            if (isset($node['children']) && is_array($node['children'])) {
+                foreach ($this->collectInboxActions($node['children']) as $nested) {
+                    $actions[] = $nested;
+                }
+            }
+        }
+
+        return $actions;
     }
 
     // ---- WC-236: interactive demos in the blocks tree ----

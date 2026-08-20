@@ -181,6 +181,60 @@ export interface DataListBlock {
 }
 
 /**
+ * Workflow blocks (#868). Mirrors the SDK contract exactly — see
+ * `sdk/src/Frontend/Blocks/BlockContract.php` and `web/lib/plugin-features.ts`.
+ */
+export interface TimelineBlock {
+  type: "timeline"
+  source: string
+  actorField: string
+  actionField: string
+  timestampField: string
+  noteField?: string
+  fromField?: string
+  toField?: string
+  pageSize?: number
+  emptyText?: string
+  params?: SourceParam[]
+}
+
+/**
+ * One candidate action on an inbox item.
+ *
+ * There is deliberately NO prop for the permission `endpoint` is gated on: the
+ * host reads that off the route the endpoint dispatches to, so what the user is
+ * shown cannot disagree with what the RBAC gate enforces.
+ *
+ * `scopedPermission` is the per-record predicate a plugin handler applies inside
+ * the request — an ADDITIONAL conjunct that can only hide an action, never
+ * reveal one.
+ */
+export interface ItemAction {
+  key: string
+  label: string
+  method: "POST" | "PUT" | "PATCH" | "DELETE"
+  endpoint: string
+  scopedPermission?: string
+  confirm?: string
+  variant?: "primary" | "secondary" | "outline" | "ghost" | "destructive"
+}
+
+export interface InboxBlock {
+  type: "inbox"
+  source: string
+  idField: string
+  titleField: string
+  subtitleField?: string
+  timestampField?: string
+  statusField?: string
+  resourceType?: string
+  actions: ItemAction[]
+  pageSize?: number
+  emptyText?: string
+  params?: SourceParam[]
+}
+
+/**
  * `submit.endpoint` may carry `{targetId.field}`/`{selector}` context tokens —
  * the same addressing as `params.from`/`defaultFrom` — interpolated from the
  * master-detail context at submit time (e.g. an edit modal PATCHing
@@ -350,6 +404,62 @@ export interface ReferenceSelectBlock {
   defaultFrom?: string
 }
 
+/**
+ * The three scope kinds an {@link OuScopeValue} may carry — the SDK's
+ * `BlockValidator::OU_SCOPES`, same strings, same canonical order. Must stay
+ * identical to `web/lib/plugin-features.ts`: a rule written on one host is read
+ * by the same consumer as one written on the other.
+ */
+export type OuScopeKind = "unit" | "subtree" | "children"
+
+/** The canonical scope order, and the default `scopes` when a block declares none. */
+export const OU_SCOPE_KINDS: readonly OuScopeKind[] = ["unit", "subtree", "children"]
+
+/**
+ * The value an `ouScopePicker` submits (#868): a RULE over the organizational-
+ * unit tree, resolved at execution time, never a pinned list of ids.
+ *
+ * | `unit` | `scope`    | resolves to                                 |
+ * |--------|------------|---------------------------------------------|
+ * | id     | `unit`     | exactly that unit                           |
+ * | id     | `children` | its direct children (`?parent_id=<id>`)     |
+ * | id     | `subtree`  | it **and** every descendant (inclusive)     |
+ * | `null` | `children` | the root units (`?parent_id=0`)             |
+ * | `null` | `subtree`  | every unit in the tenant                    |
+ * | `null` | `unit`     | never produced — the nothing-selected state |
+ *
+ * `scope` is ALWAYS present: "this unit" and "this unit's subtree" are different
+ * answers and nothing else in the object distinguishes them. `type`, when
+ * non-null, narrows whatever the scope produced to units of that kind.
+ */
+export interface OuScopeValue {
+  unit: number | null
+  scope: OuScopeKind
+  type: string | null
+}
+
+/**
+ * Leaf (form only): choose a scope over the organizational-unit tree.
+ *
+ * Carries no `source`, deliberately — the units and the type vocabulary come
+ * from the HOST's own OU endpoints under the caller's own `ous:read` gate, so a
+ * plugin has no prop with which to point this control anywhere else.
+ */
+export interface OuScopePickerBlock {
+  type: "ouScopePicker"
+  name: string
+  label: string
+  /** Permitted scopes, in offer order; the first is the opening state. Defaults to all three. */
+  scopes?: OuScopeKind[]
+  /** Restricts which units may ANCHOR the rule, by kind (`?type=` on the unit fetch). */
+  anchorType?: string
+  /** Pins the value's `type` to one kind and hides the kind control. */
+  memberType?: string
+  /** Removes the tenant-wide option, so the rule must be anchored at a unit. */
+  required?: boolean
+  placeholder?: string
+}
+
 export interface SubmitButtonBlock {
   type: "submitButton"
   label: string
@@ -452,10 +562,13 @@ export type Block =
   | ColorInputBlock
   | BilingualTextInputBlock
   | ReferenceSelectBlock
+  | OuScopePickerBlock
   | SubmitButtonBlock
   | ActionButtonBlock
   | ChartBlock
   | SelectorBlock
+  | TimelineBlock
+  | InboxBlock
   | ModalBlock
   | DrawerBlock
 

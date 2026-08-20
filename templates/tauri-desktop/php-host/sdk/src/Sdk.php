@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.29).
+ * SDK identity (v1.32).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -257,13 +257,90 @@ namespace Whity\Sdk;
  * and costs core's own auditing nothing; the refusal is whole-declaration,
  * because a plugin with half its events audited ships a trail that looks
  * complete. The subscriptions are registered with the plugin's other hooks, so
- * disabling a plugin removes them and re-enabling it restores them. Additive).
+ * disabling a plugin removes them and re-enabling it restores them. Additive) →
+ * 1.30 ({@see \Whity\Sdk\Ou\PluginOuTypesInterface}, the organizational-unit
+ * TYPE contribution point. An OU carried no kind, so the only thing a plugin
+ * could filter its tree on was DEPTH — which names a different kind of unit on
+ * every installation (a single-campus institution has its faculties at depth 0,
+ * a multi-campus one at depth 1) and shifts the moment somebody inserts a
+ * parent above an existing unit. Slugs are declared BARE and the host stamps
+ * the plugin's prefix, so two plugins may both declare `clinic` and neither can
+ * mint a bare key — the unprefixed namespace belongs to core and to the
+ * tenant's own vocabulary. A declaration is a CATALOGUE ENTRY, not a write:
+ * it makes a key adoptable, and an administrator adopts it into their tenant
+ * explicitly, inheriting the declared label and rank as overridable defaults.
+ * Force-seeding instead would have been a cross-tenant write driven by an
+ * install-wide plugin. A malformed declaration costs that plugin the one type.
+ * Additive) ->
+ * 1.31 (WORKFLOW BLOCK TYPES: `timeline` and `inbox` join
+ * {@see \Whity\Sdk\Frontend\Blocks\BlockContract}, plus the `itemActionList`
+ * prop-rule kind behind `inbox.actions`.
+ * `timeline` is the easy half and was overdue: an ordered, append-only event
+ * list — actor, action, timestamp, optional note, optional from/to — data-bound
+ * to one ownership-checked `source` exactly as `dataStat` is. Every product on
+ * the platform with an audit trail was hand-rolling it, so the same history
+ * rendered differently on every screen. It declares no endpoint and no verb, so
+ * read-only is a property of the contract rather than a convention.
+ * `inbox` is the half with a seam, and where the seam falls is the whole design.
+ * Core has no notion of a task queue, so the ITEMS come from the plugin's own
+ * `source`. What core owns is which of the declared `actions` the caller may
+ * take on each item — and it resolves that from the ROUTE the action calls, with
+ * the same RoleChecker calls RbacMiddleware makes, through
+ * `POST /api/v1/me/permitted-actions`. An action therefore does NOT declare the
+ * permission its endpoint is gated on: that is not the plugin's to restate. A
+ * restated slug is a second answer to a question the route table already
+ * answers authoritatively, and it drifts the day someone re-gates the route and
+ * updates one of the two places. Resolving from the route makes "what the user
+ * is shown" and "what the middleware admits" the same computation rather than
+ * two computations that agree for now.
+ * `scopedPermission` is the one authorization fact a plugin CAN contribute,
+ * because it is the one the route table cannot express: the per-record predicate
+ * a handler applies inside the request, resolved at (`resourceType`, the item's
+ * id) through the resource-scoped grants of 1.17/1.22. It is an ADDITIONAL
+ * conjunct — the route gate is evaluated regardless — so it can only ever remove
+ * an action from the permitted set, never add one. That direction is chosen
+ * deliberately: a wrong declaration costs a user an affordance they had, and
+ * cannot cost a tenant an authorization it relied on. Declaring it requires
+ * `resourceType`, since a per-record check with no record silently becomes the
+ * tenant-wide check wearing the wrong name.
+ * The rejected alternative was to have the plugin's queue endpoint return the
+ * permitted actions per item. It is less code in core and it is exactly the
+ * failure the block vocabulary exists to prevent: every product re-deriving
+ * authorization beside the host's, each one drifting from the middleware in its
+ * own direction, and the drift only visible as a 403 after a click. Additive) ->
+ * 1.32 (the ORGANIZATIONAL-UNIT SCOPE PICKER: `ouScopePicker` joins
+ * {@see \Whity\Sdk\Frontend\Blocks\BlockContract}, with the `ouScopeList` and
+ * `ouTypeKey` prop-rule kinds behind its `scopes` and `anchorType`/`memberType`.
+ * A form input whose value is a RULE over the OU tree rather than a pinned list
+ * of ids: `{unit, scope, type}`, where `scope` is one of `unit`/`subtree`/
+ * `children` and is ALWAYS written. That is the whole shape decision — "this
+ * unit" and "this unit's subtree" are different answers, and a consumer must
+ * never have to infer which was meant from the presence of some other field.
+ * `type` is an OU type key from 1.30, filtering the set the scope resolves to;
+ * pinning the ids that set contains today is the parallel unit-id → kind map
+ * #822 exists to delete, and it goes stale the first time a unit is reparented,
+ * silently.
+ * The type declares NO `source`, and that is structural rather than a
+ * convenience. Every `source` in this contract is ownership-checked by the
+ * loader against the routes the declaring plugin registered, so a plugin cannot
+ * name `/api/ous` at all — a `referenceSelect` aimed there drops the whole
+ * feature, and the only way to satisfy the gate is to republish core's hierarchy
+ * through a plugin route, which is exactly the drift being prevented. So the
+ * host renderer reads the units and the vocabulary from CORE's own endpoints
+ * under the caller's own `ous:read` gate: a caller who may not read the org
+ * chart cannot build a rule over it, and a plugin has no prop with which to
+ * point the control anywhere else.
+ * `anchorType` and the value's `type` are deliberately separate: the first
+ * restricts which unit may ANCHOR the rule, the second restricts the set it
+ * resolves to, and "every department under a faculty" needs both. A `memberType`
+ * declared beside a `scopes` list of exactly ['unit'] is refused — a kind filter
+ * over the single unit the user just picked can only ever remove it. Additive).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.29.0';
+    public const VERSION = '1.32.0';
 
     /**
      * Static identity only — never instantiated.
