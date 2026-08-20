@@ -242,9 +242,27 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.29.0',
+            '1.30.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.29 adds the audited-event contribution point (PluginEventsInterface): '
+            'SDK 1.30 adds the workflow block types `timeline` and `inbox`, plus the '
+            . 'itemActionList prop-rule kind behind inbox.actions. timeline is the '
+            . 'audit-trail shape every product was hand-rolling, so the same history '
+            . 'rendered differently on every screen; it declares no endpoint and no verb, '
+            . 'so read-only is a property of the contract rather than a convention. inbox '
+            . 'is the half with a seam: core has no notion of a task queue, so the PLUGIN '
+            . 'supplies the items, and CORE resolves which of the declared actions the '
+            . 'caller may take on each — from the ROUTE the action calls, with the same '
+            . 'RoleChecker calls RbacMiddleware makes, through '
+            . 'POST /api/v1/me/permitted-actions. An action therefore does NOT declare the '
+            . 'permission its endpoint is gated on: a restated slug is a second answer to a '
+            . 'question the route table already answers, and it drifts the day someone '
+            . 're-gates the route and updates one of the two places. scopedPermission is '
+            . 'the one authorization fact a plugin CAN contribute, because it is the one '
+            . 'the route table cannot express — the per-record predicate a handler applies '
+            . 'inside the request, resolved through the resource-scoped grants of 1.17/1.22 '
+            . 'as an ADDITIONAL conjunct, so it can only ever remove an action from the '
+            . 'permitted set and never add one; '
+            . 'SDK 1.29 adds the audited-event contribution point (PluginEventsInterface): '
             . 'the audit writer subscribed to a HARDCODED map of core event names, so a '
             . 'plugin\'s own domain events reached the platform audit trail never — an '
             . 'operator opening the one screen that answers "who did what" saw core\'s '

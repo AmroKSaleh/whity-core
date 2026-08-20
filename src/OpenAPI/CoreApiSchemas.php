@@ -908,6 +908,32 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+            // #868: batch "would you let me make these requests?" resolution,
+            // behind the `inbox` block type. Registered with NEITHER a required
+            // role NOR a required permission for the same reason as
+            // /api/me/capabilities — any authenticated caller may ask about
+            // their OWN authority — and the handler fails closed itself. The
+            // profile and tenant are the caller's resolved ones and are never
+            // read from the body, so this cannot probe another user's authority;
+            // the answers are UI hints and grant nothing.
+            [
+                'method' => 'POST',
+                'path' => '/api/me/permitted-actions',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Resolve which of a batch of requests the caller is permitted to make',
+                    'tags' => ['me'],
+                    'request' => 'PermittedActionsRequest',
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'One allow/deny answer per check, in request order',
+                            'PermittedActionsResponse'
+                        ),
+                        422 => self::errorResponse("Missing 'checks' list, or more than 200 checks"),
+                    ] + self::authErrors(),
+                ],
+            ],
             // Self-service analogue of GET /api/audit-logs (audit:read-gated,
             // see auditRoutes()): no permission gate here — every authenticated
             // caller may see their OWN activity. actor_user_id is pinned to the
@@ -3074,6 +3100,34 @@ final class CoreApiSchemas
             'MeCapabilitiesResponse' => self::dataEnvelope(self::object([
                 'permissions' => ['type' => 'array', 'items' => self::str()],
             ], ['permissions'])),
+
+            // #868: batch permitted-action resolution behind the `inbox` block.
+            // A check names the CONCRETE request an affordance would make, so the
+            // host can answer with the same route lookup + RoleChecker calls
+            // RbacMiddleware makes. `scopedPermission` (with resourceType +
+            // resourceId) is an ADDITIONAL per-record conjunct — it can only
+            // narrow the route gate's answer, never widen it.
+            'PermittedActionCheck' => self::object([
+                'ref' => self::str(),
+                'method' => ['type' => 'string', 'enum' => ['POST', 'PUT', 'PATCH', 'DELETE']],
+                'path' => self::str(),
+                'resourceType' => self::str(true),
+                'resourceId' => self::int(true),
+                'scopedPermission' => self::str(true),
+            ], ['ref', 'method', 'path']),
+            'PermittedActionsRequest' => self::object([
+                'checks' => ['type' => 'array', 'items' => SchemaBuilder::ref('PermittedActionCheck')],
+            ], ['checks']),
+            // `required` mirrors RbacMiddleware's 403 body: the permission slug
+            // that refused, or null when a role (or a missing route) refused.
+            'PermittedActionResult' => self::object([
+                'ref' => self::str(true),
+                'allowed' => self::bool(),
+                'required' => self::str(true),
+            ], ['ref', 'allowed', 'required']),
+            'PermittedActionsResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('PermittedActionResult')],
+            ], ['data']),
 
             'AuditLogEntry' => $auditEntry,
             'Pagination' => self::object([

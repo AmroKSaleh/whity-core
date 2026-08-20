@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -303,6 +303,69 @@ final class BlockContract
                 'valueField'  => ['type' => 'string',     'required' => true],
                 'labelField'  => ['type' => 'string',     'required' => true],
                 'placeholder' => ['type' => 'string',     'required' => false],
+            ]],
+
+            // ---- workflow blocks (#868) ----
+            // An ordered, append-only EVENT LIST — the audit-trail shape every
+            // product on the platform grows and, until now, hand-rolled: actor,
+            // action, timestamp, an optional note, and an optional from/to pair
+            // for a state change. Read-only by construction: it declares no
+            // action, no endpoint and no mutation verb, so there is nothing for
+            // a renderer to submit. Data-bound exactly like `dataStat` — one
+            // ownership-checked `source`, then per-field mappings — because an
+            // audit trail is never a literal the plugin can inline.
+            'timeline' => ['container' => false, 'props' => [
+                'source'         => ['type' => 'apiPath', 'required' => true],
+                'actorField'     => ['type' => 'string',  'required' => true],
+                'actionField'    => ['type' => 'string',  'required' => true],
+                'timestampField' => ['type' => 'string',  'required' => true],
+                'noteField'      => ['type' => 'string',  'required' => false],
+                'fromField'      => ['type' => 'string',  'required' => false],
+                'toField'        => ['type' => 'string',  'required' => false],
+                'pageSize'       => ['type' => 'int',     'required' => false],
+                'emptyText'      => ['type' => 'string',  'required' => false],
+                'params'         => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+            // A TASK LIST: the items awaiting the current user, each carrying
+            // the actions that user may actually take on it.
+            //
+            // The seam. Core has no notion of a task queue, so the ITEMS come
+            // from the plugin's own `source` — an ordinary ownership-checked
+            // apiPath, fetched exactly like a `dataTable`'s. What core owns is
+            // the other half: WHICH of the declared `actions` this caller may
+            // take on each item. That half is the entire reason the type lives
+            // here. A plugin that answered it itself would be re-deriving
+            // authorization beside the host's, and the two would drift.
+            //
+            // Note what an action does NOT declare: the permission its endpoint
+            // is gated on. That is not the plugin's to restate — the host reads
+            // it off the ROUTE the action actually calls and evaluates it with
+            // the same RoleChecker calls RbacMiddleware makes, so what the user
+            // is shown cannot disagree with what the middleware enforces. A
+            // restated slug would be a second source of truth for a question
+            // that already has an authoritative one.
+            //
+            // `scopedPermission` is the one thing a plugin CAN add, and it is
+            // not a restatement either: it is an ADDITIONAL per-record predicate
+            // the host resolves at (`resourceType`, the item's `idField` value)
+            // through the resource-scoped grants of SDK 1.17/1.22 — the check a
+            // plugin's own handler makes INSIDE the request, which no route
+            // table can expose. It can only ever hide an action, never reveal
+            // one: the route gate is evaluated regardless. Declaring it requires
+            // `resourceType`, since a per-record predicate with no record is a
+            // tenant-wide check wearing the wrong name.
+            'inbox' => ['container' => false, 'props' => [
+                'source'         => ['type' => 'apiPath',        'required' => true],
+                'idField'        => ['type' => 'string',         'required' => true],
+                'titleField'     => ['type' => 'string',         'required' => true],
+                'subtitleField'  => ['type' => 'string',         'required' => false],
+                'timestampField' => ['type' => 'string',         'required' => false],
+                'statusField'    => ['type' => 'string',         'required' => false],
+                'resourceType'   => ['type' => 'string',         'required' => false],
+                'actions'        => ['type' => 'itemActionList', 'required' => true],
+                'pageSize'       => ['type' => 'int',            'required' => false],
+                'emptyText'      => ['type' => 'string',         'required' => false],
+                'params'         => ['type' => 'sourceParamList', 'required' => false],
             ]],
 
             // ---- interactive blocks (SP3, WC-233) ----

@@ -39,6 +39,8 @@ import type {
   GridBlock,
   HeadingBlock,
   IconBlock,
+  InboxBlock,
+  ItemAction,
   KeyValueBlock,
   ListBlock,
   LocalizedTextValue,
@@ -63,6 +65,7 @@ import type {
   TextAreaBlock,
   TextBlock,
   TextInputBlock,
+  TimelineBlock,
   VisibleWhen,
 } from '@/lib/plugin-features';
 import { Chart } from '@amroksaleh/ui/chart';
@@ -118,6 +121,10 @@ import { submitPluginAction } from '@/lib/plugin-action-submit';
 import type { ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { usePluginData } from '@/lib/use-plugin-data';
+import {
+  usePermittedActions,
+  type PermittedActionCheck,
+} from '@/lib/use-permitted-actions';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import {
@@ -275,6 +282,24 @@ function isChartSeriesList(
         typeof (item as { label?: unknown }).label === 'string' &&
         isOneOfNumber((item as { color?: unknown }).color, [1, 2, 3, 4, 5] as const)
     )
+  );
+}
+
+/**
+ * #868: `inbox.actions` — mirrors the SDK's itemActionList rule. A malformed
+ * entry costs the whole block rather than silently rendering an action whose
+ * endpoint the host never shape-checked.
+ */
+function isItemActionList(value: unknown): value is ItemAction[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every(
+    (item) =>
+      typeof item === 'object' &&
+      item !== null &&
+      isNonEmptyString((item as { key?: unknown }).key) &&
+      isNonEmptyString((item as { label?: unknown }).label) &&
+      isOneOf((item as { method?: unknown }).method, ['POST', 'PUT', 'PATCH', 'DELETE'] as const) &&
+      isNonEmptyString((item as { endpoint?: unknown }).endpoint)
   );
 }
 
@@ -1458,6 +1483,467 @@ function ChartRenderer({ block }: { block: ChartBlock }) {
   );
 }
 
+// ---- workflow renderers (#868) ----
+
+/**
+ * TimelineRenderer — an ordered, append-only event list: actor, action,
+ * timestamp, an optional note, and an optional from → to pair.
+ *
+ * Read-only by construction. There is no endpoint, no verb and no affordance in
+ * the contract, so there is nothing here to submit — the type cannot grow a
+ * write without a contract change a reviewer would see.
+ *
+ * Data-bound exactly like `dataStat`: one already-verified `source`, then
+ * per-field mappings over each row. `pageSize` is the SAME client-side facet
+ * `dataTable`/`dataList` carry — it slices rows already fetched and never
+ * issues a second request.
+ */
+function TimelineRenderer({ block }: { block: TimelineBlock }) {
+  type Rows = Record<string, unknown>[];
+  const t = useTranslation('plugin');
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
+    if (!Array.isArray(body) || body.length === 0) return null;
+    return body as Rows;
+  });
+  const [page, setPage] = React.useState(1);
+
+  useRefetchOnSignal(
+    state.status === 'ready' || state.status === 'empty' ? state.refresh
+      : state.status === 'error' ? state.retry : undefined
+  );
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" data-slot="block-data-loading">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-2/3" />
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-error"
+      >
+        <span>{t('blocks.data.loadError', 'Failed to load data.')}</span>
+        <Button type="button" variant="outline" size="sm" onClick={state.retry}>
+          {t('blocks.retry', 'Retry')}
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.status === 'empty') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-empty"
+      >
+        {/* The plugin's own `emptyText` wins; only our default is keyed. */}
+        <span>{block.emptyText ?? t('blocks.timeline.empty', 'No events recorded.')}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+    );
+  }
+
+  const events = state.data.map((row) => ({
+    actor: String(row[block.actorField] ?? ''),
+    action: String(row[block.actionField] ?? ''),
+    timestamp: String(row[block.timestampField] ?? ''),
+    note: block.noteField !== undefined ? String(row[block.noteField] ?? '') : '',
+    from: block.fromField !== undefined ? String(row[block.fromField] ?? '') : '',
+    to: block.toField !== undefined ? String(row[block.toField] ?? '') : '',
+  }));
+
+  const paginate = block.pageSize !== undefined && block.pageSize > 0;
+  const effectivePageSize = paginate ? (block.pageSize as number) : Math.max(events.length, 1);
+  const totalPages = Math.max(1, Math.ceil(events.length / effectivePageSize));
+  const clampedPage = Math.min(page, totalPages);
+  const paged = paginate
+    ? events.slice((clampedPage - 1) * effectivePageSize, clampedPage * effectivePageSize)
+    : events;
+
+  return (
+    <div className="space-y-2" data-slot="block-timeline">
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+      {/* An ordered list, semantically: the order IS the information. */}
+      <ol className="relative space-y-4 border-s border-border ps-5">
+        {paged.map((event, index) => (
+          <li key={index} className="relative" data-slot="block-timeline-event">
+            <IconPointFilled
+              className="absolute -start-[1.4rem] top-1 size-3 text-muted-foreground"
+              aria-hidden
+            />
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-sm font-medium text-foreground">{event.actor}</span>
+              <span className="text-sm text-foreground">{event.action}</span>
+              <span className="text-xs text-muted-foreground">{event.timestamp}</span>
+            </div>
+            {(event.from !== '' || event.to !== '') && (
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {event.from !== '' && <Badge variant="outline">{event.from}</Badge>}
+                <span className="text-xs text-muted-foreground" aria-hidden>
+                  &rarr;
+                </span>
+                {event.to !== '' && <Badge variant="secondary">{event.to}</Badge>}
+              </div>
+            )}
+            {event.note !== '' && (
+              <p className="mt-1 text-xs text-muted-foreground">{event.note}</p>
+            )}
+          </li>
+        ))}
+      </ol>
+      {paginate && (
+        <Pagination
+          page={clampedPage}
+          perPage={effectivePageSize}
+          total={events.length}
+          onPageChange={setPage}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A stable empty row set, so the memoized item list is not rebuilt every render. */
+const EMPTY_ROWS: Record<string, unknown>[] = [];
+
+/**
+ * The `ref` under which one (item, action) pair is resolved and looked up.
+ * Item ids and action keys are both plugin-supplied, so the separator has to be
+ * one the action key cannot contain — the SDK forbids whitespace in `key`, so a
+ * space is unambiguous.
+ */
+function actionRef(itemId: string, actionKey: string): string {
+  return `${itemId} ${actionKey}`;
+}
+
+/** Stringify a row for `{field}` templating: every value as its display string. */
+function templateRowOf(raw: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, String(v ?? '')]));
+}
+
+/**
+ * One resolved action button on an inbox item. Rendered ONLY when core answered
+ * that this caller may make this exact request, so a refused or unresolved
+ * action is absent rather than present-and-disabled: a greyed-out button still
+ * advertises work the user cannot do, and a task list of them is noise.
+ */
+function InboxActionButton({
+  action,
+  path,
+  onMutated,
+}: {
+  action: ItemAction;
+  path: string;
+  onMutated: () => void;
+}) {
+  const { addToast } = useToast();
+  const t = useTranslation('plugin');
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+
+  const run = React.useCallback(() => {
+    setBusy(true);
+    void submitPluginAction(path, action.method, {}).then((result) => {
+      setBusy(false);
+      setOpen(false);
+      if (result.ok) {
+        addToast(t('action.toast.completed', 'Completed successfully'), 'success');
+        onMutated();
+      } else {
+        // `result.error` is the server's own message — never keyed.
+        addToast(result.error ?? t('action.toast.requestFailed', 'Request failed'), 'error');
+      }
+    });
+  }, [action.method, path, addToast, onMutated, t]);
+
+  const variant = action.variant === 'primary' ? 'default' : (action.variant ?? 'outline');
+
+  if (typeof action.confirm === 'string' && action.confirm !== '') {
+    return (
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogTrigger asChild>
+          <Button type="button" variant={variant} size="sm" disabled={busy}>
+            {action.label}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{action.label}</AlertDialogTitle>
+            <AlertDialogDescription>{action.confirm}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('blocks.dialog.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); run(); }}>
+              {action.label}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
+
+  return (
+    <Button type="button" variant={variant} size="sm" disabled={busy} onClick={run}>
+      {action.label}
+    </Button>
+  );
+}
+
+/**
+ * InboxRenderer — the items awaiting the current user, each carrying the actions
+ * that user may actually take on it.
+ *
+ * The seam, and the reason the type is in core rather than in each product:
+ *
+ *   - the PLUGIN supplies the items. Core has no notion of a task queue, so
+ *     `source` is an ordinary ownership-checked apiPath, fetched exactly as a
+ *     `dataTable`'s is.
+ *   - CORE resolves which of the declared `actions` this caller may take on each
+ *     item, through `POST /api/v1/me/permitted-actions`. That endpoint answers
+ *     from the live route table with the same RoleChecker calls RbacMiddleware
+ *     makes, so what is shown here and what the middleware admits are one
+ *     computation rather than two that happen to agree.
+ *
+ * Fail-closed while resolving: `usePermittedActions` denies every ref until the
+ * real answer lands, so the action row fills in rather than emptying out.
+ *
+ * Pagination is the same client-side `pageSize` facet `dataTable`/`dataList`
+ * carry, over the rows one fetch of `source` returned — deliberately NOT a
+ * second pagination mechanism (the fetch side is #867).
+ */
+function InboxRenderer({ block }: { block: InboxBlock }) {
+  type Rows = Record<string, unknown>[];
+  const t = useTranslation('plugin');
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
+    if (!Array.isArray(body) || body.length === 0) return null;
+    return body as Rows;
+  });
+  const [page, setPage] = React.useState(1);
+
+  const rows = state.status === 'ready' ? state.data : EMPTY_ROWS;
+
+  const items = React.useMemo(
+    () =>
+      rows.map((row) => ({
+        id: String(row[block.idField] ?? ''),
+        title: String(row[block.titleField] ?? ''),
+        subtitle: block.subtitleField !== undefined ? String(row[block.subtitleField] ?? '') : '',
+        timestamp:
+          block.timestampField !== undefined ? String(row[block.timestampField] ?? '') : '',
+        status: block.statusField !== undefined ? String(row[block.statusField] ?? '') : '',
+        raw: row,
+      })),
+    [
+      rows,
+      block.idField,
+      block.titleField,
+      block.subtitleField,
+      block.timestampField,
+      block.statusField,
+    ]
+  );
+
+  // One check per (item, action): the CONCRETE request the button would make,
+  // templated from the item exactly as it will be at click time. Asking about
+  // the same string the button will send is what makes the answer binding.
+  const checks = React.useMemo<PermittedActionCheck[]>(() => {
+    const out: PermittedActionCheck[] = [];
+    for (const item of items) {
+      const row = templateRowOf(item.raw);
+      for (const action of block.actions) {
+        out.push({
+          ref: actionRef(item.id, action.key),
+          method: action.method,
+          path: applyRowTemplate(action.endpoint, row),
+          ...(block.resourceType !== undefined
+            ? { resourceType: block.resourceType, resourceId: item.id }
+            : {}),
+          ...(action.scopedPermission !== undefined
+            ? { scopedPermission: action.scopedPermission }
+            : {}),
+        });
+      }
+    }
+    return out;
+  }, [items, block.actions, block.resourceType]);
+
+  // The batch changes only when the resolved requests do. Derived from the
+  // checks themselves, so a re-render with identical content does not re-POST.
+  const batchKey = React.useMemo(
+    () => checks.map((c) => `${c.method} ${c.path} ${c.scopedPermission ?? ''}`).join('|'),
+    [checks]
+  );
+
+  const permitted = usePermittedActions(checks, batchKey);
+
+  const refresh =
+    state.status === 'ready' || state.status === 'empty' ? state.refresh
+      : state.status === 'error' ? state.retry : undefined;
+  useRefetchOnSignal(refresh);
+
+  // After a mutation BOTH halves are stale: the queue (the item may have left
+  // it) and the permission answer (approving something can change what is next
+  // permitted on it).
+  const permittedRefresh =
+    permitted.status === 'ready' ? permitted.refresh
+      : permitted.status === 'error' ? permitted.retry : undefined;
+  const onMutated = React.useCallback(() => {
+    refresh?.();
+    permittedRefresh?.();
+  }, [refresh, permittedRefresh]);
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" data-slot="block-data-loading">
+        <Skeleton className="h-14 w-full" />
+        <Skeleton className="h-14 w-full" />
+        <Skeleton className="h-14 w-2/3" />
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-error"
+      >
+        <span>{t('blocks.data.loadError', 'Failed to load data.')}</span>
+        <Button type="button" variant="outline" size="sm" onClick={state.retry}>
+          {t('blocks.retry', 'Retry')}
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.status === 'empty') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-empty"
+      >
+        {/* The plugin's own `emptyText` wins; only our default is keyed. */}
+        <span>{block.emptyText ?? t('blocks.inbox.empty', 'Nothing awaiting you.')}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+    );
+  }
+
+  const paginate = block.pageSize !== undefined && block.pageSize > 0;
+  const effectivePageSize = paginate ? (block.pageSize as number) : Math.max(items.length, 1);
+  const totalPages = Math.max(1, Math.ceil(items.length / effectivePageSize));
+  const clampedPage = Math.min(page, totalPages);
+  const paged = paginate
+    ? items.slice((clampedPage - 1) * effectivePageSize, clampedPage * effectivePageSize)
+    : items;
+
+  return (
+    <div className="space-y-2" data-slot="block-inbox">
+      <div className="flex items-center justify-end gap-2">
+        {permitted.status === 'error' && (
+          <span className="text-xs text-muted-foreground" data-slot="block-inbox-actions-error">
+            {t(
+              'blocks.inbox.actionsUnavailable',
+              'Actions unavailable — permissions could not be resolved.'
+            )}
+          </span>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
+          onClick={onMutated}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+      <ul className="space-y-2">
+        {paged.map((item, index) => {
+          const row = templateRowOf(item.raw);
+          const allowedActions = block.actions.filter((action) =>
+            permitted.isAllowed(actionRef(item.id, action.key))
+          );
+          return (
+            <li
+              key={`${item.id}-${index}`}
+              className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border bg-card p-3"
+              data-slot="block-inbox-item"
+            >
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{item.title}</span>
+                  {item.status !== '' && <Badge variant="secondary">{item.status}</Badge>}
+                </div>
+                {item.subtitle !== '' && (
+                  <p className="text-xs text-muted-foreground">{item.subtitle}</p>
+                )}
+                {item.timestamp !== '' && (
+                  <p className="text-xs text-muted-foreground">{item.timestamp}</p>
+                )}
+              </div>
+              {allowedActions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5" data-slot="block-inbox-actions">
+                  {allowedActions.map((action) => (
+                    <InboxActionButton
+                      key={action.key}
+                      action={action}
+                      path={applyRowTemplate(action.endpoint, row)}
+                      onMutated={onMutated}
+                    />
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {paginate && (
+        <Pagination
+          page={clampedPage}
+          perPage={effectivePageSize}
+          total={items.length}
+          onPageChange={setPage}
+        />
+      )}
+    </div>
+  );
+}
+
 // ---- SP3 interactive renderers (WC-235) ----
 
 function InputLabel({ inputId, label, required, error }: { inputId: string; label: string; required?: boolean; error?: string }) {
@@ -2225,6 +2711,24 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       );
     case 'selector':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isNonEmptyString(block.source) && isNonEmptyString(block.valueField) && isNonEmptyString(block.labelField) ? <SelectorRenderer block={block} /> : <UnsupportedBlock type="selector" />;
+    case 'timeline':
+      return isNonEmptyString(block.source) &&
+        isNonEmptyString(block.actorField) &&
+        isNonEmptyString(block.actionField) &&
+        isNonEmptyString(block.timestampField) ? (
+        <TimelineRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="timeline" />
+      );
+    case 'inbox':
+      return isNonEmptyString(block.source) &&
+        isNonEmptyString(block.idField) &&
+        isNonEmptyString(block.titleField) &&
+        isItemActionList(block.actions) ? (
+        <InboxRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="inbox" />
+      );
 
     case 'form':
       return Array.isArray(block.children) && isValidSubmitSpec(block.submit) ? <FormRenderer block={block} /> : <UnsupportedBlock type="form" />;

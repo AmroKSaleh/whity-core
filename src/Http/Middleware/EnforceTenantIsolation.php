@@ -625,6 +625,31 @@ class EnforceTenantIsolation
      */
     private function isPublicRoute(string $path): bool
     {
+        return self::pathBypassesTenantResolution($path);
+    }
+
+    /**
+     * Whether a path is reachable WITHOUT tenant resolution — the same question
+     * {@see self::isPublicRoute()} asks, published so another component can ask
+     * it about a path other than the one it is currently serving (#868).
+     *
+     * The one caller today is {@see \Whity\Api\PermittedActionsApiHandler},
+     * which answers "would the middleware admit this request?" for a batch of
+     * paths. A public path never has a tenant resolved for it, so
+     * {@see \Whity\Http\RbacMiddleware} refuses any gated route on one with
+     * `401 Unresolved tenant context` before it ever consults RBAC — and the
+     * resolver must report that as NOT permitted rather than answering the
+     * narrower RBAC question and being right about the wrong layer.
+     *
+     * Reading the same three lists through the same predicate is the point:
+     * a second copy of "which paths are public" is exactly the drift this
+     * endpoint exists to avoid.
+     *
+     * @param string $path The request path (without query string).
+     * @return bool True when the path bypasses tenant resolution.
+     */
+    public static function pathBypassesTenantResolution(string $path): bool
+    {
         if (in_array($path, self::PUBLIC_ROUTES, true)) {
             return true;
         }

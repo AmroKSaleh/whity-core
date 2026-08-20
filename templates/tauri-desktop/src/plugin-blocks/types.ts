@@ -181,6 +181,60 @@ export interface DataListBlock {
 }
 
 /**
+ * Workflow blocks (#868). Mirrors the SDK contract exactly — see
+ * `sdk/src/Frontend/Blocks/BlockContract.php` and `web/lib/plugin-features.ts`.
+ */
+export interface TimelineBlock {
+  type: "timeline"
+  source: string
+  actorField: string
+  actionField: string
+  timestampField: string
+  noteField?: string
+  fromField?: string
+  toField?: string
+  pageSize?: number
+  emptyText?: string
+  params?: SourceParam[]
+}
+
+/**
+ * One candidate action on an inbox item.
+ *
+ * There is deliberately NO prop for the permission `endpoint` is gated on: the
+ * host reads that off the route the endpoint dispatches to, so what the user is
+ * shown cannot disagree with what the RBAC gate enforces.
+ *
+ * `scopedPermission` is the per-record predicate a plugin handler applies inside
+ * the request — an ADDITIONAL conjunct that can only hide an action, never
+ * reveal one.
+ */
+export interface ItemAction {
+  key: string
+  label: string
+  method: "POST" | "PUT" | "PATCH" | "DELETE"
+  endpoint: string
+  scopedPermission?: string
+  confirm?: string
+  variant?: "primary" | "secondary" | "outline" | "ghost" | "destructive"
+}
+
+export interface InboxBlock {
+  type: "inbox"
+  source: string
+  idField: string
+  titleField: string
+  subtitleField?: string
+  timestampField?: string
+  statusField?: string
+  resourceType?: string
+  actions: ItemAction[]
+  pageSize?: number
+  emptyText?: string
+  params?: SourceParam[]
+}
+
+/**
  * `submit.endpoint` may carry `{targetId.field}`/`{selector}` context tokens —
  * the same addressing as `params.from`/`defaultFrom` — interpolated from the
  * master-detail context at submit time (e.g. an edit modal PATCHing
@@ -456,6 +510,8 @@ export type Block =
   | ActionButtonBlock
   | ChartBlock
   | SelectorBlock
+  | TimelineBlock
+  | InboxBlock
   | ModalBlock
   | DrawerBlock
 

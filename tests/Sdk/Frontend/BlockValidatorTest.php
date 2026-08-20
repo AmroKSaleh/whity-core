@@ -285,6 +285,236 @@ final class BlockValidatorTest extends TestCase
         $this->assertStringContainsString('node', $joined);
     }
 
+    // ==================== workflow blocks (#868) ====================
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function validInbox(): array
+    {
+        return [
+            'type' => 'inbox',
+            'source' => '/api/tasks/mine',
+            'idField' => 'id',
+            'titleField' => 'title',
+            'actions' => [
+                ['key' => 'approve', 'label' => 'Approve', 'method' => 'POST', 'endpoint' => '/api/tasks/{id}/approve'],
+            ],
+        ];
+    }
+
+    public function testTimelineAcceptsItsFullPropSet(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'timeline',
+            'source' => '/api/tasks/1/events',
+            'actorField' => 'actor',
+            'actionField' => 'action',
+            'timestampField' => 'at',
+            'noteField' => 'note',
+            'fromField' => 'from',
+            'toField' => 'to',
+            'pageSize' => 10,
+            'emptyText' => 'Nothing yet.',
+        ]]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    public function testTimelineRequiresItsThreeMandatoryFieldMappings(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'timeline',
+            'source' => '/api/tasks/1/events',
+        ]]);
+
+        $joined = implode(' | ', $result['errors']);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('actorField', $joined);
+        $this->assertStringContainsString('actionField', $joined);
+        $this->assertStringContainsString('timestampField', $joined);
+    }
+
+    public function testTimelineRejectsAnAbsoluteSource(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'timeline',
+            'source' => 'https://evil.example/events',
+            'actorField' => 'actor',
+            'actionField' => 'action',
+            'timestampField' => 'at',
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('source', implode(' | ', $result['errors']));
+    }
+
+    /**
+     * `timeline` is read-only BY CONSTRUCTION: the contract gives it no verb and
+     * no endpoint, so a tree cannot express a writable one. Pinned here because
+     * "read-only" is the type's whole promise — a later prop that quietly
+     * carried an endpoint would break it silently.
+     */
+    public function testTimelineDeclaresNoWritableProp(): void
+    {
+        $rule = BlockContract::rulesFor('timeline');
+        $this->assertNotNull($rule);
+        $props = $rule['props'];
+
+        $this->assertArrayNotHasKey('actions', $props);
+        $this->assertArrayNotHasKey('rowActions', $props);
+        foreach ($props as $name => $rule) {
+            $this->assertNotSame(
+                'submitSpec',
+                $rule['type'],
+                "timeline.{$name} must not be a submit spec — the type is read-only"
+            );
+        }
+    }
+
+    public function testInboxAcceptsItsFullPropSet(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'inbox',
+            'source' => '/api/tasks/mine',
+            'idField' => 'id',
+            'titleField' => 'title',
+            'subtitleField' => 'requester',
+            'timestampField' => 'submitted',
+            'statusField' => 'status',
+            'resourceType' => 'task',
+            'pageSize' => 20,
+            'emptyText' => 'Nothing awaiting you.',
+            'actions' => [
+                [
+                    'key' => 'approve',
+                    'label' => 'Approve',
+                    'method' => 'POST',
+                    'endpoint' => '/api/tasks/{id}/approve',
+                    'scopedPermission' => 'tasks:approve',
+                    'confirm' => 'Approve this?',
+                    'variant' => 'primary',
+                ],
+                [
+                    'key' => 'reject',
+                    'label' => 'Reject',
+                    'method' => 'DELETE',
+                    'endpoint' => '/api/tasks/{id}',
+                ],
+            ],
+        ]]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    public function testInboxRequiresANonEmptyActionList(): void
+    {
+        $block = self::validInbox();
+        $block['actions'] = [];
+
+        $result = BlockValidator::validate([$block]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('actions', implode(' | ', $result['errors']));
+    }
+
+    public function testInboxRejectsADuplicateActionKey(): void
+    {
+        $block = self::validInbox();
+        $block['actions'][] = [
+            'key' => 'approve',
+            'label' => 'Approve again',
+            'method' => 'POST',
+            'endpoint' => '/api/tasks/{id}/approve-again',
+        ];
+
+        $result = BlockValidator::validate([$block]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate 'inbox.actions' key 'approve'", implode(' | ', $result['errors']));
+    }
+
+    public function testInboxRejectsAnUnsupportedActionMethod(): void
+    {
+        $block = self::validInbox();
+        $block['actions'][0]['method'] = 'GET';
+
+        $result = BlockValidator::validate([$block]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('method', implode(' | ', $result['errors']));
+    }
+
+    public function testInboxRejectsAnAbsoluteActionEndpoint(): void
+    {
+        $block = self::validInbox();
+        $block['actions'][0]['endpoint'] = 'https://evil.example/approve';
+
+        $result = BlockValidator::validate([$block]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('endpoint', implode(' | ', $result['errors']));
+    }
+
+    /**
+     * A `scopedPermission` is a PER-RECORD predicate, so the block must say what
+     * kind of record its items are. Without `resourceType` the host would fall
+     * back to the tenant-wide question — a check that reads as per-record, is
+     * not, and is wrong in the permissive direction relative to the author's
+     * intent. Refused at validation rather than degraded at runtime.
+     */
+    public function testInboxRejectsScopedPermissionWithoutAResourceType(): void
+    {
+        $block = self::validInbox();
+        $block['actions'][0]['scopedPermission'] = 'tasks:approve';
+
+        $result = BlockValidator::validate([$block]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('resourceType', implode(' | ', $result['errors']));
+    }
+
+    public function testInboxAcceptsScopedPermissionWithAResourceType(): void
+    {
+        $block = self::validInbox();
+        $block['resourceType'] = 'task';
+        $block['actions'][0]['scopedPermission'] = 'tasks:approve';
+
+        $result = BlockValidator::validate([$block]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    /**
+     * The permission an action's ENDPOINT is gated on is not the plugin's to
+     * restate — the host reads it off the route. Pinned so nobody adds a
+     * `permission` prop back and reintroduces the second source of truth.
+     */
+    public function testInboxActionsCannotDeclareTheEndpointsOwnPermission(): void
+    {
+        $block = self::validInbox();
+        $block['permission'] = 'tasks:approve';
+
+        // An unknown prop is IGNORED by the contract (props are a whitelist, and
+        // only declared ones are read) — so the guarantee is not that this is
+        // rejected, but that no such prop exists to be honoured.
+        $inboxRule = BlockContract::rulesFor('inbox');
+        $this->assertNotNull($inboxRule);
+        $this->assertArrayNotHasKey('permission', $inboxRule['props']);
+        $this->assertTrue(BlockValidator::validate([$block])['ok']);
+    }
+
+    public function testInboxIsALeafAndRejectsChildren(): void
+    {
+        $block = self::validInbox();
+        $block['children'] = [['type' => 'text', 'value' => 'x']];
+
+        $result = BlockValidator::validate([$block]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('leaf', implode(' | ', $result['errors']));
+    }
+
     // ==================== contract surface ====================
 
     public function testContractCapsAreExposed(): void
@@ -299,13 +529,13 @@ final class BlockValidatorTest extends TestCase
         sort($types);
 
         // SP1 display types + SP2 data-bound types + SP3 interactive types
-        // (WC-233) + SP4 chart type (WC-240)
+        // (WC-233) + SP4 chart type (WC-240) + workflow types (#868)
         $expected = [
             'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider', 'drawer',
-            'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list', 'markdown', 'math',
+            'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'inbox', 'keyValue', 'list', 'markdown', 'math',
             'modal', 'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
-            'tab', 'table', 'tabs', 'text', 'textArea', 'textInput',
+            'tab', 'table', 'tabs', 'text', 'textArea', 'textInput', 'timeline',
         ];
         sort($expected);
 
