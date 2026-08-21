@@ -273,6 +273,9 @@ final class DocumentRenderApiHandler
         }
 
         return [
+            // @db-bool-ignore: $raw is the render request's `sheet` object from the
+            // JSON body (normalizeSheet is called on $body['sheet']), not a row —
+            // there is no `sheet` table and no BOOLEAN column behind this.
             'enabled' => (bool) ($raw['enabled'] ?? false),
             'cols' => $cols,
             'rows' => $rows,

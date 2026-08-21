@@ -16,6 +16,7 @@ use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Users API Handler
@@ -1032,7 +1033,7 @@ class UsersApiHandler
                     'roleId'     => (int) $row['role_id'],
                     'role'       => (string) $row['role'],
                     'ou_id'      => $row['ou_id'] !== null ? (int) $row['ou_id'] : null,
-                    'isPrimary'  => (bool) $row['is_primary'],
+                    'isPrimary'  => DbBool::of($row['is_primary']),
                     'status'     => (string) $row['status'],
                 ];
             }
@@ -1197,7 +1198,7 @@ class UsersApiHandler
                         'tenantId'  => $ownerTenantId,
                         'roleId'    => $roleId,
                         'ou_id'     => $ouId,
-                        'isPrimary' => (bool) $found['is_primary'],
+                        'isPrimary' => DbBool::of($found['is_primary']),
                         'created'   => false,
                     ],
                 ]);
@@ -1335,7 +1336,7 @@ class UsersApiHandler
                 return Response::error('Membership not found', 404);
             }
 
-            if ((bool) $row['is_primary']) {
+            if (DbBool::of($row['is_primary'])) {
                 return Response::error(
                     'Cannot remove the primary membership; use DELETE /api/users/{id} to remove the user from this tenant',
                     409
@@ -1498,11 +1499,7 @@ class UsersApiHandler
                     'role_name'     => isset($row['role_name']) ? (string) $row['role_name'] : null,
                     'ou_id'         => isset($row['ou_id']) ? (int) $row['ou_id'] : null,
                     'status'        => isset($row['status']) ? (string) $row['status'] : null,
-                    // Not a bare (bool) cast: PostgreSQL can hand a BOOLEAN back
-                    // as the string 'f', and `(bool) 'f'` is true — so the row
-                    // would report every membership as the primary one. Same
-                    // idiom as ProfileEmailRepository::toBool() and friends.
-                    'is_primary'    => in_array((string) $row['is_primary'], ['1', 't', 'true'], true),
+                    'is_primary'    => DbBool::of($row['is_primary']),
                     'granted_at'    => isset($row['created_at']) ? (string) $row['created_at'] : null,
                 ];
             }

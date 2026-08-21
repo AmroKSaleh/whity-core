@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Storage;
 
+use Whity\Core\Db\DbBool;
 use Whity\Core\Entitlement\EntitlementRegistry;
 use Whity\Core\Entitlement\EntitlementService;
 use Whity\Core\Security\EncryptedSecretStore;
@@ -117,7 +118,7 @@ final class TenantStorageResolver
             bucket: (string) $config['bucket'],
             accessKey: (string) $config['access_key'],
             secretKey: $this->secrets->decrypt($ciphertext),
-            pathStyle: (bool) $config['path_style'],
+            pathStyle: DbBool::of($config['path_style']),
             publicBaseUrl: is_string($publicBaseUrl) && $publicBaseUrl !== '' ? $publicBaseUrl : null,
         );
 
