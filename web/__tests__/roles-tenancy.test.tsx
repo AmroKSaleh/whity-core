@@ -286,7 +286,7 @@ describe('RoleRecordScreen reports scope from the server flag (#886)', () => {
       <RoleRecordScreen adapter={adapter} roleId={1} can={can} t={t} onBack={() => undefined} />
     );
 
-    expect(await screen.findByTestId('role-record-global-badge')).toBeInTheDocument();
+    expect(await screen.findByTestId('role-record-badge-global')).toBeInTheDocument();
     expect(await screen.findByTestId('role-record-global-warning')).toHaveTextContent(EDIT_WARNING);
     // Manageable, so the page is NOT read-only — the warning is the whole point:
     // an editable form on a role that reaches every tenant.
@@ -303,7 +303,7 @@ describe('RoleRecordScreen reports scope from the server flag (#886)', () => {
     );
 
     await screen.findByTestId('role-record');
-    expect(screen.queryByTestId('role-record-global-badge')).toBeNull();
+    expect(screen.queryByTestId('role-record-badge-global')).toBeNull();
     expect(screen.queryByTestId('role-record-global-warning')).toBeNull();
     expect(screen.getByText("Your tenant's role")).toBeInTheDocument();
   });
@@ -322,7 +322,7 @@ describe('RoleRecordScreen reports scope from the server flag (#886)', () => {
       <RoleRecordScreen adapter={adapter} roleId={1} can={can} t={t} onBack={() => undefined} />
     );
 
-    expect(await screen.findByTestId('role-record-global-badge')).toBeInTheDocument();
+    expect(await screen.findByTestId('role-record-badge-global')).toBeInTheDocument();
     expect(screen.queryByTestId('role-record-global-warning')).toBeNull();
     expect(screen.getByTestId('role-record-readonly-notice')).toBeInTheDocument();
   });

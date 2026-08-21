@@ -475,6 +475,18 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Email already exists in the tenant'),
                 ] + self::authErrors(),
             ]),
+            // #882: the single-record read a record page is built on. Tenant
+            // scoped exactly like the list — a non-system caller reads only a
+            // membership in its OWN tenant, and a profile without one here is a
+            // 404 rather than a leak that the profile exists somewhere.
+            self::adminRoute('GET', '/api/users/{id:\d+}', [
+                'summary' => 'Read one user',
+                'tags' => ['users'],
+                'responses' => [
+                    200 => self::jsonResponse('The user', 'UserResponse'),
+                    404 => self::errorResponse('User not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
             self::adminRoute('PATCH', '/api/users/{id:\d+}', [
                 'summary' => 'Update a user',
                 'tags' => ['users'],

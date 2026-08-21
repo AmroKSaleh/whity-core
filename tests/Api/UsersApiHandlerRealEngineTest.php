@@ -1097,6 +1097,96 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         return $request;
     }
 
+    // ── Single-record read (#882) ────────────────────────────────────────────
+
+    /**
+     * `GET /api/users/{id}` returns one person in the caller's tenant.
+     *
+     * The handler has carried this method since the identity cutover but NO
+     * ROUTE reached it until #882 registered one, so it was never exercised.
+     * A record page is addressable by definition — a pasted URL has to work —
+     * and the alternative, fetching the list and searching it, silently caps at
+     * the page size.
+     */
+    public function testGetReturnsTheUserInTheCallersTenant(): void
+    {
+        $this->seedProfile(120, 'p120@example.com');
+        $this->seedMembership(120, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->get($this->authedRequest('GET', '/api/users/120'), ['id' => '120']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+        $this->assertSame(120, $decoded['data']['id'], 'the id is the canonical profile_id');
+        $this->assertSame('p120@example.com', $decoded['data']['email']);
+        $this->assertSame('user', $decoded['data']['role'], 'role id 2 is the seeded `user` role');
+        $this->assertSame(1, $decoded['data']['tenantId']);
+        $this->assertArrayNotHasKey('password_hash', $decoded['data'], 'never expose the credential');
+    }
+
+    /**
+     * The two statuses are DIFFERENT facts and both are reported.
+     *
+     * `status` is the per-tenant membership lifecycle and `accountStatus` is the
+     * global profile switch (ADR 0005 §1). The record page states both, because
+     * an operator looking at an `invited` membership on a deactivated profile
+     * needs both sentences — reading either one as "active" says nothing about
+     * the other.
+     */
+    public function testGetReportsTheMembershipStatusAndTheAccountStatusSeparately(): void
+    {
+        $this->seedProfile(121, 'p121@example.com', 'inactive');
+        $this->seedMembership(121, 1, 2, 'invited');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->get($this->authedRequest('GET', '/api/users/121'), ['id' => '121']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+        $this->assertSame('invited', $decoded['data']['status']);
+        $this->assertSame('inactive', $decoded['data']['accountStatus']);
+    }
+
+    /**
+     * A profile with no membership HERE is a 404, not another tenant's record.
+     *
+     * The route is reachable by typing an id into the address bar, so this is
+     * the first place a cross-tenant read would be attempted — deliberately or
+     * by pasting the wrong link.
+     */
+    public function testGetRefusesAProfileWithoutAMembershipInThisTenant(): void
+    {
+        $this->seedProfile(122, 'p122@example.com');
+        $this->seedMembership(122, 2, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->get($this->authedRequest('GET', '/api/users/122'), ['id' => '122']);
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
+     * The SYSTEM tenant (id 0) reads a membership in any tenant — the same
+     * cross-tenant authority the list and the memberships endpoints already
+     * grant it.
+     */
+    public function testGetLetsTheSystemTenantReadAnotherTenantsMember(): void
+    {
+        $this->seedProfile(123, 'p123@example.com');
+        $this->seedMembership(123, 2, 2, 'active');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->get(
+            $this->authedRequest('GET', '/api/users/123', null, 0),
+            ['id' => '123']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+        $this->assertSame(2, $decoded['data']['tenantId'], 'the membership it found, with its own tenant');
+    }
+
     // ── Secondary memberships (WC-712 §1) ────────────────────────────────────
 
     /**

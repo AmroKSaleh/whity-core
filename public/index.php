@@ -1252,6 +1252,13 @@ $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
 // bare 'admin' role. requiredRole is cleared (null) so the check is driven
 // entirely by requiredPermission; migration 022 grants all three to admin.
 $router->register('GET',    '/api/users',           [$usersHandler, 'list'],   null, null, CorePermissions::USERS_READ);
+// #882: read ONE user. The handler has had this method since the identity
+// cutover but no route reached it, so every surface that wanted one person had
+// to fetch the list and search it — which caps at the page size and answers
+// "who is profile 412?" with silence once a tenant passes 100 people. A record
+// page is addressable by definition (a pasted URL must work), so it needs the
+// single-record read rather than a filtered list.
+$router->register('GET',    '/api/users/{id:\d+}',  [$usersHandler, 'get'],    null, null, CorePermissions::USERS_READ);
 $router->register('POST',   '/api/users',           [$usersHandler, 'create'], null, null, CorePermissions::USERS_WRITE);
 $router->register('PATCH',  '/api/users/{id:\d+}',  [$usersHandler, 'update'], null, null, CorePermissions::USERS_WRITE);
 $router->register('DELETE', '/api/users/{id:\d+}',  [$usersHandler, 'delete'], null, null, CorePermissions::USERS_DELETE);
