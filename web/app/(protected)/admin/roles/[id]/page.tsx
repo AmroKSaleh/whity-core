@@ -6,9 +6,12 @@
  * The FIRST record route in the web app. Every single-record surface here was
  * an overlay until now, so a record could not be linked to, bookmarked, or
  * returned to with the back button: "send me the link to that role" had no
- * answer. This route is that answer, and it is deliberately a PROTOTYPE — a
- * hand-built page that proves the shape before the general, block-DESCRIBED
- * record mechanism is built on top of it (#882/#883).
+ * answer. This route is that answer.
+ *
+ * It began as a hand-built prototype and is now a CONSUMER of the record-page
+ * shell (@amroksaleh/features/record, #882) — the same shell `/admin/users/[id]`
+ * mounts. The block-DESCRIBED version, which lets a plugin's records get the
+ * same treatment without host edits, is #883.
  *
  * Thin, like every other page in this app: it owns only web's provider seams —
  * the dynamic segment, the cookie-authenticated `webRolesAdapter`, the
@@ -21,7 +24,7 @@
 import { useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { RoleRecordScreen } from '@amroksaleh/features/roles';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { RecordPageSkeleton } from '@amroksaleh/features/record';
 import { webRolesAdapter } from '@/lib/roles-adapter';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useTranslation } from '@amroksaleh/features/i18n';
@@ -90,20 +93,15 @@ export default function Page() {
   // up a moment later, that is simply false while it is on screen. The
   // capabilities fetch is a single shared request the root layout already
   // started, so this waits on something already in flight rather than adding a
-  // round trip; the skeleton mirrors the screen's own so nothing jumps.
+  // round trip.
+  //
+  // #882: the screen's OWN skeleton, not a hand-copied lookalike. This route
+  // used to reproduce it — four `Skeleton` boxes in a four-column grid — and a
+  // copy of a skeleton is a copy that drifts the first time the record page
+  // grows a fifth stat, at which point the page visibly jumps at the moment the
+  // capabilities land.
   if (capabilitiesLoading) {
-    return (
-      <div className="space-y-6" aria-busy="true">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-        </div>
-        <Skeleton className="h-64" />
-      </div>
-    );
+    return <RecordPageSkeleton />;
   }
 
   return (

@@ -103,24 +103,13 @@ export interface RoleActivityEntry {
  */
 export type RoleActivityResult = RoleActivityEntry[] | 'forbidden';
 
-/** A single transport round-trip result. */
-export interface TransportResponse {
-  /** HTTP-equivalent status code. */
-  status: number;
-  /** Parsed JSON response body (or `null` when there was no body). */
-  body: unknown;
-}
-
 /**
- * The transport-agnostic seam every client implements. `{status, body}` is the
- * natural least-common-denominator: the desktop side's Rust command already
- * returns exactly this shape, and the web adapter maps a `fetch` `Response`
- * into it. A `RolesAdapter` is a thin function over one of these.
+ * The transport-agnostic seam every client implements. Defined once in the
+ * record slice now that a SECOND adapter (users, #882) is written over it, and
+ * re-exported here so `@amroksaleh/features/roles`' published surface is
+ * unchanged for everything that already imports it from this module.
  */
-export interface Transport {
-  /** method + app-relative path (e.g. "/api/v1/roles?per_page=100"); JSON body optional. */
-  request(method: string, path: string, body?: unknown): Promise<TransportResponse>;
-}
+export type { Transport, TransportResponse } from '../record/transport';
 
 /** The fields a caller may set when creating or updating a role. */
 export interface RoleInput {

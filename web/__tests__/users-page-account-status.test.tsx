@@ -16,6 +16,15 @@ import UsersPage, { type User } from '@/app/(protected)/admin/users/page';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useToast } from '@/lib/toast-context';
 
+// #882: the list's Edit action now opens the user RECORD page, so the page
+// takes a router. Mocked rather than wrapped in a provider — this suite is
+// about the status badge and the Deactivate/Reactivate action, and the
+// navigation is asserted where it belongs, in user-record-page.test.tsx.
+const mockRouterPush = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockRouterPush }),
+}));
+
 jest.mock('@/hooks/useCapabilities', () => ({
   useCapabilities: jest.fn(),
 }));
@@ -108,12 +117,19 @@ beforeEach(() => {
   });
 });
 
-/** Open the row's actions dropdown and return its menu element. */
+/**
+ * Open the row's actions dropdown and return its menu element.
+ *
+ * Named explicitly (#882): the row now holds a SECOND button — the person's own
+ * name, which opens their record page — so "the button in this row" stopped
+ * being unambiguous, for a screen reader as much as for this query. Same
+ * adjustment the roles list needed when its rows gained a record link.
+ */
 async function openRowMenu(rowName: string): Promise<HTMLElement> {
   const user = userEvent.setup();
   const row = screen.getByText(rowName).closest('tr');
   expect(row).not.toBeNull();
-  const trigger = within(row as HTMLElement).getByRole('button');
+  const trigger = within(row as HTMLElement).getByRole('button', { name: 'Row actions' });
   await user.click(trigger);
   return await screen.findByRole('menu');
 }

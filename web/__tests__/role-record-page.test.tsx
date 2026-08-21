@@ -279,7 +279,7 @@ describe('RoleRecordScreen — context a modal cannot carry', () => {
       }),
     });
 
-    expect(await screen.findByTestId('role-record-holder-count')).toHaveTextContent('12');
+    expect(await screen.findByTestId('role-record-stat-holders')).toHaveTextContent('12');
     // The most recent assignment is the first row — "latest role assignment was
     // to user3".
     const holders = screen.getByTestId('role-record-holders');
@@ -292,7 +292,7 @@ describe('RoleRecordScreen — context a modal cannot carry', () => {
 
     const holders = await screen.findByTestId('role-record-holders');
     expect(within(holders).getByText('Nobody holds this role yet.')).toBeInTheDocument();
-    expect(await screen.findByTestId('role-record-holder-count')).toHaveTextContent('0');
+    expect(await screen.findByTestId('role-record-stat-holders')).toHaveTextContent('0');
   });
 
   it('keeps the record usable when the holders panel fails', async () => {
@@ -355,7 +355,7 @@ describe('RoleRecordScreen — read-only is a state, not a disabled form', () =>
   it('renders read-only, and says why, for a global base role (WC-110/WC-222)', async () => {
     renderRecord({ adapter: fakeAdapter({ getRole: jest.fn().mockResolvedValue(GLOBAL_ROLE) }) });
 
-    expect(await screen.findByTestId('role-record-global-badge')).toHaveTextContent(
+    expect(await screen.findByTestId('role-record-badge-global')).toHaveTextContent(
       'Global base role'
     );
     expect(
