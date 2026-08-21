@@ -21,6 +21,7 @@
 import { useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { RoleRecordScreen } from '@amroksaleh/features/roles';
+import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { webRolesAdapter } from '@/lib/roles-adapter';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useTranslation } from '@amroksaleh/features/i18n';
@@ -38,7 +39,7 @@ const I18N_MISS = '__ROLE_RECORD_I18N_MISS__';
 export default function Page() {
   const params = useParams<{ id: string | string[] }>();
   const router = useRouter();
-  const { hasPermission } = useCapabilities();
+  const { hasPermission, loading: capabilitiesLoading } = useCapabilities();
   const { addToast } = useToast();
 
   // Client pages read dynamic segments via useParams (Next 16 app router). The
@@ -80,6 +81,28 @@ export default function Page() {
       <p className="text-sm text-muted-foreground">
         {t('roles.record.error.title', 'This role could not be loaded')}
       </p>
+    );
+  }
+
+  // `hasPermission` is FAIL-CLOSED while the capability fetch is in flight, so
+  // mounting the screen early would render "You don't have permission to edit
+  // roles" to an administrator who does — a sentence, unlike a button that shows
+  // up a moment later, that is simply false while it is on screen. The
+  // capabilities fetch is a single shared request the root layout already
+  // started, so this waits on something already in flight rather than adding a
+  // round trip; the skeleton mirrors the screen's own so nothing jumps.
+  if (capabilitiesLoading) {
+    return (
+      <div className="space-y-6" aria-busy="true">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+        </div>
+        <Skeleton className="h-64" />
+      </div>
     );
   }
 
