@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core"
 
 import {
+  blankTemplate,
   createDocumentDesignerAdapter,
   isDocTemplate,
   migrateTemplate,
@@ -80,6 +81,22 @@ interface DeviceRow {
  */
 const deviceMeta = new Map<string, { scope: string; requiredPermission: string | null; isSystem: boolean }>()
 
+/**
+ * A row the plugin's own "New template" form created carries the EMPTY
+ * placeholder rather than a canvas — the form sets name and scope and nothing
+ * else, and `{}` round-trips through PHP's json_decode/encode as `[]`.
+ *
+ * Such a row must open as a blank document to be designed, not be hidden.
+ * Hiding it is precisely why a template created on the plugin screen never
+ * reached the designer: `isDocTemplate([])` is false, so the row was skipped
+ * and the list came back empty. Only a row that is neither a template NOR a
+ * placeholder is genuinely malformed and skipped.
+ */
+function isEmptyPlaceholder(data: unknown): boolean {
+  if (Array.isArray(data)) return data.length === 0
+  return !!data && typeof data === "object" && Object.keys(data as object).length === 0
+}
+
 function rowsOf(body: unknown): unknown[] {
   const data = (body as { data?: unknown } | null)?.data
   return Array.isArray(data) ? data : []
@@ -104,7 +121,18 @@ async function listDeviceTemplates(): Promise<SavedTemplate[]> {
   const out: SavedTemplate[] = []
   for (const raw of rowsOf(body)) {
     const row = raw as DeviceRow
-    if (!isDocTemplate(row.data)) continue
+
+    let doc: DocTemplate
+    if (isDocTemplate(row.data)) {
+      doc = migrateTemplate(row.data as DocTemplate)
+    } else if (isEmptyPlaceholder(row.data)) {
+      // Keep the row's own name: it is what the operator typed on the plugin
+      // screen, and what they will look for in the designer's list.
+      doc = { ...blankTemplate(), name: row.name }
+    } else {
+      continue
+    }
+
     const id = `${DEVICE}${row.id}`
     deviceMeta.set(id, {
       scope: row.scope ?? "personal",
@@ -115,7 +143,7 @@ async function listDeviceTemplates(): Promise<SavedTemplate[]> {
       id,
       name: label(row.name, "device"),
       updatedAt: row.updatedAt ?? "",
-      data: migrateTemplate(row.data as DocTemplate),
+      data: doc,
     })
   }
   return out

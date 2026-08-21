@@ -158,6 +158,42 @@ describe("documentsAdapter — merging two stores", () => {
     expect(srvCalls[0].args.path).toBe("/api/v1/document-templates/4")
   })
 
+  it("opens a plugin-created stub as a blank document rather than hiding it", async () => {
+    // The plugin's "New template" form sets name and scope only, so `data` is
+    // the empty placeholder -- and `{}` round-trips through PHP as `[]`. This
+    // is the exact row shape captured from the live offline host, and skipping
+    // it is why a template created on the plugin screen never reached the
+    // designer.
+    wire({
+      remote: () => ({ status: 200, body: { data: [] } }),
+      php: () => ({
+        status: 200,
+        body: { data: [{ ...deviceRow(2, "Test from menu"), data: [] }] },
+      }),
+    })
+
+    const out = await documentsAdapter.listTemplates()
+
+    expect(out).toHaveLength(1)
+    expect(out[0].id).toBe("dev:2")
+    // Named for what the operator typed, not "Untitled template".
+    expect(out[0].data.name).toBe("Test from menu")
+    expect(out[0].data.version).toBe(2)
+    expect(out[0].data.pages).toHaveLength(1)
+  })
+
+  it("still skips a row that is neither a template nor a placeholder", async () => {
+    wire({
+      remote: () => ({ status: 200, body: { data: [] } }),
+      php: () => ({
+        status: 200,
+        body: { data: [{ ...deviceRow(3, "Corrupt"), data: { nope: true } }] },
+      }),
+    })
+
+    await expect(documentsAdapter.listTemplates()).resolves.toEqual([])
+  })
+
   it("keeps blocks server-only", async () => {
     // Block ids are persisted inside templates as `blockInstance.blockId`, so
     // namespacing them would write this file's scheme into saved documents.
