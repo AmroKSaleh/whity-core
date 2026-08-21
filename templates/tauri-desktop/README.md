@@ -37,9 +37,12 @@ npm install
 npm run tauri dev
 ```
 
-This opens a desktop window with a sidebar (Home / Demo Catalog / Printer
-demo / Plugins). The Demo Catalog list/create/edit flow persists to a
-real SQLite file in your OS's per-app data directory (see `src-tauri/src/db.rs`)
+This opens a desktop window with a sidebar (Home / Demo Catalog / Printer demo /
+Plugins / Plugin store / Roles), plus whatever screens the plugins on this device
+declare — `plugin-nav-provider.tsx` adds a nav entry per plugin frontend feature
+the offline host reports, so a plugin's screens appear without editing
+`nav-config.tsx`. The Demo Catalog list/create/edit flow persists to a
+real SQLite file in your OS's per-app data directory (see `src-tauri/src/db/`)
 — close the app and reopen it, your data is still there. The Plugins screen
 reports on the offline FrankenPHP process described below — what's actually
 loaded from the last automatic server sync, not a manual install control (see
@@ -48,20 +51,34 @@ loaded from the last automatic server sync, not a manual install control (see
 ## Project layout
 
 ```
-src/                          # Frontend (Vite + React + TypeScript)
-  App.tsx                     # Route switch + AppSidebar/PageShell wiring
-  nav-config.tsx              # The app's nav, as plain data (see the nav contract below)
-  demo-catalog-tauri-adapter.ts  # DemoCatalogAdapter -> Tauri invoke() -> Rust commands
-  printer-demo.tsx             # UI for the printer command example
+src/                            # Frontend (Vite + React + TypeScript)
+  App.tsx                       # Route switch + AppSidebar/PageShell wiring
+  nav-config.tsx                # The app's nav, as plain data (see the nav contract below)
+  app-state-provider.tsx        # Session / sync / plugin state shared across screens
+  demo-catalog-tauri-adapter.ts # DemoCatalogAdapter -> invoke() -> Rust commands (local SQLite)
+  plugin-blocks/                # Desktop renderer for the SDK block contract (see below)
+  roles-page.tsx                # Shared Roles admin, over the REMOTE transport
+  roles-tauri-adapter.ts        # RolesAdapter -> remote_request (twin of web/lib/roles-adapter.ts)
+  remote-client.ts              # invoke("remote_request") -> the enrolled server (see the two transports)
+  plugins-page.tsx              # What the offline PHP host currently has loaded
+  plugin-store-page.tsx         # The server's plugin catalog for this tenant
+  sync-controller-tauri.ts      # Mounts the shared sync UI (banner / conflict resolver / lock)
+  printer-demo.tsx              # UI for the printer command example
   hash-link.tsx / use-hash-path.ts  # Minimal zero-dependency router (swap for react-router as you grow)
 
-src-tauri/                    # Backend (Rust)
+src-tauri/                      # Backend (Rust)
   src/
-    lib.rs                    # Tauri::Builder setup, command registration
-    db.rs                     # SQLite connection + schema migration
-    commands/
-      items.rs                # list_items / get_item / save_item (DemoCatalog)
-      printer.rs               # print_text (the native-crate example)
+    lib.rs                      # Tauri::Builder setup, command registration
+    config.rs                   # Backend URL resolution (compile-time default + env override)
+    auth/                       # Device enrollment, keychain credential, offline lock
+    db/                         # Connection, versioned migrations (v1 -> v10), row repos
+    sync/                       # The offline-first sync engine + the PHP-host bridge relay
+    php_host/                   # FrankenPHP sidecar supervisor, HTTP proxy, native bridge
+    plugins/                    # Mandatory plugin reconcile + the installer
+    self_update.rs              # App self-update check
+    commands/                   # Every #[tauri::command] the frontend invokes
+      items.rs                  # list_items / get_item / save_item (DemoCatalog)
+      printer.rs                # print_text (the native-crate example)
 ```
 
 ## The adapter pattern (why this matters)
@@ -133,7 +150,8 @@ re-authenticating online — `auth_lock_state` reports it; the UI shows a
 `LockedScreen`.
 
 **Local store (`src-tauri/src/db/`).** Schema is versioned via `PRAGMA user_version`
-(migrations v1→v5). Each row carries sync metadata (`client_uuid`, `server_id`,
+(migrations v1→v10 — each step is documented, with its reasoning, at the top of
+`db/migrations.rs`). Each row carries sync metadata (`client_uuid`, `server_id`,
 `version`/`base_version`, `sync_state`, `dirty`, `deleted` tombstone). Mid-edit
 **drafts** autosave to `item_drafts` (never synced).
 
@@ -147,12 +165,24 @@ re-authenticating online — `auth_lock_state` reports it; the UI shows a
   `list_conflicts`; the user resolves each field (mine/theirs/custom) in the shared
   `ConflictResolver`, and `resolve_conflict` rebases + re-queues the merge.
 
-The server side lives in whity-core: the configurable TTL setting and the
-DemoCatalog sync API (version, idempotent create, soft-delete, changes feed).
+**Any resource, not just DemoCatalog.** Every push/pull/conflict path is
+parameterized by a `sync::resource::ResourceDescriptor` (`key`, local `table`,
+server `base_path`, `domain_columns`) — nothing in the engine names DemoCatalog.
+`item_conflicts` is keyed on `(resource, client_uuid)` for the same reason: with a
+single syncable resource a bare `client_uuid` identified a conflict, and that stops
+being true the moment there are two.
 
-**Reusability.** The sync-metadata column set + the engine are the pattern to copy
-for your own entities — DemoCatalog is the worked example, exactly like the printer
-command is the worked native-crate example.
+The server side lives in whity-core and is generalized the same way: a plugin
+describes its table with `Whity\Sdk\Sync\SyncableResource` and `SyncController`
+drives the whole lifecycle — version, idempotent create, optimistic `409` carrying
+the server's own row as `serverItem`, soft-delete, changes feed. The two
+descriptors converged on the same shape independently.
+
+**Adding your own synced entity** is therefore: an entry in `RESOURCES`, a
+migration creating its table with the standard sync-identity column set, a
+`commands/<resource>.rs` CRUD surface, and a frontend adapter — no engine change.
+DemoCatalog is the worked example, exactly like the printer command is the worked
+native-crate example.
 
 ## The offline PHP plugin host
 
@@ -211,7 +241,11 @@ currently loaded.
   `PermissionResolver` — not an implicit super-user. The default device role
   (`admin`) is granted every permission any loaded plugin declares; set
   `WHITY_DEVICE_ROLE` to a narrower seeded role to deliberately test your
-  plugin's 403 path offline.
+  plugin's 403 path offline. The same resolver answers
+  `POST /__whity/permitted-actions`, the offline twin of the server's
+  `POST /api/v1/me/permitted-actions`, so an `inbox` block resolves the same
+  permitted set on a device as it does on the server. The path differs because
+  this host has no versioned `/api/v1/me/...` surface; the answer does not.
 - **SQLite dialect shim** (`SqliteCompatPdo`): plugin migrations are written
   for Postgres. The shim rewrites `SERIAL PRIMARY KEY` → `INTEGER PRIMARY KEY`
   and adds a `NOW()` UDF — deliberately narrow; a plugin using `JSONB`,
@@ -246,14 +280,82 @@ extensions this app needs (`pdo_sqlite`, `sqlite3`, `mbstring`) — see the
 scripts' own comments for the full per-platform story. macOS is not yet
 spiked (no Mac available in this environment).
 
-**Known gap — data doesn't yet round-trip.** The PHP host owns its own
-SQLite file (`whity-offline.sqlite`), completely separate from the Rust sync
-engine's `whity-desktop.sqlite` described above. A row created through a
-plugin's offline routes today lives only in the PHP host's database — it does
-not reach the real server, unlike the Rust-hand-ported DemoCatalog sync flow.
-Reconciling the two is a real, harder, deliberately deferred follow-up (the
-two schemas are structurally different: one is a client-side sync queue, the
-other a server-schema clone).
+### A plugin's offline writes reach the server — the bridge relay
+
+The PHP host owns its own SQLite file (`whity-offline.sqlite`), completely
+separate from the Rust sync engine's `whity-desktop.sqlite` described above, and
+for a while that was the end of the story: a row created through a plugin's
+offline routes lived only on the device. `src-tauri/src/sync/bridge.rs` closes
+it.
+
+Rather than reconcile the two files, the bridge treats the local PHP host as a
+**second "remote"** and relays it against the real server over two HTTP legs —
+local → remote, then remote → local — reusing the very same generalized
+create / update / delete / fetch-changes functions the device engine already
+uses. Both sides speak one wire contract at one path, so there is no schema
+coupling and no cross-process SQLite access: everything goes through
+`php_host::proxy`, the channel Rust already used to reach the host.
+
+**`ATTACH DATABASE` was evaluated and rejected**, and the reasoning is worth
+keeping. `whity-desktop.sqlite` runs WAL while the host's `SqliteCompatPdo` sets
+no journal-mode pragma at all, and a cross-database transaction spanning a
+WAL-mode and a rollback-mode database loses SQLite's own documented
+atomic-commit guarantee on crash. Matching the journal modes would still leave
+two independent OS processes sharing one file's `-wal`/`-shm` sidecars.
+
+Rust owns **no** table for a bridged resource. It remembers only the last-known
+id/version on each side (`bridge_resource_state`) plus one changes-feed cursor
+per leg (`bridge_cursor_kv`) — device migration v10 — which is the same
+optimistic-concurrency primitive the ordinary push path already uses. The relay
+runs inside the background sync loop (`sync/scheduler.rs`), and no single
+resource's failure propagates: a leg that fails is logged and retried on the
+next cycle without advancing its cursor.
+
+`BRIDGE_RESOURCES` currently holds one entry, `relations/persons`. **Relaying a
+resource that isn't installed on a device is a safe no-op** — each call simply
+fails and is retried — which is deliberate, but it does mean an unverified relay
+and a working one look alike from the outside. Confirm a new entry end to end
+against a real server rather than inferring it from a quiet log.
+
+## Plugin UI blocks, and the two transports
+
+A plugin doesn't only run offline here — it **draws** offline.
+`src/plugin-blocks/` is the desktop renderer for the SDK's declare-once block
+contract (`sdk/src/Frontend/Blocks/BlockContract.php`): the block tree a plugin
+declares once renders on web and on the device, so a `blocks` screen needs no
+desktop-specific code at all. It maps each block `type` to an `@amroksaleh/ui`
+primitive through the same switch/registry web uses, and it never throws — an
+unknown or malformed node renders `UnsupportedBlock` rather than taking the
+whole feature down.
+
+**It is a hand-written twin of `web/components/plugin/blocks/block-renderer.tsx`,
+and that is the thing to be careful about.** It has silently diverged twice — on
+unrendered sort/filter/pageSize props, and on which values a form actually
+submits — each time found downstream rather than in CI, because for a long time
+nothing checked it but a `tsc` that only ran on a release tag. The two renderers
+are now pinned against each other: `src/plugin-blocks/__tests__/` runs under
+**web's** Jest project (`web/jest.config.mjs` lists this tree in its `roots`),
+and the contract suites assert the same points against both. Change one
+renderer, change the other in the same commit, and add the assertion to both
+suites.
+
+**Two transports, and picking the wrong one is the common mistake.** A screen
+here reaches data one of two ways:
+
+| | `php_request` | `remote_request` |
+|---|---|---|
+| Reaches | the bundled offline PHP host, on loopback | the enrolled whity-core server |
+| Authorizes with | the single-device `PermissionResolver` | this device's access token (keychain credential, refreshed on a stale `401`) |
+| Works offline | yes | no |
+| Use it for | anything a **plugin** owns | server-owned admin surfaces |
+
+Plugin blocks fetch and submit through `php_request`
+(`plugin-blocks/use-plugin-data.ts`, `submit-plugin-action.ts`) because a
+plugin's data is on the device. Server-owned admin — Roles, the plugin catalog —
+has no offline plugin behind it and routes through `remote-client.ts` instead.
+Both return a byte-identical `{ status, body }` shape, so a shared feature's
+adapter (`roles-tauri-adapter.ts`, the twin of `web/lib/roles-adapter.ts`)
+differs from web's only in which transport it wraps.
 
 ## Adding your own native capability (the printer recipe)
 
@@ -280,7 +382,7 @@ devices, OS-level integrations, etc.):
    ```
 
 If the capability needs shared state (a DB connection, a device handle,
-etc.), manage it the way `db.rs`/`lib.rs` do: build it once in `.setup(...)`,
+etc.), manage it the way `db/mod.rs`/`lib.rs` do: build it once in `.setup(...)`,
 then `app.manage(...)` it, and receive it in your commands via
 `State<'_, YourType>`.
 
@@ -324,11 +426,22 @@ system dependencies installed (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `libsqlite3-dev`, `libcups2-dev`, `pkg-config`) — not just written by hand.
 The frontend was verified with `tsc --noEmit` and a real `vite build`.
 
+**These are point-in-time results, not a standing guarantee.** The frontend half
+is held there continuously — the block renderer runs under web's Jest project on
+every CI run — but nothing in CI re-runs the Rust half. See **Known gaps** below
+before assuming a green pipeline covers it.
+
 ### Offline-sync stack — verified
 
-- Rust unit tests cover the schema migrations (v1→v6), the offline-lock logic,
+- Rust unit tests cover the schema migrations (v1→v10), the offline-lock logic,
   the drafts + soft-delete repos, the conflict-resolution repo, the push
-  retry/backoff, and the scheduler's connectivity classification + status reads.
+  retry/backoff, the resource descriptors' SQL-identifier safety, the bridge
+  relay's state/cursor bookkeeping, and the scheduler's connectivity
+  classification + status reads. 41 `#[test]` functions in all: 40 are hermetic
+  and run on a bare `cargo test`, and the one live-backend integration test is
+  `#[ignore]`d — it refuses to run without an explicit `WHITY_BACKEND_URL`
+  rather than falling back to the compiled-in default, which is the hosted
+  instance.
 - A live integration test drives the sync engine against a real backend end to
   end: device enroll → push → pull on a fresh client → concurrent-edit `409` →
   conflict parked → resolve → re-sync.
@@ -367,11 +480,14 @@ The frontend was verified with `tsc --noEmit` and a real `vite build`.
   Service over D-Bus, so a Linux build/run needs `libdbus-1-dev` (add it to the
   Tauri Linux system deps above). Windows/macOS use their native keystores with
   no extra dep.
-- **Generalizing the engine (`SyncableResource`).** The sync engine is currently
-  DemoCatalog-specific; extracting a `SyncableResource` trait — so a new synced
-  entity is just a new table with the standard sync columns + a trait impl — is a
-  scoped follow-up. (The Rust background sync loop, connectivity detection, and
-  per-row retry/backoff are implemented — see the sync stack above.)
+- **The Rust side is not under CI at all.** No workflow runs `cargo build`,
+  `cargo test` or `cargo clippy`, so the tests described above execute only when
+  somebody runs them locally, and the only automated build is
+  `tauri-desktop-release.yml` on `windows-latest`, triggered on a release tag.
+  A Rust compile error can therefore merge and stay hidden until release. The
+  TypeScript half sat in exactly this position — checked by nothing but a
+  release-tag `tsc`, and it diverged twice — until its tests were pulled under
+  web's Jest project; the Rust half has not had its equivalent yet.
 - **Packaging size / startup on macOS + Linux.** Windows is measured above
   (installer sizes; ~0.5 s first-run / ~60 ms warm launch on Windows 11). The
   macOS `.app`/`.dmg` and Linux AppImage/deb sizes + cold-start remain
