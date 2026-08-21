@@ -285,6 +285,10 @@ class TenantsApiHandler
             // behind: it would be invisible to every API path that requires a
             // membership, and the only way to finish or remove it would be the
             // direct SQL this endpoint exists to eliminate.
+            // The first administrator's membership grant, for the audit dispatch
+            // after the transaction commits (#889).
+            $adminGrant = null;
+
             $ownTx = !$this->db->inTransaction();
             if ($ownTx) {
                 $this->db->beginTransaction();
@@ -311,7 +315,7 @@ class TenantsApiHandler
 
                 $adminSummary = null;
                 if ($admin !== null) {
-                    $adminSummary = $this->provisionInitialAdmin((int)$tenantId, $admin);
+                    $adminSummary = $this->provisionInitialAdmin((int)$tenantId, $admin, $adminGrant);
                     if ($adminSummary instanceof Response) {
                         if ($ownTx && $this->db->inTransaction()) {
                             $this->db->rollBack();
@@ -328,6 +332,15 @@ class TenantsApiHandler
                     $this->db->rollBack();
                 }
                 throw $e;
+            }
+
+            // Post-commit, unlike `tenant.created` above — that one runs inside
+            // the transaction on purpose, so a listener can seed tenant roles
+            // before the initial role is resolved. This one has the opposite
+            // requirement: it is an assertion for an append-only trail, so it
+            // must not be made until the write it describes is durable.
+            if ($adminGrant !== null) {
+                $this->hookManager->dispatch('user.membership.added', $adminGrant);
             }
 
             // Dispatch asynchronous hook for background tasks
@@ -642,10 +655,18 @@ class TenantsApiHandler
      *
      * @param int $tenantId The tenant just inserted.
      * @param array{email: string, password: string, role: string} $admin
+     * @param array<string, mixed>|null $grant OUT: the `user.membership.added`
+     *        payload for the membership this creates (#889). An out-parameter
+     *        rather than an extra key on the return value because that value is
+     *        the API RESPONSE shape — widening it to carry an audit detail
+     *        would put an internal concern on a published contract. The caller
+     *        dispatches it after the transaction commits: this method runs
+     *        inside one, and a tenant whose creation rolls back must not leave
+     *        an audit row claiming its first administrator was appointed.
      * @return array{id: int, email: string, role: string}|Response
      *         A summary for the response, or the error response to return.
      */
-    private function provisionInitialAdmin(int $tenantId, array $admin): array|Response
+    private function provisionInitialAdmin(int $tenantId, array $admin, ?array &$grant = null): array|Response
     {
         // A brand-new tenant has no roles of its own unless a `tenant.created`
         // listener just seeded some, so both scopes are consulted — tenant-owned
@@ -667,6 +688,22 @@ class TenantsApiHandler
             "INSERT INTO memberships (profile_id, tenant_id, role_id, is_primary, status, created_at)
              VALUES (?, ?, ?, true, 'active', NOW())"
         )->execute([$profileId, $tenantId, $roleId]);
+
+        // The highest-authority grant this platform makes — a brand-new tenant's
+        // first administrator — and until #889 it was made in complete silence.
+        // The role NAME is free here: it is what the request named, so unlike
+        // every other emitter this one needs no lookup to record it.
+        $grant = [
+            'profile_id'    => $profileId,
+            'tenant_id'     => $tenantId,
+            'membership_id' => (int) $this->db->lastInsertId(),
+            'role_id'       => $roleId,
+            'role_name'     => $admin['role'],
+            'ou_id'         => null,
+            'status'        => 'active',
+            'is_primary'    => true,
+            'via'           => 'tenant_bootstrap',
+        ];
 
         return ['id' => $profileId, 'email' => $admin['email'], 'role' => $admin['role']];
     }

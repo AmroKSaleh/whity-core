@@ -154,6 +154,10 @@ final class RegisterApiHandler
             }
             $roleId = (int) $roleId;
 
+            // The owner membership's id, for the audit payload built after the
+            // transaction block below (#889).
+            $membershipId = 0;
+
             $ownTx = !$this->db->inTransaction();
             if ($ownTx) {
                 $this->db->beginTransaction();
@@ -229,6 +233,7 @@ final class RegisterApiHandler
                     ':role_id'    => $roleId,
                     ':status'     => $membershipStatus,
                 ]);
+                $membershipId = (int) $this->db->lastInsertId();
 
                 if ($ownTx) {
                     $this->db->commit();
@@ -249,6 +254,35 @@ final class RegisterApiHandler
                     $this->verificationProvider->sendVerification($profileId, $email);
                 } catch (\Throwable $e) {
                     error_log('[register] verification dispatch failed for profile ' . $profileId . ': ' . $e->getMessage());
+                }
+            }
+
+            // Self-registration mints a workspace OWNER, so it is a membership
+            // grant like any other and belongs in the trail (#889). Post-commit
+            // and best-effort, for the reason the block below gives: a listener
+            // failure must never undo the created account.
+            //
+            // `status` distinguishes the two shapes this path produces — an
+            // ACTIVE owner who can log in now, or an INVITED one still waiting
+            // on operator approval. Recording the invited case is deliberate:
+            // "who asked for a workspace and was left pending" is a question an
+            // operator reviewing the approval queue actually has, and dropping
+            // it would make the trail silent about every registration that was
+            // never approved.
+            if ($this->hooks !== null) {
+                try {
+                    $this->hooks->dispatch('user.membership.added', [
+                        'profile_id'    => $profileId,
+                        'tenant_id'     => $tenantId,
+                        'membership_id' => $membershipId,
+                        'role_id'       => $roleId,
+                        'role_name'     => self::OWNER_ROLE,
+                        'ou_id'         => null,
+                        'status'        => $membershipStatus,
+                        'via'           => 'self_registration',
+                    ]);
+                } catch (\Throwable $e) {
+                    error_log('[register] membership audit dispatch failed for profile ' . $profileId . ': ' . $e->getMessage());
                 }
             }
 

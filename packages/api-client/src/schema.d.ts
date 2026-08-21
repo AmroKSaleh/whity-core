@@ -3409,7 +3409,8 @@ export interface components {
             /** @enum {string} */
             status: "ok" | "degraded";
             version: string;
-            worker_count: number;
+            sdk_version: string;
+            workers_active: number;
             uptime_seconds: number;
             db_connected: boolean;
             /** Format: float */

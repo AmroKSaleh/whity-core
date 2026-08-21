@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Identity;
 
 use PDO;
+use Whity\Core\Hooks\HookManager;
 
 /**
  * Repository for the `memberships` table (WC-101).
@@ -34,9 +35,29 @@ final class MembershipRepository
 
     private PDO $db;
 
-    public function __construct(PDO $db)
+    /**
+     * Optional hook manager used to ANNOUNCE membership writes (#889).
+     *
+     * Optional, not required, and the reason is the fan-in. Three production
+     * callers reach {@see self::insert()} — SSO tenant-trust JIT, SSO
+     * first-login provisioning and verified-email domain policy — and none of
+     * them held a HookManager, so all three granted real authority in complete
+     * silence. Announcing from HERE rather than from each of them means the
+     * event exists once, and the next service that writes a membership through
+     * this repository is audited without anyone remembering to add it. That is
+     * the failure mode being fixed: the hole did not come from a decision, it
+     * came from three call sites that each had no reason to think about it.
+     *
+     * Null-tolerant because the repository is constructed in tests and CLI
+     * contexts with no hook manager wired, and a membership write must not
+     * depend on one existing.
+     */
+    private ?HookManager $hooks;
+
+    public function __construct(PDO $db, ?HookManager $hooks = null)
     {
         $this->db = $db;
+        $this->hooks = $hooks;
     }
 
     /**
@@ -71,7 +92,23 @@ final class MembershipRepository
             ':ou_id'      => $ouId,
             ':status'     => $status,
         ]);
-        return (int) $this->db->lastInsertId();
+        $membershipId = (int) $this->db->lastInsertId();
+
+        // Announce the grant so it reaches the audit trail (#889). `status` is
+        // carried rather than filtered on: an `invited` row is a STAGED grant,
+        // not access, and the trail should say which one happened instead of
+        // this method deciding that a pending invitation is not worth recording.
+        $this->announce('user.membership.added', [
+            'profile_id'    => $profileId,
+            'tenant_id'     => $tenantId,
+            'membership_id' => $membershipId,
+            'role_id'       => $roleId,
+            'role_name'     => $this->roleName($roleId, $tenantId),
+            'ou_id'         => $ouId,
+            'status'        => $status,
+        ]);
+
+        return $membershipId;
     }
 
     /**
@@ -296,11 +333,97 @@ final class MembershipRepository
      */
     public function delete(int $id, int $tenantId): int
     {
+        // Read BEFORE the delete (#889). Afterwards there is nothing left to
+        // read, and a revocation the trail cannot describe is barely better
+        // than one it never saw. This method has no production caller today —
+        // every live delete is inline SQL — which is exactly why it is wired
+        // now rather than later: the first caller to adopt it should inherit a
+        // complete row, not discover the omission from an empty incident
+        // timeline.
+        $before = $this->findById($id, $tenantId);
+
         $stmt = $this->db->prepare(
             'DELETE FROM memberships WHERE id = :id AND tenant_id = :tenant_id'
         );
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
-        return $stmt->rowCount();
+        $affected = $stmt->rowCount();
+
+        // Only a delete that actually removed something is a revocation. A
+        // cross-tenant or not-found call touches zero rows, and recording it
+        // would put a revocation that never happened into an append-only trail.
+        if ($affected > 0 && $before !== null) {
+            $roleId = isset($before['role_id']) ? (int) $before['role_id'] : null;
+            $this->announce('user.membership.removed', [
+                'profile_id'    => isset($before['profile_id']) ? (int) $before['profile_id'] : null,
+                'tenant_id'     => $tenantId,
+                'membership_id' => $id,
+                'role_id'       => $roleId,
+                'role_name'     => $roleId !== null ? $this->roleName($roleId, $tenantId) : null,
+                'ou_id'         => isset($before['ou_id']) ? (int) $before['ou_id'] : null,
+                'status'        => isset($before['status']) ? (string) $before['status'] : null,
+                'granted_at'    => isset($before['created_at']) ? (string) $before['created_at'] : null,
+            ]);
+        }
+
+        return $affected;
+    }
+
+    /**
+     * The NAME of a role visible to a tenant — its own, or a global one.
+     *
+     * Captured into the hook payload beside `role_id` so the audit row stays
+     * readable after the role itself is gone. `memberships.role_id` is
+     * `ON DELETE CASCADE`, so deleting a role removes every membership holding
+     * it with no per-row signal at all; an id recorded without a name is then a
+     * pointer into a table that no longer has the row, and "membership removed,
+     * role 47" is not an answer to "what access was taken away".
+     *
+     * The tenant predicate is the platform's ordinary role-visibility rule
+     * (own-or-global), so this cannot read another tenant's role name.
+     */
+    private function roleName(int $roleId, int $tenantId): ?string
+    {
+        $stmt = $this->db->prepare(
+            'SELECT name FROM roles WHERE id = :id AND (tenant_id = :tenant_id OR tenant_id IS NULL) LIMIT 1'
+        );
+        $stmt->execute([':id' => $roleId, ':tenant_id' => $tenantId]);
+        $name = $stmt->fetchColumn();
+
+        return $name === false || $name === null ? null : (string) $name;
+    }
+
+    /**
+     * Dispatch a membership lifecycle event when a hook manager is wired.
+     *
+     * FAIL-SOFT, deliberately: the audit trail must never be the reason a
+     * membership write fails. {@see \Whity\Core\Audit\AuditLogger::record()}
+     * already swallows its own write errors for the same reason, but a
+     * DIFFERENT listener on the same event — a plugin's — has no such promise,
+     * and a plugin throwing must not roll back an SSO login's provisioning.
+     *
+     * TRANSACTIONS. Unlike the handler-level emitters, which dispatch after
+     * their own commit, this fires wherever the CALLER happens to be — and
+     * {@see FederatedIdentityLinker::provisionTenantMember()} calls insert()
+     * inside a transaction. That is safe rather than merely tolerable: the
+     * audit writer holds the SAME PDO connection, so its row is part of the
+     * caller's transaction and rolls back with the membership it describes.
+     * The trail therefore cannot end up asserting a grant the database
+     * discarded, which is the property the post-commit emitters buy explicitly
+     * and this one inherits.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function announce(string $event, array $payload): void
+    {
+        if ($this->hooks === null) {
+            return;
+        }
+
+        try {
+            $this->hooks->dispatch($event, $payload);
+        } catch (\Throwable) {
+            // Intentionally swallowed; see the method docblock.
+        }
     }
 
     /**

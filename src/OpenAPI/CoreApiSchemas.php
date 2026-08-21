@@ -3447,14 +3447,26 @@ final class CoreApiSchemas
             // ---- Platform-ops schemas (WC-62133b3f) ----
 
             // GET /api/health — top-level (not data-enveloped)
+            //
+            // `version` is the CORE version and keeps that name: it is a
+            // published field on a public probe, so renaming it to
+            // `core_version` would break somebody's alerting for cosmetics.
+            // `sdk_version` is the plugin-SDK contract version, unauthenticated
+            // here on purpose — the reasoning is on HealthApiHandler's docblock.
+            //
+            // `workers_active` was documented here as `worker_count` — a name
+            // the handler has never returned. Corrected rather than left beside
+            // the new field: a spec that names a key the server does not send is
+            // worse than one that omits it, because a generated client compiles.
             'HealthResponse' => self::object([
                 'status' => ['type' => 'string', 'enum' => ['ok', 'degraded']],
                 'version' => self::str(),
-                'worker_count' => self::int(),
+                'sdk_version' => self::str(),
+                'workers_active' => self::int(),
                 'uptime_seconds' => self::int(),
                 'db_connected' => self::bool(),
                 'memory_usage_mb' => ['type' => 'number', 'format' => 'float'],
-            ], ['status', 'version', 'worker_count', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
+            ], ['status', 'version', 'sdk_version', 'workers_active', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
 
             // GET /api/platform/version (WHIT-587)
             'PlatformVersionResponse' => self::object([

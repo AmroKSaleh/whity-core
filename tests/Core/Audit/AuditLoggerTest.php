@@ -181,6 +181,167 @@ final class AuditLoggerTest extends TestCase
         $this->assertSame(['role_id' => 7], json_decode($row['metadata'], true));
     }
 
+    // ==================== Membership grants / revocations (#889) ============
+
+    /**
+     * A membership grant targets the USER, not the role.
+     *
+     * The role did not change when Alice was given it; Alice's authority did.
+     * This is also what keeps a person's authority history retrievable in one
+     * query — `user.created`/`updated`/`deleted` already target `user`, so a
+     * membership row targeted at the role would scatter one person's history
+     * across N role ids with nothing able to reassemble it.
+     */
+    public function testMembershipGrantTargetsTheUserAndKeepsTheRoleInMetadata(): void
+    {
+        $hooks = new HookManager();
+        (new AuditLogger($this->pdo))->subscribe($hooks);
+
+        TenantContext::setTenantId(3);
+        AuditContext::set(11, '198.51.100.9');
+
+        $hooks->dispatch('user.membership.added', [
+            'profile_id'    => 77,
+            'tenant_id'     => 3,
+            'membership_id' => 501,
+            'role_id'       => 9,
+            'role_name'     => 'manager',
+            'ou_id'         => 4,
+        ]);
+
+        $row = $this->onlyRow();
+        $this->assertSame('user.membership.added', $row['action']);
+        $this->assertSame('user', $row['target_type'], 'a membership change happens TO the user');
+        $this->assertSame('77', (string) $row['target_id'], 'target_id is the profile_id, not the role id');
+        $this->assertSame('3', (string) $row['tenant_id']);
+        $this->assertSame('11', (string) $row['actor_user_id']);
+
+        $meta = json_decode($row['metadata'], true);
+        $this->assertSame(9, $meta['role_id']);
+        $this->assertSame('manager', $meta['role_name']);
+        $this->assertSame(4, $meta['ou_id']);
+        $this->assertSame(501, $meta['membership_id']);
+        // Promoted to first-class columns, so never duplicated into metadata.
+        $this->assertArrayNotHasKey('profile_id', $meta);
+        $this->assertArrayNotHasKey('tenant_id', $meta);
+    }
+
+    /**
+     * A revocation row carries everything the deleted row held.
+     *
+     * This is the whole point of #889: after the DELETE the membership row is
+     * gone, so if the audit row does not name the role, the OU and the tenant,
+     * nothing anywhere can answer "what access was taken away".
+     */
+    public function testMembershipRevocationRecordsWhatWasLost(): void
+    {
+        $hooks = new HookManager();
+        (new AuditLogger($this->pdo))->subscribe($hooks);
+
+        TenantContext::setTenantId(2);
+        AuditContext::set(11, null);
+
+        $hooks->dispatch('user.membership.removed', [
+            'profile_id'    => 77,
+            'tenant_id'     => 2,
+            'membership_id' => 501,
+            'role_id'       => 9,
+            'role_name'     => 'manager',
+            'ou_id'         => 4,
+            'status'        => 'active',
+            'granted_at'    => '2026-01-02 03:04:05',
+        ]);
+
+        $row = $this->onlyRow();
+        $this->assertSame('user.membership.removed', $row['action']);
+        $this->assertSame('user', $row['target_type']);
+        $this->assertSame('77', (string) $row['target_id']);
+        $this->assertSame('2', (string) $row['tenant_id'], 'the tenant the authority was held in');
+
+        $meta = json_decode($row['metadata'], true);
+        $this->assertSame(9, $meta['role_id']);
+        $this->assertSame('manager', $meta['role_name'], 'the name survives the role being deleted later');
+        $this->assertSame(4, $meta['ou_id']);
+        $this->assertSame('active', $meta['status']);
+        $this->assertSame('2026-01-02 03:04:05', $meta['granted_at'], 'how long the access was held');
+    }
+
+    /**
+     * A grant and its revocation describe the same authority with the same
+     * field names, so the pair can be matched by `role_id` rather than by
+     * judgement. A trail whose two halves speak different dialects cannot be
+     * read as a sequence.
+     */
+    public function testGrantAndRevocationShareTheirVocabulary(): void
+    {
+        $hooks = new HookManager();
+        (new AuditLogger($this->pdo))->subscribe($hooks);
+        TenantContext::setTenantId(1);
+
+        $common = [
+            'profile_id'    => 5,
+            'tenant_id'     => 1,
+            'membership_id' => 8,
+            'role_id'       => 3,
+            'role_name'     => 'editor',
+            'ou_id'         => null,
+        ];
+        $hooks->dispatch('user.membership.added', $common);
+        $hooks->dispatch('user.membership.removed', $common + ['granted_at' => '2026-02-01 00:00:00']);
+
+        $rows = $this->allRows();
+        $this->assertCount(2, $rows);
+
+        $added = json_decode($rows[0]['metadata'], true);
+        $removed = json_decode($rows[1]['metadata'], true);
+
+        foreach (['membership_id', 'role_id', 'role_name', 'ou_id'] as $field) {
+            $this->assertArrayHasKey($field, $added, "grant must carry {$field}");
+            $this->assertArrayHasKey($field, $removed, "revocation must carry {$field}");
+            $this->assertSame($added[$field], $removed[$field], "{$field} must mean the same thing in both");
+        }
+
+        $this->assertSame('user', $rows[0]['target_type']);
+        $this->assertSame('user', $rows[1]['target_type']);
+        $this->assertSame($rows[0]['target_id'], $rows[1]['target_id']);
+    }
+
+    /**
+     * Every authority-affecting action about a person targets `user`, which is
+     * what makes `target_type=user&target_id=N` — the filter #885 added — return
+     * that person's COMPLETE authority history in one query.
+     *
+     * This is the concrete payoff of choosing the user over the role as the
+     * target, and it is asserted rather than asserted-in-prose because it is
+     * the property a future action key could silently break.
+     */
+    public function testOnePersonsAuthorityHistoryIsOneQuery(): void
+    {
+        $hooks = new HookManager();
+        (new AuditLogger($this->pdo))->subscribe($hooks);
+        TenantContext::setTenantId(1);
+
+        $hooks->dispatch('user.created', ['id' => 42, 'tenant_id' => 1, 'role_id' => 2]);
+        $hooks->dispatch('user.membership.added', ['profile_id' => 42, 'tenant_id' => 1, 'role_id' => 3]);
+        $hooks->dispatch('user.updated', ['id' => 42, 'tenant_id' => 1, 'previous_role_id' => 2, 'role_id' => 5]);
+        $hooks->dispatch('user.membership.removed', ['profile_id' => 42, 'tenant_id' => 1, 'role_id' => 3]);
+        $hooks->dispatch('user.deleted', ['id' => 42, 'tenant_id' => 1]);
+
+        $stmt = $this->pdo->prepare(
+            'SELECT action FROM audit_log WHERE target_type = ? AND target_id = ? ORDER BY id'
+        );
+        $stmt->execute(['user', 42]);
+        $actions = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $this->assertSame([
+            'user.created',
+            'user.membership.added',
+            'user.updated',
+            'user.membership.removed',
+            'user.deleted',
+        ], $actions, 'one target filter must return the whole authority history of one person');
+    }
+
     public function testSubscribedHooksReturnDataUnchanged(): void
     {
         // A subscribed listener must not break the filter chain (returns $data).

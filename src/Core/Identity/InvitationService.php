@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Identity;
 
 use PDO;
+use Whity\Core\Hooks\HookManager;
 
 /**
  * Issues and consumes tenant invitations (WHIT-417 / #797 item 3) — the path by
@@ -81,9 +82,16 @@ final class InvitationService
     public const ACCEPT_ALREADY_MEMBER = 'already_member';
     public const ACCEPT_SUSPENDED = 'suspended';
 
+    /**
+     * @param HookManager|null $hooks Optional; announces the membership an
+     *        accepted invitation creates or completes (#889). Null-tolerant so
+     *        the service stays constructible in tests and CLI contexts, where
+     *        no hook manager exists and an invitation must still be acceptable.
+     */
     public function __construct(
         private readonly PDO $db,
         private readonly ProfileProvisioner $profiles,
+        private readonly ?HookManager $hooks = null,
     ) {}
 
     /**
@@ -377,6 +385,10 @@ final class InvitationService
 
             $statuses = $this->membershipStatuses($profileId, $tenantId);
 
+            // Set by whichever branch actually grants access, and dispatched
+            // only after the transaction commits (#889).
+            $granted = null;
+
             if ($statuses['active']) {
                 // Already here — burn the invitation so the link cannot be
                 // replayed, but add nothing.
@@ -403,6 +415,10 @@ final class InvitationService
                     ':tenant_id' => $tenantId,
                     ':invited' => MembershipRepository::STATUS_INVITED,
                 ]);
+                // The row existed already, so THIS is the moment access begins —
+                // a staged `invited` row grants nothing. The trail records the
+                // completion, not the staging (#889).
+                $granted = $this->membershipGrantPayload($profileId, $tenantId);
                 $outcome = self::ACCEPT_JOINED;
             } else {
                 $this->db->prepare(
@@ -415,6 +431,7 @@ final class InvitationService
                     ':ou_id' => $invitation['ou_id'] !== null ? (int) $invitation['ou_id'] : null,
                     ':status' => MembershipRepository::STATUS_ACTIVE,
                 ]);
+                $granted = $this->membershipGrantPayload($profileId, $tenantId);
                 $outcome = self::ACCEPT_JOINED;
             }
 
@@ -440,11 +457,23 @@ final class InvitationService
                 return ['result' => self::ACCEPT_INVALID, 'tenant_id' => null, 'profile_id' => null];
             }
 
-            return $this->finish($ownTx, [
+            $result = $this->finish($ownTx, [
                 'result' => $outcome,
                 'tenant_id' => $tenantId,
                 'profile_id' => $profileId,
             ]);
+
+            // AFTER the commit, never inside it. An audit row is a claim that
+            // something happened; dispatched from inside a transaction that can
+            // still roll back — the burn-guard below returns ACCEPT_INVALID on a
+            // concurrent double-accept — the trail would assert a grant the
+            // database then discarded, and an append-only trail has no way to
+            // take it back.
+            if ($granted !== null) {
+                $this->announce('user.membership.added', $granted);
+            }
+
+            return $result;
         } catch (\Throwable $e) {
             if ($ownTx && $this->db->inTransaction()) {
                 $this->db->rollBack();
@@ -563,5 +592,79 @@ final class InvitationService
     private function clampTtlDays(int $ttlDays): int
     {
         return max(self::MIN_TTL_DAYS, min(self::MAX_TTL_DAYS, $ttlDays));
+    }
+
+    /**
+     * The `user.membership.added` payload for the ACTIVE membership an accepted
+     * invitation just produced (#889).
+     *
+     * Read back from the table rather than assembled from the invitation, and
+     * deliberately so: the completion branch updates a row that was staged
+     * earlier, possibly with a different role than this invitation names, and
+     * the trail must record the authority the person actually ended up with —
+     * not the one the paperwork asked for.
+     *
+     * The role NAME is captured beside the id because `memberships.role_id` is
+     * `ON DELETE CASCADE`: deleting a role removes every membership holding it
+     * with no per-row signal, after which a bare id is a pointer into a table
+     * that no longer has the row.
+     *
+     * @return array<string, mixed>|null Null when the row cannot be re-read, in
+     *         which case nothing is announced — a payload that had to guess at
+     *         what was granted is worse than a known silence.
+     */
+    private function membershipGrantPayload(int $profileId, int $tenantId): ?array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT m.id, m.role_id, m.ou_id, m.status, r.name AS role_name
+               FROM memberships m
+               LEFT JOIN roles r ON r.id = m.role_id
+              WHERE m.profile_id = :profile_id AND m.tenant_id = :tenant_id
+                AND m.status = :active
+              LIMIT 1'
+        );
+        $stmt->execute([
+            ':profile_id' => $profileId,
+            ':tenant_id' => $tenantId,
+            ':active' => MembershipRepository::STATUS_ACTIVE,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'profile_id'    => $profileId,
+            'tenant_id'     => $tenantId,
+            'membership_id' => (int) $row['id'],
+            'role_id'       => isset($row['role_id']) ? (int) $row['role_id'] : null,
+            'role_name'     => isset($row['role_name']) ? (string) $row['role_name'] : null,
+            'ou_id'         => isset($row['ou_id']) ? (int) $row['ou_id'] : null,
+            'status'        => isset($row['status']) ? (string) $row['status'] : null,
+            'via'           => 'invitation',
+        ];
+    }
+
+    /**
+     * Dispatch a membership lifecycle event when a hook manager is wired.
+     *
+     * Fail-soft: accepting an invitation must not fail because a listener threw.
+     * The audit writer swallows its own errors already, but a PLUGIN listening
+     * on the same event makes no such promise, and a person who clicked a valid
+     * invitation link must not be left outside the tenant by someone else's bug.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function announce(string $event, array $payload): void
+    {
+        if ($this->hooks === null) {
+            return;
+        }
+
+        try {
+            $this->hooks->dispatch($event, $payload);
+        } catch (\Throwable) {
+            // Intentionally swallowed; see the method docblock.
+        }
     }
 }
