@@ -1040,9 +1040,14 @@ $router->register('POST', '/api/register', [$registerHandler, 'register'], null)
 // shared store; audited as system-level (tenant 0) identity events.
 // WC-9b87: on a successful confirm the handler applies the tenant email-domain
 // policy (accept invite / auto-provision membership) for the now-verified email.
+// The MembershipRepository is handed the hook manager (#889): auto-provisioning
+// a membership from a verified email domain is a real authority grant, and it
+// used to happen with nothing recording it. The repository announces the write
+// so this path — and the two SSO ones below — are audited without each service
+// having to remember to.
 $emailDomainPolicy = new TenantEmailDomainPolicyService(
     new TenantEmailDomainsRepository($db->getPdo()),
-    new MembershipRepository($db->getPdo())
+    new MembershipRepository($db->getPdo(), $hookManager)
 );
 $emailVerificationHandler = new EmailVerificationHandler(
     $emailVerificationService,
@@ -1205,7 +1210,10 @@ $router->register('POST', '/api/2fa-recovery/force-reset',       [$twoFactorReco
 // invitee has no session and may have no account at all.
 $invitationService = new \Whity\Core\Identity\InvitationService(
     $db->getPdo(),
-    new \Whity\Core\Identity\ProfileProvisioner($db->getPdo())
+    new \Whity\Core\Identity\ProfileProvisioner($db->getPdo()),
+    // Accepting an invitation is how most people GET a role here; without this
+    // the trail recorded the invitation and never the membership it produced (#889).
+    $hookManager
 );
 $invitationUrlBase = (string) ($_ENV['INVITATION_ACCEPT_URL'] ?? getenv('INVITATION_ACCEPT_URL')
     ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/accept-invitation'));
@@ -2196,7 +2204,10 @@ $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
         $db->getPdo(),
         $externalIdentityRepository,
         $profileEmailRepository,
-        new MembershipRepository($db->getPdo()),
+        // SSO JIT provisioning grants authority with no administrator in the
+        // loop at all, which makes it the path an audit trail can least afford
+        // to be silent about (#889).
+        new MembershipRepository($db->getPdo(), $hookManager),
         new \Whity\Core\Identity\TenantEmailDomainsRepository($db->getPdo()),
     ),
     $settingsService,

@@ -90,6 +90,19 @@ class UsersApiHandler
     /** The reserved identifier for the system (cross-tenant authority) tenant. */
     private const SYSTEM_TENANT_ID = 0;
 
+    /**
+     * Most memberships enumerated into a single audit payload (#889).
+     *
+     * Removing a user from a tenant deletes every membership they hold there,
+     * and the audit row lists them so the trail can say what was lost. The list
+     * is bounded because its length is not something an operator controls: it
+     * is whatever the data happens to hold, and an unbounded blob in a metadata
+     * column is a way for one request to write an arbitrarily large row. The
+     * true count travels beside it, so exceeding the cap is legible rather than
+     * silent.
+     */
+    private const AUDIT_MEMBERSHIP_LIST_CAP = 25;
+
     private PDO $db;
     private HookManager $hookManager;
 
@@ -368,6 +381,11 @@ class UsersApiHandler
             $roleId = (int)$userData['role_id'];
             $passwordHash = password_hash((string)$userData['password'], PASSWORD_BCRYPT);
 
+            // Whether this act revived an existing invited/suspended membership
+            // rather than creating one. Initialised out here because the audit
+            // payload below is built after the transaction block (#889).
+            $promoted = false;
+
             $ownTx = !$this->db->inTransaction();
             if ($ownTx) {
                 $this->db->beginTransaction();
@@ -390,6 +408,9 @@ class UsersApiHandler
                     }
                     return Response::error('User already exists for this tenant', 409);
                 }
+
+                // Which shape this act took, for the audit payload below (#889).
+                $promoted = $existing !== null;
 
                 if ($existing !== null) {
                     // A non-active membership (invited/suspended) exists: promote it
@@ -448,10 +469,24 @@ class UsersApiHandler
 
             // Dispatch synchronous hook after the user is created. `id` is the
             // canonical profile_id (ADR 0005 hard cutover).
+            //
+            // ONE audit row for one administrative act (#889). This path creates
+            // a membership, and it deliberately does NOT also dispatch
+            // `user.membership.added`: `user.created` is already audited and
+            // already targets the user, so a second event would put two rows in
+            // an append-only trail for a single click — and creating a user is
+            // by far the most common membership write, so doubling it is exactly
+            // the flood that drowns the signal. It carries the membership detail
+            // instead. `promoted` says which shape it was: a fresh membership,
+            // or an `invited`/`suspended` row revived to active with this role,
+            // which is a REINSTATEMENT and reads very differently in a timeline.
             $this->hookManager->dispatch('user.created', [
                 'id' => $profileId,
                 'email' => $email,
                 'role_id' => $roleId,
+                'role_name' => $this->roleNameVisibleToTenant($roleId, (int)$tenantId),
+                'ou_id' => $ouId,
+                'promoted' => $promoted,
                 'tenant_id' => (int)$tenantId,
                 'tenant_name' => $tenantName,
             ]);
@@ -749,13 +784,44 @@ class UsersApiHandler
 
             // Notify listeners (e.g. the audit trail, WC-34) after a successful
             // update. The owning tenant scopes the record.
-            $this->hookManager->dispatch('user.updated', [
+            //
+            // The from/to ids are the point (#889). This endpoint — not the
+            // memberships endpoints — is where a person's PRIMARY role is
+            // changed, so it is where most authority on this platform actually
+            // moves. It was reporting `role_changed: true` and nothing else,
+            // which records that authority changed while making it impossible to
+            // say what it changed FROM or TO. Reconstructing "who held manager
+            // on the 14th" from a column of booleans cannot be done, and an
+            // append-only trail gets no second chance to write the ids down.
+            //
+            // A role reassignment is deliberately ONE row rather than a
+            // synthesised removed+added pair: it is one act, it is not a
+            // revocation (access is replaced, not withdrawn), and two rows would
+            // report two events that never happened separately.
+            $payload = [
                 'id' => $profileId,
                 'tenant_id' => $ownerTenantId,
                 'role_changed' => $roleChanged,
                 'ou_changed' => $ouChanged,
                 'account_status_changed' => $accountStatusChanged,
-            ]);
+            ];
+            if ($roleChanged && $newRoleId !== null) {
+                $previousRoleId = (int) $membership['role_id'];
+                $payload['previous_role_id'] = $previousRoleId;
+                $payload['previous_role_name'] = isset($membership['role']) ? (string) $membership['role'] : null;
+                $payload['role_id'] = $newRoleId;
+                $payload['role_name'] = $this->roleNameVisibleToTenant($newRoleId, $ownerTenantId);
+            }
+            if ($ouChanged) {
+                $payload['previous_ou_id'] = $membership['ou_id'] !== null ? (int) $membership['ou_id'] : null;
+                $payload['ou_id'] = $ouSetNull ? null : $newOuId;
+            }
+            if ($accountStatusChanged && $newAccountStatus !== null) {
+                $payload['previous_account_status'] = (string) ($membership['account_status'] ?? 'active');
+                $payload['account_status'] = $newAccountStatus;
+            }
+
+            $this->hookManager->dispatch('user.updated', $payload);
 
             $row = $this->fetchMembershipRow($profileId, $ownerTenantId);
 
@@ -803,6 +869,22 @@ class UsersApiHandler
             }
             $ownerTenantId = (int)$membership['tenant_id'];
 
+            // Read every row about to go, BEFORE it goes (#889).
+            //
+            // This DELETE is predicated on (profile_id, tenant_id), so it takes
+            // the primary membership AND every extra role the person holds here
+            // — a three-role person loses three rows. `user.deleted` was the
+            // only signal, and it named none of them, so the platform could say
+            // somebody was removed from a tenant and never what they had been
+            // able to do in it.
+            //
+            // Enumerated into ONE row rather than dispatched per membership:
+            // this is one administrative act, and one act that emits N audit
+            // rows is how a provisioning run floods a trail. The list is capped
+            // for the same reason, with the true count kept alongside it so a
+            // truncated list is visibly truncated rather than quietly wrong.
+            $lost = $this->membershipsHeldBy($profileId, $ownerTenantId);
+
             // Remove the MEMBERSHIP (not the global profile). The DELETE carries
             // the tenant predicate itself; the SYSTEM tenant edits across tenants
             // and stays unscoped.
@@ -814,6 +896,12 @@ class UsersApiHandler
                 $deleteStmt = $this->db->prepare('DELETE FROM memberships WHERE profile_id = ? AND tenant_id = ?');
                 $deleteStmt->execute([$profileId, $currentTenantId]);
             }
+
+            // The authoritative number of memberships this act ended — taken
+            // from the DELETE itself, not from the capped list above, so a
+            // truncated list is visibly truncated instead of quietly reporting
+            // its own length as the total.
+            $removedCount = $deleteStmt->rowCount();
 
             // A role/membership removal alters the profile's effective access;
             // invalidate the worker-level cache.
@@ -849,6 +937,9 @@ class UsersApiHandler
                 'tenant_name' => $tenantName,
                 // '' (friendly farewell) or 'terms_violation' (ToS termination).
                 'reason' => $reason,
+                // What this removal actually took away (#889).
+                'memberships_removed' => $removedCount,
+                'roles_lost' => $lost,
             ]);
 
             return Response::json(['data' => ['id' => $profileId, 'message' => 'User deleted']], 200);
@@ -1134,10 +1225,20 @@ class UsersApiHandler
             // A new role changes effective access, so the worker-level permission
             // cache must not keep serving the old answer (#701/#727: a stale grant
             // on seven of eight workers reads as test flakiness).
+            //
+            // It is also the grant half of the audit trail (#889), and it carries
+            // the SAME fields the revocation does. A trail whose grants and
+            // revocations describe an authority differently cannot be read as a
+            // sequence — matching one against the other becomes a judgement call
+            // rather than a join on `role_id`.
             $this->hookManager->dispatch('user.membership.added', [
-                'profile_id' => $profileId,
-                'tenant_id'  => $ownerTenantId,
-                'role_id'    => $roleId,
+                'profile_id'    => $profileId,
+                'tenant_id'     => $ownerTenantId,
+                'membership_id' => $newId,
+                'role_id'       => $roleId,
+                'role_name'     => $this->roleNameVisibleToTenant($roleId, $ownerTenantId),
+                'ou_id'         => $ouId,
+                'is_primary'    => $isPrimary,
             ]);
 
             return Response::json([
@@ -1205,9 +1306,27 @@ class UsersApiHandler
                 $ownerTenantId = (int) $membership['tenant_id'];
             }
 
+            // Reads everything the row HOLDS, not merely what this method needs
+            // in order to decide (#889). Once the DELETE below runs, the audit
+            // row is the only place any of it still exists — so a revocation
+            // that recorded just "membership removed" would answer "who lost
+            // access" and never "access to WHAT", which is the half an incident
+            // actually turns on.
+            //
+            // `roles` is joined for the NAME as well as the id. A bare role_id
+            // dangles the moment that role is deleted, and a trail that has to
+            // be read against a table that no longer contains the row is not an
+            // append-only record of what happened. The join is on the role id
+            // the membership itself carries, inside a statement already pinned
+            // to one tenant, so it reads back a role this tenant demonstrably
+            // held — it is not a lookup by any caller-supplied id and cannot
+            // become a way to enumerate roles.
             $stmt = $this->db->prepare(
-                'SELECT id, is_primary FROM memberships
-                  WHERE id = ? AND profile_id = ? AND tenant_id = ? LIMIT 1'
+                'SELECT m.id, m.is_primary, m.role_id, m.ou_id, m.status, m.created_at,
+                        r.name AS role_name
+                   FROM memberships m
+                   LEFT JOIN roles r ON r.id = m.role_id
+                  WHERE m.id = ? AND m.profile_id = ? AND m.tenant_id = ? LIMIT 1'
             );
             $stmt->execute([$membershipId, $profileId, $ownerTenantId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1226,9 +1345,23 @@ class UsersApiHandler
             $del = $this->db->prepare('DELETE FROM memberships WHERE id = ? AND profile_id = ? AND tenant_id = ?');
             $del->execute([$membershipId, $profileId, $ownerTenantId]);
 
+            // The payload IS the surviving record of the deleted row (#889).
+            // {@see \Whity\Core\Audit\AuditLogger::subscribe()} maps this event
+            // to an audit row targeting the USER, with everything below except
+            // profile_id/tenant_id landing in metadata verbatim. `granted_at` is
+            // the membership's own created_at, so the pair of rows answers not
+            // just "who took this away and when" but "how long did they hold
+            // it" — which is the question a compromised-account timeline is
+            // built out of.
             $this->hookManager->dispatch('user.membership.removed', [
-                'profile_id' => $profileId,
-                'tenant_id'  => $ownerTenantId,
+                'profile_id'    => $profileId,
+                'tenant_id'     => $ownerTenantId,
+                'membership_id' => $membershipId,
+                'role_id'       => isset($row['role_id']) ? (int) $row['role_id'] : null,
+                'role_name'     => isset($row['role_name']) ? (string) $row['role_name'] : null,
+                'ou_id'         => isset($row['ou_id']) ? (int) $row['ou_id'] : null,
+                'status'        => isset($row['status']) ? (string) $row['status'] : null,
+                'granted_at'    => isset($row['created_at']) ? (string) $row['created_at'] : null,
             ]);
 
             return Response::json(['data' => ['id' => $membershipId, 'removed' => true]]);
@@ -1319,6 +1452,92 @@ class UsersApiHandler
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Every membership a profile holds in one tenant, in audit-payload shape (#889).
+     *
+     * Read immediately before a bulk removal so the resulting audit row can say
+     * what was lost, since afterwards there is nothing left to read.
+     *
+     * CAPPED, and the count is reported separately. An unbounded list would put
+     * an arbitrarily large blob into a metadata column on a path an operator
+     * does not control — and a person with hundreds of memberships in one tenant
+     * is a data anomaly, not a case worth serialising in full. Reporting the
+     * true `memberships_removed` count beside a capped list means a truncated
+     * row is visibly truncated: `count > len(roles_lost)` says so plainly,
+     * whereas a silently short list would read as a complete one.
+     *
+     * Best-effort: the removal must not fail because the trail could not be
+     * prepared. A read failure yields an empty list, and the count of 0 beside
+     * it is then honest about knowing nothing rather than asserting nothing was
+     * lost — the caller pairs it with the removal's own outcome.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function membershipsHeldBy(int $profileId, int $tenantId): array
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT m.id, m.role_id, m.ou_id, m.status, m.is_primary, m.created_at,
+                        r.name AS role_name
+                   FROM memberships m
+                   LEFT JOIN roles r ON r.id = m.role_id
+                  WHERE m.profile_id = ? AND m.tenant_id = ?
+                  ORDER BY m.is_primary DESC, m.id ASC
+                  LIMIT ' . self::AUDIT_MEMBERSHIP_LIST_CAP
+            );
+            $stmt->execute([$profileId, $tenantId]);
+
+            $out = [];
+            /** @var array<string, mixed> $row */
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $out[] = [
+                    'membership_id' => (int) $row['id'],
+                    'role_id'       => isset($row['role_id']) ? (int) $row['role_id'] : null,
+                    'role_name'     => isset($row['role_name']) ? (string) $row['role_name'] : null,
+                    'ou_id'         => isset($row['ou_id']) ? (int) $row['ou_id'] : null,
+                    'status'        => isset($row['status']) ? (string) $row['status'] : null,
+                    // Not a bare (bool) cast: PostgreSQL can hand a BOOLEAN back
+                    // as the string 'f', and `(bool) 'f'` is true — so the row
+                    // would report every membership as the primary one. Same
+                    // idiom as ProfileEmailRepository::toBool() and friends.
+                    'is_primary'    => in_array((string) $row['is_primary'], ['1', 't', 'true'], true),
+                    'granted_at'    => isset($row['created_at']) ? (string) $row['created_at'] : null,
+                ];
+            }
+
+            return $out;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * The NAME of a role visible to a tenant — its own, or a global one (#889).
+     *
+     * Recorded into the audit payload beside `role_id` so a grant row stays
+     * legible after the role itself is gone. `memberships.role_id` is
+     * `ON DELETE CASCADE`, so deleting a role silently removes every membership
+     * holding it with no per-row event; from that moment an id alone points
+     * into a table that no longer has the row.
+     *
+     * Best-effort by design: a null name degrades the audit row's readability
+     * and must never fail the grant that produced it.
+     */
+    private function roleNameVisibleToTenant(int $roleId, int $tenantId): ?string
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT name FROM roles WHERE id = ? AND (tenant_id = ? OR tenant_id IS NULL) LIMIT 1'
+            );
+            $stmt->execute([$roleId, $tenantId]);
+            $name = $stmt->fetchColumn();
+
+            return $name === false || $name === null ? null : (string) $name;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
