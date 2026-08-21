@@ -21,7 +21,9 @@ import type {
   RoleActivityResult,
   RoleAssignment,
   RoleAssignmentsPage,
+  RoleCreateInput,
   RoleInput,
+  RoleScope,
   RoleWithPermissions,
   RolesAdapter,
   Transport,
@@ -82,6 +84,22 @@ function paginationTotal(body: unknown): number {
   if (typeof pagination !== "object" || pagination === null || !("total" in pagination)) return 0
   const total = (pagination as { total: unknown }).total
   return typeof total === "number" ? total : 0
+}
+
+/**
+ * The ownership fields a create request carries for a given scope (#888).
+ *
+ * Three states, three distinct wire forms, and none of them is "the field is
+ * there but empty": an omitted scope sends NO fields, a named tenant sends
+ * `tenant_id`, and global sends `global: true`. `tenant_id: null` is deliberately
+ * not producible here — the server rejects it with a 400 precisely so that
+ * whether a client serialises an unset optional as `null` or drops it can never
+ * decide which tenant a role lands in.
+ */
+function scopeFields(scope: RoleScope | undefined): Record<string, number | boolean> {
+  if (scope === undefined || scope === "own") return {}
+  if (scope === "global") return { global: true }
+  return { tenant_id: scope }
 }
 
 /** Narrow a `/me/capabilities` payload to its permission slugs (fail-closed). */
@@ -176,8 +194,18 @@ export function createRolesAdapter(transport: Transport): RolesAdapter {
       return unwrapData<Permission[]>(body) ?? []
     },
 
-    async createRole(input: RoleInput): Promise<void> {
-      const { status, body } = await transport.request("POST", "/api/v1/roles", input)
+    async createRole(input: RoleCreateInput): Promise<void> {
+      const { scope, ...role } = input
+      const { status, body } = await transport.request("POST", "/api/v1/roles", {
+        ...role,
+        // The ONE place the wire grammar of #888 is written, for both clients.
+        // `scope` is a single closed value in the package so the UI cannot
+        // express the states the server rejects; it is unpacked into the two
+        // independent fields the endpoint actually takes here, and an omitted
+        // scope adds NOTHING to the body — the request stays byte-identical to
+        // the pre-#888 one, which is what makes the whole change additive.
+        ...scopeFields(scope),
+      })
       if (!isOk(status)) {
         // Surface a server validation message when present; an empty message
         // lets the caller fall back to its own translated copy.

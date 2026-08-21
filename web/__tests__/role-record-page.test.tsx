@@ -60,6 +60,7 @@ const TENANT_ROLE: RoleWithPermissions = {
   description: 'Front-line support',
   createdAt: '2026-01-05T09:00:00Z',
   manageable: true,
+  global: false,
   permissions: [CATALOGUE[0], CATALOGUE[2]],
 };
 
@@ -69,6 +70,7 @@ const GLOBAL_ROLE: RoleWithPermissions = {
   name: 'admin',
   description: 'Global base role',
   manageable: false,
+  global: true,
 };
 
 function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {

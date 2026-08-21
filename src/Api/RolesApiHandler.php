@@ -64,6 +64,20 @@ use PDO;
  * the deletion guard counted that very seed assignment; that hack has been
  * removed in favour of the explicit owning column.)
  *
+ * Since #888 a SYSTEM-tenant caller may also OVERRIDE that stamp — `tenant_id`
+ * to create for a named tenant, `global: true` to create a shared NULL-tenant
+ * base role. Both are refused with a 403 for any other caller and both are
+ * absent by default, so the paragraph above still describes every existing
+ * client. Without them the platform operator, who administers from tenant 0,
+ * could produce neither: an unqualified create stamps tenant 0, which is OWNED
+ * by the system tenant and therefore invisible to every other tenant, and only
+ * seeding could write a NULL row. See {@see self::create()}.
+ *
+ * Ownership is settled at CREATE and never moves: `PATCH` accepts no tenant
+ * field. Re-homing a role would silently revoke it from everyone holding it in
+ * the old tenant, which is a different operation with a different blast radius
+ * from "rename this role", and one endpoint should not quietly do both.
+ *
  * Name uniqueness is PER TENANT (#712, migration 093)
  * ---------------------------------------------------
  * `roles.name` used to be UNIQUE platform-wide, which meant the first tenant to
@@ -106,6 +120,14 @@ use PDO;
  */
 class RolesApiHandler
 {
+    /**
+     * The reserved tenant that administers the platform.
+     *
+     * Its holders see every role and are the only callers permitted to name a
+     * target tenant, or ask for a global role, on create (#888).
+     */
+    private const SYSTEM_TENANT_ID = 0;
+
     private PDO $db;
     private HookManager $hookManager;
 
@@ -193,20 +215,35 @@ class RolesApiHandler
             /** @var array<int, array<string, mixed>> $roles */
             $roles = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Normalize permission_count to camelCase integer and surface an
-            // AUTHORITATIVE per-row `manageable` flag so the admin UI can gate
-            // Edit/Delete without first issuing a write that would 404 on a
-            // global base role. The flag mirrors roleManageableByTenant()
+            // Normalize permission_count to camelCase integer and surface TWO
+            // authoritative per-row flags.
+            //
+            // `global` (#886) says what the row IS: a NULL-tenant base role
+            // shared by every tenant, so an edit to it changes it for the whole
+            // deployment. That was previously unknowable from a list row — the
+            // list deliberately returns own-plus-global and rendered both
+            // identically, which is how "a role edited in a tenant affects the
+            // same named role in another tenant" got reported as a cross-tenant
+            // write bug. It is not one: there is genuinely one row. `manageable`
+            // could not stand in for this, because for the SYSTEM tenant it is
+            // true for every role — precisely the caller for whom the
+            // distinction carries deployment-wide blast radius.
+            //
+            // `manageable` says what this CALLER may do to the row, so the admin
+            // UI can gate Edit/Delete without first issuing a write that would
+            // 404 on a global base role. The flag mirrors roleManageableByTenant()
             // (WC-110): SYSTEM tenant (id 0) may manage every role; a regular
             // tenant may manage ONLY its own roles (a global NULL-tenant role is
             // not manageable); a null tenant context manages nothing. The raw
-            // owning tenant_id is dropped from the payload — `manageable` is the
-            // clean contract the UI consumes.
+            // owning tenant_id is still dropped from the payload — `global` and
+            // `manageable` are the clean contract the UI consumes, and neither
+            // discloses WHICH other tenant owns a row.
             $roles = array_map(static function (array $role) use ($tenantId): array {
                 $role['permissionCount'] = (int)($role['permission_count'] ?? 0);
                 unset($role['permission_count']);
 
                 $roleTenantId = isset($role['tenant_id']) ? (int)$role['tenant_id'] : null;
+                $role['global'] = self::roleRowIsGlobal($role);
                 if ($tenantId === 0) {
                     $role['manageable'] = true;
                 } elseif ($tenantId === null) {
@@ -236,12 +273,17 @@ class RolesApiHandler
      * Visible means owned by the current tenant OR global (NULL tenant_id); the
      * SYSTEM tenant sees all roles (WC-110).
      *
-     * Carries the same authoritative `manageable` flag the LIST rows carry
-     * (#882). The list has surfaced it since WC-222 so the admin UI can gate
-     * Edit/Delete without first firing a write that would 404 on a global base
-     * role — but a record page reached by URL never sees a list row, so without
-     * it here the page would have to choose between rendering an editable form
-     * that 403/404s on save and re-fetching the whole list to find one boolean.
+     * Carries the same authoritative `manageable` and `global` flags the LIST
+     * rows carry. `manageable` (#882): the list has surfaced it since WC-222 so
+     * the admin UI can gate Edit/Delete without first firing a write that would
+     * 404 on a global base role — but a record page reached by URL never sees a
+     * list row, so without it here the page would have to choose between
+     * rendering an editable form that 403/404s on save and re-fetching the whole
+     * list to find one boolean. `global` (#886) is the same argument for the
+     * other flag: the record page inferred "is this a global base role" from
+     * `!manageable`, which is right for a tenant and WRONG for the system tenant
+     * — for whom everything is manageable, so a global base role rendered as
+     * "Your tenant's role" to the one caller whose edit reaches every tenant.
      *
      * @param Request              $request The incoming request.
      * @param array<string, mixed> $params  Route params (expects `id`).
@@ -263,7 +305,7 @@ class RolesApiHandler
 
             // @tenant-guard-ignore: role visibility already enforced by roleVisibleToTenant($id,$tenantId) guard above
             $stmt = $this->db->prepare('
-                SELECT id, name, description, parent_id, created_at
+                SELECT id, name, description, parent_id, created_at, tenant_id
                 FROM roles
                 WHERE id = ?
             ');
@@ -273,6 +315,14 @@ class RolesApiHandler
             if (!$role) {
                 return Response::error('Role not found', 404);
             }
+
+            // `global` is a FACT about the row, so it is read straight off the
+            // column the list reads — unlike `manageable` below, it is not an
+            // authorization rule and there is no guard helper for it to drift
+            // from. The raw owning tenant is dropped again afterwards: which
+            // OTHER tenant owns a role is not this endpoint's to disclose.
+            $role['global'] = self::roleRowIsGlobal($role);
+            unset($role['tenant_id']);
 
             $role['permissions'] = $this->fetchRolePermissions((int)$id);
             // Resolved through the SAME helper the write guards call rather than
@@ -292,12 +342,41 @@ class RolesApiHandler
     }
 
     /**
-     * POST /api/roles - Create a new role scoped to the current tenant.
+     * POST /api/roles - Create a role, by default owned by the current tenant.
      *
-     * Accepts `{name, description?, permissions?}` where `permissions` is a list
-     * of numeric permission ids and/or `resource:action` name strings. The new
-     * role is stamped with the current tenant id (`roles.tenant_id`) so it is
-     * immediately visible only to that tenant.
+     * Accepts `{name, description?, permissions?, tenant_id?, global?}` where
+     * `permissions` is a list of numeric permission ids and/or `resource:action`
+     * name strings.
+     *
+     * OWNERSHIP (#888)
+     * ----------------
+     * `tenant_id` names the tenant the role is created FOR and `global: true`
+     * asks for a GLOBAL (NULL-tenant) base role; both are honoured ONLY for a
+     * SYSTEM-tenant (0) caller and both are REFUSED — not ignored — for anyone
+     * else, because a field that is accepted and silently discarded teaches the
+     * caller it worked. With neither present the role is stamped with the
+     * caller's own tenant, exactly as it always was, so no existing client
+     * changes behaviour.
+     *
+     * This closes the defect that made every role on a single-operator install
+     * deployment-wide by accident: the platform is administered FROM tenant 0,
+     * so `TenantContext::getTenantId()` was 0 for every create through the admin
+     * UI and there was no way to say "this role belongs to tenant 7" — nor, in
+     * fact, any way to create a genuinely shared role either, since a tenant-0
+     * role is OWNED by tenant 0 and therefore invisible to every other tenant.
+     * Only seeding could produce a NULL-tenant row.
+     *
+     * WHY TWO FIELDS AND NOT ONE NULLABLE ONE. Ownership has three states —
+     * the caller's tenant, a named tenant, and global — and `tenant_id: null`
+     * for the third would make the wire meaning depend on whether a client
+     * serialises an unset optional field as `null` or drops it. That is the same
+     * omitted-vs-explicit-null trap that made resource-grant revoke id-addressed
+     * in v0.2.2. So `tenant_id` is INTEGER-ONLY here (null and '' are a 400, not
+     * a synonym for absent, unlike the more tolerant membership parameter this
+     * follows) and `global: true` is a separate, unmistakable request. Sending
+     * both is a 400 rather than a silent precedence rule.
+     *
+     * @see self::resolveCreateOwner() for the target-tenant validation.
      *
      * @param Request $request The incoming request.
      * @return Response JSON created role under the `data` key (201) or an error.
@@ -311,10 +390,21 @@ class RolesApiHandler
                 return Response::error('Role name is required', 400);
             }
 
-            $tenantId = TenantContext::getTenantId();
-            if ($tenantId === null) {
+            $callerTenantId = TenantContext::getTenantId();
+            if ($callerTenantId === null) {
                 return Response::error('Tenant context is required', 400);
             }
+
+            // The OWNING tenant of the new row: the caller's own tenant unless a
+            // system-tenant caller named another one or asked for a global role.
+            // null here means GLOBAL (roles.tenant_id IS NULL), which every
+            // downstream step — the name-uniqueness namespace, the INSERT, the
+            // hook payload — already understands.
+            $owner = $this->resolveCreateOwner($body, $callerTenantId);
+            if ($owner instanceof Response) {
+                return $owner;
+            }
+            $tenantId = $owner['tenantId'];
 
             $name = (string)$body['name'];
             $description = isset($body['description']) ? (string)$body['description'] : '';
@@ -331,10 +421,14 @@ class RolesApiHandler
             /** @var array<int, string|int> $permissions */
             $permissions = $this->extractPermissionList($body);
 
-            // Role names are unique PER TENANT (migration 093). The new role will
-            // be owned by the acting tenant, so that is the namespace it must be
-            // unique within — plus the global base roles it inherits. Another
-            // tenant's identically-named role is irrelevant and invisible here.
+            // Role names are unique PER TENANT (migration 093). The namespace is
+            // the OWNING tenant of the row being written — the caller's tenant
+            // by default, the NAMED tenant when a system caller supplied one —
+            // plus the global base roles it inherits. Another tenant's
+            // identically-named role is irrelevant and invisible here. A GLOBAL
+            // create ($tenantId === null) is checked against the global
+            // namespace alone, so a tenant's private role name cannot stop the
+            // operator naming a base role (#712).
             if ($this->roleNameTaken($name, $tenantId)) {
                 return Response::error('Role already exists', 409);
             }
@@ -354,7 +448,8 @@ class RolesApiHandler
 
             // Insert the role, stamping it with the owning tenant so it is visible
             // to — and only to — this tenant (WC-110). The SYSTEM tenant (id 0) is
-            // a real, scopeable owner here; it also sees every role on read.
+            // a real, scopeable owner here; it also sees every role on read. A
+            // NULL stamp is the GLOBAL row a `global: true` create asked for.
             $stmt = $this->db->prepare('
                 INSERT INTO roles (name, description, tenant_id, created_at)
                 VALUES (?, ?, ?, NOW())
@@ -398,6 +493,14 @@ class RolesApiHandler
                     'name' => $name,
                     'description' => $description,
                     'permissionCount' => $linkedCount,
+                    // Echo the RESOLVED owner (#888). The request's ownership
+                    // fields are optional, so without this a caller that omitted
+                    // them cannot tell what it got, and a `global: true` create
+                    // cannot be confirmed at all. Always present, so `null` here
+                    // is unambiguously GLOBAL — the omitted-vs-null problem the
+                    // request grammar avoids does not exist in a response.
+                    'tenantId' => $tenantId,
+                    'global' => $tenantId === null,
                 ],
             ], 201);
         } catch (\Exception $e) {
@@ -988,6 +1091,136 @@ class RolesApiHandler
             ]);
             return Response::error('Failed to change role permissions', 500);
         }
+    }
+
+    /**
+     * Whether a fetched role row is a GLOBAL (NULL-tenant) one (#886).
+     *
+     * Every query that reaches this selects `tenant_id`, so an ABSENT key is a
+     * programming error rather than a value — and it is answered `false`, not
+     * `true`. The asymmetry is deliberate: on incomplete data the safe claim is
+     * "an ordinary role", never "this one is shared by the whole deployment",
+     * because the second is the claim the UI hangs a blast-radius warning on.
+     * Reading the key directly also emitted an "Undefined array key" warning
+     * against a mocked row, which `failOnWarning` turns into a red suite —
+     * exactly the signal that says a caller is not selecting what it reads.
+     *
+     * @param array<string, mixed> $row A fetched `roles` row.
+     * @return bool True when the row's owning tenant is NULL.
+     */
+    private static function roleRowIsGlobal(array $row): bool
+    {
+        return array_key_exists('tenant_id', $row) && $row['tenant_id'] === null;
+    }
+
+    /**
+     * Resolve which tenant a CREATE writes its role for (#888).
+     *
+     * Returns `['tenantId' => int|null]` on success — `null` meaning a GLOBAL
+     * (NULL-tenant) role — or the `Response` the request should get instead.
+     *
+     * The grammar, and why each half of it is shaped this way:
+     *
+     *  - NEITHER field present ⇒ the caller's own tenant. Unchanged behaviour,
+     *    which is what makes this additive: every existing client keeps working
+     *    byte for byte.
+     *  - `tenant_id: <int>` ⇒ create for that tenant. INTEGER-ONLY: `null` and
+     *    `''` are a 400 rather than a synonym for absent, unlike the more
+     *    tolerant `POST /api/users/{id}/memberships` parameter this otherwise
+     *    copies. That endpoint has no third state to confuse, this one does, and
+     *    accepting `null` as "unspecified" would make `{"tenant_id": null}` mean
+     *    "my tenant" while `{"global": true}` means global — two spellings of an
+     *    empty field with opposite meanings, decided by whichever way the
+     *    client's JSON serialiser happens to treat an unset optional.
+     *  - `global: true` ⇒ a GLOBAL base role, the separate unmistakable form
+     *    that lets us keep `tenant_id` integer-only.
+     *  - BOTH ⇒ 400. A precedence rule ("tenant_id wins") is a rule nobody reads
+     *    until it has already written the wrong row.
+     *
+     * Both fields are honoured only for a SYSTEM-tenant (0) caller and REFUSED
+     * with a 403 for anyone else — never ignored, because a field that is
+     * accepted and silently dropped teaches the caller it worked. `global:
+     * false` asserts nothing and is therefore treated as absent, including for a
+     * regular tenant, so a client that always sends the field is not punished
+     * for it.
+     *
+     * A named tenant must EXIST, and a tenant that does not is a 404 rather than
+     * a 403 — the same choice the role guards make for a role the caller may not
+     * see (existence is not disclosed by the status code). Only a tenant-0
+     * caller ever reaches this check and every tenant is visible to it, so the
+     * two readings coincide here; the 404 keeps them coinciding if that ever
+     * stops being true.
+     *
+     * @param array<string, mixed> $body           The parsed request body.
+     * @param int                  $callerTenantId The caller's resolved tenant.
+     * @return Response|array{tenantId: int|null}
+     */
+    private function resolveCreateOwner(array $body, int $callerTenantId): Response|array
+    {
+        $wantsGlobal = array_key_exists('global', $body) ? $body['global'] : null;
+        $namesTenant = array_key_exists('tenant_id', $body);
+
+        if ($wantsGlobal !== null && !is_bool($wantsGlobal)) {
+            return Response::error('Invalid global', 400);
+        }
+
+        if ($wantsGlobal === true && $namesTenant) {
+            return Response::error('Specify either tenant_id or global, not both', 400);
+        }
+
+        if ($wantsGlobal === true) {
+            if ($callerTenantId !== self::SYSTEM_TENANT_ID) {
+                return Response::error('Only the system tenant may create a global role', 403);
+            }
+
+            return ['tenantId' => null];
+        }
+
+        if (!$namesTenant) {
+            return ['tenantId' => $callerTenantId];
+        }
+
+        // Authorization before validation, as on the membership endpoint: a
+        // caller who may not name a tenant learns nothing about which values
+        // would have been valid.
+        if ($callerTenantId !== self::SYSTEM_TENANT_ID) {
+            return Response::error('Only the system tenant may name a target tenant', 403);
+        }
+
+        $requested = $body['tenant_id'];
+
+        // Rejecting a non-integer HERE keeps `{"tenant_id": "sales"}` a clean 400
+        // rather than an "invalid input syntax for integer" driver error
+        // surfacing as an opaque 500 on PostgreSQL.
+        if (!is_int($requested) && !(is_string($requested) && ctype_digit($requested))) {
+            return Response::error('Invalid tenant_id', 400);
+        }
+
+        $targetTenantId = (int)$requested;
+        if (!$this->tenantExists($targetTenantId)) {
+            return Response::error('Tenant not found', 404);
+        }
+
+        return ['tenantId' => $targetTenantId];
+    }
+
+    /**
+     * Whether a tenant row exists, for the cross-tenant create target (#888).
+     *
+     * Tenant 0 counts: the system tenant is a real, scopeable owner of a role —
+     * a role stamped with tenant 0 is owned by, and visible only to, the system
+     * tenant, which is exactly what an unqualified system-tenant create has
+     * always produced.
+     *
+     * @param int $tenantId The tenant id to check.
+     * @return bool True when the tenant exists.
+     */
+    private function tenantExists(int $tenantId): bool
+    {
+        $stmt = $this->db->prepare('SELECT 1 FROM tenants WHERE id = ? LIMIT 1');
+        $stmt->execute([$tenantId]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

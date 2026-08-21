@@ -13,6 +13,7 @@
  *   roles.edit.description.label = Description
  *   roles.edit.description.placeholder = Role description
  *   roles.edit.error = Failed to update role
+ *   roles.edit.globalWarning = This is a global base role: one role shared by every tenant on this deployment. Saving changes it for all of them, including their existing users.
  *   roles.edit.loading = Loading role details...
  *   roles.edit.name.label = Role Name
  *   roles.edit.name.placeholder = e.g., Editor
@@ -41,6 +42,8 @@ import {
 } from '@amroksaleh/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { IconAlertTriangle } from '@tabler/icons-react';
 import {
   Form,
   FormField,
@@ -196,6 +199,27 @@ export function EditRoleModal({
             {t('roles.edit.subtitle', 'Update role information and permissions.')}
           </DialogDescription>
         </DialogHeader>
+
+        {/*
+          #886 — the one edit in this product with deployment-wide blast radius,
+          said out loud before it is made. Shown only when the role is BOTH
+          global and manageable by this caller, i.e. only to a system-tenant
+          operator: for anyone else the action is already disabled and the
+          read-only explanation is the right message instead. This is the reason
+          the reporter believed there was a cross-tenant write bug — there is
+          not; there is genuinely one row, and nothing said so.
+        */}
+        {role.global && role.manageable && (
+          <Alert variant="warning" data-testid="role-edit-global-warning">
+            <IconAlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              {t(
+                'roles.edit.globalWarning',
+                'This is a global base role: one role shared by every tenant on this deployment. Saving changes it for all of them, including their existing users.'
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {isLoading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">
