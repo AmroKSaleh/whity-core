@@ -14,7 +14,9 @@
       {
         "title": "Whity Desktop",
         "width": 1024,
-        "height": 720
+        "height": 720,
+        "minWidth": 1024,
+        "minHeight": 720
       }
     ],
     "security": {
