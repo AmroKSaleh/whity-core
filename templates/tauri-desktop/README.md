@@ -280,13 +280,17 @@ extensions this app needs (`pdo_sqlite`, `sqlite3`, `mbstring`) — see the
 scripts' own comments for the full per-platform story. macOS is not yet
 spiked (no Mac available in this environment).
 
-### A plugin's offline writes reach the server — the bridge relay
+### The bridge relay — built, and currently switched OFF
 
 The PHP host owns its own SQLite file (`whity-offline.sqlite`), completely
-separate from the Rust sync engine's `whity-desktop.sqlite` described above, and
-for a while that was the end of the story: a row created through a plugin's
-offline routes lived only on the device. `src-tauri/src/sync/bridge.rs` closes
-it.
+separate from the Rust sync engine's `whity-desktop.sqlite` described above, so
+a row created through a plugin's offline routes lives only on the device.
+`src-tauri/src/sync/bridge.rs` was built to close that gap.
+
+> **It does not work yet, and `BRIDGE_RESOURCES` is empty as a result.** The
+> design below is real and the engine is sound; what is missing is a server that
+> speaks the other end of it. Read this section as the intended mechanism, not
+> as current behaviour.
 
 Rather than reconcile the two files, the bridge treats the local PHP host as a
 **second "remote"** and relays it against the real server over two HTTP legs —
@@ -311,11 +315,33 @@ runs inside the background sync loop (`sync/scheduler.rs`), and no single
 resource's failure propagates: a leg that fails is logged and retried on the
 next cycle without advancing its cursor.
 
-`BRIDGE_RESOURCES` currently holds one entry, `relations/persons`. **Relaying a
-resource that isn't installed on a device is a safe no-op** — each call simply
-fails and is retried — which is deliberate, but it does mean an unverified relay
-and a working one look alike from the outside. Confirm a new entry end to end
-against a real server rather than inferring it from a quiet log.
+**Why it is off.** `relations/persons` was the one entry, and it failed on BOTH
+legs on every sync cycle — 131 failures per leg in a single observed session.
+The two causes are different, and only one is the template's:
+
+1. **The local leg had a path bug.** The URL is `php_host_base + base_path`, and
+   plugins register under `/api`. With `base_path: "/persons"` the request went
+   to `http://127.0.0.1:PORT/persons` → 404. Measured against a running host:
+   `/persons` 404s, while `/api/persons?updatedSince=0` returns a correct
+   `{data, cursor, hasMore}` feed.
+2. **The remote leg has no changes feed to talk to.**
+   `GET /api/v1/persons?updatedSince=0` answers `200` with
+   `{"data":[…],"pagination":{…}}` — a paginated list that ignores
+   `updatedSince` and carries no cursor. Core's document routes behave the same
+   way.
+
+Fixing only (1) would be worse than leaving it broken: the local leg would start
+succeeding and begin pushing real rows at a server that cannot honour the
+contract. Re-enabling needs server-side sync endpoints plus a **per-leg** path
+on `BridgeResource` — a single `base_path` cannot express `/api/persons`
+locally and `/persons` under `api_base` remotely.
+
+The lesson worth keeping: the module's own comment described relaying an
+uninstalled resource as a "safe no-op", and that reads as reassurance. It was
+not a no-op — it was two structural mismatches, logging hundreds of failures a
+session that nobody had read. **An unverified relay and a working one look
+alike from the outside; confirm one end to end rather than inferring it from a
+quiet log.**
 
 ## Plugin UI blocks, and the two transports
 
