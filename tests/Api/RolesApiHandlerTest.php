@@ -402,9 +402,13 @@ class RolesApiHandlerTest extends TestCase
         $visibility = $this->statement(['1' => 1]);       // role visible to tenant
         $roleRow = $this->statement(['id' => 5, 'name' => 'Editor', 'description' => '', 'parent_id' => null, 'created_at' => 'now']);
         $perms = $this->statement(false, [['id' => 7, 'name' => 'posts:read', 'description' => null]]);
+        // #882: the detail payload now carries `manageable`, resolved through the
+        // same roleManageableByTenant() guard the writes use — one more prepared
+        // statement, owned by this tenant, so the flag comes back true.
+        $manageable = $this->statement(['1' => 1]);
 
         $pdo = $this->createMock(PDO::class);
-        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $perms);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $perms, $manageable);
 
         $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
         $response = $handler->get(new Request('GET', '/api/roles/5'), ['id' => '5']);
@@ -414,6 +418,7 @@ class RolesApiHandlerTest extends TestCase
         $this->assertSame('Editor', $data['name']);
         $this->assertCount(1, $data['permissions']);
         $this->assertSame('posts:read', $data['permissions'][0]['name']);
+        $this->assertTrue($data['manageable'], 'A record page reached by URL reads editability from here.');
     }
 
     /**
