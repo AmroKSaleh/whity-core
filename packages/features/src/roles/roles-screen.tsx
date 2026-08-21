@@ -211,7 +211,11 @@ export function RolesScreen({
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm">
+          {/* Named explicitly: an icon-only trigger had no accessible name at
+              all, and #882 puts a SECOND button in the row (the name, which
+              opens the record) — so "the button in this row" stopped being
+              unambiguous for a screen reader and for a test alike. */}
+          <Button variant="ghost" size="icon-sm" aria-label={t('ui.table.actions', 'Actions')}>
             <IconMenu2 size={16} />
           </Button>
         </DropdownMenuTrigger>
