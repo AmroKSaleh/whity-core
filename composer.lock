@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0a538902bded9e71ef828b00c6fb09c7",
+    "content-hash": "7ce55f54a5dbff6028f8603549590500",
     "packages": [
         {
             "name": "composer/semver",
@@ -576,11 +576,11 @@
         },
         {
             "name": "whity/plugin-sdk",
-            "version": "1.27.0",
+            "version": "1.32.0",
             "dist": {
                 "type": "path",
                 "url": "sdk",
-                "reference": "a1db5fd7c28454ed529571d531876a06cca70b5b"
+                "reference": "3299509672870e9ba4cc6c3b0290d4a1050eaead"
             },
             "require": {
                 "php": ">=8.4"
@@ -1088,16 +1088,16 @@
         },
         {
             "name": "infection/infection",
-            "version": "0.34.2",
+            "version": "0.35.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/infection/infection.git",
-                "reference": "18d9bef39fae250f202920d1453ab96e793e6637"
+                "reference": "f54ac591f8ae3e2341c09cef7c26d69afe83f5ee"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/infection/infection/zipball/18d9bef39fae250f202920d1453ab96e793e6637",
-                "reference": "18d9bef39fae250f202920d1453ab96e793e6637",
+                "url": "https://api.github.com/repos/infection/infection/zipball/f54ac591f8ae3e2341c09cef7c26d69afe83f5ee",
+                "reference": "f54ac591f8ae3e2341c09cef7c26d69afe83f5ee",
                 "shasum": ""
             },
             "require": {
@@ -1118,7 +1118,7 @@
                 "ondram/ci-detector": "^4.1.0",
                 "php": "^8.3",
                 "psr/log": "^2.0 || ^3.0",
-                "sanmai/di-container": "^0.1.16",
+                "sanmai/di-container": "^0.1.23 || ^0.2",
                 "sanmai/duoclock": "^0.1.0",
                 "sanmai/later": "^0.1.7",
                 "sanmai/pipeline": "^7.2",
@@ -1133,7 +1133,8 @@
             },
             "conflict": {
                 "antecedent/patchwork": "<2.1.25",
-                "dg/bypass-finals": "<1.4.1"
+                "dg/bypass-finals": "<1.4.1",
+                "marc-mabe/php-enum": "<4.4"
             },
             "require-dev": {
                 "carthage-software/mago": "^1.20",
@@ -1211,7 +1212,7 @@
             ],
             "support": {
                 "issues": "https://github.com/infection/infection/issues",
-                "source": "https://github.com/infection/infection/tree/0.34.2"
+                "source": "https://github.com/infection/infection/tree/0.35.0"
             },
             "funding": [
                 {
@@ -1223,7 +1224,7 @@
                     "type": "open_collective"
                 }
             ],
-            "time": "2026-08-07T12:59:47+00:00"
+            "time": "2026-08-17T07:19:49+00:00"
         },
         {
             "name": "infection/mutator",
@@ -1280,19 +1281,20 @@
         },
         {
             "name": "justinrainbow/json-schema",
-            "version": "6.10.0",
+            "version": "6.11.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/jsonrainbow/json-schema.git",
-                "reference": "8b1308a9d7bdbdb20ce87ef920f82b4564bb2d33"
+                "reference": "7e420a943a6fbc95e60e3cf67acfbee85b3b4da7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/jsonrainbow/json-schema/zipball/8b1308a9d7bdbdb20ce87ef920f82b4564bb2d33",
-                "reference": "8b1308a9d7bdbdb20ce87ef920f82b4564bb2d33",
+                "url": "https://api.github.com/repos/jsonrainbow/json-schema/zipball/7e420a943a6fbc95e60e3cf67acfbee85b3b4da7",
+                "reference": "7e420a943a6fbc95e60e3cf67acfbee85b3b4da7",
                 "shasum": ""
             },
             "require": {
+                "ext-filter": "*",
                 "ext-json": "*",
                 "marc-mabe/php-enum": "^4.4",
                 "php": "^7.2 || ^8.0"
@@ -1325,20 +1327,9 @@
             ],
             "authors": [
                 {
-                    "name": "Bruno Prieto Reis",
-                    "email": "bruno.p.reis@gmail.com"
-                },
-                {
-                    "name": "Justin Rainbow",
-                    "email": "justin.rainbow@gmail.com"
-                },
-                {
-                    "name": "Igor Wiedler",
-                    "email": "igor@wiedler.ch"
-                },
-                {
-                    "name": "Robert Schönthal",
-                    "email": "seroscho@googlemail.com"
+                    "name": "Danny van der Sluijs",
+                    "email": "danny.vandersluijs@icloud.com",
+                    "role": "Maintainer"
                 }
             ],
             "description": "A library to validate a json schema.",
@@ -1349,9 +1340,9 @@
             ],
             "support": {
                 "issues": "https://github.com/jsonrainbow/json-schema/issues",
-                "source": "https://github.com/jsonrainbow/json-schema/tree/6.10.0"
+                "source": "https://github.com/jsonrainbow/json-schema/tree/6.11.0"
             },
-            "time": "2026-06-16T20:50:26+00:00"
+            "time": "2026-08-21T10:30:42+00:00"
         },
         {
             "name": "marc-mabe/php-enum",
@@ -2277,16 +2268,16 @@
         },
         {
             "name": "sanmai/di-container",
-            "version": "0.1.23",
+            "version": "0.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/sanmai/di-container.git",
-                "reference": "8cf59c091f33297389d0a5a27ea0d688df15c376"
+                "reference": "c14ca816bb5527e2361e3dc554a20829674c7ee1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/sanmai/di-container/zipball/8cf59c091f33297389d0a5a27ea0d688df15c376",
-                "reference": "8cf59c091f33297389d0a5a27ea0d688df15c376",
+                "url": "https://api.github.com/repos/sanmai/di-container/zipball/c14ca816bb5527e2361e3dc554a20829674c7ee1",
+                "reference": "c14ca816bb5527e2361e3dc554a20829674c7ee1",
                 "shasum": ""
             },
             "require": {
@@ -2344,7 +2335,7 @@
             ],
             "support": {
                 "issues": "https://github.com/sanmai/di-container/issues",
-                "source": "https://github.com/sanmai/di-container/tree/0.1.23"
+                "source": "https://github.com/sanmai/di-container/tree/0.2"
             },
             "funding": [
                 {
@@ -2352,7 +2343,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-08-11T00:58:41+00:00"
+            "time": "2026-08-11T06:42:18+00:00"
         },
         {
             "name": "sanmai/duoclock",
