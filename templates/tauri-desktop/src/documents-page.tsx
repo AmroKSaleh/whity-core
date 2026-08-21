@@ -6,7 +6,7 @@ import {
   type DocumentsNotifyType,
 } from "@amroksaleh/features/document-designer"
 
-import { documentsAdapter } from "./documents-tauri-adapter"
+import { documentsAdapter } from "./documents-composite-adapter"
 
 /**
  * Desktop mount of the shared Document & Label Designer
