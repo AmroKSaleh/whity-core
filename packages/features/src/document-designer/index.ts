@@ -35,6 +35,7 @@ export {
   isDocTemplate,
   migrateTemplate,
   newElement,
+  repointBlockInstances,
   sampleDataOf,
   toSavedTemplate,
   interpolate,

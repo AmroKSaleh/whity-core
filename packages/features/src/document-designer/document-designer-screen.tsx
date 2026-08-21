@@ -9,6 +9,7 @@ import {
   isDocTemplate,
   migrateTemplate,
   newElement,
+  repointBlockInstances,
   sampleDataOf,
 } from './template-model';
 import {
@@ -785,6 +786,10 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     const stash = blockStashRef.current;
     const editing = blockEdit;
     if (!stash || !editing) return;
+    // The pre-edit document to put back. Reassigned below when saving minted a
+    // new block id, so the restored page follows the block rather than
+    // dangling at its old one.
+    let restored = stash.template;
     if (save) {
       const els = template.pages[0]?.elements ?? [];
       const rebuilt = makeBlockFromElements(editing.name, els);
@@ -796,8 +801,18 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
         // personal (which would drop it out of every other user's library).
         const currentScope = blocksMap[editing.id]?.scope ?? rebuilt.scope;
         try {
-          await adapter.saveBlock({ ...rebuilt, id: editing.id, scope: currentScope });
+          const savedId = await adapter.saveBlock({ ...rebuilt, id: editing.id, scope: currentScope });
           await refreshBlocks();
+          // A block whose id was not a backend id — a starter (`sys-header`),
+          // or one authored locally and never persisted — is CREATED rather
+          // than updated, so the backend hands back a different id. Every
+          // instance on the page still points at the old one, and
+          // `refreshBlocks` has just dropped the starter from the library
+          // (same name as the block now saved), so leaving them alone renders
+          // them all as "missing block". Follow the id instead.
+          if (savedId !== editing.id) {
+            restored = repointBlockInstances(restored, editing.id, savedId);
+          }
           addToast(t('designer.block.updated', 'Block “{name}” updated.', { name: editing.name }), 'success');
         } catch (error) {
           addToast(
@@ -809,7 +824,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
         addToast(t('designer.block.empty', 'A block needs at least one element; discarded.'), 'info');
       }
     }
-    setTemplate(stash.template);
+    setTemplate(restored);
     setCurrentPage(stash.currentPage);
     setSelectedIds(stash.selectedIds);
     setCurrentId(stash.currentId);

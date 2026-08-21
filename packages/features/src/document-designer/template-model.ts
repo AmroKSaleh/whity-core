@@ -151,6 +151,40 @@ export function migrateTemplate(value: DocTemplate): DocTemplate {
   };
 }
 
+/**
+ * Repoint every `blockInstance` that references `fromId` at `toId`.
+ *
+ * Saving a block whose id is not a backend id — a starter (`sys-header`), or
+ * any block authored locally and never persisted — takes the CREATE path, and
+ * the backend mints a fresh numeric id. Every instance already placed on the
+ * page still points at the old one, and `refreshBlocks()` drops the starter
+ * from the library the moment a saved block shares its name, so those
+ * instances resolve to nothing and render as "missing block".
+ *
+ * Returns the template unchanged (same reference) when nothing matched, so a
+ * no-op save does not force a re-render.
+ */
+export function repointBlockInstances(template: DocTemplate, fromId: string, toId: string): DocTemplate {
+  if (fromId === toId) return template;
+
+  let touched = false;
+  const pages = template.pages.map((page) => {
+    let pageTouched = false;
+    const elements = page.elements.map((el) => {
+      if (el.type === 'blockInstance' && el.blockId === fromId) {
+        pageTouched = true;
+        return { ...el, blockId: toId };
+      }
+      return el;
+    });
+    if (!pageTouched) return page;
+    touched = true;
+    return { ...page, elements };
+  });
+
+  return touched ? { ...template, pages } : template;
+}
+
 export function exportTemplateJson(template: DocTemplate): void {
   const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
