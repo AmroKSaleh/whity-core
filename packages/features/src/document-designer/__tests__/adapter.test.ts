@@ -44,7 +44,7 @@ function fakeTransport(...responses: TransportResponse[]) {
 const ok = (body: unknown): TransportResponse => ({ status: 200, body });
 
 describe('createDocumentDesignerAdapter — templates', () => {
-  it('lists templates, mapping rows and asking for more than one default page', async () => {
+  it('lists templates, mapping rows, and requests the collection unadorned', async () => {
     const { transport, calls } = fakeTransport(
       ok({ data: [{ id: 42, name: 'Invoice', updated_at: '2026-08-01T00:00:00Z', data: V2_TEMPLATE }] }),
     );
@@ -52,9 +52,11 @@ describe('createDocumentDesignerAdapter — templates', () => {
     const result = await createDocumentDesignerAdapter(transport).listTemplates();
 
     expect(calls[0].method).toBe('GET');
-    // The cap matters: without it a library past the endpoint's default page
-    // size would silently render page one as the whole set.
-    expect(calls[0].path).toBe('/api/v1/document-templates?per_page=100');
+    // No `per_page`, on purpose: this endpoint answers with every visible row
+    // (no pagination envelope, no declared query params). Pinned so that a
+    // future page-size parameter has to be a deliberate change, with the page
+    // walk that would then be required rather than a cap.
+    expect(calls[0].path).toBe('/api/v1/document-templates');
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ id: '42', name: 'Invoice', updatedAt: '2026-08-01T00:00:00Z' });
   });
@@ -126,7 +128,7 @@ describe('createDocumentDesignerAdapter — blocks', () => {
 
     const result = await createDocumentDesignerAdapter(transport).listBlocks();
 
-    expect(calls[0].path).toBe('/api/v1/document-blocks?per_page=100');
+    expect(calls[0].path).toBe('/api/v1/document-blocks');
     expect(result[0]).toMatchObject({ id: '5', name: 'Header', scope: 'tenant', w: 50, h: 21 });
   });
 

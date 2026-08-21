@@ -25,14 +25,19 @@ const LIST_PATH_TEMPLATES = '/api/v1/document-templates';
 const LIST_PATH_BLOCKS = '/api/v1/document-blocks';
 
 /**
- * Core list endpoints paginate, and the default page is small. Asking for the
- * server maximum keeps a designer with more than a page of saved templates
- * from silently showing its first page as the whole set — the exact defect
- * #867 fixed for plugin blocks. It is a CAP, not a full walk: a library beyond
- * this many entries would still truncate, which is why it is stated here
- * rather than left implicit. Matches the roles adapter's convention.
+ * These two endpoints do NOT paginate, unlike most core list routes.
+ *
+ * `DocumentTemplatesApiHandler::list()` and its blocks counterpart answer
+ * `{data: <every visible row>}` — no `per_page`, no `pagination` envelope, and
+ * no query parameters declared in the OpenAPI spec. So there is deliberately
+ * no page walk and no per-page cap here: both would be dead code, and a cap in
+ * particular would give false confidence.
+ *
+ * If either endpoint ever gains pagination, the fix is a full walk (as #867
+ * did for plugin blocks), NOT a larger page size — a cap would still truncate,
+ * just later and less visibly. This note is here so that lands as a decision
+ * rather than an oversight.
  */
-const PER_PAGE = 100;
 
 /** Narrow a `{status, body}` result, throwing the server's own message when it
  *  supplied one (the API's error shape is `{error: string}`). */
@@ -64,7 +69,7 @@ export function createDocumentDesignerAdapter(transport: Transport): DocumentDes
   return {
     async listTemplates(): Promise<SavedTemplate[]> {
       const body = unwrap(
-        await transport.request('GET', `${LIST_PATH_TEMPLATES}?per_page=${PER_PAGE}`),
+        await transport.request('GET', LIST_PATH_TEMPLATES),
         'Failed to load templates'
       );
       return rowsOf(body).reduce<SavedTemplate[]>((out, row) => {
@@ -89,7 +94,7 @@ export function createDocumentDesignerAdapter(transport: Transport): DocumentDes
 
     async listBlocks(): Promise<DocBlock[]> {
       const body = unwrap(
-        await transport.request('GET', `${LIST_PATH_BLOCKS}?per_page=${PER_PAGE}`),
+        await transport.request('GET', LIST_PATH_BLOCKS),
         'Failed to load blocks'
       );
       return rowsOf(body).reduce<DocBlock[]>((out, row) => {
