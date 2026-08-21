@@ -713,11 +713,16 @@ class RolesApiHandler
      * since the day it was switched on.
      *
      * Note what it therefore cannot show: a REVOCATION. Removing a membership
-     * deletes the row, and `user.membership.added`/`user.membership.removed` are
-     * dispatched but not audited (see {@see \Whity\Core\Audit\AuditLogger::subscribe()},
-     * whose map covers role/user/tenant/ou CRUD and OU role changes only). So
-     * this is "who holds it and since when", truthfully, rather than "every
-     * grant and revoke", falsely.
+     * deletes the row, so this is "who holds it and since when", truthfully,
+     * rather than "every grant and revoke", falsely.
+     *
+     * Revocations ARE recorded since #889 — but against the USER, not the role
+     * (see {@see \Whity\Core\Audit\AuditLogger::subscribe()} for the argument),
+     * with `role_id` in metadata. `GET /api/v1/audit-logs`'s `target_id` filter
+     * works on the target, so a role's revocation history is not reachable from
+     * here until metadata is queryable. This endpoint remains the answer to
+     * "who holds it now"; the trail is the answer to "what happened to this
+     * person", and neither is pretending to be the other.
      *
      * AUTHORIZATION. Registered on the SAME `admin` role gate as every other
      * `/api/roles/*` route — deliberately not a new permission. A new slug ships
