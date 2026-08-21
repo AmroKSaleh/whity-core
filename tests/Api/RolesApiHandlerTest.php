@@ -404,8 +404,11 @@ class RolesApiHandlerTest extends TestCase
         $perms = $this->statement(false, [['id' => 7, 'name' => 'posts:read', 'description' => null]]);
         // #882: the detail payload now carries `manageable`, resolved through the
         // same roleManageableByTenant() guard the writes use — one more prepared
-        // statement, owned by this tenant, so the flag comes back true.
-        $manageable = $this->statement(['1' => 1]);
+        // statement, owned by this tenant, so the flag comes back true. The guard
+        // only asks whether the row exists (`fetch() !== false`), so the column
+        // name is arbitrary; a STRING key keeps this off the baselined
+        // `array{1: 1}` ignore pattern the neighbouring statements sit on.
+        $manageable = $this->statement(['owned' => 1]);
 
         $pdo = $this->createMock(PDO::class);
         $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $perms, $manageable);
