@@ -30,6 +30,17 @@ export interface Role {
    * non-system tenant never fires a PATCH/DELETE that would 404 (WC-222).
    */
   manageable: boolean;
+  /**
+   * Whether this is a GLOBAL (NULL-tenant) base role — one row shared by every
+   * tenant, so editing it changes it deployment-wide (#886).
+   *
+   * A separate fact from {@link Role.manageable}, and not derivable from it. For
+   * the SYSTEM tenant `manageable` is true for EVERY role, so the one caller
+   * whose edit reaches every tenant is precisely the one for whom `!manageable`
+   * says nothing — which is how a global base role used to render as "your
+   * tenant's role" to the operator about to change it for the whole install.
+   */
+  global: boolean;
 }
 
 export interface RoleWithPermissions extends Role {
@@ -119,6 +130,59 @@ export interface RoleInput {
 }
 
 /**
+ * One tenant a system operator may create a role for (#888).
+ *
+ * The name is what a person picks from; the id is what `POST /roles` is given.
+ */
+export interface RoleTenantOption {
+  id: number;
+  name: string;
+}
+
+/**
+ * Where a new role is to live (#888).
+ *
+ *  - `'own'`   — the caller's own tenant. The default, and the ONLY value a
+ *                non-system caller can produce: it sends no scope fields at all,
+ *                so the request is byte-identical to what it always was.
+ *  - `'global'`— a shared NULL-tenant base role (`global: true`).
+ *  - a number  — that tenant's own role (`tenant_id: n`).
+ *
+ * Modelled as one closed value rather than two independent optional fields
+ * because the UI must not be able to express the states the server rejects —
+ * "both" and "explicitly nothing" — in the first place.
+ */
+export type RoleScope = 'own' | 'global' | number;
+
+/**
+ * The create seam a HOST supplies when its caller may choose a scope (#888) —
+ * in practice, when the caller is the system tenant.
+ *
+ * OPTIONAL, and its absence is the ordinary state rather than a broken one: the
+ * package is mounted by a Next app, a Tauri shell and a Vite harness, and none
+ * of them shares an identity or tenants API. A host that supplies it gets the
+ * scope picker; a host that omits it creates in its own tenant exactly as
+ * before. Same shape of opt-in as `onOpenRecord` — revertible by deleting one
+ * prop at one call site.
+ */
+export interface RoleScopeSeam {
+  /**
+   * The tenants that may be chosen, loaded when the create modal opens rather
+   * than on every list render.
+   */
+  loadTenants: () => Promise<RoleTenantOption[]>;
+}
+
+/**
+ * Create adds an optional target SCOPE to {@link RoleInput} (#888). Update does
+ * not: a role's owner is settled at create and never moves, because re-homing
+ * one would silently revoke it from everyone holding it in the old tenant.
+ */
+export interface RoleCreateInput extends RoleInput {
+  scope?: RoleScope;
+}
+
+/**
  * The injected data-source adapter the components consume. Both the web and
  * desktop factories are thin wrappers over a {@link Transport}, so the
  * per_page=100 cap, the `{data}` unwrap and the 404→'not-manageable' mapping
@@ -144,8 +208,12 @@ export interface RolesAdapter {
   getRoleActivity(id: number, limit?: number): Promise<RoleActivityResult>;
   /** GET /permissions?per_page=100 (capped) — the picker source. */
   listPermissions(): Promise<Permission[]>;
-  /** POST /roles. */
-  createRole(input: RoleInput): Promise<void>;
+  /**
+   * POST /roles. `input.scope` names the tenant to create IN, or asks for a
+   * global base role; omitted (and for every non-system caller) the request
+   * carries no scope fields and the server stamps the caller's own tenant.
+   */
+  createRole(input: RoleCreateInput): Promise<void>;
   /** PATCH /roles/{id}; a 404 maps to 'not-manageable' (WC-110/WC-222). */
   updateRole(id: number, input: RoleInput): Promise<'ok' | 'not-manageable'>;
   /** DELETE /roles/{id}; a 404 maps to 'not-manageable' (WC-110/WC-222). */
@@ -203,6 +271,12 @@ export interface RolesScreenProps {
    * is still in this package.
    */
   onOpenRecord?: (role: Role) => void;
+  /**
+   * Cross-tenant create seam (#888). Supplied only by a host whose caller may
+   * choose where a new role lives; omitted, the Create modal has no scope picker
+   * and posts no scope fields. See {@link RoleScopeSeam}.
+   */
+  scope?: RoleScopeSeam;
   className?: string;
 }
 

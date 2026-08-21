@@ -2285,7 +2285,7 @@ export interface paths {
         /** List the roles visible to the tenant (own + global) */
         get: operations["get_api_v1_roles"];
         put?: never;
-        /** Create a role with optional permission grants */
+        /** Create a role, owned by the caller's tenant unless a system caller names another */
         post: operations["post_api_v1_roles"];
         delete?: never;
         options?: never;
@@ -4178,6 +4178,7 @@ export interface components {
             created_at: string | null;
             permissionCount: number;
             manageable: boolean;
+            global: boolean;
         };
         RoleAssignment: {
             membershipId: number;
@@ -4198,6 +4199,8 @@ export interface components {
             name: string;
             description?: string;
             permissions?: (number | string)[];
+            tenant_id?: number;
+            global?: boolean;
         };
         RoleCreateResponse: {
             data: {
@@ -4205,6 +4208,8 @@ export interface components {
                 name: string;
                 description?: string;
                 permissionCount?: number;
+                tenantId?: number | null;
+                global?: boolean;
             };
         };
         RoleDetail: {
@@ -4214,6 +4219,7 @@ export interface components {
             parent_id: number | null;
             created_at: string | null;
             manageable: boolean;
+            global: boolean;
             permissions: components["schemas"]["Permission"][];
         };
         RoleDetailResponse: {
@@ -17837,7 +17843,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoleCreateResponse"];
                 };
             };
-            /** @description Validation failed */
+            /** @description Validation failed, or tenant_id and global both sent */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17855,7 +17861,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Insufficient permissions */
+            /** @description Only the system tenant may name a target tenant or create a global role */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17864,7 +17870,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Not found */
+            /** @description The named target tenant does not exist */
             404: {
                 headers: {
                     [name: string]: unknown;

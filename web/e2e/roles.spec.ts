@@ -32,21 +32,21 @@ test.describe('Roles CRUD (admin)', () => {
     await adminPage.shell.clickNav('Roles');
     await page.waitForURL('**/admin/roles');
     const table = page.getByRole('table');
-    await expect(table.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
-    await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
+    await expect(table.getByRole('cell', { name: /^admin\b/ })).toBeVisible();
+    await expect(table.getByRole('cell', { name: /^user\b/ })).toBeVisible();
   });
 
   test('the roles list filters by search', async ({ adminPage, page }) => {
     await adminPage.shell.clickNav('Roles');
     await page.waitForURL('**/admin/roles');
     const table = page.getByRole('table');
-    await expect(table.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
-    await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
+    await expect(table.getByRole('cell', { name: /^admin\b/ })).toBeVisible();
+    await expect(table.getByRole('cell', { name: /^user\b/ })).toBeVisible();
 
     // Filtering by "admin" keeps the admin role and hides the user role.
     await page.getByPlaceholder('Search roles…').fill('admin');
-    await expect(table.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
-    await expect(table.getByRole('cell', { name: 'user', exact: true })).toHaveCount(0);
+    await expect(table.getByRole('cell', { name: /^admin\b/ })).toBeVisible();
+    await expect(table.getByRole('cell', { name: /^user\b/ })).toHaveCount(0);
   });
 
   test('create a role, see it listed, then delete it', async ({ adminPage, page }) => {
@@ -419,17 +419,24 @@ test.describe('Roles delete guards (admin)', () => {
     await adminPage.shell.clickNav('Roles');
     await page.waitForURL('**/admin/roles');
 
-    // The global seeded roles are VISIBLE in the list (read is global).
+    // The global seeded roles are VISIBLE in the list (read is global), and
+    // since #886 they SAY SO: the name cell carries a "Global" badge, which is
+    // why these locators match a prefix rather than the exact cell text.
     const table = page.getByRole('table');
-    await expect(table.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
-    await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
+    await expect(table.getByRole('cell', { name: /^admin\b/ })).toBeVisible();
+    await expect(table.getByRole('cell', { name: /^user\b/ })).toBeVisible();
+
+    // #886: the marker is the whole point — an operator must be able to tell a
+    // deployment-wide base role from their own before they act on it, in the
+    // LIST, where the action starts.
+    const userRow = page.getByRole('row', { name: /^user/ });
+    await expect(userRow.getByTestId('role-row-global-badge')).toBeVisible();
 
     // DELETE and EDIT on the global `user` base role are DISABLED for this
     // tenant (WC-222): a global base role (NULL tenant) is not tenant-manageable
     // (only the system tenant may write it), so the row actions are shown
     // disabled with an explanatory tooltip rather than letting the admin open a
     // dialog that would only 404. The seeded role therefore stays.
-    const userRow = page.getByRole('row', { name: /^user/ });
     await userRow.getByRole('button', { name: 'Actions' }).click();
     const deleteItem = page.getByRole('menuitem', { name: 'Delete' });
     await expect(deleteItem).toBeVisible();
@@ -437,7 +444,7 @@ test.describe('Roles delete guards (admin)', () => {
     await expect(page.getByRole('menuitem', { name: 'Edit' })).toHaveAttribute('aria-disabled', 'true');
     // Close the menu without triggering a delete; the seeded role survives.
     await page.keyboard.press('Escape');
-    await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
+    await expect(table.getByRole('cell', { name: /^user\b/ })).toBeVisible();
   });
 
   test('deleting a tenant role with assigned users is blocked (409) and surfaces gracefully', async ({

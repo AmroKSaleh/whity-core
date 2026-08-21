@@ -551,12 +551,14 @@ final class CoreApiSchemas
                 ] + self::authErrors(),
             ]),
             self::adminRoute('POST', '/api/roles', [
-                'summary' => 'Create a role with optional permission grants',
+                'summary' => 'Create a role, owned by the caller\'s tenant unless a system caller names another',
                 'tags' => ['roles'],
                 'request' => 'RoleCreateRequest',
                 'responses' => [
                     201 => self::jsonResponse('The created role', 'RoleCreateResponse'),
-                    400 => self::errorResponse('Validation failed'),
+                    400 => self::errorResponse('Validation failed, or tenant_id and global both sent'),
+                    403 => self::errorResponse('Only the system tenant may name a target tenant or create a global role'),
+                    404 => self::errorResponse('The named target tenant does not exist'),
                     409 => self::errorResponse('Role name already exists'),
                 ] + self::authErrors(),
             ]),
@@ -2059,7 +2061,16 @@ final class CoreApiSchemas
             // tenant (only the SYSTEM tenant may manage it); the admin UI gates
             // its Edit/Delete actions on this flag (WC-222).
             'manageable' => self::bool(),
-        ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissionCount', 'manageable']);
+            // True when this is a GLOBAL (NULL-tenant) base role — one row shared
+            // by every tenant, so an edit to it applies deployment-wide (#886).
+            // Distinct from `manageable`, which says what the CALLER may do: for
+            // the system tenant everything is manageable, so without this flag
+            // the one caller whose edit reaches every tenant is also the one who
+            // cannot tell which roles those are. The owning tenant id itself is
+            // never returned — a tenant learns that a role is shared, not who
+            // else has one.
+            'global' => self::bool(),
+        ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissionCount', 'manageable', 'global']);
 
         $tenant = self::object([
             'id' => self::int(),
@@ -3005,8 +3016,13 @@ final class CoreApiSchemas
                 'parent_id' => self::int(true),
                 'created_at' => self::str(true),
                 'manageable' => self::bool(),
+                // #886 — the same "is this shared by every tenant" fact the list
+                // rows carry. The record page previously inferred it from
+                // `!manageable`, which reads correctly for a tenant and inverts
+                // for the system tenant.
+                'global' => self::bool(),
                 'permissions' => ['type' => 'array', 'items' => SchemaBuilder::ref('Permission')],
-            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'manageable', 'permissions']),
+            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'manageable', 'global', 'permissions']),
             'RoleDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('RoleDetail')),
             // #882 — one holder of a role. `assignedAt` is the membership's
             // created_at: when this person was given this role in this tenant,
@@ -3027,21 +3043,41 @@ final class CoreApiSchemas
                 'assignedAt' => self::str(true),
             ], ['membershipId', 'profileId', 'tenantId', 'displayName', 'isPrimary', 'status']),
             'RoleAssignmentListResponse' => self::paginatedListEnvelope('RoleAssignment'),
+            // #888 — `tenant_id` names the tenant the role is created FOR and
+            // `global: true` asks for a shared NULL-tenant base role. Both are
+            // honoured ONLY for a tenant-0 caller (403 otherwise, never a silent
+            // ignore) and both are optional, so an unqualified create still
+            // stamps the caller's own tenant exactly as before.
+            //
+            // Two fields rather than one nullable one, and `tenant_id` is
+            // INTEGER, not nullable-integer, on purpose: ownership has three
+            // states and `tenant_id: null` for the third would make the meaning
+            // on the wire depend on whether a client serialises an unset
+            // optional as `null` or drops it. Sending both is a 400.
             'RoleCreateRequest' => self::object([
                 'name' => self::str(),
                 'description' => self::str(),
                 'permissions' => ['type' => 'array', 'items' => $permissionRef],
+                'tenant_id' => self::int(),
+                'global' => self::bool(),
             ], ['name']),
             'RoleUpdateRequest' => self::object([
                 'name' => self::str(),
                 'description' => self::str(),
                 'permissions' => ['type' => 'array', 'items' => $permissionRef],
             ], []),
+            // `tenantId`/`global` echo the RESOLVED owner (#888). The request's
+            // ownership fields are optional, so a caller that omitted them
+            // otherwise cannot tell what it got. In a RESPONSE the field is
+            // always present, so `tenantId: null` is unambiguously global — the
+            // omitted-vs-explicit-null problem exists only on the request side.
             'RoleCreateResponse' => self::dataEnvelope(self::object([
                 'id' => self::int(),
                 'name' => self::str(),
                 'description' => self::str(),
                 'permissionCount' => self::int(),
+                'tenantId' => self::int(true),
+                'global' => self::bool(),
             ], ['id', 'name'])),
             // #712 — the delta body shared by POST and DELETE
             // /api/roles/{id}/permissions. Same mixed id-or-`resource:action`

@@ -12,6 +12,7 @@
  *   roles.delete.cancel = Cancel
  *   roles.delete.description = Are you sure you want to delete this role? This action cannot be undone.
  *   roles.delete.error = Failed to delete role
+ *   roles.delete.globalWarning = This is a global base role: one role shared by every tenant on this deployment. Deleting it removes it from all of them.
  *   roles.delete.notManageable = This role can't be modified by your tenant — global base roles are managed by the system tenant.
  *   roles.delete.permissionCount = Permissions: {count}
  *   roles.delete.submit = Delete Role
@@ -34,7 +35,7 @@ import {
 } from '@amroksaleh/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { IconAlertCircle } from '@tabler/icons-react';
+import { IconAlertCircle, IconAlertTriangle } from '@tabler/icons-react';
 import type { Role, RolesAdapter, RolesTranslate } from './types';
 
 interface DeleteRoleModalProps {
@@ -122,6 +123,23 @@ export function DeleteRoleModal({
               </div>
             )}
           </div>
+
+          {/*
+            #886 — same blast-radius statement the edit path makes, for the
+            irreversible half of it. Only a system-tenant operator ever sees it:
+            for anyone else a global role's Delete is already disabled.
+          */}
+          {role.global && role.manageable && (
+            <Alert variant="warning" data-testid="role-delete-global-warning">
+              <IconAlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                {t(
+                  'roles.delete.globalWarning',
+                  'This is a global base role: one role shared by every tenant on this deployment. Deleting it removes it from all of them.'
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
 
           <Alert>
             <IconAlertCircle className="h-4 w-4" />

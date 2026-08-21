@@ -24,6 +24,7 @@
  *   roles.record.error.load = Failed to load this role
  *   roles.record.error.save = Failed to save this role
  *   roles.record.error.title = This role could not be loaded
+ *   roles.record.globalWarning = This is a global base role: one role shared by every tenant on this deployment. Saving changes it for all of them, including their existing users.
  *   roles.record.holders.assignedOn = assigned {date}
  *   roles.record.holders.assignedUnknown = assignment date unknown
  *   roles.record.holders.empty = Nobody holds this role yet.
@@ -56,6 +57,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
@@ -63,7 +65,7 @@ import { ErrorState } from '@amroksaleh/ui/empty-state';
 import { Input } from '@amroksaleh/ui/input';
 import { PageHeader } from '@amroksaleh/ui/page-header';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { IconArrowLeft, IconShieldLock } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowLeft, IconShieldLock } from '@tabler/icons-react';
 
 import { identityTranslate } from '../nav/types';
 import { ROLES_WRITE } from './capabilities';
@@ -268,6 +270,12 @@ export function RoleRecordScreen({
   const hasWrite = can(ROLES_WRITE);
   const isManageable = role?.manageable === true;
   const isEditable = hasWrite && isManageable;
+  // #886: read from the server's own `global` flag rather than inferred from
+  // `!isManageable`. The inference is right for a tenant and INVERTED for the
+  // system tenant — for whom every role is manageable — so the page told the
+  // one operator who can change a role for the whole deployment that it was
+  // their tenant's own.
+  const isGlobal = role?.global === true;
 
   const isDirty = useMemo(() => {
     if (!role) return false;
@@ -398,7 +406,7 @@ export function RoleRecordScreen({
         title={role.name}
         description={role.description || t('roles.record.subtitle', 'Role record')}
         badge={
-          !isManageable ? (
+          isGlobal ? (
             <Badge variant="warning" data-testid="role-record-global-badge">
               {t('roles.record.stat.scope.global', 'Global base role')}
             </Badge>
@@ -432,6 +440,25 @@ export function RoleRecordScreen({
         </p>
       )}
 
+      {/*
+        #886 — the blast radius, stated before the edit rather than after it.
+        Shown only when the record is BOTH global and actually editable here,
+        which is only ever a system-tenant operator: for anyone else the
+        read-only notice above already explains why the form is absent, and two
+        notices saying overlapping things is one notice too many.
+      */}
+      {isGlobal && isEditable && (
+        <Alert variant="warning" data-testid="role-record-global-warning">
+          <IconAlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            {t(
+              'roles.record.globalWarning',
+              'This is a global base role: one role shared by every tenant on this deployment. Saving changes it for all of them, including their existing users.'
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* The record's context, above everything editable: what this role IS on
           this installation, before what it may be changed to. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -458,9 +485,9 @@ export function RoleRecordScreen({
         <Stat
           label={t('roles.record.stat.scope', 'Scope')}
           value={
-            isManageable
-              ? t('roles.record.stat.scope.tenant', "Your tenant's role")
-              : t('roles.record.stat.scope.global', 'Global base role')
+            isGlobal
+              ? t('roles.record.stat.scope.global', 'Global base role')
+              : t('roles.record.stat.scope.tenant', "Your tenant's role")
           }
         />
       </div>

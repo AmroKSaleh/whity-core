@@ -15868,7 +15868,7 @@
             },
             "post": {
                 "operationId": "post_api_v1_roles",
-                "summary": "Create a role with optional permission grants",
+                "summary": "Create a role, owned by the caller's tenant unless a system caller names another",
                 "tags": [
                     "roles"
                 ],
@@ -15894,7 +15894,7 @@
                         }
                     },
                     "400": {
-                        "description": "Validation failed",
+                        "description": "Validation failed, or tenant_id and global both sent",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -15914,7 +15914,7 @@
                         }
                     },
                     "403": {
-                        "description": "Insufficient permissions",
+                        "description": "Only the system tenant may name a target tenant or create a global role",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -15924,7 +15924,7 @@
                         }
                     },
                     "404": {
-                        "description": "Not found",
+                        "description": "The named target tenant does not exist",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -26624,6 +26624,9 @@
                     },
                     "manageable": {
                         "type": "boolean"
+                    },
+                    "global": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
@@ -26633,7 +26636,8 @@
                     "parent_id",
                     "created_at",
                     "permissionCount",
-                    "manageable"
+                    "manageable",
+                    "global"
                 ]
             },
             "RoleAssignment": {
@@ -26718,6 +26722,12 @@
                                 }
                             ]
                         }
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "global": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
@@ -26741,6 +26751,13 @@
                             },
                             "permissionCount": {
                                 "type": "integer"
+                            },
+                            "tenantId": {
+                                "type": "integer",
+                                "nullable": true
+                            },
+                            "global": {
+                                "type": "boolean"
                             }
                         },
                         "required": [
@@ -26777,6 +26794,9 @@
                     "manageable": {
                         "type": "boolean"
                     },
+                    "global": {
+                        "type": "boolean"
+                    },
                     "permissions": {
                         "type": "array",
                         "items": {
@@ -26791,6 +26811,7 @@
                     "parent_id",
                     "created_at",
                     "manageable",
+                    "global",
                     "permissions"
                 ]
             },
