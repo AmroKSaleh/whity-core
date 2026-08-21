@@ -2808,6 +2808,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/uikit/demo/rows/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Demo single record for the record-bound block example */
+        get: operations["get_api_v1_uikit_demo_rows_name"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uikit/demo/tasks": {
         parameters: {
             query?: never;
@@ -4768,6 +4785,16 @@ export interface components {
                 value: string;
                 trend: string;
                 hint: string;
+            };
+        };
+        UiKitDemoRecordResponse: {
+            data: {
+                name: string;
+                role: string;
+                status: string;
+                joined: string;
+                manageable: boolean;
+                canEdit: boolean;
             };
         };
         UiKitDemoRow: {
@@ -21811,6 +21838,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UiKitDemoRowsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_uikit_demo_rows_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoRecordResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoRecordResponse"];
                 };
             };
             /** @description Unauthorized */

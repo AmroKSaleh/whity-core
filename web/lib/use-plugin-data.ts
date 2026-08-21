@@ -104,6 +104,14 @@ export function usePluginData<T>(
   }, []);
 
   useEffect(() => {
+    // #883: an EMPTY source is not a path, it is "nobody has said which record
+    // yet" — a `dataRecord` whose `{token}` has not resolved. Hooks cannot be
+    // skipped, so the caller passes `''` and the fetch is skipped here instead.
+    // Requesting `''` would resolve against the current document URL and answer
+    // with a page of HTML, which parses as an error the user has no way to act
+    // on. The state stays `loading`, which is what the caller renders around.
+    if (source === '') return;
+
     const key = fetchKey;
     const controller = new AbortController();
     // Hang guard on the SAME controller already used for unmount/re-fetch

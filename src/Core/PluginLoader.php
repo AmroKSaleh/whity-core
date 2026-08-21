@@ -2926,7 +2926,49 @@ class PluginLoader
         // substitutes a concrete value there in either case. Comparing the
         // literal strings would reject a correct declaration for a naming
         // difference the dispatcher does not care about.
-        return strtoupper($method) . ' ' . (string) preg_replace('/\{[^}]*\}/', '{}', $path);
+        return strtoupper($method) . ' ' . self::normalizePathKey($path);
+    }
+
+    /**
+     * The comparison key for a PATH alone (#883): every `{param}` collapsed to
+     * `{}`.
+     *
+     * The path half of {@see normalizeRouteKey()}, split out because a
+     * `dataRecord.source` is matched against the GET-route map, which is keyed
+     * by path with no method in the key.
+     *
+     * @param string $path A route path or a block's `recordPath` template.
+     * @return string The normalized key.
+     */
+    private static function normalizePathKey(string $path): string
+    {
+        return (string) preg_replace('/\{[^}]*\}/', '{}', $path);
+    }
+
+    /**
+     * Whether a `recordPath` source names a GET route this plugin registered,
+     * comparing with route parameters normalized (#883).
+     *
+     * Falls back to the same answer an exact comparison would give for a source
+     * carrying no `{token}` at all, so a singleton record source is judged
+     * exactly as a `dataTable`'s collection source is.
+     *
+     * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission.
+     */
+    private static function matchesRegisteredGetRoute(string $source, array $registeredGetRoutes): bool
+    {
+        if (array_key_exists($source, $registeredGetRoutes)) {
+            return true;
+        }
+
+        $key = self::normalizePathKey($source);
+        foreach (array_keys($registeredGetRoutes) as $registered) {
+            if (self::normalizePathKey((string) $registered) === $key) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -3269,12 +3311,28 @@ class PluginLoader
                 $type = $node['type'] ?? null;
                 if (is_string($type)) {
                     $rule = \Whity\Sdk\Frontend\Blocks\BlockContract::rulesFor($type);
-                    $isDataBound = $rule !== null
-                        && (($rule['props']['source']['type'] ?? null) === 'apiPath');
-                    if ($isDataBound) {
-                        /** @var string $source — guaranteed a valid apiPath by BlockValidator */
+                    $sourceKind = $rule !== null ? ($rule['props']['source']['type'] ?? null) : null;
+                    if ($sourceKind === 'apiPath' || $sourceKind === 'recordPath') {
+                        /** @var string $source — guaranteed a valid apiPath/recordPath by BlockValidator */
                         $source = $node['source'];
-                        if (!array_key_exists($source, $registeredGetRoutes)) {
+                        // #883: a `recordPath` (`dataRecord.source`) may carry
+                        // `{token}` segments the renderer substitutes from the
+                        // master-detail context, so it is compared with route
+                        // parameters normalized — exactly as an inbox action's
+                        // endpoint is, and for the same reason: a declared
+                        // `{record}` and a registered `{id}` name the same
+                        // segment with different words, and the dispatcher does
+                        // not care which word was used. The gate is NOT widened
+                        // by this: the shape still has to be one THIS plugin
+                        // registered, and the concrete path the renderer builds
+                        // is dispatched and permission-checked like any other.
+                        // An `apiPath` keeps its exact-string comparison, which
+                        // is stricter — nothing that validates today starts
+                        // matching by shape.
+                        $owned = $sourceKind === 'apiPath'
+                            ? array_key_exists($source, $registeredGetRoutes)
+                            : self::matchesRegisteredGetRoute($source, $registeredGetRoutes);
+                        if (!$owned) {
                             // Ownership violation — record the offending path
                             // and signal the caller to drop the feature.
                             $dropSource = $source;

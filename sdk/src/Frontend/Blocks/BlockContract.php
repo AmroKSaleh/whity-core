@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -132,17 +132,33 @@ final class BlockContract
             ],
 
             // ---- leaves (no `children`) ----
+            // #883: the four literal leaves each carry an optional `…From`
+            // twin — a `contextPath` naming a field of a record in the
+            // master-detail context (a `dataRecord`'s published facts, or a row
+            // an `open` row action published). The LITERAL stays required and
+            // is the fallback: a record page that titles itself with the
+            // record's own name still has a title while the record loads, and
+            // still has one if the reference never resolves. That is why these
+            // are additive twins rather than an either/or — "exactly one of"
+            // would have made an unresolved reference render as nothing, and a
+            // page with no heading is a worse failure than a generic one.
+            //
+            // These are FACT bindings — the page STATING something about the
+            // record — so the validator refuses one that names a field in
+            // {@see BlockValidator::CALLER_DECISION_FIELDS}. See #895.
             'heading' => [
                 'container' => false,
                 'props' => [
                     'level' => ['type' => 'intEnum', 'required' => true, 'values' => [1, 2, 3, 4]],
                     'text' => ['type' => 'string', 'required' => true],
+                    'textFrom' => ['type' => 'contextPath', 'required' => false],
                 ],
             ],
             'text' => [
                 'container' => false,
                 'props' => [
                     'value' => ['type' => 'string', 'required' => true],
+                    'valueFrom' => ['type' => 'contextPath', 'required' => false],
                     'tone' => ['type' => 'enum', 'required' => false, 'values' => ['default', 'muted']],
                 ],
             ],
@@ -159,6 +175,7 @@ final class BlockContract
                 'props' => [
                     'variant' => ['type' => 'enum', 'required' => true, 'values' => ['neutral', 'info', 'success', 'warning', 'danger']],
                     'label' => ['type' => 'string', 'required' => true],
+                    'labelFrom' => ['type' => 'contextPath', 'required' => false],
                 ],
             ],
             'stat' => [
@@ -166,7 +183,9 @@ final class BlockContract
                 'props' => [
                     'label' => ['type' => 'string', 'required' => true],
                     'value' => ['type' => 'string', 'required' => true],
+                    'valueFrom' => ['type' => 'contextPath', 'required' => false],
                     'hint' => ['type' => 'string', 'required' => false],
+                    'hintFrom' => ['type' => 'contextPath', 'required' => false],
                     'trend' => ['type' => 'enum', 'required' => false, 'values' => ['up', 'down', 'flat']],
                 ],
             ],
@@ -366,6 +385,99 @@ final class BlockContract
                 'pageSize'       => ['type' => 'int',            'required' => false],
                 'emptyText'      => ['type' => 'string',         'required' => false],
                 'params'         => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+
+            // ---- record blocks (#883) ----
+            // The RECORD-BOUND primitive. Every other data-bound leaf in this
+            // contract assumes a COLLECTION at `source`: `dataTable` renders
+            // rows, `dataStat` reduces a body to one scalar, `keyValue` takes
+            // literals baked into the declaration. Nothing fetched ONE resource
+            // and rendered its fields, so a record page — the platform's
+            // standard for editing a record since #882 — could not be described
+            // at all, only hand-written in React.
+            //
+            // `dataRecord` is a CONTAINER rather than a leaf, and that is the
+            // whole design. It does three jobs that a record page needs done in
+            // one place:
+            //
+            //  1. It fetches one resource at `source`.
+            //  2. It PUBLISHES that record into the master-detail context under
+            //     its `id`, so every block beneath it — and beside it — reads
+            //     the record through the SAME `{id}.{field}` addressing an
+            //     `open` row action already publishes a row under. That is the
+            //     page-level record context #883 asks for, built out of the
+            //     mechanism that already exists instead of a second one.
+            //  3. It owns the loading and failure states for its whole subtree,
+            //     so a half-loaded record is one state on one block rather than
+            //     a dozen skeletons that arrive in an arbitrary order.
+            //
+            // WHICH record. `source` is a `recordPath`: an owned apiPath that
+            // may carry `{token}` segments in the SAME addressing as
+            // `params.from` / `defaultFrom` / `submit.endpoint`. So a detail
+            // pane reads `/api/x/rows/{picker}` from a `selector`, an overlay
+            // reads `/api/x/rows/{edit-modal.id}` from the row that opened it,
+            // and a record ROUTE reads `/api/x/rows/{record}` — `record` being
+            // the reserved name a host seeds with the route's own record id
+            // (which is why a `selector` may not be named `record`; see
+            // {@see BlockValidator::PAGE_RECORD_BINDING}). The block does not
+            // fetch until every token resolves: an unresolved token would
+            // otherwise request a DIFFERENT resource than the one meant, and
+            // silently render it as the record.
+            //
+            // `fields` IS THE #895 GUARD, and it is a whitelist rather than a
+            // warning. #895: the roles record page derived "is this a global
+            // role" from `manageable` — the server's answer to "may YOU write
+            // this?" — and for a tenant-0 caller `manageable` is true of every
+            // role, so the system tenant, the one caller whose edit reaches
+            // every tenant, saw a deployment-wide role labelled "Your tenant's
+            // role". #897 made that unwriteable in TypeScript by splitting the
+            // payload into `fields` (what the record IS) and `access` (what the
+            // caller MAY DO) and refusing a fields type that carries a caller
+            // flag. A block tree is runtime data, not a type, so the same split
+            // is enforced two ways here:
+            //
+            //  - The declaration NAMES the record's facts, and ONLY the named
+            //    fields are published into context. A payload's `manageable`,
+            //    `canEdit` or `mayModify` is not reachable by any binding in
+            //    the tree because it was never published — whatever it is
+            //    called, and whether or not the author thought about it. That
+            //    is the structural half, and it does not depend on a vocabulary.
+            //  - A `fields` entry naming a field the contract recognises as a
+            //    caller decision ({@see BlockValidator::CALLER_DECISION_FIELDS},
+            //    the same list #897 checks in TypeScript) is REFUSED, which
+            //    drops the whole feature. That is the half that names the
+            //    mistake, so an author who tries to declare `manageable` as a
+            //    fact is told why rather than watching it silently vanish.
+            //
+            // A record's caller-permission flags therefore have exactly one
+            // route into a record page: none. What the caller may do decides
+            // which CONTROLS exist, and controls are gated by
+            // `requiredPermission` on `form`/`submitButton`/`actionButton` and
+            // by the host's own per-caller resolution — never by a sentence the
+            // page states about the record.
+            'dataRecord' => ['container' => true, 'props' => [
+                'id'        => ['type' => 'blockId',        'required' => true],
+                'source'    => ['type' => 'recordPath',     'required' => true],
+                'fields'    => ['type' => 'recordFactList', 'required' => true],
+                'emptyText' => ['type' => 'string',         'required' => false],
+                'params'    => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+            // The data-bound `keyValue`: a description list of a record's facts,
+            // read from the context a `dataRecord` published rather than from
+            // literals baked into the declaration.
+            //
+            // It carries no `source` and no labels of its own. The labels were
+            // declared once beside the facts on `dataRecord.fields`, because a
+            // record page shows the same field in more than one place (a card, a
+            // side panel, a read-only rendering) and a label restated per
+            // placement is a label that drifts per placement. `fields` picks a
+            // SUBSET, in the order given; omitted, the block renders every fact
+            // the named record declared. A name that is not one of them renders
+            // nothing — the same no-op an unresolvable `params.from` already is.
+            'recordFields' => ['container' => false, 'props' => [
+                'from'      => ['type' => 'blockId',    'required' => true],
+                'fields'    => ['type' => 'stringList', 'required' => false],
+                'emptyText' => ['type' => 'string',     'required' => false],
             ]],
 
             // ---- interactive blocks (SP3, WC-233) ----

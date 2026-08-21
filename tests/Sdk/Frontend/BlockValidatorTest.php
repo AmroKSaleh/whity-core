@@ -530,17 +530,402 @@ final class BlockValidatorTest extends TestCase
 
         // SP1 display types + SP2 data-bound types + SP3 interactive types
         // (WC-233) + SP4 chart type (WC-240) + workflow types and the OU scope
-        // picker (#868)
+        // picker (#868) + the record blocks (#883)
         $expected = [
             'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
-            'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider', 'drawer',
+            'colorInput', 'dataList', 'dataRecord', 'dataStat', 'dataTable', 'dateInput', 'divider', 'drawer',
             'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'inbox', 'keyValue', 'list', 'markdown', 'math',
-            'modal', 'numberInput', 'ouScopePicker', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
+            'modal', 'numberInput', 'ouScopePicker', 'recordFields', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput', 'timeline',
         ];
         sort($expected);
 
         $this->assertSame($expected, $types);
+    }
+
+    // ==================== record blocks (#883) ====================
+
+    /**
+     * A record page, expressed entirely in the block vocabulary: a record-bound
+     * container that publishes its facts, a header bound to those facts, a
+     * description list, and the edit form seeded from the record.
+     *
+     * This is the acceptance test for #883 — if this tree stops validating, a
+     * record page has stopped being describable.
+     */
+    public function testARecordPageIsExpressibleAsABlockTree(): void
+    {
+        $tree = [[
+            'type' => 'dataRecord',
+            'id' => 'role',
+            'source' => '/api/roles/{record}',
+            'fields' => [
+                ['field' => 'name', 'label' => 'Name'],
+                ['field' => 'scope', 'label' => 'Scope'],
+                ['field' => 'created', 'label' => 'Created'],
+            ],
+            'children' => [
+                ['type' => 'heading', 'level' => 1, 'text' => 'Role', 'textFrom' => 'role.name'],
+                ['type' => 'badge', 'variant' => 'info', 'label' => 'Scope', 'labelFrom' => 'role.scope'],
+                ['type' => 'stat', 'label' => 'Created', 'value' => '-', 'valueFrom' => 'role.created'],
+                ['type' => 'text', 'value' => '-', 'valueFrom' => 'role.scope'],
+                ['type' => 'recordFields', 'from' => 'role'],
+                ['type' => 'recordFields', 'from' => 'role', 'fields' => ['scope', 'name']],
+                ['type' => 'dataTable', 'source' => '/api/roles/holders', 'columns' => [
+                    ['key' => 'name', 'label' => 'Name'],
+                ], 'params' => [['param' => 'role', 'from' => 'role.name']]],
+                ['type' => 'timeline', 'source' => '/api/roles/history',
+                    'actorField' => 'actor', 'actionField' => 'action', 'timestampField' => 'at'],
+                ['type' => 'form', 'submit' => ['method' => 'PATCH', 'endpoint' => '/api/roles/{record}'],
+                    'requiredPermission' => 'roles:write', 'children' => [
+                        ['type' => 'textInput', 'name' => 'name', 'label' => 'Name', 'defaultFrom' => 'role.name'],
+                        ['type' => 'submitButton', 'label' => 'Save'],
+                    ]],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    /**
+     * THE #895 GUARD, on the declaration side.
+     *
+     * `manageable` is the server's answer to "may YOU write this?". A record
+     * page that names it as a fact is the exact defect #895 found, and naming it
+     * is refused rather than discouraged — the whole feature drops.
+     */
+    public function testACallerPermissionFieldCannotBeDeclaredAsARecordFact(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataRecord',
+            'id' => 'role',
+            'source' => '/api/roles/{record}',
+            'fields' => [
+                ['field' => 'name', 'label' => 'Name'],
+                ['field' => 'manageable', 'label' => "Your tenant's role"],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("may not bind 'manageable'", $result['errors'][0]);
+        $this->assertStringContainsString('#895', $result['errors'][0]);
+    }
+
+    /**
+     * THE #895 GUARD, on the binding side.
+     *
+     * The declaration half only covers a `dataRecord`'s own payload. A row
+     * published by an `open` row action carries whatever the collection endpoint
+     * returned, with no `fields` declaration in front of it, so the `...From`
+     * twins are guarded independently — otherwise the same sentence would be
+     * refused in one place and permitted three lines away.
+     *
+     * @dataProvider callerFlagBindingProvider
+     *
+     * @param array<string, mixed> $node
+     */
+    public function testACallerPermissionFieldCannotBeBoundAsAFact(array $node, string $expectedField): void
+    {
+        $result = BlockValidator::validate([$node]);
+
+        $this->assertFalse($result['ok'], 'expected a refusal for ' . $expectedField);
+        $this->assertStringContainsString("may not bind '{$expectedField}'", implode('; ', $result['errors']));
+    }
+
+    /**
+     * @return array<string, array{array<string, mixed>, string}>
+     */
+    public static function callerFlagBindingProvider(): array
+    {
+        return [
+            'heading.textFrom' => [
+                ['type' => 'heading', 'level' => 1, 'text' => 'x', 'textFrom' => 'rec.manageable'],
+                'manageable',
+            ],
+            'text.valueFrom' => [
+                ['type' => 'text', 'value' => 'x', 'valueFrom' => 'rec.editable'],
+                'editable',
+            ],
+            'badge.labelFrom' => [
+                ['type' => 'badge', 'variant' => 'info', 'label' => 'x', 'labelFrom' => 'rec.canEdit'],
+                'canEdit',
+            ],
+            'stat.valueFrom' => [
+                ['type' => 'stat', 'label' => 'x', 'value' => 'y', 'valueFrom' => 'rec.readOnly'],
+                'readOnly',
+            ],
+            'stat.hintFrom' => [
+                ['type' => 'stat', 'label' => 'x', 'value' => 'y', 'hintFrom' => 'rec.permitted'],
+                'permitted',
+            ],
+            // A bare reference addresses a selector's value rather than a record
+            // field, and is checked too: the same sentence about the same
+            // subject, reached by a different route.
+            'a bare selector reference' => [
+                ['type' => 'badge', 'variant' => 'info', 'label' => 'x', 'labelFrom' => 'deletable'],
+                'deletable',
+            ],
+        ];
+    }
+
+    /**
+     * The same flag arrives spelled differently from different serializers, and
+     * a guard that only knows one spelling fails on the payload shape it was not
+     * written against.
+     *
+     * @dataProvider callerFlagSpellingProvider
+     */
+    public function testCallerPermissionFieldsAreMatchedAcrossSpellings(string $spelling): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataRecord',
+            'id' => 'rec',
+            'source' => '/api/x/{record}',
+            'fields' => [['field' => $spelling, 'label' => 'L']],
+        ]]);
+
+        $this->assertFalse($result['ok'], "expected '{$spelling}' to be refused");
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function callerFlagSpellingProvider(): array
+    {
+        return [
+            'camelCase' => ['canEdit'],
+            'snake_case' => ['can_edit'],
+            'kebab-case' => ['can-edit'],
+            'SCREAMING_SNAKE' => ['READ_ONLY'],
+            'is-prefixed' => ['is_editable'],
+            'has-prefixed' => ['hasWritable'],
+            'mixed case' => ['Manageable'],
+        ];
+    }
+
+    /**
+     * The guard must not refuse correct programs, or it gets removed.
+     *
+     * `issued` is not `sued` — the `is`/`has` prefix is tried as a SECOND
+     * candidate rather than stripped unconditionally — and a field whose name
+     * merely CONTAINS a reserved word is a different field.
+     *
+     * @dataProvider honestFieldProvider
+     */
+    public function testHonestFieldNamesAreNotRefused(string $field): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataRecord',
+            'id' => 'rec',
+            'source' => '/api/x/{record}',
+            'fields' => [['field' => $field, 'label' => 'L']],
+        ]]);
+
+        $this->assertTrue($result['ok'], "'{$field}' should be a permitted fact: " . implode('; ', $result['errors']));
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function honestFieldProvider(): array
+    {
+        return [
+            'issued' => ['issued'],
+            'allowedList' => ['allowedList'],
+            'permittedDomains' => ['permittedDomains'],
+            'editableRegions' => ['editableRegions'],
+            'island' => ['island'],
+            'hash' => ['hash'],
+        ];
+    }
+
+    /**
+     * PLUMBING IS NOT A STATEMENT.
+     *
+     * `defaultFrom` seeds a control the server re-validates and is authoritative
+     * over; `params.from` narrows a fetch. #897 draws the line in exactly the
+     * same place — its `RecordAccess` half is read freely to decide which
+     * controls exist, and only the FACTS projection is checked. Pinned as a
+     * test because the tempting "guard every binding" change looks stricter and
+     * is wrong.
+     */
+    public function testPlumbingBindingsMayStillReferenceACallerFlag(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/save'],
+            'children' => [
+                ['type' => 'checkbox', 'name' => 'm', 'label' => 'M', 'defaultFrom' => 'rec.manageable'],
+            ],
+        ], [
+            'type' => 'dataTable',
+            'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'params' => [['param' => 'editable', 'from' => 'rec.editable']],
+        ]]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    /**
+     * The SDK's caller-decision vocabulary is #897's `CallerDecisionKey`
+     * verbatim.
+     *
+     * Two lists that are "kept in sync" are one list and one stale copy, so the
+     * pairing is asserted rather than remembered. When this fails, the
+     * TypeScript union in `packages/features/src/record/types.ts` and this
+     * constant have diverged, and the fix is to change BOTH.
+     */
+    public function testTheCallerDecisionVocabularyMatchesTheTypeScriptGuard(): void
+    {
+        $this->assertSame(
+            [
+                'manageable', 'editable', 'writable', 'deletable',
+                'canEdit', 'canDelete', 'canManage', 'canWrite',
+                'allowed', 'permitted', 'readOnly',
+            ],
+            BlockValidator::CALLER_DECISION_FIELDS,
+            'BlockValidator::CALLER_DECISION_FIELDS must stay identical to CallerDecisionKey in '
+            . 'packages/features/src/record/types.ts — one vocabulary, two media (#895/#897).'
+        );
+    }
+
+    /**
+     * `record` is the host's binding for the record a ROUTE is about. A selector
+     * publishing under that name would shadow it for every block on the screen,
+     * and the symptom — a record page showing a different record — appears only
+     * once the selector has a value.
+     */
+    public function testASelectorMayNotClaimTheReservedRecordBinding(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'selector',
+            'name' => 'record',
+            'label' => 'Pick',
+            'source' => '/api/x/rows',
+            'valueField' => 'id',
+            'labelField' => 'name',
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("may not be 'record'", $result['errors'][0]);
+        $this->assertSame('record', BlockValidator::PAGE_RECORD_BINDING);
+    }
+
+    /**
+     * A `recordPath` accepts an ordinary owned API path, with or without context
+     * tokens — a singleton record source is judged exactly as a collection
+     * source is.
+     *
+     * @dataProvider recordPathProvider
+     */
+    public function testRecordPathShapes(string $source, bool $valid): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataRecord',
+            'id' => 'rec',
+            'source' => $source,
+            'fields' => [['field' => 'name', 'label' => 'Name']],
+        ]]);
+
+        $this->assertSame($valid, $result['ok'], $source . ': ' . implode('; ', $result['errors']));
+    }
+
+    /**
+     * @return array<string, array{string, bool}>
+     */
+    public static function recordPathProvider(): array
+    {
+        return [
+            'a singleton, no tokens' => ['/api/x/settings', true],
+            'the page record binding' => ['/api/x/rows/{record}', true],
+            'a selector name' => ['/api/x/rows/{picker}', true],
+            'a dotted row reference' => ['/api/x/rows/{edit-modal.id}', true],
+            'two tokens' => ['/api/x/{tenant}/rows/{record}', true],
+            'a token mid-segment' => ['/api/x/rows/{record}/detail', true],
+            'unbalanced open brace' => ['/api/x/rows/{record', false],
+            'unbalanced close brace' => ['/api/x/rows/record}', false],
+            'a token with two dots' => ['/api/x/rows/{a.b.c}', false],
+            'an empty token' => ['/api/x/rows/{}', false],
+            'a token with whitespace' => ['/api/x/rows/{a b}', false],
+            'traversal' => ['/api/x/../y/{record}', false],
+            'an absolute URL' => ['https://evil.example/api/x', false],
+            'a double slash' => ['/api//x/{record}', false],
+            'not under /api/' => ['/admin/x/{record}', false],
+        ];
+    }
+
+    /**
+     * `dataRecord.fields` is the record's fact whitelist, so its shape is
+     * enforced: non-empty, duplicate-free, and each `field` a plain name with no
+     * dot (which would collide with `{id}.{field}` addressing).
+     */
+    public function testRecordFactListShape(): void
+    {
+        $cases = [
+            'not a list' => 'nope',
+            'empty' => [],
+            'missing label' => [['field' => 'name']],
+            'missing field' => [['label' => 'Name']],
+            'empty field' => [['field' => '', 'label' => 'Name']],
+            'dotted field' => [['field' => 'a.b', 'label' => 'A']],
+            'whitespace field' => [['field' => 'a b', 'label' => 'A']],
+            'duplicate field' => [['field' => 'a', 'label' => 'A'], ['field' => 'a', 'label' => 'B']],
+        ];
+
+        foreach ($cases as $label => $fields) {
+            $result = BlockValidator::validate([[
+                'type' => 'dataRecord',
+                'id' => 'rec',
+                'source' => '/api/x/rows/{record}',
+                'fields' => $fields,
+            ]]);
+            $this->assertFalse($result['ok'], "expected '{$label}' to be refused");
+        }
+    }
+
+    /**
+     * `dataRecord` is a container (it wraps the page); `recordFields` is a leaf
+     * (it renders a list). Getting these the wrong way round is a common first
+     * mistake, and the contract answers it rather than rendering something odd.
+     */
+    public function testRecordBlockContainerClassification(): void
+    {
+        $this->assertTrue(BlockContract::isContainer('dataRecord'));
+        $this->assertFalse(BlockContract::isContainer('recordFields'));
+
+        $result = BlockValidator::validate([[
+            'type' => 'recordFields',
+            'from' => 'rec',
+            'children' => [],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('leaf block and cannot have', $result['errors'][0]);
+    }
+
+    /**
+     * Every `...From` twin is OPTIONAL and its literal stays REQUIRED, so every
+     * tree that validated before this release still validates. The fallback is
+     * the point: a record page needs a title before its record arrives.
+     */
+    public function testLiteralLeavesStillValidateWithoutTheirBindings(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'heading', 'level' => 1, 'text' => 'Plain'],
+            ['type' => 'text', 'value' => 'Plain'],
+            ['type' => 'badge', 'variant' => 'info', 'label' => 'Plain'],
+            ['type' => 'stat', 'label' => 'Plain', 'value' => '1'],
+        ]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+
+        $missingLiteral = BlockValidator::validate([
+            ['type' => 'heading', 'level' => 1, 'textFrom' => 'rec.name'],
+        ]);
+        $this->assertFalse($missingLiteral['ok']);
+        $this->assertStringContainsString("missing required prop 'text'", $missingLiteral['errors'][0]);
     }
 
     public function testContainerClassification(): void

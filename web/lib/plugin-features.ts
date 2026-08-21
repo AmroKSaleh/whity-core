@@ -86,17 +86,26 @@ export interface DividerBlock {
   type: 'divider';
 }
 
-/** Leaf: a semantic heading at one of four levels. */
+/**
+ * Leaf: a semantic heading at one of four levels.
+ *
+ * #883: `textFrom` binds the heading to a field of a record in the
+ * master-detail context, so a record page can title itself with the record's
+ * own name. The literal `text` stays REQUIRED and is the fallback — a page
+ * whose record has not arrived yet still has a heading.
+ */
 export interface HeadingBlock {
   type: 'heading';
   level: 1 | 2 | 3 | 4;
   text: string;
+  textFrom?: string;
 }
 
-/** Leaf: a paragraph of text, optionally muted. */
+/** Leaf: a paragraph of text, optionally muted. `valueFrom` binds it to a record field (#883). */
 export interface TextBlock {
   type: 'text';
   value: string;
+  valueFrom?: string;
   tone?: 'default' | 'muted';
 }
 
@@ -108,19 +117,22 @@ export interface AlertBlock {
   body: string;
 }
 
-/** Leaf: a small status pill. */
+/** Leaf: a small status pill. `labelFrom` binds it to a record field (#883). */
 export interface BadgeBlock {
   type: 'badge';
   variant: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
   label: string;
+  labelFrom?: string;
 }
 
-/** Leaf: a single metric tile with an optional hint and trend. */
+/** Leaf: a single metric tile with an optional hint and trend. `valueFrom`/`hintFrom` bind to record fields (#883). */
 export interface StatBlock {
   type: 'stat';
   label: string;
   value: string;
+  valueFrom?: string;
   hint?: string;
+  hintFrom?: string;
   trend?: 'up' | 'down' | 'flat';
 }
 
@@ -682,6 +694,54 @@ export interface ModalBlock {
   children: Block[];
 }
 
+/**
+ * #883: one FACT a record states about itself — the field to read and the label
+ * to read it under. The labels live here rather than on `recordFields` because a
+ * record page shows the same field in more than one place, and a label restated
+ * per placement drifts per placement.
+ */
+export interface RecordFact {
+  field: string;
+  label: string;
+}
+
+/**
+ * Container (#883): fetches ONE resource and publishes it into the
+ * master-detail context under `id`, where every block in the tree reads it
+ * through the same `{id}.{field}` addressing an `open` row action already uses.
+ *
+ * ONLY the fields named in `fields` are published. That is the structural half
+ * of the #895 guard: a caller-permission flag riding along in the payload is
+ * unreachable from the tree because it was never published, whatever it is
+ * called. The named-vocabulary half lives in the SDK's `BlockValidator`.
+ *
+ * `source` may carry `{token}` segments in the master-detail addressing — a
+ * selector's value, a row an overlay was opened with, or `{record}`, the record
+ * a record-page route is about. The block does not fetch until every token
+ * resolves.
+ */
+export interface DataRecordBlock {
+  type: 'dataRecord';
+  id: string;
+  source: string;
+  fields: RecordFact[];
+  emptyText?: string;
+  params?: SourceParam[];
+  children: Block[];
+}
+
+/**
+ * Leaf (#883): the data-bound `keyValue` — a description list of the facts a
+ * `dataRecord` published under `from`. `fields` picks a subset, in the order
+ * given; omitted, every declared fact is rendered.
+ */
+export interface RecordFieldsBlock {
+  type: 'recordFields';
+  from: string;
+  fields?: string[];
+  emptyText?: string;
+}
+
 /** Container (→ Sheet): a slide-out panel; same open model as {@link ModalBlock}. */
 export interface DrawerBlock {
   type: 'drawer';
@@ -743,7 +803,9 @@ export type Block =
   | TimelineBlock
   | InboxBlock
   | ModalBlock
-  | DrawerBlock;
+  | DrawerBlock
+  | DataRecordBlock
+  | RecordFieldsBlock;
 
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {
