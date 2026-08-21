@@ -81,6 +81,14 @@ use PDO;
  * create), not the acting tenant, so a SYSTEM-tenant edit of tenant 5's role is
  * checked against tenant 5's namespace rather than the system tenant's.
  *
+ * Who holds a role
+ * ----------------
+ * {@see self::assignments()} answers "how many users have this role, and who
+ * most recently" from `memberships` — the authoritative assignment table —
+ * rather than leaving a client to fetch every user and count. See that method
+ * for why the count is the pagination total and what it deliberately cannot
+ * show.
+ *
  * Additive permission changes
  * ---------------------------
  * {@see self::grantPermissions()} / {@see self::revokePermissions()} add and
@@ -228,6 +236,13 @@ class RolesApiHandler
      * Visible means owned by the current tenant OR global (NULL tenant_id); the
      * SYSTEM tenant sees all roles (WC-110).
      *
+     * Carries the same authoritative `manageable` flag the LIST rows carry
+     * (#882). The list has surfaced it since WC-222 so the admin UI can gate
+     * Edit/Delete without first firing a write that would 404 on a global base
+     * role — but a record page reached by URL never sees a list row, so without
+     * it here the page would have to choose between rendering an editable form
+     * that 403/404s on save and re-fetching the whole list to find one boolean.
+     *
      * @param Request              $request The incoming request.
      * @param array<string, mixed> $params  Route params (expects `id`).
      * @return Response JSON role with `permissions` under the `data` key.
@@ -260,6 +275,10 @@ class RolesApiHandler
             }
 
             $role['permissions'] = $this->fetchRolePermissions((int)$id);
+            // Resolved through the SAME helper the write guards call rather than
+            // re-derived from a tenant_id added to the SELECT: two copies of an
+            // authorization rule are two rules, and the second one drifts.
+            $role['manageable'] = $this->roleManageableByTenant((int)$id, $tenantId);
 
             return Response::json(['data' => $role], 200);
         } catch (\Exception $e) {
@@ -668,6 +687,150 @@ class RolesApiHandler
                 'detail' => $e->getMessage(),
             ]);
             return Response::error('Failed to fetch role permissions', 500);
+        }
+    }
+
+    /**
+     * GET /api/roles/{id}/assignments - who holds this role, newest first (#882).
+     *
+     * The record page's "12 users hold this role, most recently user3 on the
+     * 14th" — one request answering both halves, because the count IS the
+     * pagination total of the same query that returns the page.
+     *
+     * WHY THIS EXISTS AT ALL. Before it, the only per-role headcount anywhere
+     * was the `usersPerRole` aggregate {@see \Whity\Api\AdminApiHandler} builds
+     * for the stats dashboard — every role at once, keyed by NAME, and useless
+     * for one role by id. `GET /api/users` has no `role` filter, so a client
+     * wanting "who has this role" had exactly one option: fetch every user and
+     * count client-side. That is wrong at any real tenant size, it walks pages
+     * privately (the defect #870 just removed from the block renderer's fetch
+     * hook), and it makes the answer depend on how far the client got.
+     *
+     * ORDERED BY WHEN THE ROLE WAS GRANTED, newest first — `memberships.created_at`
+     * is the moment this person was given this role in this tenant, so page one
+     * of this endpoint IS the recent-assignment history without a second
+     * endpoint, a second index, or an audit trail that only knows about events
+     * since the day it was switched on.
+     *
+     * Note what it therefore cannot show: a REVOCATION. Removing a membership
+     * deletes the row, and `user.membership.added`/`user.membership.removed` are
+     * dispatched but not audited (see {@see \Whity\Core\Audit\AuditLogger::subscribe()},
+     * whose map covers role/user/tenant/ou CRUD and OU role changes only). So
+     * this is "who holds it and since when", truthfully, rather than "every
+     * grant and revoke", falsely.
+     *
+     * AUTHORIZATION. Registered on the SAME `admin` role gate as every other
+     * `/api/roles/*` route — deliberately not a new permission. A new slug ships
+     * with a grant migration that can only reach the seeded `admin` role, so
+     * every operator running a custom administrative role loses the capability
+     * on upgrade and finds out as a 403 (#834). Visibility is the ordinary
+     * {@see self::roleVisibleToTenant()} check, so a role a tenant cannot see is
+     * 404 here exactly as it is on GET /api/roles/{id} — this cannot become a
+     * way to enumerate another tenant's roles by id.
+     *
+     * TENANT SCOPING. Memberships are tenant-owned: a regular tenant counts only
+     * ITS OWN members, so a GLOBAL base role (visible to everyone) reports the
+     * holders inside the caller's tenant and never leaks another tenant's
+     * headcount, let alone its people. The SYSTEM tenant (id 0) counts across
+     * all tenants, matching how it reads everything else, and each row names its
+     * tenant so the spanning list is readable.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @return Response JSON `{ data: [...], pagination: {...} }` (200) or an error.
+     */
+    public function assignments(Request $request, array $params): Response
+    {
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('Role ID is required', 400);
+            }
+
+            $tenantId = TenantContext::getTenantId();
+
+            if (!$this->roleVisibleToTenant((int)$id, $tenantId)) {
+                return Response::error('Role not found', 404);
+            }
+
+            $p = PaginationParams::fromPath($request->getPath());
+            $roleId = (int)$id;
+
+            if ($tenantId === 0) {
+                // @tenant-guard-ignore: system-tenant (id 0) counts holders across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM memberships m WHERE m.role_id = :role_id');
+                $countStmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
+                $countStmt->execute();
+
+                // @tenant-guard-ignore: system-tenant (id 0) lists holders across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
+                $listStmt = $this->db->prepare('
+                    SELECT m.id, m.profile_id, m.tenant_id, m.ou_id, m.is_primary, m.status, m.created_at,
+                           p.display_name, pe.email
+                    FROM memberships m
+                    JOIN profiles p ON p.id = m.profile_id
+                    LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                    WHERE m.role_id = :role_id
+                    ORDER BY m.created_at DESC, m.id DESC
+                    LIMIT :limit OFFSET :offset
+                ');
+                $listStmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
+            } else {
+                $countStmt = $this->db->prepare(
+                    'SELECT COUNT(*) AS cnt FROM memberships m WHERE m.role_id = :role_id AND m.tenant_id = :tenant_id'
+                );
+                $countStmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
+                $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $countStmt->execute();
+
+                $listStmt = $this->db->prepare('
+                    SELECT m.id, m.profile_id, m.tenant_id, m.ou_id, m.is_primary, m.status, m.created_at,
+                           p.display_name, pe.email
+                    FROM memberships m
+                    JOIN profiles p ON p.id = m.profile_id
+                    LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                    WHERE m.role_id = :role_id AND m.tenant_id = :tenant_id
+                    ORDER BY m.created_at DESC, m.id DESC
+                    LIMIT :limit OFFSET :offset
+                ');
+                $listStmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
+                $listStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+            }
+
+            $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+            $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
+            $listStmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+            $listStmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+            $listStmt->execute();
+
+            /** @var array<int, array<string, mixed>> $rows */
+            $rows = $listStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $data = array_map(static function (array $row): array {
+                return [
+                    'membershipId' => (int)($row['id'] ?? 0),
+                    'profileId' => (int)($row['profile_id'] ?? 0),
+                    'tenantId' => (int)($row['tenant_id'] ?? 0),
+                    'displayName' => (string)($row['display_name'] ?? ''),
+                    // NULL when the profile carries no primary email row; the
+                    // LEFT JOIN is deliberate — a person with no primary email
+                    // still holds the role and must still be counted and shown.
+                    'email' => isset($row['email']) && $row['email'] !== null ? (string)$row['email'] : null,
+                    'ouId' => isset($row['ou_id']) && $row['ou_id'] !== null ? (int)$row['ou_id'] : null,
+                    'isPrimary' => (bool)($row['is_primary'] ?? false),
+                    'status' => (string)($row['status'] ?? ''),
+                    'assignedAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
+                ];
+            }, $rows);
+
+            return Response::json(['data' => $data, 'pagination' => $p->meta($total)], 200);
+        } catch (\Exception $e) {
+            $this->log('error', 'Failed to fetch role assignments', [
+                'event' => 'roles.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to fetch role assignments', 500);
         }
     }
 

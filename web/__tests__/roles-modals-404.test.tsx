@@ -70,6 +70,8 @@ function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
     listRoles: jest.fn().mockResolvedValue([MANAGEABLE_ROLE]),
     getRole: jest.fn().mockResolvedValue({ ...MANAGEABLE_ROLE, permissions: [] }),
     getRolePermissions: jest.fn().mockResolvedValue([]),
+    getRoleAssignments: jest.fn().mockResolvedValue({ assignments: [], total: 0 }),
+    getRoleActivity: jest.fn().mockResolvedValue([]),
     listPermissions: jest.fn().mockResolvedValue([]),
     createRole: jest.fn().mockResolvedValue(undefined),
     updateRole: jest.fn().mockResolvedValue('ok'),

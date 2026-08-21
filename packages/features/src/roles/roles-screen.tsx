@@ -68,6 +68,7 @@ export function RolesScreen({
   can,
   t: injectedT,
   onNotify,
+  onOpenRecord,
   className,
 }: RolesScreenProps) {
   const t: RolesTranslate = injectedT ?? identityTranslate;
@@ -124,7 +125,15 @@ export function RolesScreen({
     setIsPermissionsPanelOpen(true);
   };
 
+  // #882: with a record-page seam wired the host navigates; without one the
+  // edit MODAL opens exactly as before. Both paths are live on purpose — the
+  // record page is additive, and reverting it is deleting one prop at one call
+  // site rather than restoring a deleted component.
   const handleEditClick = (role: Role) => {
+    if (onOpenRecord) {
+      onOpenRecord(role);
+      return;
+    }
     setSelectedRole(role);
     setIsEditModalOpen(true);
   };
@@ -161,6 +170,20 @@ export function RolesScreen({
       header: t('roles.table.name', 'Name'),
       enableSorting: true,
       enableColumnFilter: true,
+      // #882: the row's own name opens the record — the affordance a list gets
+      // once its records have addresses. Only when the host supplied the seam;
+      // otherwise the cell stays the plain accessor value it was.
+      cell: onOpenRecord
+        ? (role) => (
+            <button
+              type="button"
+              onClick={() => onOpenRecord(role)}
+              className="text-start font-medium text-primary underline-offset-4 hover:underline"
+            >
+              {role.name}
+            </button>
+          )
+        : undefined,
     },
     {
       accessorKey: 'description',
