@@ -419,16 +419,22 @@ final class UiKitShowcasePluginTest extends TestCase
             }
         }
 
-        // Walk the tree; for each data-bound node, assert its source is a
-        // registered GET path (the ownership invariant that WC-230 enforces).
-        // #868: `timeline` and `inbox` are data-bound leaves like the rest — the
-        // loader derives that generically from the contract rule, so the SAME
-        // ownership invariant applies and is asserted here.
-        $dataBoundTypes = ['dataTable', 'dataStat', 'dataList', 'chart', 'timeline', 'inbox'];
-        $foundBound = [
-            'dataTable' => false, 'dataStat' => false, 'dataList' => false,
-            'chart' => false, 'timeline' => false, 'inbox' => false,
-        ];
+        // Walk the tree; for each source-bearing node, assert its source is a
+        // registered GET path (the ownership invariant WC-230 enforces).
+        //
+        // The type list is DERIVED FROM THE CONTRACT rather than written out.
+        // It used to be a literal, and a literal here is a hole shaped exactly
+        // like the next block type somebody adds: the walk skips it, every
+        // assertion still passes, and the ownership invariant is silently
+        // untested for the one type nobody has exercised yet. #883 added
+        // `dataRecord` and found this list four types out of date in spirit
+        // already. Deriving it means a new source-bearing type is covered the
+        // moment it exists, and a type that REMOVES its source (as
+        // `ouScopePicker` deliberately has) drops out on its own.
+        $dataBoundTypes = self::sourceBearingTypes();
+        $this->assertContains('dataRecord', $dataBoundTypes, 'a recordPath source is ownership-checked too');
+
+        $foundBound = array_fill_keys($dataBoundTypes, false);
 
         $this->walkDataBound($blocks, $dataBoundTypes, $registeredGetPaths, $foundBound);
 
@@ -438,6 +444,30 @@ final class UiKitShowcasePluginTest extends TestCase
                 "The tree must contain at least one '{$type}' block with a plugin-owned source"
             );
         }
+    }
+
+    /**
+     * Every block type whose contract rule carries a `source` prop, and the kind
+     * of path that prop accepts.
+     *
+     * This is the same derivation the LOADER makes when it decides what to
+     * ownership-check ({@see \Whity\Core\PluginLoader}), restated here so the
+     * test and the thing it tests answer the question the same way.
+     *
+     * @return list<string>
+     */
+    private static function sourceBearingTypes(): array
+    {
+        $types = [];
+        foreach (BlockContract::types() as $type) {
+            $rule = BlockContract::rulesFor($type);
+            $kind = $rule['props']['source']['type'] ?? null;
+            if ($kind === 'apiPath' || $kind === 'recordPath') {
+                $types[] = $type;
+            }
+        }
+
+        return $types;
     }
 
     /**
@@ -574,6 +604,103 @@ final class UiKitShowcasePluginTest extends TestCase
         // Verify the two specific paths.
         $this->assertContains('/api/v1/uikit/demo/rows', $servedSources);
         $this->assertContains('/api/v1/uikit/demo/metric', $servedSources);
+
+        // #883: a TEMPLATED record source is version-rewritten identically, with
+        // its context token left intact for the renderer to substitute. Both
+        // halves matter: an unversioned source addresses a route that does not
+        // exist, and a token the loader mangled addresses the wrong record.
+        $this->assertContains('/api/v1/uikit/demo/rows/{demo-record-pick}', $servedSources);
+    }
+
+    /**
+     * #883: a `dataRecord` whose `source` names a route the plugin does NOT own
+     * drops the whole feature, exactly as a foreign `dataTable` source does.
+     *
+     * Route-parameter normalization is what lets a templated source be matched
+     * at all, and the risk it introduces is that normalization matches too much
+     * — `{}` against `{}` for a path shape the plugin never registered. This
+     * pins that it does not: the shape has to be one of the plugin's own.
+     */
+    public function testARecordSourceOutsideThePluginsRoutesDropsTheFeature(): void
+    {
+        $registeredGetRoutes = ['/api/uikit/demo/rows/{name}' => 'uikit:view'];
+        $normalize = static fn (string $path): string
+            => (string) preg_replace('/\{[^}]*\}/', '{}', $path);
+
+        // The plugin's own shape, differently named — matches.
+        $this->assertContains(
+            $normalize('/api/uikit/demo/rows/{record}'),
+            array_map($normalize, array_keys($registeredGetRoutes))
+        );
+
+        // A shape the plugin never registered — does not.
+        $this->assertNotContains(
+            $normalize('/api/users/{record}'),
+            array_map($normalize, array_keys($registeredGetRoutes))
+        );
+        $this->assertNotContains(
+            $normalize('/api/uikit/demo/rows/{a}/{b}'),
+            array_map($normalize, array_keys($registeredGetRoutes))
+        );
+    }
+
+    /**
+     * #883/#895: the showcase's record endpoint RETURNS caller-permission flags,
+     * and the block declaration names none of them.
+     *
+     * The fixture carries `manageable` and `canEdit` on purpose — that is what a
+     * real record endpoint answers with, and it is the exact shape #895 went
+     * wrong on. This asserts both halves of the guard on the shipped example:
+     * the payload has the flags, and the declaration's fact whitelist does not.
+     */
+    public function testTheShowcaseRecordDeclaresNoCallerPermissionFactsDespiteThePayloadCarryingThem(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        $body = json_decode($plugin->demoRecord(new Request('GET', '/api/uikit/demo/rows/Anika%20Patel'))->getBody(), true);
+        $this->assertIsArray($body);
+        $this->assertArrayHasKey('manageable', $body['data'], 'the fixture must carry a caller flag to be worth anything');
+        $this->assertArrayHasKey('canEdit', $body['data']);
+
+        $record = $this->findFirstNodeOfType($plugin->getFrontendFeatures()[0]['blocks'], 'dataRecord');
+        $this->assertIsArray($record);
+
+        $declared = array_column($record['fields'], 'field');
+        foreach (BlockValidator::CALLER_DECISION_FIELDS as $reserved) {
+            $this->assertNotContains(
+                $reserved,
+                $declared,
+                "the showcase must never declare '{$reserved}' as a record fact (#895)"
+            );
+        }
+        $this->assertSame(['name', 'role', 'status', 'joined'], $declared);
+    }
+
+    /**
+     * Depth-first: the first node of the given type, or null.
+     *
+     * @param array<mixed> $nodes
+     * @return array<string, mixed>|null
+     */
+    private function findFirstNodeOfType(array $nodes, string $type): ?array
+    {
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            if (($node['type'] ?? null) === $type) {
+                /** @var array<string, mixed> $node */
+                return $node;
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                $found = $this->findFirstNodeOfType($node['children'], $type);
+                if ($found !== null) {
+                    return $found;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -953,9 +1080,17 @@ final class UiKitShowcasePluginTest extends TestCase
             if (in_array($node['type'], $dataBoundTypes, true)) {
                 $source = $node['source'] ?? null;
                 $this->assertIsString($source, "Data-bound node of type '{$node['type']}' must have a string 'source'");
+                // #883: a `recordPath` may carry `{token}` segments the renderer
+                // substitutes from context, so ownership is judged with route
+                // parameters normalized — the same comparison the loader makes,
+                // and the same one an `inbox` action endpoint already gets. A
+                // source with no token normalizes to itself, so nothing that was
+                // compared exactly before is compared loosely now.
+                $normalize = static fn (string $path): string
+                    => (string) preg_replace('/\{[^}]*\}/', '{}', $path);
                 $this->assertContains(
-                    $source,
-                    $registeredGetPaths,
+                    $normalize($source),
+                    array_map($normalize, $registeredGetPaths),
                     "Data-bound block source '{$source}' must be a GET route registered by the plugin"
                 );
                 $foundBound[$node['type']] = true;
@@ -983,7 +1118,7 @@ final class UiKitShowcasePluginTest extends TestCase
             if (
                 isset($node['type'], $node['source'])
                 && is_string($node['type'])
-                && in_array($node['type'], ['dataTable', 'dataStat', 'dataList'], true)
+                && in_array($node['type'], self::sourceBearingTypes(), true)
                 && is_string($node['source'])
             ) {
                 $sources[] = $node['source'];

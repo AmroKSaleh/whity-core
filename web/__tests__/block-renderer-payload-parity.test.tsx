@@ -362,3 +362,174 @@ describe('web ⇄ desktop fetched-collection parity', () => {
     expect(screen.queryByText('Row 1')).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #883: same record tree ⇒ same rendered facts, and the same fields WITHHELD.
+//
+// The record blocks are where a twin divergence would be worst. The web and
+// desktop renderers each hold their own copy of the projection that decides
+// which of a payload's fields reach the tree, and that projection IS the #895
+// guard's structural half — so one renderer publishing a field the other drops
+// is not a cosmetic difference, it is one platform able to state a caller
+// permission as a fact and the other not. Both are run over the same tree
+// against the same payload here, and both are asserted to withhold the flags.
+// ---------------------------------------------------------------------------
+
+/** A record endpoint's honest answer: the record's own fields AND the caller's
+ * permissions on it, which is what a real one returns. */
+const RECORD = {
+  name: 'Ada Lovelace',
+  role: 'Administrator',
+  status: 'Active',
+  manageable: true,
+  canEdit: true,
+};
+
+/** A record page in miniature: the container, a bound heading/badge/stat, and
+ * the description list. `manageable` and `canEdit` are named nowhere. */
+const RECORD_TREE = [
+  {
+    type: 'dataRecord',
+    id: 'person',
+    source: '/api/v1/people/7',
+    fields: [
+      { field: 'name', label: 'Name' },
+      { field: 'role', label: 'Role' },
+      { field: 'status', label: 'Status' },
+    ],
+    children: [
+      { type: 'heading', level: 2, text: 'Untitled record', textFrom: 'person.name' },
+      { type: 'badge', variant: 'info', label: 'No role', labelFrom: 'person.role' },
+      { type: 'stat', label: 'Status', value: 'Unknown', valueFrom: 'person.status' },
+      { type: 'text', value: 'No role', valueFrom: 'person.role' },
+      { type: 'recordFields', from: 'person' },
+    ],
+  },
+];
+
+/** What a rendered record tree SAYS, as a sorted list of its text content —
+ * enough to compare two renderers that lay the same facts out differently. */
+function renderedFacts(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('h2, dt, dd, p, span'))
+    .map((node) => (node.textContent ?? '').trim())
+    .filter((text) => text !== '')
+    .sort();
+}
+
+describe('web ⇄ desktop record-block parity (#883)', () => {
+  it('agrees on the facts a record tree states', async () => {
+    cleanup();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: RECORD }));
+    const web = render(<WebBlockRenderer blocks={RECORD_TREE as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findAllByText('Ada Lovelace');
+    const webFacts = renderedFacts(web.container);
+
+    cleanup();
+    mockInvoke.mockImplementation(() => Promise.resolve({ status: 200, body: { data: RECORD } }));
+    const desktop = render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: RECORD_TREE as unknown as DesktopBlock[] }}
+      />
+    );
+    await screen.findAllByText('Ada Lovelace');
+    const desktopFacts = renderedFacts(desktop.container);
+
+    // Both must show the record's own values...
+    for (const value of ['Ada Lovelace', 'Administrator', 'Active']) {
+      expect(webFacts).toContain(value);
+      expect(desktopFacts).toContain(value);
+    }
+    // ...and both must have replaced every declared literal fallback.
+    for (const fallback of ['Untitled record', 'No role', 'Unknown']) {
+      expect(webFacts).not.toContain(fallback);
+      expect(desktopFacts).not.toContain(fallback);
+    }
+  });
+
+  it('agrees that an undeclared caller-permission field never reaches the tree', async () => {
+    // The payload carries `manageable` and `canEdit`; the declaration names
+    // neither. Neither renderer may publish them, so neither can render them —
+    // this is the runtime half of the #895 guard, asserted on both twins.
+    cleanup();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: RECORD }));
+    const web = render(<WebBlockRenderer blocks={RECORD_TREE as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findAllByText('Ada Lovelace');
+    expect(web.container.textContent).not.toMatch(/manageable|canEdit/i);
+    // A boolean flag would render as "Yes" through `formatFactValue` — assert on
+    // the rendered form too, since the field NAME never appears either way.
+    expect(web.container.querySelectorAll('dd')).toHaveLength(3);
+
+    cleanup();
+    mockInvoke.mockImplementation(() => Promise.resolve({ status: 200, body: { data: RECORD } }));
+    const desktop = render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: RECORD_TREE as unknown as DesktopBlock[] }}
+      />
+    );
+    await screen.findAllByText('Ada Lovelace');
+    expect(desktop.container.textContent).not.toMatch(/manageable|canEdit/i);
+    expect(desktop.container.querySelectorAll('dd')).toHaveLength(3);
+  });
+
+  it('agrees that an unresolved record token costs ZERO requests', async () => {
+    // The failure this prevents: `/api/v1/people/{record}` with nothing bound
+    // becomes `/api/v1/people/`, which is the COLLECTION endpoint — so the block
+    // would fetch every record the caller can see and render one of them as "the
+    // record this page is about". Both renderers must decline to fetch at all.
+    const UNBOUND = [{ ...RECORD_TREE[0], source: '/api/v1/people/{record}' }];
+
+    cleanup();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: RECORD }));
+    render(<WebBlockRenderer blocks={UNBOUND as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findByText('No record selected.');
+    expect(mockApiClient).not.toHaveBeenCalled();
+
+    cleanup();
+    mockInvoke.mockClear();
+    mockInvoke.mockImplementation(() => Promise.resolve({ status: 200, body: { data: RECORD } }));
+    render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: UNBOUND as unknown as DesktopBlock[] }}
+      />
+    );
+    await screen.findByText('No record selected');
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it('agrees on the request a route-bound record costs once the host seeds it', async () => {
+    // The page-level record binding (#883 gap 2): the host publishes the route's
+    // record id under `record`, and the SAME declaration that fetched nothing
+    // above now addresses exactly one resource.
+    const UNBOUND = [{ ...RECORD_TREE[0], source: '/api/v1/people/{record}' }];
+
+    cleanup();
+    mockApiClient.mockClear();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: RECORD }));
+    render(<WebBlockRenderer blocks={UNBOUND as unknown as WebBlock[]} record="7" />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findAllByText('Ada Lovelace');
+    const webPaths = mockApiClient.mock.calls.map((call) => String(call[0]));
+
+    cleanup();
+    mockInvoke.mockClear();
+    mockInvoke.mockImplementation(() => Promise.resolve({ status: 200, body: { data: RECORD } }));
+    render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: UNBOUND as unknown as DesktopBlock[] }}
+        record="7"
+      />
+    );
+    await screen.findAllByText('Ada Lovelace');
+    const desktopPaths = mockInvoke.mock.calls.map(([, args]) => String((args as { path: string }).path));
+
+    expect(webPaths).toEqual(['/api/v1/people/7']);
+    expect(desktopPaths).toEqual(['/api/v1/people/7']);
+  });
+});
