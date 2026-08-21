@@ -418,6 +418,22 @@ jobs:
       - name: Undeclared-reference guard (in-tree plugins)
         run: php scripts/ci-undeclared-reference-guard.php
 
+      # Database-boolean guard (#891): fail CI on a boolean read whose answer
+      # depends on how the driver spelled it. The same BOOLEAN column arrives
+      # as bool(false), '0', 'f', or — from a `::text` projection — 'false',
+      # and `(bool) 'false'` is TRUE, so the cast reports every row as true
+      # instead of failing. #891 found five such casts on memberships.is_primary
+      # alone, one of them gating the 409 that refuses to remove a primary
+      # membership.
+      #
+      # It knows which columns are booleans by PARSING THE MIGRATIONS, so it
+      # cannot fall behind the schema, and it derives its two common exemptions
+      # (request bodies, `SELECT 1`/`COUNT(` existence probes) rather than
+      # demanding an annotation for them — see the scanner's header for why a
+      # guard that fires on correct code is worse than no guard at all.
+      - name: Database-boolean guard
+        run: php scripts/ci-db-bool-guard.php
+
       # Vendored-SDK parity guard (#849): the Tauri desktop template carries its
       # own copy of sdk/src, because a device boots from a hand-rolled PSR-4
       # autoloader with no Composer behind it. Re-vendoring that copy was a

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
+use Whity\Core\Db\DbBool;
 use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Request;
@@ -346,7 +347,7 @@ class PersonsApiHandler
             'profileId' => $row['profile_id'] !== null ? (int) $row['profile_id'] : null,
             'hasAccount' => $row['profile_id'] !== null,
             'birthDate' => $row['birth_date'] !== null ? (string) $row['birth_date'] : null,
-            'deceased' => (bool) $row['deceased'],
+            'deceased' => DbBool::of($row['deceased']),
             'notes' => $row['notes'] !== null ? (string) $row['notes'] : null,
             'createdAt' => $row['created_at'] !== null ? (string) $row['created_at'] : null,
             'relationCount' => count($relations),

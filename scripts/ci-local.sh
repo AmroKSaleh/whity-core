@@ -193,6 +193,9 @@ job_unit() {
   log "Undeclared-reference guard (in-tree plugins)"
   run_in_ci php scripts/ci-undeclared-reference-guard.php
 
+  log "Database-boolean guard"
+  run_in_ci php scripts/ci-db-bool-guard.php
+
   # Runs as its own job in CI (path filter `i18n`, so it fires on frontend-only
   # PRs where `backend` does not). Grouped here because it is a PHP guard and
   # this is where a developer runs the PHP guards.
