@@ -15,6 +15,7 @@ use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Sdk\Hooks\HookVetoException;
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Roles API Handler
@@ -925,7 +926,7 @@ class RolesApiHandler
                     // still holds the role and must still be counted and shown.
                     'email' => isset($row['email']) && $row['email'] !== null ? (string)$row['email'] : null,
                     'ouId' => isset($row['ou_id']) && $row['ou_id'] !== null ? (int)$row['ou_id'] : null,
-                    'isPrimary' => (bool)($row['is_primary'] ?? false),
+                    'isPrimary' => DbBool::of($row['is_primary'] ?? false),
                     'status' => (string)($row['status'] ?? ''),
                     'assignedAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
                 ];
