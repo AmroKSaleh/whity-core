@@ -9,7 +9,9 @@
  */
 
 import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { RolesScreen } from '@amroksaleh/features/roles';
+import type { Role } from '@amroksaleh/features/roles';
 import { webRolesAdapter } from '@/lib/roles-adapter';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useTranslation } from '@amroksaleh/features/i18n';
@@ -27,6 +29,7 @@ const I18N_MISS = '__ROLES_I18N_MISS__';
 export default function Page() {
   const { hasPermission } = useCapabilities();
   const { addToast } = useToast();
+  const router = useRouter();
 
   // The Roles feature's own copy lives in the `admin` domain, but the shared UI
   // chrome it renders (DataTable/Dialog `ui.*` keys) lives in `common` — exactly
@@ -47,12 +50,24 @@ export default function Page() {
     [tAdmin, tCommon]
   );
 
+  // #882: web routes Edit (and the row's own name) to the RECORD PAGE. Supplying
+  // this prop is the entire opt-in — a host that omits it keeps the edit modal,
+  // which is still in the package and still wired, so this is revertible by
+  // deleting these three lines.
+  const openRecord = useCallback(
+    (role: Role) => {
+      router.push(`/admin/roles/${role.id}`);
+    },
+    [router]
+  );
+
   return (
     <RolesScreen
       adapter={webRolesAdapter}
       can={hasPermission}
       t={t}
       onNotify={addToast}
+      onOpenRecord={openRecord}
     />
   );
 }

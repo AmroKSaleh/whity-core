@@ -587,6 +587,23 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Role has active user assignments'),
                 ] + self::authErrors(),
             ]),
+            // #882: the record page's "12 users hold this role, most recently
+            // user3". Ordered by grant time (memberships.created_at) newest
+            // first, so page one is the recent-assignment history and
+            // `pagination.total` is the headcount — one request for both, and no
+            // client-side count over every user in the tenant.
+            self::adminRoute('GET', '/api/roles/{id:\d+}/assignments', [
+                'summary' => 'List who holds this role, newest grant first (total = headcount)',
+                'tags' => ['roles'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The role\'s holders with pagination', 'RoleAssignmentListResponse'),
+                    404 => self::errorResponse('Role not found or not visible'),
+                ] + self::authErrors(),
+            ]),
             self::adminRoute('GET', '/api/roles/{id:\d+}/permissions', [
                 'summary' => 'List a role\'s permissions',
                 'tags' => ['roles'],
@@ -922,6 +939,7 @@ final class CoreApiSchemas
                     self::queryParam('action', 'string', 'Exact action match (e.g. users:create)'),
                     self::queryParam('actor', 'integer', 'Filter by actor user id'),
                     self::queryParam('target_type', 'string', 'Filter by target type'),
+                    self::queryParam('target_id', 'integer', 'Filter by target id — the history of ONE record. Normally paired with target_type; alone it matches that id across every target type.'),
                     self::queryParam('from', 'string', 'Inclusive ISO-8601 lower bound'),
                     self::queryParam('to', 'string', 'Inclusive ISO-8601 upper bound'),
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
@@ -1037,6 +1055,7 @@ final class CoreApiSchemas
                     'parameters' => [
                         self::queryParam('action', 'string', 'Exact action match (e.g. users:create)'),
                         self::queryParam('target_type', 'string', 'Filter by target type'),
+                        self::queryParam('target_id', 'integer', 'Filter by target id — the caller\'s own entries about ONE record'),
                         self::queryParam('from', 'string', 'Inclusive ISO-8601 lower bound'),
                         self::queryParam('to', 'string', 'Inclusive ISO-8601 upper bound'),
                         self::queryParam('page', 'integer', '1-indexed page (default 1)'),
@@ -2975,15 +2994,39 @@ final class CoreApiSchemas
             'PermissionCatalogueResponse' => self::listEnvelope('PermissionCatalogueEntry'),
             'Role' => $role,
             'RoleListResponse' => self::paginatedListEnvelope('Role'),
+            // `manageable` mirrors the LIST row's flag (WC-222): whether THIS
+            // tenant may write this role. #882 added it here because a record
+            // page reached by URL has no list row to read it from, and a page
+            // that guesses renders an editable form that 404s on save.
             'RoleDetail' => self::object([
                 'id' => self::int(),
                 'name' => self::str(),
                 'description' => self::str(true),
                 'parent_id' => self::int(true),
                 'created_at' => self::str(true),
+                'manageable' => self::bool(),
                 'permissions' => ['type' => 'array', 'items' => SchemaBuilder::ref('Permission')],
-            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissions']),
+            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'manageable', 'permissions']),
             'RoleDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('RoleDetail')),
+            // #882 — one holder of a role. `assignedAt` is the membership's
+            // created_at: when this person was given this role in this tenant,
+            // which is what makes the list an assignment history rather than a
+            // roster in arbitrary order. `email` is nullable because the primary
+            // email row is LEFT JOINed — someone without one still holds the
+            // role. `tenantId` is a constant for a tenant caller and the only
+            // thing distinguishing rows for a tenant-0 one.
+            'RoleAssignment' => self::object([
+                'membershipId' => self::int(),
+                'profileId' => self::int(),
+                'tenantId' => self::int(),
+                'displayName' => self::str(),
+                'email' => self::str(true),
+                'ouId' => self::int(true),
+                'isPrimary' => self::bool(),
+                'status' => self::str(),
+                'assignedAt' => self::str(true),
+            ], ['membershipId', 'profileId', 'tenantId', 'displayName', 'isPrimary', 'status']),
+            'RoleAssignmentListResponse' => self::paginatedListEnvelope('RoleAssignment'),
             'RoleCreateRequest' => self::object([
                 'name' => self::str(),
                 'description' => self::str(),

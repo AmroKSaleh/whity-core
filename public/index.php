@@ -1267,6 +1267,11 @@ $router->register('GET', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'get
 // clobbering each other through the read-modify-write PATCH forces on them.
 $router->register('POST', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'grantPermissions'], 'admin');
 $router->register('DELETE', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'revokePermissions'], 'admin');
+// #882: who holds this role, newest grant first — the record page's headcount
+// and its recent-assignment list in one request (the count is the pagination
+// total). Same 'admin' gate as its siblings: a new permission slug would ship a
+// grant migration reaching only the seeded admin role (#834).
+$router->register('GET', '/api/roles/{id:\d+}/assignments', [$rolesHandler, 'assignments'], 'admin');
 
 $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');

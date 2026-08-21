@@ -70,7 +70,7 @@ test.describe('Roles CRUD (admin)', () => {
     await expect(row).toBeVisible();
 
     // --- Delete ---
-    await row.getByRole('button').click(); // row actions menu trigger
+    await row.getByRole('button', { name: 'Actions' }).click(); // row actions menu trigger
     await page.getByRole('menuitem', { name: 'Delete' }).click();
     const deleteDialog = page.getByRole('dialog');
     await expect(deleteDialog.getByRole('heading', { name: 'Delete Role' })).toBeVisible();
@@ -91,7 +91,7 @@ test.describe('Roles CRUD (admin)', () => {
 
     // Open the row-actions menu on the seeded `admin` role and view perms.
     const adminRow = page.getByRole('row', { name: /^admin/ });
-    await adminRow.getByRole('button').click();
+    await adminRow.getByRole('button', { name: 'Actions' }).click();
     await page.getByRole('menuitem', { name: 'View Permissions' }).click();
 
     // The permissions panel header names the role, and the seeded admin role
@@ -107,7 +107,7 @@ test.describe('Roles CRUD (admin)', () => {
 
     // Clone the seeded admin role via its row-actions menu.
     const adminRow = page.getByRole('row', { name: /^admin/ });
-    await adminRow.getByRole('button').click();
+    await adminRow.getByRole('button', { name: 'Actions' }).click();
     await page.getByRole('menuitem', { name: 'Clone' }).click();
 
     const dialog = page.getByRole('dialog');
@@ -182,11 +182,18 @@ test.describe('Roles CRUD (admin)', () => {
     expect((body.data ?? []).map((p) => p.name)).toContain('users:read');
   });
 
-  // Edit flow: open a role with no permissions, add one through the Edit modal's
-  // permission picker, Save, and assert the new permission count is reflected in
-  // the table (the Permission Count cell) AND persisted server-side. This covers
-  // the "edit/reassign permissions" + "count persists" interaction (WC-99) from
-  // the editing side, complementing the create-side guard above.
+  // Edit flow: open a role with no permissions, add one through the RECORD
+  // PAGE's in-page permission grid, Save, and assert the new permission count is
+  // reflected in the table (the Permission Count cell) AND persisted
+  // server-side. This covers the "edit/reassign permissions" + "count persists"
+  // interaction (WC-99) from the editing side, complementing the create-side
+  // guard above.
+  //
+  // #882 moved where this happens: web's roles list now routes Edit to
+  // `/admin/roles/{id}` instead of opening a dialog. The MODAL is still in the
+  // package and still opens for any host that does not supply the
+  // `onOpenRecord` seam (the desktop shell), so what changed here is which
+  // surface web drives — not whether the modal works.
   test('edit a role to add a permission; the count persists', async ({
     adminPage,
     page,
@@ -210,24 +217,34 @@ test.describe('Roles CRUD (admin)', () => {
     // The fresh role shows a 0 permission count.
     await expect(row.getByRole('cell', { name: '0', exact: true })).toBeVisible();
 
-    // --- Edit: add a permission ---
-    await row.getByRole('button').click();
+    // --- Edit: add a permission on the record page ---
+    await row.getByRole('button', { name: 'Actions' }).click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
-    const editDialog = page.getByRole('dialog');
-    await expect(editDialog.getByRole('heading', { name: 'Edit Role' })).toBeVisible();
 
-    const permsToggle = editDialog.getByTestId('perm-toggle');
-    await permsToggle.click();
-    const rolesReadLabel = editDialog.locator('label', { hasText: 'roles:read' });
+    // The record has an ADDRESS now — that is the whole point of the page, so
+    // the URL is asserted rather than only the content.
+    await page.waitForURL(/\/admin\/roles\/\d+$/);
+    await expect(page.getByTestId('role-record')).toBeVisible();
+    await expect(page.getByRole('heading', { name: createdRoleName })).toBeVisible();
+
+    // No dialog, and no scroll porthole: every permission group is on the page.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const grid = page.getByTestId('perm-grid');
+    await expect(grid).toBeVisible();
+    await expect(page.getByTestId('perm-grid-group-roles')).toBeVisible();
+    await expect(page.getByTestId('perm-grid-group-users')).toBeVisible();
+
+    const rolesReadLabel = grid.locator('label', { hasText: 'roles:read' });
     await expect(rolesReadLabel).toBeVisible();
     await rolesReadLabel.click();
-    await expect(permsToggle).toHaveText(/1 permission selected/);
-    // Collapse the dropdown so its panel does not overlay the footer.
-    await permsToggle.click();
-    await editDialog.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(page.getByTestId('perm-grid-summary')).toHaveText(/^1 of \d+ selected$/);
+
+    await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('Role updated successfully')).toBeVisible();
 
-    // The table's Permission Count cell for this row now reads 1...
+    // Back to the list: the table's Permission Count cell for this row reads 1...
+    await page.getByRole('button', { name: 'Back to roles' }).click();
+    await page.waitForURL('**/admin/roles');
     const updatedRow = page.getByRole('row', { name: new RegExp(createdRoleName) });
     await expect(updatedRow.getByRole('cell', { name: '1', exact: true })).toBeVisible();
 
@@ -413,7 +430,7 @@ test.describe('Roles delete guards (admin)', () => {
     // disabled with an explanatory tooltip rather than letting the admin open a
     // dialog that would only 404. The seeded role therefore stays.
     const userRow = page.getByRole('row', { name: /^user/ });
-    await userRow.getByRole('button').click();
+    await userRow.getByRole('button', { name: 'Actions' }).click();
     const deleteItem = page.getByRole('menuitem', { name: 'Delete' });
     await expect(deleteItem).toBeVisible();
     await expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
@@ -464,7 +481,7 @@ test.describe('Roles delete guards (admin)', () => {
     await page.reload();
     await page.waitForURL('**/admin/roles');
     const row = page.getByRole('row', { name: new RegExp(createdRoleName) });
-    await row.getByRole('button').click();
+    await row.getByRole('button', { name: 'Actions' }).click();
     await page.getByRole('menuitem', { name: 'Delete' }).click();
     const deleteDialog = page.getByRole('dialog');
     await deleteDialog.getByRole('button', { name: 'Delete Role' }).click();
