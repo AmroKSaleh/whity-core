@@ -25,10 +25,33 @@ use Whity\Database\Database;
  *
  * Response shape (200 healthy / 503 degraded):
  *  - `status`           : `"ok"` when the database is reachable, `"degraded"` otherwise.
+ *  - `version`          : the running core version (WC-172). NOT renamed — monitoring parses it.
+ *  - `sdk_version`      : the plugin-SDK contract version (see the disclosure note below).
  *  - `workers_active`   : the configured FrankenPHP worker count (see note below).
  *  - `memory_usage_mb`  : the current worker's real memory usage, in megabytes.
  *  - `uptime_seconds`   : seconds since this worker process captured its boot timestamp.
  *  - `db_connected`     : whether a cheap connectivity ping to the database succeeded.
+ *
+ * DISCLOSURE NOTE — `sdk_version` IS PUBLIC HERE, DELIBERATELY.
+ * -----------------------------------------------------------
+ * The same number is also served by `GET /api/v1/platform/version`, which is
+ * gated on `settings:manage` AND the system tenant. Reporting it here moves it
+ * from gated to unauthenticated, and that is a decision, not an oversight:
+ *
+ *  - Monitoring is where a version question is actually asked. A plugin that
+ *    refuses to load after a core update is nearly always the SDK contract
+ *    number moving, and the operator diagnosing that at 03:00 is reading a
+ *    probe, not signing into an admin UI.
+ *  - The marginal disclosure is small. `version` — the core release, from which
+ *    the SDK version is derivable by anyone holding the public source or a
+ *    GHCR tag — has been public on this endpoint since WC-172. Someone who can
+ *    read one can already look up the other.
+ *
+ * It is nonetheless REVERSIBLE IN ONE LINE: delete the `sdk_version` entry
+ * below (and its `HealthResponse` property). Nothing in the product reads it
+ * from here — the admin dashboard sources versions from the GATED
+ * `/api/v1/platform/version` on purpose, so that removing this key costs a
+ * monitoring field and no UI.
  *
  * Worker-count note: FrankenPHP does not expose live per-worker introspection to
  * PHP userland, so `workers_active` reports the *configured* worker count from the
@@ -83,7 +106,13 @@ class HealthApiHandler
             'status' => $dbConnected ? 'ok' : 'degraded',
             // WC-172: the running core version, so operators can read a
             // deployment's version remotely (and compare it to releases).
+            // The key stays `version`, not `core_version`: it is a published
+            // field on a PUBLIC probe and somebody's alerting parses it.
             'version' => \Whity\Core\CoreVersion::VERSION,
+            // The plugin-SDK contract version installed plugins declare their
+            // sdk-constraint against. Public here on purpose — see the
+            // disclosure note on the class docblock.
+            'sdk_version' => \Whity\Sdk\Sdk::VERSION,
             'workers_active' => $this->configuredWorkerCount(),
             'memory_usage_mb' => $this->memoryUsageMb(),
             'uptime_seconds' => $this->uptimeSeconds(),

@@ -53,18 +53,37 @@ final class HealthProbe
     }
 
     /**
+     * Samples successfully WRITTEN by the most recent {@see runAll()}.
+     *
+     * Not the same number as the components probed. {@see runOne()} swallows a
+     * failed INSERT on purpose (a database that is down cannot be told that it
+     * is down), so "the probe ran" has never implied "an observation exists".
+     * The collector needs the difference: its own liveness claim is "I recorded
+     * a sample", and a claim it cannot substantiate is the whole bug class this
+     * counter closes.
+     */
+    private int $recordedCount = 0;
+
+    /**
      * Probe everything and persist one sample per component.
      *
      * @return array<string, HealthStatus> What was recorded, for CLI output.
      */
     public function runAll(): array
     {
+        $this->recordedCount = 0;
         $results = [];
         foreach ($this->registry?->getAll() ?? HealthProbeRegistry::CORE_PROBES as $component) {
             $results[$component] = $this->runOne($component);
         }
 
         return $results;
+    }
+
+    /** How many samples the last {@see runAll()} actually persisted. */
+    public function recordedCount(): int
+    {
+        return $this->recordedCount;
     }
 
     private function runOne(string $component): HealthStatus
@@ -90,9 +109,12 @@ final class HealthProbe
 
         try {
             $this->samples->record($component, $status, 'internal', $latency, $detail);
+            $this->recordedCount++;
         } catch (Throwable) {
             // If the database is the thing that is down we cannot record that we
-            // noticed. The external watchdog covers this case.
+            // noticed. The external watchdog covers this case. The counter is
+            // deliberately NOT incremented here: an unwritten observation must
+            // never contribute to the collector's "I am recording" claim.
         }
 
         return $status;

@@ -38,6 +38,105 @@ final class BlockValidator
     public const OU_SCOPES = ['unit', 'subtree', 'children'];
 
     /**
+     * The reserved master-detail binding a host seeds with the record its ROUTE
+     * is about (#883 gap 2).
+     *
+     * A record page is `/admin/<resource>/[id]`, and nothing in a block tree
+     * could name that id: `defaultFrom` and `params.from` resolve only against a
+     * `selector` choice or a `dataTable` row action, and both of those are
+     * list-anchored. So the host publishes the route's record id under this one
+     * reserved name, and a `dataRecord` reads it the ordinary way —
+     * `source => '/api/x/rows/{record}'`.
+     *
+     * Public because it is the vocabulary a host implements and a plugin author
+     * types, not an implementation detail. A `selector` may not claim the name:
+     * a selection published under it would shadow the page's own record for
+     * every block on the screen, and the failure — a record page quietly showing
+     * a different record — is invisible in exactly the deployments where the
+     * selector happens to be empty.
+     */
+    public const PAGE_RECORD_BINDING = 'record';
+
+    /**
+     * Field names that state a decision about the CALLER rather than a property
+     * of the RECORD (#895), refused wherever a declaration states a FACT.
+     *
+     * This list is #897's `CallerDecisionKey` verbatim — the same eleven names,
+     * in the same order — and that is deliberate rather than incidental. #897
+     * made the mistake unwriteable in TypeScript for hand-built record pages;
+     * this file has to make the same mistake unwriteable in a tree that is
+     * validated at runtime. Two lists that were "kept in sync" would be one list
+     * and one stale copy, so the pairing is stated here, pinned by a test on
+     * both sides, and any addition is made to both in the same change.
+     *
+     * WHAT WENT WRONG, since a list of words does not carry it: the roles record
+     * page derived "is this a global base role" from `manageable`, the server's
+     * answer to "may YOU write this?". For a tenant-0 caller `manageable` is
+     * true of every role, so the system tenant — the one caller whose edit
+     * reaches every tenant — saw a deployment-wide base role labelled "Your
+     * tenant's role". The inference reads as correct in the common case and is
+     * wrong precisely for the caller who can act on it.
+     *
+     * Note what this list is NOT. It is not the guard; it is the guard's error
+     * message. The guard is that a `dataRecord` publishes ONLY the fields its
+     * declaration names as facts, so a payload's caller flag is unreachable from
+     * the tree whatever it is called. This list catches the author who names one
+     * ANYWAY, and names it back to them.
+     *
+     * @var list<string>
+     */
+    public const CALLER_DECISION_FIELDS = [
+        'manageable',
+        'editable',
+        'writable',
+        'deletable',
+        'canEdit',
+        'canDelete',
+        'canManage',
+        'canWrite',
+        'allowed',
+        'permitted',
+        'readOnly',
+    ];
+
+    /**
+     * The HTTP methods an `accessGate.check` may name (#909).
+     *
+     * GET is here and the write verbs are here, and the pair is the difference
+     * between two of the three states a gated region has. "May I CHANGE this?"
+     * is a write verb and selects between the editable and the read-only
+     * rendering; "may I SEE this at all?" is a GET and selects between rendering
+     * the region and omitting it. Without GET the hidden state has no authority
+     * to ask, and an author would have to fake it by gating a read-only panel on
+     * a write request — which answers a different question and answers it wrong
+     * for every reader who may look but not touch.
+     *
+     * `POST /api/v1/me/permitted-actions` accepts the same set; that endpoint's
+     * identity ("allowed implies the middleware would admit exactly this
+     * request") is method-agnostic, so widening it costs nothing it was
+     * promising.
+     *
+     * @var list<string>
+     */
+    public const ACCESS_CHECK_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+    /**
+     * The props whose value is a FACT the page states about a record, and which
+     * therefore may not name a caller decision.
+     *
+     * `defaultFrom` and `params.from` are deliberately absent. They are
+     * PLUMBING, not statements: one seeds a form control whose value the server
+     * re-validates and is authoritative over, the other narrows a fetch. #897
+     * draws the line in the same place — its `RecordAccess` half is read freely
+     * to decide which controls exist, and only the FACTS projection is checked.
+     * A guard that also refused the plumbing would be refusing a correct
+     * program, and a guard that refuses correct programs gets removed.
+     *
+     * @var list<string>
+     */
+    private const FACT_BINDING_PROPS = ['textFrom', 'valueFrom', 'labelFrom', 'hintFrom'];
+
+    /**
      * Longest organizational-unit type key accepted (#822's `ou_types.type_key`
      * column width). Restated rather than imported for the same reason the key
      * grammar is: the SDK may not reference a core symbol.
@@ -222,25 +321,59 @@ final class BlockValidator
             self::validateOuScopePicker($node, $path, $errors);
         }
 
-        $isContainer = $rule['container'];
-        $hasChildren = \array_key_exists('children', $node);
+        // #883: `record` is the host's binding for the record a ROUTE is about
+        // (see self::PAGE_RECORD_BINDING). A selector publishing under that name
+        // would shadow it for every block on the screen, and the symptom — a
+        // record page showing a different record — appears only once the
+        // selector has a value, so it is invisible on first paint and in every
+        // test that never touches the dropdown.
+        if ($type === 'selector' && ($node['name'] ?? null) === self::PAGE_RECORD_BINDING) {
+            $errors[] = "{$path}.name: 'selector.name' may not be '" . self::PAGE_RECORD_BINDING
+                . "' — that name is reserved for the record a record-page route is about, "
+                . 'and a selection published under it would shadow the page\'s own record';
+        }
 
-        if ($hasChildren && !$isContainer) {
-            $errors[] = "{$path}: '{$type}' is a leaf block and cannot have 'children'";
+        // The child lists this TYPE declares (#909). Almost always `['children']`;
+        // `accessGate` declares two, and asking the contract rather than reaching
+        // for `children` is what keeps a slot added later from being silently
+        // skipped here and in every other walker.
+        $slots = BlockContract::childSlots($type);
+
+        foreach (BlockContract::knownChildSlots() as $slot) {
+            if (!\array_key_exists($slot, $node) || \in_array($slot, $slots, true)) {
+                continue;
+            }
+
+            $errors[] = $rule['container']
+                ? "{$path}: '{$type}' has no '{$slot}' list — it takes " . self::describeSlots($slots)
+                : "{$path}: '{$type}' is a leaf block and cannot have '{$slot}'";
 
             return;
         }
 
-        if ($hasChildren) {
-            $children = $node['children'];
+        // The two branches of an `accessGate` are MUTUALLY EXCLUSIVE renderings,
+        // so an input name used in one is not a duplicate of the same name in the
+        // other — only one of them is ever on screen. Each slot therefore starts
+        // from a snapshot of the names declared BEFORE the node, and the names
+        // each slot introduces are merged back afterwards so a later sibling
+        // still collides with them. For a single-slot container this is exactly
+        // the by-reference behaviour it replaces.
+        $outerNames = $formNames;
+
+        foreach ($slots as $slot) {
+            if (!\array_key_exists($slot, $node)) {
+                continue;
+            }
+
+            $children = $node[$slot];
             if (!\is_array($children)) {
-                $errors[] = "{$path}.children: 'children' must be a list of blocks";
+                $errors[] = "{$path}.{$slot}: '{$slot}' must be a list of blocks";
 
                 return;
             }
 
             if ($depth + 1 > BlockContract::MAX_DEPTH) {
-                $errors[] = "{$path}.children: nesting too deep — the tree exceeds the maximum depth of "
+                $errors[] = "{$path}.{$slot}: nesting too deep — the tree exceeds the maximum depth of "
                     . BlockContract::MAX_DEPTH;
 
                 return;
@@ -252,20 +385,37 @@ final class BlockValidator
                 // `fieldArray` (WC-532 A2) likewise scopes its template's input
                 // names PER ROW, so they neither collide with the outer form nor
                 // with a sibling fieldArray. Its children still require a form
-                // ancestor, so `$inForm` stays true down this branch.
+                // ancestor, so `$inForm` stays true down this branch. Nothing
+                // merges back out: that scoping is the point.
                 $childFormNames = [];
-                self::validateList($children, "{$path}.children", $depth + 1, $count, $errors, $type, true, $childFormNames);
-            } else {
-                self::validateList($children, "{$path}.children", $depth + 1, $count, $errors, $type, $inForm, $formNames);
+                self::validateList($children, "{$path}.{$slot}", $depth + 1, $count, $errors, $type, true, $childFormNames);
+
+                continue;
             }
+
+            $slotNames = $outerNames;
+            self::validateList($children, "{$path}.{$slot}", $depth + 1, $count, $errors, $type, $inForm, $slotNames);
+            $formNames += $slotNames;
         }
+    }
+
+    /**
+     * Render a type's child-slot names for an error message.
+     *
+     * @param list<string> $slots
+     */
+    private static function describeSlots(array $slots): string
+    {
+        return $slots === []
+            ? 'no child lists'
+            : "'" . implode("' and '", $slots) . "'";
     }
 
     /**
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -294,7 +444,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -491,8 +641,298 @@ final class BlockValidator
                 // against the tree.
                 self::validateContextPath($value, $type, $prop, $path, $errors);
 
+                // #883/#895: a FACT binding may not name a caller decision. The
+                // shape check above ran first, so a malformed reference is
+                // reported as malformed rather than as a permission mistake.
+                if (\in_array($prop, self::FACT_BINDING_PROPS, true) && \is_string($value)) {
+                    self::rejectCallerDecisionField(
+                        self::fieldOfContextPath($value),
+                        "'{$type}.{$prop}'",
+                        $path,
+                        $errors,
+                    );
+                }
+
+                break;
+
+            case 'recordPath':
+                // #883: `dataRecord.source` — an owned apiPath that may carry
+                // `{token}` segments in the master-detail addressing.
+                self::validateRecordPath($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'recordFactList':
+                // #883: `dataRecord.fields` — the record's FACTS, named and
+                // labelled, and the only fields published into context.
+                self::validateRecordFactList($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'accessCheck':
+                // #909: `accessGate.check` — the one concrete request whose
+                // permission the host resolves for this caller.
+                self::validateAccessCheck($value, $type, $prop, $path, $errors);
+
                 break;
         }
+    }
+
+    /**
+     * `accessGate.check` (#909): the CONCRETE REQUEST a gate asks the host about
+     * — `{method, endpoint}`, where `endpoint` is an owned API path that may
+     * carry `{token}` segments in the same master-detail addressing a
+     * `dataRecord.source` uses.
+     *
+     * A request rather than a permission slug, and that is the design decision
+     * rather than a shorthand. The host answers it by looking the method+path up
+     * in the LIVE ROUTE TABLE and evaluating that route's own gate with the same
+     * RoleChecker calls RbacMiddleware makes. So the plugin never states which
+     * permission governs the region, and there is no second copy of that answer
+     * to fall out of step with the route — the property #868 established for
+     * `inbox`, which is the closest existing thing to this question.
+     *
+     * A slug WOULD have been the shorter spelling, and it is the one deliberately
+     * not offered: `'permission' => 'acme:write'` beside a route gated on
+     * `acme:manage` is a page that hides a control the caller could have used, or
+     * shows one they cannot, and nothing detects the disagreement because nothing
+     * compares them.
+     *
+     * Token substitution happens in the renderer, exactly as it does for
+     * `dataRecord.source`, and an unresolved token means the gate is NOT asked —
+     * a half-substituted path names a different resource, and being told whether
+     * you may write some other record is worse than not being told.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateAccessCheck(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || array_is_list($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a {method, endpoint} object, got "
+                . get_debug_type($value);
+
+            return;
+        }
+
+        $method = $value['method'] ?? null;
+        if (!\is_string($method) || !\in_array($method, self::ACCESS_CHECK_METHODS, true)) {
+            $errors[] = "{$path}.method: '{$type}.{$prop}.method' must be one of ["
+                . implode(', ', self::ACCESS_CHECK_METHODS) . '], got ' . self::describeScalar($method);
+        }
+
+        if (!\array_key_exists('endpoint', $value)) {
+            $errors[] = "{$path}.endpoint: '{$type}.{$prop}' is missing 'endpoint'";
+
+            return;
+        }
+
+        // Same predicate as `dataRecord.source`: an owned API path that may
+        // carry balanced `{token}` segments in the master-detail addressing.
+        self::validateRecordPath($value['endpoint'], $type, "{$prop}.endpoint", "{$path}.endpoint", $errors);
+    }
+
+    /**
+     * `dataRecord.source` (#883): an owned API path that may carry `{token}`
+     * segments, each one a master-detail reference in the SAME addressing as
+     * `params.from` / `defaultFrom` / `submit.endpoint` — a bare name (a
+     * `selector`'s value, or the host-seeded {@see self::PAGE_RECORD_BINDING})
+     * or a dotted `{targetId}.{field}`.
+     *
+     * The path around the tokens is the ordinary `apiPath` predicate, unchanged:
+     * this widens what a source may SAY, never where it may point. The loader
+     * still ownership-checks it against the routes the declaring plugin actually
+     * registered, comparing with route parameters normalized, so a templated
+     * source can only ever name a route the plugin already owns.
+     *
+     * A brace that never closes is refused rather than treated as a literal.
+     * `/api/x/{id` is a path that requests a resource named `{id`, which no
+     * route serves — so the block would 404 forever with nothing saying why, and
+     * the author's intent is not in doubt.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateRecordPath(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (
+            !\is_string($value)
+            || !str_starts_with($value, '/api/')
+            || str_contains($value, '//')
+            || str_contains($value, '..')
+            || str_contains($value, '\\')
+            || preg_match('/[\s\x00-\x1f\x7f]/', $value) === 1
+        ) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a relative API path starting with '/api/' "
+                . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($value);
+
+            return;
+        }
+
+        // Balanced, non-nested braces. `preg_match_all` finds the well-formed
+        // tokens; comparing the counts catches a stray brace on either side.
+        $tokenCount = preg_match_all('/\{([^{}]*)\}/', $value, $matches);
+        if ($tokenCount === false
+            || $tokenCount !== substr_count($value, '{')
+            || $tokenCount !== substr_count($value, '}')
+        ) {
+            $errors[] = "{$path}: '{$type}.{$prop}' has unbalanced '{'/'}' — every context token must be "
+                . "a complete '{reference}', got " . self::describeScalar($value);
+
+            return;
+        }
+
+        foreach ($matches[1] as $i => $reference) {
+            if (self::isMalformedContextPath($reference)) {
+                $errors[] = "{$path}: '{$type}.{$prop}' token #{$i} must be a selector name or a dotted "
+                    . "'{targetId}.{field}' reference, got " . self::describeScalar('{' . $reference . '}');
+            }
+        }
+    }
+
+    /**
+     * `dataRecord.fields` (#883): the record's FACTS — a non-empty, duplicate-
+     * free list of `{field: non-empty string, label: string}`.
+     *
+     * This list is a WHITELIST with two jobs at once. It names the labels a
+     * `recordFields` renders, and it is the complete set of the fetched
+     * payload's keys the renderer publishes into the master-detail context —
+     * everything else the endpoint returned is dropped before any binding can
+     * see it. That is the structural half of the #895 guard
+     * ({@see self::CALLER_DECISION_FIELDS} explains the incident): a caller flag
+     * riding along in the payload is unreachable from the tree because it was
+     * never published, whatever the plugin chose to call it.
+     *
+     * A `field` carries no dot, for the same reason a `blockId` carries none —
+     * `{id}.{field}` addressing has to stay unambiguous about where the split
+     * falls. Duplicates are refused rather than collapsed: two entries for one
+     * field are two labels for one value, and whichever the renderer picked
+     * would be arbitrary.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateRecordFactList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value) || $value === []) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty list of {field, label} objects";
+
+            return;
+        }
+
+        $seen = [];
+
+        foreach ($value as $i => $item) {
+            $at = "{$path}[{$i}]";
+
+            if (
+                !\is_array($item)
+                || !isset($item['field']) || !\is_string($item['field']) || $item['field'] === ''
+                || str_contains($item['field'], '.')
+                || preg_match('/\s/', $item['field']) === 1
+                || !isset($item['label']) || !\is_string($item['label'])
+            ) {
+                $errors[] = "{$at}: each '{$type}.{$prop}' entry must be a "
+                    . '{field: non-empty string with no "." or whitespace, label: string} object';
+
+                continue;
+            }
+
+            /** @var string $field */
+            $field = $item['field'];
+
+            if (isset($seen[$field])) {
+                $errors[] = "{$at}.field: duplicate '{$type}.{$prop}' field '{$field}'";
+
+                continue;
+            }
+            $seen[$field] = true;
+
+            self::rejectCallerDecisionField($field, "'{$type}.{$prop}'", "{$at}.field", $errors);
+        }
+    }
+
+    /**
+     * The FIELD half of a context reference: everything after the dot in a
+     * dotted `{targetId}.{field}`, or the whole thing when it is a bare name.
+     *
+     * A bare name addresses a `selector`'s current value rather than a record's
+     * field, and it is checked too. A selector named `manageable` publishing
+     * into a heading is the same sentence about the same subject, reached by a
+     * different route.
+     */
+    private static function fieldOfContextPath(string $reference): string
+    {
+        $dot = strpos($reference, '.');
+
+        return $dot === false ? $reference : substr($reference, $dot + 1);
+    }
+
+    /**
+     * Refuse a field name that states what the CALLER may do where the
+     * declaration states what the RECORD is (#895).
+     *
+     * Matching is on a NORMALIZED form — case-folded with `_`/`-` removed, and
+     * again with a leading `is`/`has` removed — because the same flag arrives as
+     * `canEdit` from one serializer and `can_edit` or `is_editable` from
+     * another, and a guard that only knows one spelling is a guard that fails on
+     * the payload shape it was not written against. The `is`/`has` form is
+     * checked as a SECOND candidate rather than by stripping the prefix
+     * unconditionally, so an honest field like `issued` is never mistaken for
+     * `sued`.
+     *
+     * @param list<string> $errors by reference
+     */
+    private static function rejectCallerDecisionField(
+        string $field,
+        string $what,
+        string $path,
+        array &$errors,
+    ): void {
+        if ($field === '') {
+            return;
+        }
+
+        $normalized = self::normalizeFieldName($field);
+        $withoutPrefix = preg_replace('/^(?:is|has)(?=.)/', '', $normalized) ?? $normalized;
+
+        foreach (self::CALLER_DECISION_FIELDS as $reserved) {
+            $target = self::normalizeFieldName($reserved);
+            if ($normalized !== $target && $withoutPrefix !== $target) {
+                continue;
+            }
+
+            $errors[] = "{$path}: {$what} may not bind '{$field}' — it says what the CALLER may do, "
+                . 'not what the record IS, and a record page states facts about the record (#895). '
+                . 'A caller-permission flag belongs to the controls the page offers '
+                . "(a form/button 'requiredPermission'), never to a field, heading, badge, or stat";
+
+            return;
+        }
+    }
+
+    /**
+     * Case-fold a field name and drop the separators serializers disagree about,
+     * so `canEdit`, `can_edit` and `Can-Edit` are one name.
+     */
+    private static function normalizeFieldName(string $field): string
+    {
+        return str_replace(['_', '-'], '', strtolower($field));
     }
 
     /**
@@ -1180,15 +1620,52 @@ final class BlockValidator
     }
 
     /**
-     * `visibleWhen` (WC-532 A3): a presentational conditional-visibility rule.
-     * An object `{field: non-empty string}` carrying EXACTLY ONE of:
-     *   - `equals`: a scalar the referenced field's value must equal, or
-     *   - `in`: a non-empty list of scalars the value must be one of.
+     * The three things a `visibleWhen` may ask about, exactly one per rule.
      *
-     * This is render-time only — the web renderer hides the block when the
-     * predicate is unmet. It carries NO endpoint or path, so unlike `apiPath`
-     * props there is nothing to ownership-check; it can never widen data access
-     * or bypass server-side validation (the server never trusts it).
+     * @var list<string>
+     */
+    private const VISIBILITY_SUBJECTS = ['field', 'from', 'access'];
+
+    /**
+     * `visibleWhen` (WC-532 A3, widened by #909): a presentational
+     * conditional-visibility rule, carried by EVERY block type
+     * ({@see BlockContract::UNIVERSAL_PROPS}).
+     *
+     * The rule names exactly one SUBJECT — what it asks about — and then how to
+     * test it:
+     *
+     *   - `field`  a sibling input in the same `form`. WC-532 A3's original and
+     *              only subject, unchanged.
+     *   - `from`   a master-detail context reference in the ordinary addressing
+     *              (`{recordId}.{field}`, or a bare `selector` name): the RECORD
+     *              the page is about, or a row an overlay was opened with.
+     *   - `access` the `id` of an `accessGate` — the host's answer to "may this
+     *              caller make that request?".
+     *
+     * plus exactly one of `equals` / `in`, except for `access`, which takes a
+     * BOOLEAN `equals` and nothing else: a yes/no answer has no set to be a
+     * member of, and `equals: false` is how the read-only half of a pair says so
+     * out loud rather than by omission.
+     *
+     * WHY `from` IS NOT FACT-GUARDED, while `textFrom` and its twins are. #908
+     * drew this line and it is the same line: a FACT binding is the page STATING
+     * something about the record, and stating "you may edit this" as a property
+     * of the record is what produced #895. A CONTROL binding decides what exists
+     * on screen. `defaultFrom` and `params.from` are unguarded for this reason
+     * and so is this. The structural guard applies regardless — a `dataRecord`
+     * publishes only the fields it named, so `from` cannot reach a caller flag
+     * riding along in the payload whatever the author calls it.
+     *
+     * AND WHY READING `access` HERE DOES NOT RE-OPEN #895. The subject is a gate
+     * id, not a record field, and a gate's answer lives in a namespace of its own
+     * that no `...From` prop resolves against. `visibleWhen.access` is the only
+     * prop in the whole contract whose value names a gate, and all it can do is
+     * decide whether a subtree renders. There is no declaration anywhere that
+     * turns the answer into text on the page.
+     *
+     * Render-time only, either way. The rule carries no endpoint of its own, so
+     * unlike `apiPath` props there is nothing here to ownership-check, and the
+     * server never trusts client-side visibility.
      *
      * @param mixed        $value
      * @param list<string> $errors by reference
@@ -1201,16 +1678,39 @@ final class BlockValidator
         array &$errors,
     ): void {
         if (!\is_array($value) || array_is_list($value)) {
-            $errors[] = "{$path}: '{$type}.{$prop}' must be a {field, equals|in} object, got "
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a {field|from|access, equals|in} object, got "
                 . get_debug_type($value);
 
             return;
         }
 
-        $field = $value['field'] ?? null;
-        if (!\is_string($field) || $field === '') {
-            $errors[] = "{$path}.field: '{$type}.{$prop}.field' must be a non-empty string, got "
-                . self::describeScalar($field);
+        $subjects = array_values(array_filter(
+            self::VISIBILITY_SUBJECTS,
+            static fn (string $key): bool => \array_key_exists($key, $value),
+        ));
+
+        if (\count($subjects) !== 1) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must name exactly one of 'field' (a sibling form input), "
+                . "'from' (a record in the master-detail context) or 'access' (an 'accessGate' id), got "
+                . ($subjects === [] ? 'none' : implode(' + ', $subjects));
+
+            return;
+        }
+
+        if ($subjects[0] === 'access') {
+            self::validateAccessCondition($value, $type, $prop, $path, $errors);
+
+            return;
+        }
+
+        if ($subjects[0] === 'field') {
+            if (!\is_string($value['field']) || $value['field'] === '') {
+                $errors[] = "{$path}.field: '{$type}.{$prop}.field' must be a non-empty string, got "
+                    . self::describeScalar($value['field']);
+            }
+        } elseif (self::isMalformedContextPath($value['from'])) {
+            $errors[] = "{$path}.from: '{$type}.{$prop}.from' must be a selector name or a dotted "
+                . "'{targetId}.{field}' reference, got " . self::describeScalar($value['from']);
         }
 
         $hasEquals = \array_key_exists('equals', $value);
@@ -1240,6 +1740,56 @@ final class BlockValidator
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * The `access` form of a visibility rule (#909):
+     * `{access: <gate id>, equals: bool}`.
+     *
+     * `equals` is REQUIRED and must be a boolean, and `in` is refused. A gate
+     * answers yes or no, so a membership test over it means nothing, and an
+     * omitted `equals` would have to default to one polarity — which is the one
+     * place in this rule where guessing wrong renders a control to somebody who
+     * may not use it. Written out, the read-only half of a pair says
+     * `equals: false` and reads as the negation it is.
+     *
+     * @param array<mixed> $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateAccessCondition(
+        array $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        $gate = $value['access'];
+        if (
+            !\is_string($gate) || $gate === ''
+            || str_contains($gate, '.')
+            || preg_match('/\s/', $gate) === 1
+        ) {
+            $errors[] = "{$path}.access: '{$type}.{$prop}.access' must be an 'accessGate' id — a non-empty "
+                . "string with no '.' or whitespace, got " . self::describeScalar($gate);
+        }
+
+        if (\array_key_exists('in', $value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' may not carry 'in' beside 'access' — a gate answers "
+                . "yes or no, so state 'equals: true' or 'equals: false'";
+        }
+
+        if (!\array_key_exists('equals', $value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' with 'access' must state 'equals: true' or "
+                . "'equals: false' — the polarity is never inferred, because inferring it the wrong way "
+                . 'renders a control to a caller who may not use it';
+
+            return;
+        }
+
+        if (!\is_bool($value['equals'])) {
+            $errors[] = "{$path}.equals: '{$type}.{$prop}.equals' must be a boolean when the subject is "
+                . "'access', got " . get_debug_type($value['equals']);
         }
     }
 

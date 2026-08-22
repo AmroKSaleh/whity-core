@@ -51,6 +51,7 @@ pub fn run() {
             commands::drafts::get_draft,
             commands::drafts::discard_draft,
             commands::auth::auth_enroll,
+            commands::auth::auth_enroll_with_tenant,
             commands::auth::auth_login,
             commands::auth::auth_logout,
             commands::auth::auth_status,

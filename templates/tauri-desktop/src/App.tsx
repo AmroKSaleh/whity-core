@@ -21,6 +21,8 @@ import { PrinterDemo } from "./printer-demo"
 import { PluginsPage } from "./plugins-page"
 import { PluginStorePage } from "./plugin-store-page"
 import { RolesPage } from "./roles-page"
+import { DocumentsPage } from "./documents-page"
+import { ErrorBoundary } from "./error-boundary"
 import { BlockRenderer } from "./plugin-blocks/block-renderer"
 import { PluginFeaturesProvider, usePluginFeatures, usePluginNavGroups } from "./plugin-nav-provider"
 import { AppStateProvider, AuthGate, useAppState, useAuthGateState } from "./app-state-provider"
@@ -82,6 +84,22 @@ function AuthenticatedApp() {
     await authClient.logout()
     await reloadAuth()
     await controller.refresh()
+  }
+
+  // The Document Designer is the one FULL-BLEED route: it supplies its own
+  // chrome (menu bar + toolbar) and needs the whole viewport for a
+  // millimetre-accurate page between two rails, so it is returned before
+  // PageShell rather than inside it. That mirrors web, where it lives in its
+  // own `(editor)` route group instead of the `(protected)` layout's
+  // `max-w-7xl` column. Wrapped in an error boundary because the app is a
+  // single bundle with no code splitting: an uncaught render error here would
+  // otherwise blank the entire window with no way back.
+  if (path === "/documents") {
+    return (
+      <ErrorBoundary title="The document designer stopped responding" onReset={() => navigate("/")}>
+        <DocumentsPage onClose={() => navigate("/")} />
+      </ErrorBoundary>
+    )
   }
 
   const sidebar = (

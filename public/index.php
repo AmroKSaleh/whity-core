@@ -1040,9 +1040,14 @@ $router->register('POST', '/api/register', [$registerHandler, 'register'], null)
 // shared store; audited as system-level (tenant 0) identity events.
 // WC-9b87: on a successful confirm the handler applies the tenant email-domain
 // policy (accept invite / auto-provision membership) for the now-verified email.
+// The MembershipRepository is handed the hook manager (#889): auto-provisioning
+// a membership from a verified email domain is a real authority grant, and it
+// used to happen with nothing recording it. The repository announces the write
+// so this path — and the two SSO ones below — are audited without each service
+// having to remember to.
 $emailDomainPolicy = new TenantEmailDomainPolicyService(
     new TenantEmailDomainsRepository($db->getPdo()),
-    new MembershipRepository($db->getPdo())
+    new MembershipRepository($db->getPdo(), $hookManager)
 );
 $emailVerificationHandler = new EmailVerificationHandler(
     $emailVerificationService,
@@ -1205,7 +1210,10 @@ $router->register('POST', '/api/2fa-recovery/force-reset',       [$twoFactorReco
 // invitee has no session and may have no account at all.
 $invitationService = new \Whity\Core\Identity\InvitationService(
     $db->getPdo(),
-    new \Whity\Core\Identity\ProfileProvisioner($db->getPdo())
+    new \Whity\Core\Identity\ProfileProvisioner($db->getPdo()),
+    // Accepting an invitation is how most people GET a role here; without this
+    // the trail recorded the invitation and never the membership it produced (#889).
+    $hookManager
 );
 $invitationUrlBase = (string) ($_ENV['INVITATION_ACCEPT_URL'] ?? getenv('INVITATION_ACCEPT_URL')
     ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/accept-invitation'));
@@ -1244,6 +1252,13 @@ $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
 // bare 'admin' role. requiredRole is cleared (null) so the check is driven
 // entirely by requiredPermission; migration 022 grants all three to admin.
 $router->register('GET',    '/api/users',           [$usersHandler, 'list'],   null, null, CorePermissions::USERS_READ);
+// #882: read ONE user. The handler has had this method since the identity
+// cutover but no route reached it, so every surface that wanted one person had
+// to fetch the list and search it — which caps at the page size and answers
+// "who is profile 412?" with silence once a tenant passes 100 people. A record
+// page is addressable by definition (a pasted URL must work), so it needs the
+// single-record read rather than a filtered list.
+$router->register('GET',    '/api/users/{id:\d+}',  [$usersHandler, 'get'],    null, null, CorePermissions::USERS_READ);
 $router->register('POST',   '/api/users',           [$usersHandler, 'create'], null, null, CorePermissions::USERS_WRITE);
 $router->register('PATCH',  '/api/users/{id:\d+}',  [$usersHandler, 'update'], null, null, CorePermissions::USERS_WRITE);
 $router->register('DELETE', '/api/users/{id:\d+}',  [$usersHandler, 'delete'], null, null, CorePermissions::USERS_DELETE);
@@ -1267,6 +1282,11 @@ $router->register('GET', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'get
 // clobbering each other through the read-modify-write PATCH forces on them.
 $router->register('POST', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'grantPermissions'], 'admin');
 $router->register('DELETE', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'revokePermissions'], 'admin');
+// #882: who holds this role, newest grant first — the record page's headcount
+// and its recent-assignment list in one request (the count is the pagination
+// total). Same 'admin' gate as its siblings: a new permission slug would ship a
+// grant migration reaching only the seeded admin role (#834).
+$router->register('GET', '/api/roles/{id:\d+}/assignments', [$rolesHandler, 'assignments'], 'admin');
 
 $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
@@ -2191,7 +2211,10 @@ $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
         $db->getPdo(),
         $externalIdentityRepository,
         $profileEmailRepository,
-        new MembershipRepository($db->getPdo()),
+        // SSO JIT provisioning grants authority with no administrator in the
+        // loop at all, which makes it the path an audit trail can least afford
+        // to be silent about (#889).
+        new MembershipRepository($db->getPdo(), $hookManager),
         new \Whity\Core\Identity\TenantEmailDomainsRepository($db->getPdo()),
     ),
     $settingsService,

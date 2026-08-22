@@ -17,6 +17,7 @@ namespace Whity\Core\i18n;
  * a new branch in the interface — nothing in this codebase tests a language
  * CODE to decide direction.
  */
+use Whity\Core\Db\DbBool;
 final class Language
 {
     /** Left-to-right — the direction assumed for any language that omits one. */
@@ -60,7 +61,7 @@ final class Language
             id: (int) $row['id'],
             code: (string) $row['code'],
             name: (string) $row['name'],
-            enabled: (bool) $row['enabled'],
+            enabled: DbBool::of($row['enabled']),
             createdAt: (string) $row['created_at'],
             updatedAt: (string) $row['updated_at'],
             direction: self::normalizeDirection($row['direction'] ?? null),

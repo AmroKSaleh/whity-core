@@ -5,6 +5,7 @@ namespace Whity\Auth;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\RateLimit\ClientIp;
 use Whity\Core\Request;
@@ -13,6 +14,7 @@ use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Http\JsonBody;
 use PDO;
+use Whity\Core\Db\DbBool;
 use PDOStatement;
 
 /**
@@ -290,10 +292,10 @@ class AuthHandler
 
         // Unverified emails must never authenticate (ADR 0005 §2).
         //
-        // Use dbTruthy(), NOT (bool)/empty(): on PostgreSQL `verified` comes back
-        // as the string "f", and (bool)"f" === true, which would SKIP this guard
-        // and let unverified emails in on production Postgres (the SQLite tests
-        // never caught it because SQLite returns 0/1).
+        // Use dbTruthy(), NOT (bool)/empty(): a BOOLEAN reaches PHP in several
+        // spellings depending on the driver and STRINGIFY_FETCHES, and a
+        // text-spelled 'false' casts to TRUE — which would SKIP this guard and
+        // let unverified emails in. {@see DbBool} records the measured set.
         //
         // Return a GENERIC 401 "Invalid credentials" (NOT a distinct 403
         // "not verified"): a verification-specific error is a user-enumeration
@@ -1097,19 +1099,6 @@ class AuthHandler
     }
 
     /**
-     * Coerce a DB boolean column to a real bool across drivers.
-     *
-     * CRITICAL: pdo_pgsql returns the STRING "f" for a false boolean, and PHP's
-     * (bool) cast — and empty() — treat the non-empty string "f" as TRUE. Using
-     * a naive `(bool)`/`!empty()` on a Postgres boolean therefore inverts the
-     * guard (e.g. an UNVERIFIED email would be treated as verified). This mirrors
-     * the coercion in migration 035 and {@see RelationRepository::toBool()}:
-     * SQLite yields 0/1 (int), Postgres yields 't'/'f' (string), and an
-     * in-process seed may hand back a native bool — all three are normalised here.
-     *
-     * @param mixed $value Raw column value from a boolean field.
-     */
-    /**
      * Normalize an email to the stored canonical form: LOWER(TRIM()).
      *
      * profile_emails stores case-folded, trimmed addresses (migration 035 +
@@ -1123,17 +1112,17 @@ class AuthHandler
         return strtolower(trim($email));
     }
 
+    /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
+     */
     private static function dbTruthy(mixed $value): bool
     {
-        if (is_bool($value)) {
-            return $value;
-        }
-        if (is_int($value)) {
-            return $value !== 0;
-        }
-        $normalised = strtolower(trim((string) $value));
-
-        return !in_array($normalised, ['', '0', 'f', 'false', 'no'], true);
+        return DbBool::of($value);
     }
 
     /**
@@ -1366,6 +1355,24 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
 
+        // #917: an IdP-backed account has no local password, so it can satisfy
+        // neither the current-password gate below nor the change it guards.
+        // Before this check it still failed — password_verify() against the
+        // empty-string hash is false for every input — but it failed by saying
+        // "Current password is incorrect", which is not what is wrong and sends
+        // the account owner looking for a password that does not exist. Answered
+        // plainly here; the caller IS the account, so there is nothing to
+        // conceal from them. Refused for ANY change, not only a password one:
+        // the gate protects the email change too, and there is no way for this
+        // account to pass it.
+        if ((new AuthMethod($this->db))->refusesLocalPassword($profileId)) {
+            return Response::error(
+                'This account signs in through an identity provider and has no local password. '
+                . 'Manage its credentials with the provider, or ask an administrator to set a local password.',
+                409
+            );
+        }
+
         // The current password must be supplied and verified for ANY change.
         $currentPassword = isset($body['current_password']) && is_string($body['current_password'])
             ? $body['current_password']
@@ -1374,8 +1381,6 @@ class AuthHandler
             return Response::error('Current password is incorrect', 401);
         }
 
-        $profileUpdates    = [];
-        $profileParams     = [];
         $newEmail          = (string) $profileEmail['email'];
         $passwordChanged   = false;
 
@@ -1413,19 +1418,17 @@ class AuthHandler
                 return Response::error($e->getMessage(), 400);
             }
 
-            $profileUpdates[] = 'password_hash = ?';
-            $profileParams[]  = password_hash($newPassword, PASSWORD_BCRYPT);
-            $profileUpdates[] = 'token_epoch = token_epoch + 1';
-            $passwordChanged  = true;
-        }
-
-        if ($profileUpdates !== []) {
-            $profileUpdates[] = 'updated_at = CURRENT_TIMESTAMP';
-            $profileParams[]  = $profileId;
-            // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-            $this->db->prepare(
-                'UPDATE profiles SET ' . implode(', ', $profileUpdates) . ' WHERE id = ?'
-            )->execute($profileParams);
+            // Written through AuthMethod, the single writer of
+            // profiles.password_hash (#917). It bumps token_epoch with the hash,
+            // as this path always has, and refuses an IdP-backed profile a
+            // second time in the statement that writes — unreachable here
+            // because of the guard above, which is the arrangement intended:
+            // the entry point explains, the writer enforces.
+            (new AuthMethod($this->db))->setPasswordHash(
+                $profileId,
+                password_hash($newPassword, PASSWORD_BCRYPT)
+            );
+            $passwordChanged = true;
         }
 
         if ($passwordChanged) {

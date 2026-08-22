@@ -193,6 +193,9 @@ job_unit() {
   log "Undeclared-reference guard (in-tree plugins)"
   run_in_ci php scripts/ci-undeclared-reference-guard.php
 
+  log "Database-boolean guard"
+  run_in_ci php scripts/ci-db-bool-guard.php
+
   # Runs as its own job in CI (path filter `i18n`, so it fires on frontend-only
   # PRs where `backend` does not). Grouped here because it is a PHP guard and
   # this is where a developer runs the PHP guards.
@@ -201,12 +204,12 @@ job_unit() {
 }
 
 job_phpstan() {
-  log "Run PHPStan (src tests plugins sdk)"
+  log "Run PHPStan (src tests plugins sdk ops)"
   if [ "$USE_CLEAN" -eq 0 ]; then
     printf '\033[0;33m    note: running against the working copy; untracked files are analysed too.\n'
     printf '          Use --clean for a CI-faithful result.\033[0m\n'
   fi
-  run_in_ci vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=512M
+  run_in_ci vendor/bin/phpstan analyse src tests plugins sdk ops --memory-limit=512M
 }
 
 # ---------------------------------------------------------------------------

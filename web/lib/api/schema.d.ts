@@ -2285,7 +2285,7 @@ export interface paths {
         /** List the roles visible to the tenant (own + global) */
         get: operations["get_api_v1_roles"];
         put?: never;
-        /** Create a role with optional permission grants */
+        /** Create a role, owned by the caller's tenant unless a system caller names another */
         post: operations["post_api_v1_roles"];
         delete?: never;
         options?: never;
@@ -2310,6 +2310,23 @@ export interface paths {
         head?: never;
         /** Update a role (permissions are replaced when supplied) */
         patch: operations["patch_api_v1_roles_id"];
+        trace?: never;
+    };
+    "/api/v1/roles/{id}/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List who holds this role, newest grant first (total = headcount) */
+        get: operations["get_api_v1_roles_id_assignments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/roles/{id}/permissions": {
@@ -2791,6 +2808,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/uikit/demo/rows/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Demo single record for the record-bound block example */
+        get: operations["get_api_v1_uikit_demo_rows_name"];
+        /** Demo single-record write, behind a permission nothing grants */
+        put: operations["put_api_v1_uikit_demo_rows_name"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uikit/demo/tasks": {
         parameters: {
             query?: never;
@@ -2867,7 +2902,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Read one user */
+        get: operations["get_api_v1_users_id"];
         put?: never;
         post?: never;
         /** Delete a user */
@@ -3392,7 +3428,8 @@ export interface components {
             /** @enum {string} */
             status: "ok" | "degraded";
             version: string;
-            worker_count: number;
+            sdk_version: string;
+            workers_active: number;
             uptime_seconds: number;
             db_connected: boolean;
             /** Format: float */
@@ -3655,8 +3692,17 @@ export interface components {
             status: "active" | "invited" | "suspended";
         };
         MembershipCreateRequest: {
+            /** @description The role to grant, by id. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400, and supplying both is legal with `role_id` winning. */
+            role_id: number;
+            /** @description The same grant addressed by role NAME (or by a numeric id). Core's own memberships UI uses this spelling. */
+            role?: number | string;
+            ou_id?: number | null;
+            tenant_id?: number;
+        } | {
+            /** @description The role to grant, by id. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400, and supplying both is legal with `role_id` winning. */
             role_id?: number;
-            role?: string;
+            /** @description The same grant addressed by role NAME (or by a numeric id). Core's own memberships UI uses this spelling. */
+            role: number | string;
             ou_id?: number | null;
             tenant_id?: number;
         };
@@ -3917,7 +3963,7 @@ export interface components {
         PermittedActionCheck: {
             ref: string;
             /** @enum {string} */
-            method: "POST" | "PUT" | "PATCH" | "DELETE";
+            method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
             path: string;
             resourceType?: string | null;
             resourceId?: number | null;
@@ -4161,11 +4207,29 @@ export interface components {
             created_at: string | null;
             permissionCount: number;
             manageable: boolean;
+            global: boolean;
+        };
+        RoleAssignment: {
+            membershipId: number;
+            profileId: number;
+            tenantId: number;
+            displayName: string;
+            email?: string | null;
+            ouId?: number | null;
+            isPrimary: boolean;
+            status: string;
+            assignedAt?: string | null;
+        };
+        RoleAssignmentListResponse: {
+            data: components["schemas"]["RoleAssignment"][];
+            pagination: components["schemas"]["Pagination"];
         };
         RoleCreateRequest: {
             name: string;
             description?: string;
             permissions?: (number | string)[];
+            tenant_id?: number;
+            global?: boolean;
         };
         RoleCreateResponse: {
             data: {
@@ -4173,6 +4237,8 @@ export interface components {
                 name: string;
                 description?: string;
                 permissionCount?: number;
+                tenantId?: number | null;
+                global?: boolean;
             };
         };
         RoleDetail: {
@@ -4181,6 +4247,8 @@ export interface components {
             description: string | null;
             parent_id: number | null;
             created_at: string | null;
+            manageable: boolean;
+            global: boolean;
             permissions: components["schemas"]["Permission"][];
         };
         RoleDetailResponse: {
@@ -4729,6 +4797,16 @@ export interface components {
                 hint: string;
             };
         };
+        UiKitDemoRecordResponse: {
+            data: {
+                name: string;
+                role: string;
+                status: string;
+                joined: string;
+                manageable: boolean;
+                canEdit: boolean;
+            };
+        };
         UiKitDemoRow: {
             name: string;
             role: string;
@@ -4766,11 +4844,16 @@ export interface components {
             status?: string;
             /** @enum {string} */
             accountStatus?: "active" | "inactive";
+            /** @enum {string} */
+            authMethod?: "local" | "idp" | "both";
         };
         UserCreateRequest: {
+            /** Format: email */
             email: string;
+            /** Format: password */
             password: string;
             role?: number | string;
+            role_id?: number;
             ou_id?: number | null;
         };
         UserListResponse: {
@@ -4781,12 +4864,16 @@ export interface components {
             data: components["schemas"]["User"];
         };
         UserUpdateRequest: {
+            /** Format: email */
             email?: string;
+            /** Format: password */
             password?: string;
             role?: number | string;
+            role_id?: number;
             ou_id?: number | null;
             /** @enum {string} */
             accountStatus?: "active" | "inactive";
+            allowLocalPasswordOnIdpAccount?: boolean;
         };
     };
     responses: never;
@@ -5732,6 +5819,8 @@ export interface operations {
                 actor?: number;
                 /** @description Filter by target type */
                 target_type?: string;
+                /** @description Filter by target id — the history of ONE record. Normally paired with target_type; alone it matches that id across every target type. */
+                target_id?: number;
                 /** @description Inclusive ISO-8601 lower bound */
                 from?: string;
                 /** @description Inclusive ISO-8601 upper bound */
@@ -9911,11 +10000,11 @@ export interface operations {
     };
     delete_api_v1_entity_tags_all: {
         parameters: {
-            query?: {
-                /** @description The opaque plugin-supplied entity type (required) */
-                entity_type?: string;
-                /** @description The entity whose associations are removed (required) */
-                entity_id?: number;
+            query: {
+                /** @description The opaque plugin-supplied entity type */
+                entity_type: string;
+                /** @description The entity whose associations are removed */
+                entity_id: number;
             };
             header?: never;
             path?: never;
@@ -12009,7 +12098,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Email already exists in the tenant */
+            /** @description Email already exists in the tenant, or this account signs in through an identity provider and has no local password */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12036,6 +12125,8 @@ export interface operations {
                 action?: string;
                 /** @description Filter by target type */
                 target_type?: string;
+                /** @description Filter by target id — the caller's own entries about ONE record */
+                target_id?: number;
                 /** @description Inclusive ISO-8601 lower bound */
                 from?: string;
                 /** @description Inclusive ISO-8601 upper bound */
@@ -17800,7 +17891,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoleCreateResponse"];
                 };
             };
-            /** @description Validation failed */
+            /** @description Validation failed, or tenant_id and global both sent */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17818,7 +17909,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Insufficient permissions */
+            /** @description Only the system tenant may name a target tenant or create a global role */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17827,7 +17918,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Not found */
+            /** @description The named target tenant does not exist */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -17847,6 +17938,15 @@ export interface operations {
             };
             /** @description Role name already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description name over 255 or description over 10000 characters */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -18079,6 +18179,87 @@ export interface operations {
             };
             /** @description Role name already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description name over 255 or description over 10000 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_roles_id_assignments: {
+        parameters: {
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100) */
+                per_page?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The role's holders with pagination */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleAssignmentListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Role not found or not visible */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21741,6 +21922,136 @@ export interface operations {
             };
         };
     };
+    get_api_v1_uikit_demo_rows_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoRecordResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoRecordResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_uikit_demo_rows_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoRecordResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoRecordResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:manage permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_uikit_demo_tasks: {
         parameters: {
             query?: never;
@@ -22021,7 +22332,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserResponse"];
                 };
             };
-            /** @description Validation failed */
+            /** @description Validation failed, or a role field was supplied empty */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22068,6 +22379,82 @@ export interface operations {
             };
             /** @description Email already exists in the tenant */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Email longer than 255 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_users_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description User not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -22222,8 +22609,17 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Email already exists in the tenant */
+            /** @description Email already exists in the tenant, or a local password was set on an identity-provider-backed account without the explicit override */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Email longer than 255 characters */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -22531,7 +22927,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Password-reset emails are disabled for this instance */
+            /** @description Password-reset emails are disabled for this instance, or the account signs in through an identity provider and has no local password to reset */
             409: {
                 headers: {
                     [name: string]: unknown;

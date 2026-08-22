@@ -1,4 +1,12 @@
-import { IconBox, IconBuildingStore, IconHome, IconPrinter, IconPuzzle, IconShieldLock } from "@tabler/icons-react"
+import {
+  IconBox,
+  IconBuildingStore,
+  IconFileText,
+  IconHome,
+  IconPrinter,
+  IconPuzzle,
+  IconShieldLock,
+} from "@tabler/icons-react"
 import type { NavConfig } from "@amroksaleh/features/nav"
 
 /**
@@ -65,6 +73,17 @@ export const navConfig: NavConfig = {
           // state (capability-gating the nav entry itself is a later refinement,
           // once App resolves capabilities at nav-render time).
           icon: <IconShieldLock className="size-5" />,
+        },
+        {
+          id: "documents",
+          label: "Document designer",
+          href: "/documents",
+          // Server-owned like Roles: templates and blocks live on the backend
+          // (`/api/v1/document-templates`), reached over `remote_request`, so
+          // this screen needs connectivity and the backend RBAC is
+          // authoritative. Shown unconditionally for the same reason the Roles
+          // entry is.
+          icon: <IconFileText className="size-5" />,
         },
       ],
     },

@@ -7,6 +7,7 @@ namespace Whity\Api;
 use PDO;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Core\Identity\PasswordResetMailer;
 use Whity\Core\Identity\PasswordResetService;
 use Whity\Core\Identity\ProfileEmailRepository;
@@ -111,6 +112,22 @@ final class AdminPasswordResetApiHandler
             if (!$this->resetMailEnabled()) {
                 return Response::error(
                     'Password-reset emails are disabled for this instance. Enable the password-reset mail event before sending a reset link.',
+                    409
+                );
+            }
+
+            // #917: this account signs in through an identity provider and holds
+            // no local password, so a reset link would not restore access — it
+            // would CREATE a local credential that outlives the provider's
+            // control of the account. PasswordResetService::issue() refuses it
+            // regardless; the check is repeated here so the administrator gets
+            // this sentence instead of the generic 500 the catch below produces,
+            // and is told where the deliberate version of this lives.
+            if ((new AuthMethod($this->db))->refusesLocalPassword($profileId)) {
+                return Response::error(
+                    'This account signs in through an identity provider and has no local password to reset. '
+                    . 'Recover access through the provider. If a local password is genuinely intended, set one '
+                    . 'explicitly with PATCH /api/users/{id} and allowLocalPasswordOnIdpAccount.',
                     409
                 );
             }

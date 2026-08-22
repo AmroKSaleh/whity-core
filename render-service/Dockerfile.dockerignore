@@ -38,6 +38,10 @@ web/lib/*
 !packages
 packages/*
 !packages/ui
+!packages/features
 
 packages/ui/*
 !packages/ui/src
+
+packages/features/*
+!packages/features/src

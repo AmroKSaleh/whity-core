@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
@@ -32,8 +33,18 @@ import { MembershipsModal } from './memberships-modal';
  */
 export type User = components['schemas']['User'];
 
+/**
+ * Whether the list's Edit action opens the record page (#882) or the edit modal.
+ *
+ * Typed `boolean` rather than left as a literal so both branches stay live code
+ * that the compiler checks — a `true` literal would narrow the modal path to
+ * unreachable and let it rot until the day somebody needs it back.
+ */
+const EDIT_OPENS_RECORD: boolean = true;
+
 export default function UsersPage() {
   const { addToast } = useToast();
+  const router = useRouter();
   const { hasPermission } = useCapabilities();
   const t = useTranslation('admin');
   const canCreate = hasPermission(USERS_WRITE);
@@ -69,7 +80,25 @@ export default function UsersPage() {
     }
   }, [error, addToast]);
 
+  /** #882: open the user's RECORD PAGE. */
+  const openRecord = useCallback(
+    (user: User) => {
+      router.push(`/admin/users/${user.id}`);
+    },
+    [router]
+  );
+
+  // #882: Edit opens the record page. Both paths are live on purpose — the
+  // record page is ADDITIVE, and reverting it is flipping the constant above
+  // rather than restoring a deleted component, which is the same property the
+  // roles list gets from its optional `onOpenRecord` prop. The edit modal below
+  // is still mounted and still works; #884 decides per screen when a modal is
+  // actually retired.
   const handleEditClick = (user: User) => {
+    if (EDIT_OPENS_RECORD) {
+      openRecord(user);
+      return;
+    }
     setSelectedUser(user);
     setIsEditModalOpen(true);
   };
@@ -122,6 +151,17 @@ export default function UsersPage() {
       header: t('users.table.name', 'Name'),
       enableSorting: true,
       enableColumnFilter: true,
+      // #882: the row's own name opens the record — the affordance a list gets
+      // once its records have addresses. Same treatment the roles list gained.
+      cell: (user) => (
+        <button
+          type="button"
+          onClick={() => openRecord(user)}
+          className="text-start font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {user.name}
+        </button>
+      ),
     },
     {
       accessorKey: 'email',

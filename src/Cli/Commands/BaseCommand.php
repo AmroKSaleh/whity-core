@@ -263,6 +263,7 @@ abstract class BaseCommand
         // WC-203: permission-gated, mirroring public/index.php.
         $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
         $router->register('GET',    '/api/users',          [$usersHandler, 'list'],   null, null, \Whity\Core\RBAC\CorePermissions::USERS_READ);
+        $router->register('GET',    '/api/users/{id}',     [$usersHandler, 'get'],    null, null, \Whity\Core\RBAC\CorePermissions::USERS_READ);
         $router->register('POST',   '/api/users',          [$usersHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::USERS_WRITE);
         $router->register('PATCH',  '/api/users/{id}',     [$usersHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::USERS_WRITE);
         $router->register('DELETE', '/api/users/{id}',     [$usersHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::USERS_DELETE);

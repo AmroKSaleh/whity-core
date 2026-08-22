@@ -6,6 +6,7 @@ namespace Whity\Api;
 
 use PDO;
 use Whity\Auth\TokenValidator;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Core\Identity\ExternalIdentityRepository;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -72,7 +73,8 @@ final class MeIdentitiesApiHandler
         // Lockout guard: don't let a passwordless account remove its last identity.
         if ($this->identities->countForProfile($profileId) <= 1 && $this->isPasswordless($profileId)) {
             return Response::error(
-                'Cannot remove your only sign-in method. Set a password first, then unlink.',
+                'Cannot remove your only sign-in method. This account holds no local password; '
+                . 'ask an administrator to set one before unlinking.',
                 409
             );
         }
@@ -83,13 +85,24 @@ final class MeIdentitiesApiHandler
         return Response::json([], 204);
     }
 
-    /** True when the profile has no usable password (SSO-only account). */
+    /**
+     * True when the profile has no usable password (SSO-only account).
+     *
+     * Reads `profiles.auth_method` — the fact the platform HOLDS (#917, migration
+     * 104) — rather than testing `password_hash` for the empty string, which is
+     * what this method used to do and was, until 104, the only place in the
+     * codebase where "is this account IdP-backed?" was answered at all. It was
+     * answered by inference, in one place, while every password-write path
+     * skipped the question entirely; that asymmetry is what let an IdP-backed
+     * account be handed a local credential.
+     */
     private function isPasswordless(int $profileId): bool
     {
-        $stmt = $this->db->prepare('SELECT password_hash FROM profiles WHERE id = :id');
-        $stmt->execute([':id' => $profileId]);
-        $hash = $stmt->fetchColumn();
-        return $hash === false || (string) $hash === '';
+        $authMethod = (new AuthMethod($this->db))->of($profileId);
+
+        // No such profile: the caller's token names a profile that is gone.
+        // Treated as passwordless so the guard errs towards refusing.
+        return $authMethod === null || !AuthMethod::holdsLocalCredential($authMethod);
     }
 
     /** Resolve the caller's profile id from a valid access token (cookie or Bearer). */

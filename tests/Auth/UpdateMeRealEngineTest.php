@@ -10,6 +10,7 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Core\Request;
 
 /**
@@ -393,5 +394,99 @@ final class UpdateMeRealEngineTest extends TestCase
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'Tenant A', datetime('now'))");
         $pdo->exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1, 'admin'), (2, 'user')");
         return $pdo;
+    }
+    // ==================== #917: IdP-backed accounts ====================
+
+    /**
+     * A profile whose credentials belong to an identity provider is told so,
+     * rather than being told its current password is wrong.
+     *
+     * Before #917 this request also failed — `password_verify($any, '')` is
+     * false for every input — but it failed with 401 "Current password is
+     * incorrect", which sends the account owner hunting for a password that has
+     * never existed. The refusal is now explicit, and it is a 409 because
+     * nothing about the request was unauthenticated.
+     */
+    public function testAnIdpBackedProfileIsToldItHasNoLocalPassword(): void
+    {
+        $profileId = $this->seedProfile('sso-self@example.com', 'irrelevant');
+        $this->becomeIdpOnly($profileId);
+        $this->authenticateAs($profileId, self::TENANT, 'sso-self@example.com');
+
+        $response = $this->handler()->handleUpdateMe(
+            $this->jsonRequest([
+                'password'         => 'attempted-local-pw',
+                'current_password' => 'irrelevant',
+            ])
+        );
+
+        $this->assertSame(409, $response->getStatusCode(), $response->getBody());
+        $this->assertStringContainsString('identity provider', $response->getBody());
+
+        $stmt = $this->pdo->prepare('SELECT password_hash, auth_method FROM profiles WHERE id = ?');
+        $stmt->execute([$profileId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $this->assertSame('', (string) $row['password_hash'], 'no credential may be created');
+        $this->assertSame(AuthMethod::IDP, (string) $row['auth_method']);
+    }
+
+    /**
+     * The refusal covers the EMAIL change too, and does not half-apply it.
+     *
+     * The current-password gate protects every field on this endpoint, and an
+     * IdP-backed account can never pass it — so letting the email write land
+     * before discovering that would leave the account changed by a request that
+     * reported failure.
+     */
+    public function testAnIdpBackedProfileCannotChangeItsEmailEither(): void
+    {
+        $profileId = $this->seedProfile('sso-email@example.com', 'irrelevant');
+        $this->becomeIdpOnly($profileId);
+        $this->authenticateAs($profileId, self::TENANT, 'sso-email@example.com');
+
+        $response = $this->handler()->handleUpdateMe(
+            $this->jsonRequest(['email' => 'moved@example.com', 'current_password' => 'irrelevant'])
+        );
+
+        $this->assertSame(409, $response->getStatusCode(), $response->getBody());
+
+        $stmt = $this->pdo->prepare('SELECT email FROM profile_emails WHERE profile_id = ? AND is_primary = true');
+        $stmt->execute([$profileId]);
+        $this->assertSame('sso-email@example.com', (string) $stmt->fetchColumn(), 'nothing may be written');
+    }
+
+    /**
+     * An account holding BOTH a local password and an identity provider is a
+     * normal self-service caller.
+     *
+     * The refusal is deliberately narrow. An operator who used the explicit
+     * override to give a federated account a local password has decided that
+     * account has one, and the person it belongs to must be able to change it.
+     */
+    public function testAnAccountWithBothCredentialsCanStillChangeItsPassword(): void
+    {
+        $profileId = $this->seedProfile('both-self@example.com', 'old-pw');
+        $stmt = $this->pdo->prepare('UPDATE profiles SET auth_method = ? WHERE id = ?');
+        $stmt->execute([AuthMethod::BOTH, $profileId]);
+        $this->authenticateAs($profileId, self::TENANT, 'both-self@example.com');
+
+        $response = $this->handler()->handleUpdateMe(
+            $this->jsonRequest(['password' => 'new-local-pw', 'current_password' => 'old-pw'])
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        $read = $this->pdo->prepare('SELECT password_hash, auth_method FROM profiles WHERE id = ?');
+        $read->execute([$profileId]);
+        $row = $read->fetch(PDO::FETCH_ASSOC);
+        $this->assertTrue(password_verify('new-local-pw', (string) $row['password_hash']));
+        $this->assertSame(AuthMethod::BOTH, (string) $row['auth_method'], 'the held fact must survive a rotation');
+    }
+
+    /** Drop the local credential and hand the account to an identity provider. */
+    private function becomeIdpOnly(int $profileId): void
+    {
+        $stmt = $this->pdo->prepare("UPDATE profiles SET password_hash = '', auth_method = ? WHERE id = ?");
+        $stmt->execute([AuthMethod::IDP, $profileId]);
     }
 }

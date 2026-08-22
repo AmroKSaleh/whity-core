@@ -182,8 +182,13 @@ services:
     # while collecting perfectly, and a red that is always red trains everyone
     # to ignore the column, so the day it means something nobody sees it.
     #
-    # The replacement asserts the one thing this container is for: that samples
-    # are still being written. See ops/health-watch-healthcheck.php.
+    # The replacement asserts the one thing this container is for: that THIS
+    # PROCESS is still writing samples. It reads the heartbeat the collector
+    # updates after every pass — not `health_samples`, which is shared and
+    # append-only and therefore stays fresh on somebody else's rows while this
+    # container records nothing. See ops/health-watch-healthcheck.php for the
+    # full reasoning; the short version is that the probe has to be able to say
+    # "I have recorded nothing", and a query over a shared table cannot.
     healthcheck:
       test: ["CMD", "php", "/app/ops/health-watch-healthcheck.php"]
       interval: 60s
@@ -193,12 +198,19 @@ services:
       # behind it; do not judge the container before it has had a chance to
       # write anything.
       start_period: 120s
+    # `exec`, deliberately. The previous form was
+    #   php ... || echo "[health-watch] exited (code $$?); restarting"
+    # which announced a restart that nothing performed, and swallowed the exit
+    # code on the way: the shell then exited 0, so a crashed collector left
+    # behind a clean-looking shutdown. With exec, php IS the container process —
+    # its exit status is the container's, `restart: unless-stopped` acts on a
+    # real failure, and nothing claims to have done something it did not do.
     command:
       - sh
       - -c
       - |
         echo "[health-watch] service-health collector started";
-        php public/index.php health:watch --interval=60 || echo "[health-watch] exited (code $$?); restarting";
+        exec php public/index.php health:watch --interval=60
 
 volumes:
   # Distinct named volume so staging data never mixes with the dev demo's.

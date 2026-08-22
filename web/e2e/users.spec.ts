@@ -11,8 +11,16 @@ import { deleteUser, findUserIdByEmail } from './support/api';
  *
  * NOTE: the users list API derives `name` from the email local-part (there is
  * no users.name column) and exposes a camelCase `tenantId` (WC-100), so the
- * table's "Name" column and the Edit dialog pre-fill from the same payload.
+ * table's "Name" column and the record page state the same derived value.
  * Rows are still located by email for stability.
+ *
+ * #882 moved where editing happens: the list's Edit action now opens
+ * `/admin/users/{id}` — the user RECORD page — instead of a dialog. The edit
+ * MODAL is untouched and still mounted (one constant flips the list back to it),
+ * so what changed here is which surface these specs drive, not whether the modal
+ * works. Every row also carries a SECOND button now — the person's name, which
+ * opens their record — so the actions trigger is addressed by its accessible
+ * name rather than as "the button in this row".
  *
  * Role choice: the edit flows switch between the seeded base roles `user` and
  * `admin` (both exist in the demo seed and resolve server-side). The role
@@ -77,35 +85,40 @@ test.describe('Users (admin)', () => {
     // The new user starts in the `user` role.
     await expect(row.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
 
-    // --- Edit (change role user -> admin) and assert it PERSISTED ---
-    await row.getByRole('button').click();
+    // --- Edit on the RECORD PAGE (change role user -> admin), persisted ---
+    await row.getByRole('button', { name: 'Row actions' }).click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
-    const editDialog = page.getByRole('dialog');
-    await expect(editDialog.getByRole('heading', { name: 'Edit User' })).toBeVisible();
-    // WC-100: Name and Tenant are pre-filled (read-only) from the list payload,
-    // so only the field we intend to change (role) needs touching.
-    await editDialog.getByRole('combobox', { name: 'Role' }).click();
-    await page.getByRole('option', { name: 'Admin' }).click();
-    await editDialog.getByRole('button', { name: 'Save Changes' }).click();
+
+    // The record has an ADDRESS now — that is the whole point of the page, so
+    // the URL is asserted rather than only the content.
+    await page.waitForURL(/\/admin\/users\/\d+$/);
+    await expect(page.getByTestId('user-record')).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await page.getByTestId('user-record-role').click();
+    await page.getByRole('option', { name: 'admin', exact: true }).click();
+    await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('User updated successfully')).toBeVisible();
 
-    // WC-113: the change must ACTUALLY persist, not just toast. After the list
-    // refreshes, the row's Role cell reflects `admin`...
+    // WC-113: the change must ACTUALLY persist, not just toast. Back on the
+    // list, the row's Role cell reflects `admin`...
+    await page.getByRole('button', { name: 'Back to users' }).click();
+    await page.waitForURL('**/admin/users');
     const adminRow = page.getByRole('row', { name: new RegExp(createdEmail) });
     await expect(adminRow.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
 
-    // ...and re-opening the Edit dialog shows the new role pre-selected (proves
-    // it was read back from the persisted record, not the stale client state).
-    await adminRow.getByRole('button').click();
+    // ...and re-opening the record shows the new role selected (proves it was
+    // read back from the persisted record, not from stale client state).
+    await adminRow.getByRole('button', { name: 'Row actions' }).click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
-    const reopened = page.getByRole('dialog');
-    await expect(reopened.getByRole('heading', { name: 'Edit User' })).toBeVisible();
-    await expect(reopened.getByRole('combobox', { name: 'Role' })).toContainText('Admin');
-    await reopened.getByRole('button', { name: 'Cancel' }).click();
+    await page.waitForURL(/\/admin\/users\/\d+$/);
+    await expect(page.getByTestId('user-record-role')).toContainText('admin');
+    await page.getByRole('button', { name: 'Back to users' }).click();
+    await page.waitForURL('**/admin/users');
 
-    // --- Delete ---
+    // --- Delete (still a modal, deliberately — #884 decides per screen) ---
     const updatedRow = page.getByRole('row', { name: new RegExp(createdEmail) });
-    await updatedRow.getByRole('button').click();
+    await updatedRow.getByRole('button', { name: 'Row actions' }).click();
     await page.getByRole('menuitem', { name: 'Delete' }).click();
     const deleteDialog = page.getByRole('dialog');
     await expect(deleteDialog.getByRole('heading', { name: 'Delete User' })).toBeVisible();
@@ -137,18 +150,24 @@ test.describe('Users (admin)', () => {
     const row = page.getByRole('row', { name: new RegExp(createdEmail) });
     await expect(row).toBeVisible();
 
-    // Change role user -> admin and save.
-    await row.getByRole('button').click();
+    // Change role user -> admin on the record page and save.
+    await row.getByRole('button', { name: 'Row actions' }).click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
-    const editDialog = page.getByRole('dialog');
-    await editDialog.getByRole('combobox', { name: 'Role' }).click();
-    await page.getByRole('option', { name: 'Admin' }).click();
-    await editDialog.getByRole('button', { name: 'Save Changes' }).click();
+    await page.waitForURL(/\/admin\/users\/\d+$/);
+    await page.getByTestId('user-record-role').click();
+    await page.getByRole('option', { name: 'admin', exact: true }).click();
+    await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('User updated successfully')).toBeVisible();
 
-    // Hard reload: the table re-fetches from GET /api/users, so a persisted
-    // change is the only way the row can still show `admin` (WC-113).
+    // A record page is DEEP-LINKABLE, so reloading the record's OWN url has to
+    // rebuild it from the server rather than depend on how it was reached.
     await page.reload();
+    await expect(page.getByTestId('user-record')).toBeVisible();
+    await expect(page.getByTestId('user-record-stat-role')).toContainText('admin');
+
+    // Hard reload of the LIST: the table re-fetches from GET /api/users, so a
+    // persisted change is the only way the row can still show `admin` (WC-113).
+    await page.goto('/admin/users');
     await page.waitForURL('**/admin/users');
     const reloadedRow = page.getByRole('row', { name: new RegExp(createdEmail) });
     await expect(reloadedRow.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
@@ -207,7 +226,7 @@ test.describe('Users (admin)', () => {
   });
 });
 
-test.describe('Edit User pre-fill (WC-100)', () => {
+test.describe('User record pre-fill (WC-100)', () => {
   let createdEmail: string | null = null;
 
   test.afterEach(async ({ adminApi }) => {
@@ -220,12 +239,12 @@ test.describe('Edit User pre-fill (WC-100)', () => {
     }
   });
 
-  // WC-100: the Edit User modal pre-fills from the row object sourced by the
-  // users LIST API (`GET /api/users`). The payload carries `name` (derived from
-  // the email local-part, since there is no users.name column) and a camelCase
-  // `tenantId`. Name and Tenant are now read-only (WC-113: they are not editable
-  // server-side), so the user changes only the role and Saves.
-  test('edit modal pre-fills name + tenant and saves after a role change', async ({
+  // WC-100: `name` is derived from the email local-part (there is no users.name
+  // column) and is not editable server-side (WC-113). #882: the record page
+  // therefore STATES it with the reason rather than showing a disabled input —
+  // a greyed-out box invites the reader to look for the permission that would
+  // ungrey it. The tenant is stated too, by NAME, in the memberships panel.
+  test('the record states the derived name and saves after a role change', async ({
     adminPage,
     page,
   }) => {
@@ -248,22 +267,25 @@ test.describe('Edit User pre-fill (WC-100)', () => {
 
     const row = page.getByRole('row', { name: new RegExp(createdEmail) });
     await expect(row).toBeVisible();
-    await row.getByRole('button').click();
-    await page.getByRole('menuitem', { name: 'Edit' }).click();
-    const editDialog = page.getByRole('dialog');
-    await expect(editDialog.getByRole('heading', { name: 'Edit User' })).toBeVisible();
+    // The row's own NAME opens the record — the affordance a list gets once its
+    // records have addresses.
+    await row.getByRole('button', { name: localPart }).click();
+    await page.waitForURL(/\/admin\/users\/\d+$/);
+    await expect(page.getByTestId('user-record')).toBeVisible();
 
-    // The pre-fill: Name (derived from the email local-part) and Tenant are
-    // populated from the list payload — shown read-only, no manual re-entry.
-    await expect(editDialog.getByLabel('Name')).toHaveValue(localPart);
-    await expect(editDialog.getByLabel('Tenant')).toHaveValue('1');
+    // The record titles itself with the derived name and carries the tenant it
+    // belongs to, by name, beside the form.
+    await expect(page.getByRole('heading', { name: localPart })).toBeVisible();
+    await expect(page.getByTestId('user-record-memberships')).toBeVisible();
 
     // Change the role (user -> admin) and Save: it must succeed and persist.
-    await editDialog.getByRole('combobox', { name: 'Role' }).click();
-    await page.getByRole('option', { name: 'Admin' }).click();
-    await editDialog.getByRole('button', { name: 'Save Changes' }).click();
+    await page.getByTestId('user-record-role').click();
+    await page.getByRole('option', { name: 'admin', exact: true }).click();
+    await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('User updated successfully')).toBeVisible();
 
+    await page.getByRole('button', { name: 'Back to users' }).click();
+    await page.waitForURL('**/admin/users');
     const updatedRow = page.getByRole('row', { name: new RegExp(createdEmail) });
     await expect(updatedRow.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
   });
@@ -360,12 +382,12 @@ test.describe('Users role dropdown is driven from real roles (WC-121)', () => {
     await expect(createDialog).toBeHidden();
   });
 
-  test('the edit dialog offers only the seeded roles and no phantom Moderator', async ({
+  test('the record page offers only the seeded roles and no phantom Moderator', async ({
     adminPage,
     page,
     adminApi,
   }) => {
-    // The edit dialog needs an existing row; open it on a throwaway user and
+    // The record page needs an existing row; open it on a throwaway user and
     // clean up via the API afterwards.
     const suffix = uniqueSuffix();
     const probeEmail = `e2e-dropdown-${suffix}@example.com`;
@@ -384,15 +406,18 @@ test.describe('Users role dropdown is driven from real roles (WC-121)', () => {
 
     try {
       const row = page.getByRole('row', { name: new RegExp(probeEmail) });
-      await row.getByRole('button').click();
+      await row.getByRole('button', { name: 'Row actions' }).click();
       await page.getByRole('menuitem', { name: 'Edit' }).click();
-      const editDialog = page.getByRole('dialog');
-      await expect(editDialog.getByRole('heading', { name: 'Edit User' })).toBeVisible();
+      await page.waitForURL(/\/admin\/users\/\d+$/);
+      await expect(page.getByTestId('user-record')).toBeVisible();
 
-      await editDialog.getByRole('combobox', { name: 'Role' }).click();
-      await expect(page.getByRole('option', { name: 'User' })).toBeVisible();
-      await expect(page.getByRole('option', { name: 'Admin' })).toBeVisible();
-      await expect(page.getByRole('option', { name: 'Moderator' })).toHaveCount(0);
+      // Role names are tenant DATA, not source strings, so the record page
+      // renders them verbatim (the same rule permission slugs follow) rather
+      // than title-cased the way the create dialog does.
+      await page.getByTestId('user-record-role').click();
+      await expect(page.getByRole('option', { name: 'user', exact: true })).toBeVisible();
+      await expect(page.getByRole('option', { name: 'admin', exact: true })).toBeVisible();
+      await expect(page.getByRole('option', { name: 'moderator', exact: true })).toHaveCount(0);
     } finally {
       const id = await findUserIdByEmail(adminApi, probeEmail);
       if (id !== null) await deleteUser(adminApi, id);

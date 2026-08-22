@@ -27,6 +27,7 @@ const MANAGEABLE_ROLE: Role = {
   createdAt: '2026-01-01',
   permissionCount: 2,
   manageable: true,
+  global: false,
 };
 
 const GLOBAL_ROLE: Role = {
@@ -36,6 +37,7 @@ const GLOBAL_ROLE: Role = {
   createdAt: '2026-01-01',
   permissionCount: 5,
   manageable: false,
+  global: true,
 };
 
 const EDIT_TOOLTIP = 'Global base roles can only be edited by the system tenant.';
@@ -52,6 +54,8 @@ function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
     listRoles: jest.fn().mockResolvedValue([]),
     getRole: jest.fn().mockResolvedValue({ ...MANAGEABLE_ROLE, permissions: [] }),
     getRolePermissions: jest.fn().mockResolvedValue([]),
+    getRoleAssignments: jest.fn().mockResolvedValue({ assignments: [], total: 0 }),
+    getRoleActivity: jest.fn().mockResolvedValue([]),
     listPermissions: jest.fn().mockResolvedValue([]),
     createRole: jest.fn().mockResolvedValue(undefined),
     updateRole: jest.fn().mockResolvedValue('ok'),

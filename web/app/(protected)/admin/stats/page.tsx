@@ -58,6 +58,21 @@ interface StatsData {
   };
 }
 
+/**
+ * What this deployment is running, from `GET /api/v1/platform/version`.
+ *
+ * `php_version` is declared because the endpoint sends it, but it is NOT read
+ * here: the System card already shows a PHP version, sourced from
+ * `/api/v1/admin/stats`, which every viewer of this page can read. Switching
+ * that row to this narrower source would make it disappear for people who see
+ * it today — a regression dressed as a consolidation.
+ */
+interface PlatformVersion {
+  core_version: string;
+  sdk_version: string;
+  php_version: string;
+}
+
 // The stats query aggregates several COUNT/GROUP BY queries server-side with
 // no request-level timeout of its own (see AdminApiHandler::stats()) — if the
 // backend is unhealthy (DB lock contention, connection exhaustion during a
@@ -66,6 +81,13 @@ interface StatsData {
 // it client-side so a stuck backend degrades to a retryable error instead.
 const STATS_FETCH_TIMEOUT_MS = 15_000;
 
+// The version endpoint reads local constants only — no database, no network
+// call to a release stream (that is the separate /latest route) — so it is
+// expected to answer immediately. The bound exists so a wedged backend leaves
+// no request dangling behind an unmounted page, not because a slow answer is
+// anticipated.
+const PLATFORM_FETCH_TIMEOUT_MS = 10_000;
+
 export default function AdminStats() {
   const { apiClient } = useAuth();
   const t = useTranslation("admin");
@@ -73,6 +95,10 @@ export default function AdminStats() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  // Null means "not shown", and it is reached by every failure path — a 403, a
+  // timeout, a network error, a malformed body. See the effect below for why
+  // that collapse is deliberate rather than lazy.
+  const [platform, setPlatform] = useState<PlatformVersion | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +131,59 @@ export default function AdminStats() {
     }
 
     fetchStats();
+    return () => {
+      cancelled = true;
+      clearTimeout(hangGuard);
+      controller.abort();
+    };
+  }, [apiClient, retryKey]);
+
+  /**
+   * Platform versions — a SEPARATE request, and a separate failure story.
+   *
+   * WHY NOT FOLDED INTO THE STATS FETCH. The two answer to different gates.
+   * This page's data needs the `admin` role; `GET /api/v1/platform/version`
+   * needs `settings:manage` AND the system tenant, because it describes the
+   * whole DEPLOYMENT rather than a tenant's slice of it. Merging them would
+   * have forced one of the two to move: either the dashboard narrows to the
+   * operator gate, or deployment state widens to every tenant admin. Two
+   * requests keep both gates exactly where their owners put them.
+   *
+   * WHY EVERY FAILURE IS SILENCE. A 403 here is the endpoint working
+   * correctly, and it is the EXPECTED outcome for a tenant admin on a shared
+   * install — not an incident. So there is no alert, no toast, and
+   * deliberately no `console.error`: a dashboard that logs an error on every
+   * ordinary render teaches people that the console is noise, which costs more
+   * than the diagnostic is worth. Timeouts and network errors collapse to the
+   * same absence, because the distinction has no action attached to it — a
+   * version readout is context, not the thing this page exists to show, and
+   * the page already has one honest error surface for the data that is.
+   *
+   * WHAT THE VIEWER SEES. The System card renders without the two version
+   * rows and is otherwise complete. Nothing is greyed out, nothing says
+   * "unavailable", nothing hints at a permission they do not have.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const hangGuard = setTimeout(() => controller.abort(), PLATFORM_FETCH_TIMEOUT_MS);
+
+    async function fetchPlatformVersion() {
+      try {
+        const response = await apiClient("/api/v1/platform/version", {
+          signal: controller.signal,
+        });
+        if (cancelled || !response.ok) return;
+        const data: PlatformVersion = await response.json();
+        if (!cancelled) setPlatform(data);
+      } catch {
+        // Intentionally empty: absence IS the degraded rendering.
+      } finally {
+        clearTimeout(hangGuard);
+      }
+    }
+
+    fetchPlatformVersion();
     return () => {
       cancelled = true;
       clearTimeout(hangGuard);
@@ -352,10 +431,36 @@ export default function AdminStats() {
             </div>
             <div>
               <CardTitle>{t("stats.system.title", "System")}</CardTitle>
-              <CardDescription>{t("stats.system.subtitle", "Resource Usage")}</CardDescription>
+              <CardDescription>{t("stats.system.subtitle", "Versions and resource usage")}</CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/*
+              Rendered only once resolved, with no "--" placeholder and no
+              skeleton. The two states that must not be confused are "still
+              loading" and "you may not read this", and a placeholder makes them
+              look identical until one of them vanishes. Appearing once on the
+              permitted path is a better transition than collapsing once on the
+              denied path: content arriving is expected, content disappearing
+              reads as a fault. Versions are values, never translated — only the
+              labels beside them are.
+            */}
+            {platform && (
+              <>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-muted-foreground">
+                    {t("stats.system.coreVersion", "Core Version")}
+                  </span>
+                  <span className="font-medium">{platform.core_version}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-muted-foreground">
+                    {t("stats.system.sdkVersion", "Plugin SDK")}
+                  </span>
+                  <span className="font-medium">{platform.sdk_version}</span>
+                </div>
+              </>
+            )}
             <div className="flex justify-between items-center text-sm">
               <span className="text-muted-foreground">
                 {t("stats.system.phpVersion", "PHP Version")}

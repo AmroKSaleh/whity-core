@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Identity\LocalPasswordRefusedException;
 use Whity\Core\Identity\PasswordResetMailer;
 use Whity\Core\Identity\PasswordResetService;
 use Whity\Core\Identity\ProfileEmailRepository;
@@ -125,6 +126,15 @@ final class PasswordResetHandler
                             'ip_address'  => $ip,
                         ]);
                     }
+                } catch (LocalPasswordRefusedException $e) {
+                    // #917: the address belongs to an IdP-backed account, which
+                    // holds no local password to reset. Caught separately from
+                    // the failure below only so the log says what happened —
+                    // the RESPONSE is deliberately identical to every other
+                    // outcome here, including an unknown address, because a
+                    // different one would turn this endpoint into an oracle for
+                    // which of an organisation's accounts are federated.
+                    error_log('[password-reset] forgot refused (IdP-backed account): ' . $e->getMessage());
                 } catch (\Throwable $e) {
                     // Delivery/issuance failure must not change the response shape.
                     error_log('[password-reset] forgot dispatch failed: ' . $e->getMessage());

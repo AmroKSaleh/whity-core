@@ -371,4 +371,83 @@ final class AdminPasswordResetApiHandlerRealEngineTest extends TestCase
 
         return $pdo;
     }
+    // ==================== #917: IdP-backed targets ====================
+
+    /**
+     * An administrator cannot mail a reset link to an account that signs in
+     * through an identity provider.
+     *
+     * A reset link is a local credential in transit. For an account the provider
+     * governs alone it would not restore access — it would CREATE a second way
+     * in, reachable by whoever holds the mailbox, outliving the provider's
+     * control. Refused with an explanation rather than the generic 500 the
+     * handler's catch-all would otherwise produce, and refused BEFORE issuing so
+     * no token is left in the table.
+     */
+    public function testRefusesToMailAResetLinkToAnIdpBackedAccount(): void
+    {
+        $this->markAsIdpBacked(self::MEMBER_A);
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $res = $this->sendLink(self::MEMBER_A, self::ADMIN_A);
+
+        self::assertSame(409, $res->getStatusCode(), $res->getBody());
+        self::assertStringContainsString('identity provider', $res->getBody());
+        self::assertSame([], $this->mailer->sent, 'nothing may be mailed');
+        self::assertSame(
+            0,
+            (int) $this->col('SELECT COUNT(*) FROM password_resets'),
+            'no token may be persisted for an account that cannot hold a local password'
+        );
+        self::assertSame(
+            0,
+            $this->auditCount('auth.password_reset.admin_requested'),
+            'a refused act is not a requested reset'
+        );
+    }
+
+    /**
+     * The refusal names the deliberate path, so an operator who really does want
+     * a local credential on a federated account is not left guessing.
+     */
+    public function testTheRefusalPointsAtTheExplicitOverride(): void
+    {
+        $this->markAsIdpBacked(self::MEMBER_A);
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $res = $this->sendLink(self::MEMBER_A, self::ADMIN_A);
+
+        self::assertStringContainsString('allowLocalPasswordOnIdpAccount', $res->getBody());
+    }
+
+    /**
+     * An account with BOTH credentials still gets its link: it has a local
+     * password, and that password can be reset.
+     */
+    public function testAnAccountWithBothCredentialsStillGetsAResetLink(): void
+    {
+        $this->pdo->exec(
+            "UPDATE profiles SET auth_method = 'both' WHERE id = " . self::MEMBER_A
+        );
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $res = $this->sendLink(self::MEMBER_A, self::ADMIN_A);
+
+        self::assertSame(202, $res->getStatusCode(), $res->getBody());
+        self::assertCount(1, $this->mailer->sent);
+    }
+
+    /** Turn a seeded profile into a passwordless, IdP-governed one. */
+    private function markAsIdpBacked(int $profileId): void
+    {
+        $this->pdo->exec(
+            "UPDATE profiles SET password_hash = '', auth_method = 'idp' WHERE id = " . $profileId
+        );
+        $this->pdo->exec(
+            "INSERT INTO external_identities
+                 (profile_id, provider_id, provider_key, issuer, subject, email, linked_at, created_at)
+             VALUES ({$profileId}, NULL, 'google', 'https://accounts.google.com',
+                     'sub-{$profileId}', NULL, datetime('now'), datetime('now'))"
+        );
+    }
 }

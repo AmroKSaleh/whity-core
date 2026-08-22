@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Notification;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access layer for `user_notification_preferences` (WC-notifications): a
@@ -91,12 +92,16 @@ final class NotificationPreferenceRepository
         return $stmt->rowCount() > 0;
     }
 
-    /**
-     * Postgres returns booleans as 't'/'f' strings under STRINGIFY_FETCHES;
-     * SQLite as 0/1. Normalise both.
+        /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
      */
     private static function toBool(mixed $value): bool
     {
-        return $value === true || $value === 1 || $value === '1' || $value === 't' || $value === 'true';
+        return DbBool::of($value);
     }
 }

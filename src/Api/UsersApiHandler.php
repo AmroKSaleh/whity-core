@@ -10,12 +10,14 @@ use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Users API Handler
@@ -49,12 +51,19 @@ use PDO;
  * (profile_id, tenant_id, role_id, status='active'). An active membership that
  * already exists for that profile in this tenant is rejected (409). The role is
  * resolved the same way as update via {@see self::resolveVisibleRoleId()} (a
- * role NAME as the Create form sends it, or a numeric role_id; absent role
- * defaults to the global `user` role; an unresolvable/foreign role is 404). An
+ * role NAME as the Create form sends it, or a numeric role_id; an ABSENT role
+ * defaults to the global `user` role and the substitution is recorded; a role
+ * field supplied EMPTY is 400; an unresolvable/foreign role is 404 — see
+ * {@see self::create()} for why absent and empty are not the same case). An
  * optional `ou_id` places the new membership in an organizational unit in the
  * same one call — validated by the SAME gate update() uses
  * ({@see self::resolveOuIdForTenant()}), so a foreign OU is a 403; omitting it
  * leaves the membership's `ou_id` NULL exactly as before.
+ *
+ * Reusing an existing profile never rewrites its credential — that is
+ * {@see \Whity\Core\Identity\ProfileProvisioner}'s contract — so a `password`
+ * sent for an address that already has a profile, IdP-backed or not, is
+ * discarded rather than applied (#917).
  *
  * Update (PATCH /api/users/{id})
  * ------------------------------
@@ -64,6 +73,14 @@ use PDO;
  * tenant predicate on the write itself (defense in depth). A role/OU change
  * invalidates the worker-level effective-permission cache via
  * {@see RoleChecker::clearCache()} (WC-15), mirroring {@see RolesApiHandler}.
+ *
+ * A `password` against an account whose credentials belong to an identity
+ * provider (`profiles.auth_method = 'idp'`) is REFUSED with 409 unless the body
+ * also carries `allowLocalPasswordOnIdpAccount: true` (#917). This endpoint was
+ * where the defect was reported: it minted a local credential on an SSO account
+ * and answered 200. The override exists because coexistence is a legitimate
+ * arrangement — what it can no longer be is accidental, so taking it moves the
+ * account to `auth_method = 'both'` and writes an audit row saying so.
  *
  * Delete (DELETE /api/users/{id})
  * -------------------------------
@@ -89,6 +106,30 @@ class UsersApiHandler
 {
     /** The reserved identifier for the system (cross-tenant authority) tenant. */
     private const SYSTEM_TENANT_ID = 0;
+
+    /**
+     * The PATCH body flag that permits a local password on an IdP-backed
+     * account (#917).
+     *
+     * Spelled out rather than shortened. It appears in an OpenAPI schema, in a
+     * refusal message and in an audit payload, and each of those is read by
+     * somebody deciding whether the thing that happened was meant — a name that
+     * needs the documentation open to interpret is the wrong name for that.
+     */
+    private const IDP_PASSWORD_OVERRIDE = 'allowLocalPasswordOnIdpAccount';
+
+    /**
+     * Most memberships enumerated into a single audit payload (#889).
+     *
+     * Removing a user from a tenant deletes every membership they hold there,
+     * and the audit row lists them so the trail can say what was lost. The list
+     * is bounded because its length is not something an operator controls: it
+     * is whatever the data happens to hold, and an unbounded blob in a metadata
+     * column is a way for one request to write an arbitrarily large row. The
+     * true count travels beside it, so exceeding the cap is legible rather than
+     * silent.
+     */
+    private const AUDIT_MEMBERSHIP_LIST_CAP = 25;
 
     private PDO $db;
     private HookManager $hookManager;
@@ -142,7 +183,7 @@ class UsersApiHandler
                 $stmt = $this->db->prepare("
                     SELECT m.profile_id AS id, pe.email, r.name AS role,
                            m.tenant_id, m.ou_id, m.created_at, m.status,
-                           p.status AS account_status
+                           p.status AS account_status, p.auth_method
                     FROM memberships m
                     JOIN roles r ON m.role_id = r.id
                     JOIN profiles p ON p.id = m.profile_id
@@ -166,7 +207,7 @@ class UsersApiHandler
                 $stmt = $this->db->prepare("
                     SELECT m.profile_id AS id, pe.email, r.name AS role,
                            m.tenant_id, m.ou_id, m.created_at, m.status,
-                           p.status AS account_status
+                           p.status AS account_status, p.auth_method
                     FROM memberships m
                     JOIN roles r ON m.role_id = r.id
                     JOIN profiles p ON p.id = m.profile_id
@@ -206,8 +247,8 @@ class UsersApiHandler
      * required). Snake_case columns are aliased to the camelCase keys the
      * frontend `User` type binds; the password hash is never included.
      *
-     * @param array<string, mixed> $row Raw row (id = profile_id, email, role, tenant_id, ou_id, created_at, status, account_status).
-     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null, status: string, accountStatus: string}
+     * @param array<string, mixed> $row Raw row (id = profile_id, email, role, tenant_id, ou_id, created_at, status, account_status, auth_method).
+     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null, status: string, accountStatus: string, authMethod: string}
      */
     private function toPublicUser(array $row): array
     {
@@ -232,6 +273,16 @@ class UsersApiHandler
             // a profile blocks login everywhere it holds a membership, not just
             // in this tenant.
             'accountStatus' => (string)($row['account_status'] ?? 'active'),
+            // Which authority holds this account's credentials (#917,
+            // profiles.auth_method — 'local' | 'idp' | 'both'). Surfaced
+            // because the reporter's sharpest point was that an IdP-backed
+            // account was invisible to anyone reviewing it: the column that
+            // would have told you was populated for every account, so nothing
+            // in the UI or the API could say which of them a local password
+            // even applies to. Read-only — PATCH does not accept it, because
+            // auth_method is a consequence of which credentials exist, not a
+            // switch to be flipped independently of them.
+            'authMethod' => (string)($row['auth_method'] ?? AuthMethod::LOCAL),
         ];
     }
 
@@ -328,14 +379,50 @@ class UsersApiHandler
             }
 
             // Resolve the submitted role (a NAME as the Create form sends it, or a
-            // numeric role_id). Absent role defaults to the global `user` role;
-            // a supplied-but-unresolvable/foreign role is 404, mirroring update.
+            // numeric role_id). A supplied-but-unresolvable/foreign role is 404,
+            // mirroring update.
+            //
+            // #917 / A4 — three cases, deliberately not two. An account meant to
+            // be an administrator was created, returned 201, and came out an
+            // ordinary user, with nothing anywhere saying a substitution had
+            // been made. The line drawn here is: IF THE CALLER NAMED THE FIELD,
+            // THEY MEANT SOMETHING BY IT.
+            //
+            //  - `role`/`role_id` ABSENT: the documented default still applies.
+            //    This is a real contract — the OpenAPI schema does not require
+            //    the field, {@see \Tests\Api\UsersApiHandlerRealEngineTest
+            //    ::testCreateWithoutRoleDefaultsToUser} pins it, and provisioning
+            //    scripts that only ever make ordinary users rely on it. Making
+            //    absence a hard error would break them to fix a problem they do
+            //    not have. What changes is that the substitution is now RECORDED
+            //    (see the hook payload and log line at the end of this method)
+            //    rather than happening in silence.
+            //  - `role`/`role_id` PRESENT but null or empty: 400. This is not the
+            //    same as absence. A key with nothing behind it is the shape an
+            //    unresolved variable takes — a form field that rendered blank, a
+            //    lookup that returned nothing — and quietly substituting the
+            //    least-privileged role there is the silent downgrade. A caller
+            //    who wants the default omits the field; one who sends it empty
+            //    has lost track of what they are asking for and should be told.
+            //  - PRESENT and unresolvable: 404, unchanged.
+            $roleNamed = array_key_exists('role', $body) || array_key_exists('role_id', $body);
             $roleRef = $body['role'] ?? $body['role_id'] ?? null;
-            $roleId = $this->resolveVisibleRoleId($roleRef, $tenantId, $tenantId);
-            if ($roleRef !== null && $roleRef !== '' && $roleId === null) {
+
+            if ($roleNamed && ($roleRef === null || $roleRef === '')) {
+                return Response::error(
+                    'A role was supplied with no value. Send a role name or role_id, or omit the field '
+                    . 'entirely to accept the default role — an empty one is not treated as either.',
+                    400
+                );
+            }
+
+            $roleDefaulted = false;
+            $roleId = $roleNamed ? $this->resolveVisibleRoleId($roleRef, $tenantId, $tenantId) : null;
+            if ($roleNamed && $roleId === null) {
                 return Response::error('Role not found', 404);
             }
             if ($roleId === null) {
+                $roleDefaulted = true;
                 $roleId = $this->resolveVisibleRoleId('user', $tenantId, $tenantId);
                 if ($roleId === null) {
                     return Response::error('Default role not found', 500);
@@ -368,6 +455,11 @@ class UsersApiHandler
             $roleId = (int)$userData['role_id'];
             $passwordHash = password_hash((string)$userData['password'], PASSWORD_BCRYPT);
 
+            // Whether this act revived an existing invited/suspended membership
+            // rather than creating one. Initialised out here because the audit
+            // payload below is built after the transaction block (#889).
+            $promoted = false;
+
             $ownTx = !$this->db->inTransaction();
             if ($ownTx) {
                 $this->db->beginTransaction();
@@ -390,6 +482,9 @@ class UsersApiHandler
                     }
                     return Response::error('User already exists for this tenant', 409);
                 }
+
+                // Which shape this act took, for the audit payload below (#889).
+                $promoted = $existing !== null;
 
                 if ($existing !== null) {
                     // A non-active membership (invited/suspended) exists: promote it
@@ -448,12 +543,33 @@ class UsersApiHandler
 
             // Dispatch synchronous hook after the user is created. `id` is the
             // canonical profile_id (ADR 0005 hard cutover).
+            //
+            // ONE audit row for one administrative act (#889). This path creates
+            // a membership, and it deliberately does NOT also dispatch
+            // `user.membership.added`: `user.created` is already audited and
+            // already targets the user, so a second event would put two rows in
+            // an append-only trail for a single click — and creating a user is
+            // by far the most common membership write, so doubling it is exactly
+            // the flood that drowns the signal. It carries the membership detail
+            // instead. `promoted` says which shape it was: a fresh membership,
+            // or an `invited`/`suspended` row revived to active with this role,
+            // which is a REINSTATEMENT and reads very differently in a timeline.
             $this->hookManager->dispatch('user.created', [
                 'id' => $profileId,
                 'email' => $email,
                 'role_id' => $roleId,
+                'role_name' => $this->roleNameVisibleToTenant($roleId, (int)$tenantId),
+                'ou_id' => $ouId,
+                'promoted' => $promoted,
                 'tenant_id' => (int)$tenantId,
                 'tenant_name' => $tenantName,
+                // #917 / A4: true when no role was named and the global `user`
+                // role was substituted. The trail now distinguishes "somebody
+                // chose the ordinary role" from "nobody chose anything and the
+                // platform picked the least-privileged one", which is what the
+                // reporter could not tell apart afterwards — the 201 and the
+                // audit row looked identical either way.
+                'role_defaulted' => $roleDefaulted,
             ]);
 
             // Dispatch asynchronous hook for background tasks.
@@ -467,6 +583,7 @@ class UsersApiHandler
                 'tenant_id' => $tenantId,
                 'user_id' => $profileId,
                 'role_id' => $roleId,
+                'role_defaulted' => $roleDefaulted,
             ]);
 
             $row = $this->fetchMembershipRow($profileId, $tenantId);
@@ -533,6 +650,12 @@ class UsersApiHandler
             // tenant's membership: validate against THAT tenant, not tenant 0).
             $ownerTenantId = (int)$membership['tenant_id'];
 
+            // The HELD fact about which authority owns this account's
+            // credentials (#917), read once from the row the guard above
+            // already fetched — never inferred from password_hash.
+            $idpBacked = ((string)($membership['auth_method'] ?? AuthMethod::LOCAL)) === AuthMethod::IDP;
+            $idpOverrideUsed = false;
+
             $roleChanged = false;
             $ouChanged = false;
             $emailChanged = false;
@@ -573,6 +696,41 @@ class UsersApiHandler
                     $validationError = $e->getMessage();
                     return Response::error($validationError, 400);
                 }
+
+                // #917 — THE defect this endpoint carried. An account that signs
+                // in only through an identity provider stores the empty string
+                // in password_hash, so before migration 104 "has no local
+                // password" and "has an empty local password" were the same row
+                // and nothing here could tell them apart. A `password` in this
+                // body therefore answered 200 and minted a working local
+                // credential on an IdP-backed account: one that keeps working
+                // after the provider deprovisions the person, is not subject to
+                // the provider's MFA, appears in no SSO audit trail, and is
+                // invisible to anyone reviewing the account afterwards. It was
+                // reported by someone who did it BY ACCIDENT.
+                //
+                // Coexistence is still allowed — the ask was that the platform
+                // know which case it is in, not that it forbid one — so this is
+                // a refusal with an explicit way through rather than a wall.
+                // What it can no longer be is silent.
+                $idpOverride = ($body[self::IDP_PASSWORD_OVERRIDE] ?? false) === true;
+                if ($idpBacked && !$idpOverride) {
+                    return Response::error(
+                        'This account signs in through an identity provider and holds no local password. '
+                        . 'Setting one creates a second way in that the provider does not control and cannot '
+                        . 'revoke. Resend `' . self::IDP_PASSWORD_OVERRIDE . '`: true with the password if that '
+                        . 'is genuinely intended.',
+                        409
+                    );
+                }
+                // Recorded so an operator can find, after the fact, every
+                // account that was deliberately given a local credential beside
+                // its IdP. `$idpBacked` alone is the whole condition here: the
+                // refusal above already returned for every IdP-backed account
+                // that did NOT carry the override, so reaching this line while
+                // still IdP-backed means the override was given.
+                $idpOverrideUsed = $idpBacked;
+
                 $newPasswordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
                 $passwordChanged = true;
             }
@@ -671,12 +829,16 @@ class UsersApiHandler
                     // strip 2FA from an account that still has an authenticator
                     // enrolled. Clearing 2FA is a separate, explicit action.
                     //
-                    // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-                    $this->db->prepare(
-                        'UPDATE profiles
-                            SET password_hash = ?, token_epoch = token_epoch + 1, updated_at = NOW()
-                          WHERE id = ?'
-                    )->execute([$newPasswordHash, $profileId]);
+                    // The statement itself now lives in AuthMethod (#917), the
+                    // single writer of profiles.password_hash — which also
+                    // carries the IdP refusal in its WHERE clause and moves an
+                    // overridden 'idp' account to 'both', so the held fact
+                    // cannot fall out of step with the credential.
+                    (new AuthMethod($this->db))->setPasswordHash(
+                        $profileId,
+                        $newPasswordHash,
+                        $idpOverrideUsed
+                    );
                 }
                 if ($accountStatusChanged && $newAccountStatus !== null) {
                     // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
@@ -745,17 +907,60 @@ class UsersApiHandler
                 'role_changed' => $roleChanged,
                 'ou_changed' => $ouChanged,
                 'account_status_changed' => $accountStatusChanged,
+                'idp_local_password_override' => $idpOverrideUsed,
             ]);
 
             // Notify listeners (e.g. the audit trail, WC-34) after a successful
             // update. The owning tenant scopes the record.
-            $this->hookManager->dispatch('user.updated', [
+            //
+            // The from/to ids are the point (#889). This endpoint — not the
+            // memberships endpoints — is where a person's PRIMARY role is
+            // changed, so it is where most authority on this platform actually
+            // moves. It was reporting `role_changed: true` and nothing else,
+            // which records that authority changed while making it impossible to
+            // say what it changed FROM or TO. Reconstructing "who held manager
+            // on the 14th" from a column of booleans cannot be done, and an
+            // append-only trail gets no second chance to write the ids down.
+            //
+            // A role reassignment is deliberately ONE row rather than a
+            // synthesised removed+added pair: it is one act, it is not a
+            // revocation (access is replaced, not withdrawn), and two rows would
+            // report two events that never happened separately.
+            $payload = [
                 'id' => $profileId,
                 'tenant_id' => $ownerTenantId,
                 'role_changed' => $roleChanged,
                 'ou_changed' => $ouChanged,
                 'account_status_changed' => $accountStatusChanged,
-            ]);
+            ];
+            if ($roleChanged && $newRoleId !== null) {
+                $previousRoleId = (int) $membership['role_id'];
+                $payload['previous_role_id'] = $previousRoleId;
+                $payload['previous_role_name'] = isset($membership['role']) ? (string) $membership['role'] : null;
+                $payload['role_id'] = $newRoleId;
+                $payload['role_name'] = $this->roleNameVisibleToTenant($newRoleId, $ownerTenantId);
+            }
+            if ($ouChanged) {
+                $payload['previous_ou_id'] = $membership['ou_id'] !== null ? (int) $membership['ou_id'] : null;
+                $payload['ou_id'] = $ouSetNull ? null : $newOuId;
+            }
+            if ($accountStatusChanged && $newAccountStatus !== null) {
+                $payload['previous_account_status'] = (string) ($membership['account_status'] ?? 'active');
+                $payload['account_status'] = $newAccountStatus;
+            }
+            if ($idpOverrideUsed) {
+                // #917: an administrator deliberately gave an IdP-backed account
+                // a local credential, moving it from 'idp' to 'both'. Recorded
+                // because this is precisely the act that used to happen by
+                // accident and leave no trace — an operator auditing which
+                // federated accounts acquired a password beside their provider
+                // needs one thing to search for, and this is it.
+                $payload['idp_local_password_override'] = true;
+                $payload['previous_auth_method'] = AuthMethod::IDP;
+                $payload['auth_method'] = AuthMethod::BOTH;
+            }
+
+            $this->hookManager->dispatch('user.updated', $payload);
 
             $row = $this->fetchMembershipRow($profileId, $ownerTenantId);
 
@@ -803,6 +1008,22 @@ class UsersApiHandler
             }
             $ownerTenantId = (int)$membership['tenant_id'];
 
+            // Read every row about to go, BEFORE it goes (#889).
+            //
+            // This DELETE is predicated on (profile_id, tenant_id), so it takes
+            // the primary membership AND every extra role the person holds here
+            // — a three-role person loses three rows. `user.deleted` was the
+            // only signal, and it named none of them, so the platform could say
+            // somebody was removed from a tenant and never what they had been
+            // able to do in it.
+            //
+            // Enumerated into ONE row rather than dispatched per membership:
+            // this is one administrative act, and one act that emits N audit
+            // rows is how a provisioning run floods a trail. The list is capped
+            // for the same reason, with the true count kept alongside it so a
+            // truncated list is visibly truncated rather than quietly wrong.
+            $lost = $this->membershipsHeldBy($profileId, $ownerTenantId);
+
             // Remove the MEMBERSHIP (not the global profile). The DELETE carries
             // the tenant predicate itself; the SYSTEM tenant edits across tenants
             // and stays unscoped.
@@ -814,6 +1035,12 @@ class UsersApiHandler
                 $deleteStmt = $this->db->prepare('DELETE FROM memberships WHERE profile_id = ? AND tenant_id = ?');
                 $deleteStmt->execute([$profileId, $currentTenantId]);
             }
+
+            // The authoritative number of memberships this act ended — taken
+            // from the DELETE itself, not from the capped list above, so a
+            // truncated list is visibly truncated instead of quietly reporting
+            // its own length as the total.
+            $removedCount = $deleteStmt->rowCount();
 
             // A role/membership removal alters the profile's effective access;
             // invalidate the worker-level cache.
@@ -849,6 +1076,9 @@ class UsersApiHandler
                 'tenant_name' => $tenantName,
                 // '' (friendly farewell) or 'terms_violation' (ToS termination).
                 'reason' => $reason,
+                // What this removal actually took away (#889).
+                'memberships_removed' => $removedCount,
+                'roles_lost' => $lost,
             ]);
 
             return Response::json(['data' => ['id' => $profileId, 'message' => 'User deleted']], 200);
@@ -941,7 +1171,7 @@ class UsersApiHandler
                     'roleId'     => (int) $row['role_id'],
                     'role'       => (string) $row['role'],
                     'ou_id'      => $row['ou_id'] !== null ? (int) $row['ou_id'] : null,
-                    'isPrimary'  => (bool) $row['is_primary'],
+                    'isPrimary'  => DbBool::of($row['is_primary']),
                     'status'     => (string) $row['status'],
                 ];
             }
@@ -1106,7 +1336,7 @@ class UsersApiHandler
                         'tenantId'  => $ownerTenantId,
                         'roleId'    => $roleId,
                         'ou_id'     => $ouId,
-                        'isPrimary' => (bool) $found['is_primary'],
+                        'isPrimary' => DbBool::of($found['is_primary']),
                         'created'   => false,
                     ],
                 ]);
@@ -1134,10 +1364,20 @@ class UsersApiHandler
             // A new role changes effective access, so the worker-level permission
             // cache must not keep serving the old answer (#701/#727: a stale grant
             // on seven of eight workers reads as test flakiness).
+            //
+            // It is also the grant half of the audit trail (#889), and it carries
+            // the SAME fields the revocation does. A trail whose grants and
+            // revocations describe an authority differently cannot be read as a
+            // sequence — matching one against the other becomes a judgement call
+            // rather than a join on `role_id`.
             $this->hookManager->dispatch('user.membership.added', [
-                'profile_id' => $profileId,
-                'tenant_id'  => $ownerTenantId,
-                'role_id'    => $roleId,
+                'profile_id'    => $profileId,
+                'tenant_id'     => $ownerTenantId,
+                'membership_id' => $newId,
+                'role_id'       => $roleId,
+                'role_name'     => $this->roleNameVisibleToTenant($roleId, $ownerTenantId),
+                'ou_id'         => $ouId,
+                'is_primary'    => $isPrimary,
             ]);
 
             return Response::json([
@@ -1205,9 +1445,27 @@ class UsersApiHandler
                 $ownerTenantId = (int) $membership['tenant_id'];
             }
 
+            // Reads everything the row HOLDS, not merely what this method needs
+            // in order to decide (#889). Once the DELETE below runs, the audit
+            // row is the only place any of it still exists — so a revocation
+            // that recorded just "membership removed" would answer "who lost
+            // access" and never "access to WHAT", which is the half an incident
+            // actually turns on.
+            //
+            // `roles` is joined for the NAME as well as the id. A bare role_id
+            // dangles the moment that role is deleted, and a trail that has to
+            // be read against a table that no longer contains the row is not an
+            // append-only record of what happened. The join is on the role id
+            // the membership itself carries, inside a statement already pinned
+            // to one tenant, so it reads back a role this tenant demonstrably
+            // held — it is not a lookup by any caller-supplied id and cannot
+            // become a way to enumerate roles.
             $stmt = $this->db->prepare(
-                'SELECT id, is_primary FROM memberships
-                  WHERE id = ? AND profile_id = ? AND tenant_id = ? LIMIT 1'
+                'SELECT m.id, m.is_primary, m.role_id, m.ou_id, m.status, m.created_at,
+                        r.name AS role_name
+                   FROM memberships m
+                   LEFT JOIN roles r ON r.id = m.role_id
+                  WHERE m.id = ? AND m.profile_id = ? AND m.tenant_id = ? LIMIT 1'
             );
             $stmt->execute([$membershipId, $profileId, $ownerTenantId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1216,7 +1474,7 @@ class UsersApiHandler
                 return Response::error('Membership not found', 404);
             }
 
-            if ((bool) $row['is_primary']) {
+            if (DbBool::of($row['is_primary'])) {
                 return Response::error(
                     'Cannot remove the primary membership; use DELETE /api/users/{id} to remove the user from this tenant',
                     409
@@ -1226,9 +1484,23 @@ class UsersApiHandler
             $del = $this->db->prepare('DELETE FROM memberships WHERE id = ? AND profile_id = ? AND tenant_id = ?');
             $del->execute([$membershipId, $profileId, $ownerTenantId]);
 
+            // The payload IS the surviving record of the deleted row (#889).
+            // {@see \Whity\Core\Audit\AuditLogger::subscribe()} maps this event
+            // to an audit row targeting the USER, with everything below except
+            // profile_id/tenant_id landing in metadata verbatim. `granted_at` is
+            // the membership's own created_at, so the pair of rows answers not
+            // just "who took this away and when" but "how long did they hold
+            // it" — which is the question a compromised-account timeline is
+            // built out of.
             $this->hookManager->dispatch('user.membership.removed', [
-                'profile_id' => $profileId,
-                'tenant_id'  => $ownerTenantId,
+                'profile_id'    => $profileId,
+                'tenant_id'     => $ownerTenantId,
+                'membership_id' => $membershipId,
+                'role_id'       => isset($row['role_id']) ? (int) $row['role_id'] : null,
+                'role_name'     => isset($row['role_name']) ? (string) $row['role_name'] : null,
+                'ou_id'         => isset($row['ou_id']) ? (int) $row['ou_id'] : null,
+                'status'        => isset($row['status']) ? (string) $row['status'] : null,
+                'granted_at'    => isset($row['created_at']) ? (string) $row['created_at'] : null,
             ]);
 
             return Response::json(['data' => ['id' => $membershipId, 'removed' => true]]);
@@ -1263,7 +1535,7 @@ class UsersApiHandler
             $stmt = $this->db->prepare("
                 SELECT m.profile_id AS id, pe.email, r.name AS role,
                        m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id,
-                       p.status AS account_status
+                       p.status AS account_status, p.auth_method
                 FROM memberships m
                 JOIN roles r ON m.role_id = r.id
                 JOIN profiles p ON p.id = m.profile_id
@@ -1277,7 +1549,7 @@ class UsersApiHandler
             $stmt = $this->db->prepare("
                 SELECT m.profile_id AS id, pe.email, r.name AS role,
                        m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id,
-                       p.status AS account_status
+                       p.status AS account_status, p.auth_method
                 FROM memberships m
                 JOIN roles r ON m.role_id = r.id
                 JOIN profiles p ON p.id = m.profile_id
@@ -1322,6 +1594,88 @@ class UsersApiHandler
     }
 
     /**
+     * Every membership a profile holds in one tenant, in audit-payload shape (#889).
+     *
+     * Read immediately before a bulk removal so the resulting audit row can say
+     * what was lost, since afterwards there is nothing left to read.
+     *
+     * CAPPED, and the count is reported separately. An unbounded list would put
+     * an arbitrarily large blob into a metadata column on a path an operator
+     * does not control — and a person with hundreds of memberships in one tenant
+     * is a data anomaly, not a case worth serialising in full. Reporting the
+     * true `memberships_removed` count beside a capped list means a truncated
+     * row is visibly truncated: `count > len(roles_lost)` says so plainly,
+     * whereas a silently short list would read as a complete one.
+     *
+     * Best-effort: the removal must not fail because the trail could not be
+     * prepared. A read failure yields an empty list, and the count of 0 beside
+     * it is then honest about knowing nothing rather than asserting nothing was
+     * lost — the caller pairs it with the removal's own outcome.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function membershipsHeldBy(int $profileId, int $tenantId): array
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT m.id, m.role_id, m.ou_id, m.status, m.is_primary, m.created_at,
+                        r.name AS role_name
+                   FROM memberships m
+                   LEFT JOIN roles r ON r.id = m.role_id
+                  WHERE m.profile_id = ? AND m.tenant_id = ?
+                  ORDER BY m.is_primary DESC, m.id ASC
+                  LIMIT ' . self::AUDIT_MEMBERSHIP_LIST_CAP
+            );
+            $stmt->execute([$profileId, $tenantId]);
+
+            $out = [];
+            /** @var array<string, mixed> $row */
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $out[] = [
+                    'membership_id' => (int) $row['id'],
+                    'role_id'       => isset($row['role_id']) ? (int) $row['role_id'] : null,
+                    'role_name'     => isset($row['role_name']) ? (string) $row['role_name'] : null,
+                    'ou_id'         => isset($row['ou_id']) ? (int) $row['ou_id'] : null,
+                    'status'        => isset($row['status']) ? (string) $row['status'] : null,
+                    'is_primary'    => DbBool::of($row['is_primary']),
+                    'granted_at'    => isset($row['created_at']) ? (string) $row['created_at'] : null,
+                ];
+            }
+
+            return $out;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * The NAME of a role visible to a tenant — its own, or a global one (#889).
+     *
+     * Recorded into the audit payload beside `role_id` so a grant row stays
+     * legible after the role itself is gone. `memberships.role_id` is
+     * `ON DELETE CASCADE`, so deleting a role silently removes every membership
+     * holding it with no per-row event; from that moment an id alone points
+     * into a table that no longer has the row.
+     *
+     * Best-effort by design: a null name degrades the audit row's readability
+     * and must never fail the grant that produced it.
+     */
+    private function roleNameVisibleToTenant(int $roleId, int $tenantId): ?string
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT name FROM roles WHERE id = ? AND (tenant_id = ? OR tenant_id IS NULL) LIMIT 1'
+            );
+            $stmt->execute([$roleId, $tenantId]);
+            $name = $stmt->fetchColumn();
+
+            return $name === false || $name === null ? null : (string) $name;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Shape a membership row for the response, falling back to a minimal record
      * when the row could not be re-read (should not happen after a successful
      * write, but keeps the response contract non-null).
@@ -1345,6 +1699,7 @@ class UsersApiHandler
             'createdAt' => null,
             'status' => '',
             'accountStatus' => 'active',
+            'authMethod' => AuthMethod::LOCAL,
         ];
     }
 

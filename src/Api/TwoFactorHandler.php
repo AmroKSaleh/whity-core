@@ -12,6 +12,7 @@ use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Audit\AuditLogger;
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Two-Factor Authentication API Handler
@@ -95,29 +96,17 @@ class TwoFactorHandler
         return null;
     }
 
-    /**
-     * Coerce a DB boolean column to a real bool across drivers.
+        /**
+     * Coerce a DB boolean column to a real bool.
      *
-     * CRITICAL: this codebase's pdo_pgsql returns the STRING "f" for a false
-     * boolean, and PHP's (bool) cast treats the non-empty string "f" as TRUE.
-     * A naive (bool)$row['two_factor_enabled'] therefore reports EVERY user as
-     * 2FA-enabled on PostgreSQL — inverting setup()/status()/regenerateCodes()
-     * false-branches. Mirrors AuthHandler::dbTruthy() and RelationRepository::toBool():
-     * SQLite yields 0/1 (int), Postgres 't'/'f' (string), in-process seeds a bool.
-     *
-     * @param mixed $value Raw column value from a boolean field.
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
      */
     private static function dbTruthy(mixed $value): bool
     {
-        if (is_bool($value)) {
-            return $value;
-        }
-        if (is_int($value)) {
-            return $value !== 0;
-        }
-        $normalised = strtolower(trim((string) $value));
-
-        return !in_array($normalised, ['', '0', 'f', 'false', 'no'], true);
+        return DbBool::of($value);
     }
 
     /**
@@ -265,9 +254,10 @@ class TwoFactorHandler
             }
 
             // Check if user already has 2FA enabled. dbTruthy(), NOT a raw bool
-            // cast: on PG two_factor_enabled comes back as "f"/"t" and (bool)"f"
-            // is TRUE, which would wrongly 400 ("already enabled") a user who has
-            // 2FA DISABLED and block them from ever enabling it.
+            // cast: a BOOLEAN reaches PHP in several spellings depending on the
+            // driver and STRINGIFY_FETCHES, and a text-spelled 'false' casts to
+            // TRUE — which would wrongly 400 ("already enabled") a user who has
+            // 2FA DISABLED and block them from ever enabling it. {@see DbBool}.
             if (self::dbTruthy($user['two_factor_enabled'])) {
                 return Response::error('2FA is already enabled for this user', 400);
             }
@@ -320,7 +310,7 @@ class TwoFactorHandler
             // would also reset backup_codes_version to 1 and strand the prior code
             // set. Enabling 2FA a second time must go through disable() first (which
             // clears the secret and invalidates the old codes). dbTruthy(), not a
-            // raw cast: on PG two_factor_enabled is "t"/"f" and (bool)"f" is TRUE.
+            // raw cast: {@see DbBool} for the spellings a BOOLEAN arrives in.
             $identity = $this->readIdentityRow($profileId);
             if ($identity === null) {
                 return Response::error('User not found', 404);
@@ -551,8 +541,9 @@ class TwoFactorHandler
                 : 0;
 
             return Response::json([
-                // dbTruthy(), NOT (bool): on PG (bool)"f" === true would report
-                // enabled=true for EVERY user (including those with 2FA disabled).
+                // dbTruthy(), NOT (bool): a text-spelled boolean casts to TRUE in
+                // both directions, which would report enabled=true for EVERY user
+                // (including those with 2FA disabled). {@see DbBool}.
                 'enabled' => self::dbTruthy($user['two_factor_enabled']),
                 'backup_codes_available' => $codeCount
             ], 200);

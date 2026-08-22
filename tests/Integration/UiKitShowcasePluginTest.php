@@ -419,16 +419,22 @@ final class UiKitShowcasePluginTest extends TestCase
             }
         }
 
-        // Walk the tree; for each data-bound node, assert its source is a
-        // registered GET path (the ownership invariant that WC-230 enforces).
-        // #868: `timeline` and `inbox` are data-bound leaves like the rest — the
-        // loader derives that generically from the contract rule, so the SAME
-        // ownership invariant applies and is asserted here.
-        $dataBoundTypes = ['dataTable', 'dataStat', 'dataList', 'chart', 'timeline', 'inbox'];
-        $foundBound = [
-            'dataTable' => false, 'dataStat' => false, 'dataList' => false,
-            'chart' => false, 'timeline' => false, 'inbox' => false,
-        ];
+        // Walk the tree; for each source-bearing node, assert its source is a
+        // registered GET path (the ownership invariant WC-230 enforces).
+        //
+        // The type list is DERIVED FROM THE CONTRACT rather than written out.
+        // It used to be a literal, and a literal here is a hole shaped exactly
+        // like the next block type somebody adds: the walk skips it, every
+        // assertion still passes, and the ownership invariant is silently
+        // untested for the one type nobody has exercised yet. #883 added
+        // `dataRecord` and found this list four types out of date in spirit
+        // already. Deriving it means a new source-bearing type is covered the
+        // moment it exists, and a type that REMOVES its source (as
+        // `ouScopePicker` deliberately has) drops out on its own.
+        $dataBoundTypes = self::sourceBearingTypes();
+        $this->assertContains('dataRecord', $dataBoundTypes, 'a recordPath source is ownership-checked too');
+
+        $foundBound = array_fill_keys($dataBoundTypes, false);
 
         $this->walkDataBound($blocks, $dataBoundTypes, $registeredGetPaths, $foundBound);
 
@@ -438,6 +444,30 @@ final class UiKitShowcasePluginTest extends TestCase
                 "The tree must contain at least one '{$type}' block with a plugin-owned source"
             );
         }
+    }
+
+    /**
+     * Every block type whose contract rule carries a `source` prop, and the kind
+     * of path that prop accepts.
+     *
+     * This is the same derivation the LOADER makes when it decides what to
+     * ownership-check ({@see \Whity\Core\PluginLoader}), restated here so the
+     * test and the thing it tests answer the question the same way.
+     *
+     * @return list<string>
+     */
+    private static function sourceBearingTypes(): array
+    {
+        $types = [];
+        foreach (BlockContract::types() as $type) {
+            $rule = BlockContract::rulesFor($type);
+            $kind = $rule['props']['source']['type'] ?? null;
+            if ($kind === 'apiPath' || $kind === 'recordPath') {
+                $types[] = $type;
+            }
+        }
+
+        return $types;
     }
 
     /**
@@ -475,6 +505,34 @@ final class UiKitShowcasePluginTest extends TestCase
     }
 
     /**
+     * Every child list a node carries, per the contract's declared slots (#909).
+     *
+     * The walkers below used to reach for `children` by name. `accessGate`
+     * carries a second list, `otherwise`, holding the rendering a refused caller
+     * gets — so a walk that knows only one name would report the read-only half
+     * of every gated region as absent, and the coverage tests would pass while
+     * the tree they measure contained blocks nobody checked. Derived from
+     * {@see BlockContract::childSlots()} rather than restated, for the same
+     * reason the source-bearing types are.
+     *
+     * @param array<string, mixed> $node
+     * @return list<array<mixed>>
+     */
+    private function childListsOf(array $node): array
+    {
+        $type = $node['type'] ?? null;
+        $lists = [];
+
+        foreach (BlockContract::childSlots(is_string($type) ? $type : '') as $slot) {
+            if (isset($node[$slot]) && is_array($node[$slot])) {
+                $lists[] = $node[$slot];
+            }
+        }
+
+        return $lists;
+    }
+
+    /**
      * Every node of one type anywhere in the tree.
      *
      * @param array<mixed> $blocks
@@ -491,8 +549,8 @@ final class UiKitShowcasePluginTest extends TestCase
             if (($node['type'] ?? null) === $type) {
                 $found[] = $node;
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $found = array_merge($found, $this->collectNodesOfType($node['children'], $type));
+            foreach ($this->childListsOf($node) as $childList) {
+                $found = array_merge($found, $this->collectNodesOfType($childList, $type));
             }
         }
 
@@ -574,6 +632,222 @@ final class UiKitShowcasePluginTest extends TestCase
         // Verify the two specific paths.
         $this->assertContains('/api/v1/uikit/demo/rows', $servedSources);
         $this->assertContains('/api/v1/uikit/demo/metric', $servedSources);
+
+        // #883: a TEMPLATED record source is version-rewritten identically, with
+        // its context token left intact for the renderer to substitute. Both
+        // halves matter: an unversioned source addresses a route that does not
+        // exist, and a token the loader mangled addresses the wrong record.
+        $this->assertContains('/api/v1/uikit/demo/rows/{demo-record-pick}', $servedSources);
+    }
+
+    /**
+     * #883: a `dataRecord` whose `source` names a route the plugin does NOT own
+     * drops the whole feature, exactly as a foreign `dataTable` source does.
+     *
+     * Route-parameter normalization is what lets a templated source be matched
+     * at all, and the risk it introduces is that normalization matches too much
+     * — `{}` against `{}` for a path shape the plugin never registered. This
+     * pins that it does not: the shape has to be one of the plugin's own.
+     */
+    public function testARecordSourceOutsideThePluginsRoutesDropsTheFeature(): void
+    {
+        $registeredGetRoutes = ['/api/uikit/demo/rows/{name}' => 'uikit:view'];
+        $normalize = static fn (string $path): string
+            => (string) preg_replace('/\{[^}]*\}/', '{}', $path);
+
+        // The plugin's own shape, differently named — matches.
+        $this->assertContains(
+            $normalize('/api/uikit/demo/rows/{record}'),
+            array_map($normalize, array_keys($registeredGetRoutes))
+        );
+
+        // A shape the plugin never registered — does not.
+        $this->assertNotContains(
+            $normalize('/api/users/{record}'),
+            array_map($normalize, array_keys($registeredGetRoutes))
+        );
+        $this->assertNotContains(
+            $normalize('/api/uikit/demo/rows/{a}/{b}'),
+            array_map($normalize, array_keys($registeredGetRoutes))
+        );
+    }
+
+    /**
+     * #883/#895: the showcase's record endpoint RETURNS caller-permission flags,
+     * and the block declaration names none of them.
+     *
+     * The fixture carries `manageable` and `canEdit` on purpose — that is what a
+     * real record endpoint answers with, and it is the exact shape #895 went
+     * wrong on. This asserts both halves of the guard on the shipped example:
+     * the payload has the flags, and the declaration's fact whitelist does not.
+     */
+    public function testTheShowcaseRecordDeclaresNoCallerPermissionFactsDespiteThePayloadCarryingThem(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        $body = json_decode($plugin->demoRecord(new Request('GET', '/api/uikit/demo/rows/Anika%20Patel'))->getBody(), true);
+        $this->assertIsArray($body);
+        $this->assertArrayHasKey('manageable', $body['data'], 'the fixture must carry a caller flag to be worth anything');
+        $this->assertArrayHasKey('canEdit', $body['data']);
+
+        $record = $this->findFirstNodeOfType($plugin->getFrontendFeatures()[0]['blocks'], 'dataRecord');
+        $this->assertIsArray($record);
+
+        $declared = array_column($record['fields'], 'field');
+        foreach (BlockValidator::CALLER_DECISION_FIELDS as $reserved) {
+            $this->assertNotContains(
+                $reserved,
+                $declared,
+                "the showcase must never declare '{$reserved}' as a record fact (#895)"
+            );
+        }
+        $this->assertSame(['name', 'role', 'status', 'joined'], $declared);
+    }
+
+    /**
+     * #909: the showcase ships a LIVE read-only state, not a description of one.
+     *
+     * This is the acceptance test for the primitive. `uikit:manage` is declared
+     * and never granted, so on a stock install the inner gate refuses and what
+     * renders is the `otherwise` branch: a description list plus a notice naming
+     * the gate. If this stops holding, a described record page has gone back to
+     * showing an editable form to a caller who may not write — the greyed-out
+     * form #882 exists to make unshippable.
+     */
+    public function testTheShowcaseDescribesARecordPagesReadOnlyState(): void
+    {
+        $blocks = (new UiKitShowcasePlugin())->getFrontendFeatures()[0]['blocks'];
+        $gates = $this->collectNodesOfType($blocks, 'accessGate');
+
+        $this->assertNotEmpty($gates, 'the showcase must contain a live accessGate');
+
+        $byId = array_column($gates, null, 'id');
+        $this->assertArrayHasKey('demo-record-readable', $byId, 'the HIDDEN state gate');
+        $this->assertArrayHasKey('demo-record-writable', $byId, 'the READ-ONLY/EDITABLE gate');
+
+        // The outer gate is a READ question and declares no `otherwise`: a
+        // caller who may not read the record sees the region absent, which is
+        // the third state and the one that has no other way to be expressed.
+        $readable = $byId['demo-record-readable'];
+        $this->assertSame('GET', $readable['check']['method']);
+        $this->assertArrayNotHasKey('otherwise', $readable);
+
+        // The inner gate is a WRITE question and declares BOTH renderings.
+        $writable = $byId['demo-record-writable'];
+        $this->assertSame('PUT', $writable['check']['method']);
+        $this->assertArrayHasKey('children', $writable, 'the editable rendering');
+        $this->assertArrayHasKey('otherwise', $writable, 'the read-only rendering');
+
+        // Read-only is a DIFFERENT RENDERING, not a disabled form: a description
+        // list, and no input anywhere beneath it.
+        $refusedTypes = $this->collectTypes($writable['otherwise']);
+        $this->assertContains('recordFields', $refusedTypes);
+        foreach (['form', 'textInput', 'submitButton', 'select', 'checkbox'] as $control) {
+            $this->assertNotContains(
+                $control,
+                $refusedTypes,
+                "the read-only rendering must contain no '{$control}' — read-only is a rendering, not a disabled form"
+            );
+        }
+
+        // ...and the editable one is the form.
+        $this->assertContains('form', $this->collectTypes($writable['children']));
+    }
+
+    /**
+     * A gate states no permission of its own, on the shipped example.
+     *
+     * The host reads `uikit:manage` off the ROUTE the check names. A slug in the
+     * declaration would be a second answer to a question the route table already
+     * answers, and re-gating the route would leave the page saying the old
+     * thing — which is the drift #868 removed for `inbox` actions.
+     */
+    public function testTheShowcaseGatesRestateNoPermission(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+        $gates = $this->collectNodesOfType($plugin->getFrontendFeatures()[0]['blocks'], 'accessGate');
+        $this->assertNotEmpty($gates);
+
+        $declaredSlugs = [];
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (is_string($r['requiredPermission'] ?? null)) {
+                $declaredSlugs[] = $r['requiredPermission'];
+            }
+        }
+        $this->assertContains('uikit:manage', $declaredSlugs, 'the write route must carry the gate');
+
+        foreach ($gates as $gate) {
+            foreach (['permission', 'requiredPermission', 'scopedPermission', 'requiredRole'] as $prop) {
+                $this->assertArrayNotHasKey($prop, $gate, "accessGate '{$gate['id']}' must restate no authority");
+            }
+            $this->assertSame(
+                ['method', 'endpoint'],
+                array_keys($gate['check']),
+                'a check is a REQUEST and nothing else'
+            );
+        }
+    }
+
+    /**
+     * A gate's endpoint is ownership-checked and version-rewritten by the
+     * loader, exactly like a data-bound `source` and an inbox action's endpoint.
+     *
+     * The version half is not cosmetic: the permitted-actions resolver matches
+     * the CONCRETE path against the live route table, so an unversioned endpoint
+     * matches no route and resolves to "not permitted" — fail-closed, but
+     * silently, and every gated region would be refused for everyone.
+     */
+    public function testTheLoaderVersionsAndOwnershipChecksGateEndpoints(): void
+    {
+        $pluginDir = dirname(__DIR__, 2) . '/plugins';
+        $loader = new PluginLoader($pluginDir, new Router('/v1'), new PermissionRegistry(), new HookManager());
+        $loader->load();
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('ui-kit-reference', $byId);
+
+        $gates = $this->collectNodesOfType($byId['ui-kit-reference']['blocks'], 'accessGate');
+        $this->assertNotEmpty($gates, 'the served descriptor must still carry its gates');
+
+        foreach ($gates as $gate) {
+            $this->assertStringStartsWith(
+                '/api/v1/',
+                $gate['check']['endpoint'],
+                "gate '{$gate['id']}' must be served with a versioned endpoint"
+            );
+            // The context token survives the rewrite — a mangled one would ask
+            // about a different record than the page is about.
+            $this->assertStringContainsString('{demo-record-pick}', $gate['check']['endpoint']);
+        }
+    }
+
+    /**
+     * Depth-first: the first node of the given type, or null.
+     *
+     * @param array<mixed> $nodes
+     * @return array<string, mixed>|null
+     */
+    private function findFirstNodeOfType(array $nodes, string $type): ?array
+    {
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            if (($node['type'] ?? null) === $type) {
+                /** @var array<string, mixed> $node */
+                return $node;
+            }
+            foreach ($this->childListsOf($node) as $childList) {
+                $found = $this->findFirstNodeOfType($childList, $type);
+                if ($found !== null) {
+                    return $found;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -695,8 +969,8 @@ final class UiKitShowcasePluginTest extends TestCase
                 }
             }
 
-            if (isset($node['children']) && is_array($node['children'])) {
-                foreach ($this->collectInboxActions($node['children']) as $nested) {
+            foreach ($this->childListsOf($node) as $childList) {
+                foreach ($this->collectInboxActions($childList) as $nested) {
                     $actions[] = $nested;
                 }
             }
@@ -830,8 +1104,8 @@ final class UiKitShowcasePluginTest extends TestCase
                     $foundForm = true;
                 }
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $this->walkInteractive($node['children'], $postRoutes, $foundForm);
+            foreach ($this->childListsOf($node) as $childList) {
+                $this->walkInteractive($childList, $postRoutes, $foundForm);
             }
         }
     }
@@ -854,8 +1128,8 @@ final class UiKitShowcasePluginTest extends TestCase
                     $foundAction = true;
                 }
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $this->walkInteractiveAction($node['children'], $postRoutes, $foundAction);
+            foreach ($this->childListsOf($node) as $childList) {
+                $this->walkInteractiveAction($childList, $postRoutes, $foundAction);
             }
         }
     }
@@ -883,8 +1157,8 @@ final class UiKitShowcasePluginTest extends TestCase
                     ? $node['requiredPermission']
                     : null;
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $this->collectInteractivePerms($node['children'], $formPerms, $actionPerms);
+            foreach ($this->childListsOf($node) as $childList) {
+                $this->collectInteractivePerms($childList, $formPerms, $actionPerms);
             }
         }
     }
@@ -920,8 +1194,8 @@ final class UiKitShowcasePluginTest extends TestCase
             ) {
                 $endpoints[] = $node['action']['endpoint'];
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                foreach ($this->collectInteractiveEndpoints($node['children']) as $ep) {
+            foreach ($this->childListsOf($node) as $childList) {
+                foreach ($this->collectInteractiveEndpoints($childList) as $ep) {
                     $endpoints[] = $ep;
                 }
             }
@@ -953,16 +1227,24 @@ final class UiKitShowcasePluginTest extends TestCase
             if (in_array($node['type'], $dataBoundTypes, true)) {
                 $source = $node['source'] ?? null;
                 $this->assertIsString($source, "Data-bound node of type '{$node['type']}' must have a string 'source'");
+                // #883: a `recordPath` may carry `{token}` segments the renderer
+                // substitutes from context, so ownership is judged with route
+                // parameters normalized — the same comparison the loader makes,
+                // and the same one an `inbox` action endpoint already gets. A
+                // source with no token normalizes to itself, so nothing that was
+                // compared exactly before is compared loosely now.
+                $normalize = static fn (string $path): string
+                    => (string) preg_replace('/\{[^}]*\}/', '{}', $path);
                 $this->assertContains(
-                    $source,
-                    $registeredGetPaths,
+                    $normalize($source),
+                    array_map($normalize, $registeredGetPaths),
                     "Data-bound block source '{$source}' must be a GET route registered by the plugin"
                 );
                 $foundBound[$node['type']] = true;
             }
 
-            if (isset($node['children']) && is_array($node['children'])) {
-                $this->walkDataBound($node['children'], $dataBoundTypes, $registeredGetPaths, $foundBound);
+            foreach ($this->childListsOf($node) as $childList) {
+                $this->walkDataBound($childList, $dataBoundTypes, $registeredGetPaths, $foundBound);
             }
         }
     }
@@ -983,13 +1265,13 @@ final class UiKitShowcasePluginTest extends TestCase
             if (
                 isset($node['type'], $node['source'])
                 && is_string($node['type'])
-                && in_array($node['type'], ['dataTable', 'dataStat', 'dataList'], true)
+                && in_array($node['type'], self::sourceBearingTypes(), true)
                 && is_string($node['source'])
             ) {
                 $sources[] = $node['source'];
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                foreach ($this->collectDataBoundSources($node['children']) as $s) {
+            foreach ($this->childListsOf($node) as $childList) {
+                foreach ($this->collectDataBoundSources($childList) as $s) {
                     $sources[] = $s;
                 }
             }
@@ -1013,8 +1295,8 @@ final class UiKitShowcasePluginTest extends TestCase
                 continue;
             }
             $types[] = $node['type'];
-            if (isset($node['children']) && is_array($node['children'])) {
-                foreach ($this->collectTypes($node['children']) as $childType) {
+            foreach ($this->childListsOf($node) as $childList) {
+                foreach ($this->collectTypes($childList) as $childType) {
                     $types[] = $childType;
                 }
             }

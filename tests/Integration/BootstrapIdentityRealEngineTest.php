@@ -421,4 +421,96 @@ final class BootstrapIdentityRealEngineTest extends TestCase
         $_ENV[$name] = $value;
         putenv($name . '=' . $value);
     }
+    // ── (f) #917: the bootstrap reconciliation names the real reason ─────────
+
+    /**
+     * When the bootstrap account signs in through an identity provider, the
+     * seeder says THAT — and stops telling the operator to go and set a password
+     * through `PATCH /api/users/{id}`.
+     *
+     * That instruction is how #917 got exercised in the first place. The
+     * seeder's mismatch warning printed it unconditionally, so an operator whose
+     * bootstrap administrator was federated was being walked into creating
+     * exactly the credential this release exists to prevent.
+     */
+    public function testSeederNamesTheIdentityProviderRatherThanAMismatch(): void
+    {
+        $this->putEnv('APP_ENV', 'production');
+
+        $pdo = SchemaFromMigrations::make();
+        $db  = Database::withFactory(fn (): PDO => $pdo, 86400, 86400);
+        $db->forceConnect();
+
+        $this->makeIdpBacked($pdo, self::DEFAULT_EMAIL);
+
+        ob_start();
+        Seeder::seed($db);
+        $output = (string) ob_get_clean();
+
+        self::assertStringContainsString(
+            'identity provider',
+            $output,
+            'the operator must be told the variable is inert BECAUSE the account is federated'
+        );
+        self::assertStringContainsString('INITIAL_SYSTEM_ADMIN_PASSWORD', $output);
+        self::assertStringContainsString(
+            'allowLocalPasswordOnIdpAccount',
+            $output,
+            'the deliberate path is named, so an operator who really wants one is not left guessing'
+        );
+        self::assertStringNotContainsString(
+            'does not match',
+            $output,
+            'a federated account is not a password mismatch, and reporting it as one sends the '
+            . 'operator to the wrong remedy'
+        );
+    }
+
+    /**
+     * And the seeder still does not rewrite the credential of a federated
+     * account — the report is a report, not a repair.
+     */
+    public function testSeederLeavesAFederatedBootstrapAccountPasswordless(): void
+    {
+        $this->putEnv('APP_ENV', 'production');
+
+        $pdo = SchemaFromMigrations::make();
+        $db  = Database::withFactory(fn (): PDO => $pdo, 86400, 86400);
+        $db->forceConnect();
+
+        $this->makeIdpBacked($pdo, self::DEFAULT_EMAIL);
+
+        ob_start();
+        Seeder::seed($db);
+        ob_end_clean();
+
+        $stmt = $pdo->prepare(
+            'SELECT p.password_hash, p.auth_method
+               FROM profiles p
+               JOIN profile_emails pe ON pe.profile_id = p.id
+              WHERE pe.email = :email'
+        );
+        $stmt->execute([':email' => self::DEFAULT_EMAIL]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        self::assertSame('', (string) $row['password_hash']);
+        self::assertSame('idp', (string) $row['auth_method']);
+    }
+
+    /** Hand an existing seeded account to an identity provider. */
+    private function makeIdpBacked(PDO $pdo, string $email): void
+    {
+        $stmt = $pdo->prepare('SELECT profile_id FROM profile_emails WHERE email = :email');
+        $stmt->execute([':email' => $email]);
+        $profileId = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $profileId, "no profile for {$email}");
+
+        $pdo->prepare("UPDATE profiles SET password_hash = '', auth_method = 'idp' WHERE id = :id")
+            ->execute([':id' => $profileId]);
+        $pdo->prepare(
+            "INSERT INTO external_identities
+                 (profile_id, provider_id, provider_key, issuer, subject, email, linked_at, created_at)
+             VALUES (:pid, NULL, 'google', 'https://accounts.google.com', :sub, :email, NOW(), NOW())"
+        )->execute([':pid' => $profileId, ':sub' => 'bootstrap-sub', ':email' => $email]);
+    }
 }

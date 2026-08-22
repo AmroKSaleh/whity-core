@@ -47,6 +47,12 @@ final class ExternalIdentityRepository
      * external account within that namespace — a duplicate raises a constraint
      * violation (the caller decides whether that is a conflict).
      *
+     * Also moves the profile's `auth_method` on (#917): this is the moment an
+     * account becomes IdP-backed, and the fact is stamped here rather than at
+     * the three call sites so no future one can link an identity without
+     * recording that it did. On a duplicate the INSERT throws before the stamp,
+     * which is correct — nothing was linked.
+     *
      * @return int The new row's id.
      */
     public function link(
@@ -70,7 +76,11 @@ final class ExternalIdentityRepository
             ':subject'      => $subject,
             ':email'        => $email,
         ]);
-        return (int) $this->db->lastInsertId();
+        $id = (int) $this->db->lastInsertId();
+
+        (new AuthMethod($this->db))->onExternalIdentityLinked($profileId);
+
+        return $id;
     }
 
     /**
@@ -174,6 +184,11 @@ final class ExternalIdentityRepository
      * Unlink an external identity, scoped to its owning profile so a caller can
      * only remove their OWN link (a cross-profile unlink matches zero rows).
      *
+     * Recomputes `auth_method` afterwards (#917) — paired with {@see link()} so
+     * the held fact cannot be left describing an IdP that is no longer attached.
+     * Only removing the LAST link changes anything; see
+     * {@see AuthMethod::onExternalIdentityUnlinked()}.
+     *
      * @return int Rows affected (1 on success, 0 if not found / wrong profile).
      */
     public function unlink(int $id, int $profileId): int
@@ -182,7 +197,13 @@ final class ExternalIdentityRepository
             'DELETE FROM external_identities WHERE id = :id AND profile_id = :profile_id'
         );
         $stmt->execute([':id' => $id, ':profile_id' => $profileId]);
-        return $stmt->rowCount();
+        $removed = $stmt->rowCount();
+
+        if ($removed > 0) {
+            (new AuthMethod($this->db))->onExternalIdentityUnlinked($profileId);
+        }
+
+        return $removed;
     }
 
     /**

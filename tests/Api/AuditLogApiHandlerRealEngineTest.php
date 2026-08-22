@@ -149,6 +149,85 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
         $this->assertSame('role', $body['data'][0]['targetType']);
     }
 
+    /**
+     * #882: `target_id` is what makes "the history of THIS record" expressible.
+     * Two roles' entries share a tenant, a target_type and an action; only the
+     * id separates them, so a record page without this filter would have to page
+     * the whole tenant's trail and sort it out client-side.
+     */
+    public function testFilterByTargetIdNarrowsToOneRecord(): void
+    {
+        $this->seedRow(1, 10, 'role.updated', 'role', 100);
+        $this->seedRow(1, 10, 'role.updated', 'role', 101);
+        $this->seedRow(1, 10, 'role.created', 'role', 100);
+
+        $_GET = ['target_type' => 'role', 'target_id' => '100'];
+        TenantContext::setTenantId(1);
+        $response = $this->handler()->list($this->authedRequest('/api/audit-logs', 10));
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(2, $body['pagination']['total']);
+        $this->assertSame([100, 100], array_column($body['data'], 'targetId'));
+        $this->assertEqualsCanonicalizing(
+            ['role.updated', 'role.created'],
+            array_column($body['data'], 'action')
+        );
+    }
+
+    /**
+     * `target_id` cannot widen what the tenant scope already admitted: another
+     * tenant's row carrying the SAME target id stays invisible. The filter is a
+     * conjunct on an already-scoped query, and this is the test that would fail
+     * if it were ever moved somewhere it could replace the scope.
+     */
+    public function testFilterByTargetIdStaysTenantScoped(): void
+    {
+        $this->seedRow(1, 10, 'role.updated', 'role', 100);
+        $this->seedRow(2, 20, 'role.updated', 'role', 100);
+
+        $_GET = ['target_type' => 'role', 'target_id' => '100'];
+        TenantContext::setTenantId(1);
+        $response = $this->handler()->list($this->authedRequest('/api/audit-logs', 10));
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(1, $body['pagination']['total']);
+        $this->assertSame(1, $body['data'][0]['tenantId']);
+    }
+
+    /**
+     * A non-numeric `target_id` is DROPPED rather than compared — same rule as
+     * `actor`. The alternative is a string bound against an integer column,
+     * which PostgreSQL refuses outright while SQLite shrugs: the exact
+     * divergence class that only shows up in CI's Postgres shard.
+     */
+    public function testNonNumericTargetIdIsIgnored(): void
+    {
+        $this->seedRow(1, 10, 'role.updated', 'role', 100);
+
+        $_GET = ['target_id' => 'not-a-number'];
+        TenantContext::setTenantId(1);
+        $response = $this->handler()->list($this->authedRequest('/api/audit-logs', 10));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(1, $body['pagination']['total'], 'An unusable filter must not silently empty the result.');
+    }
+
+    /** The self-service endpoint carries the same narrowing filter (#882). */
+    public function testListOwnFiltersByTargetId(): void
+    {
+        $this->seedRow(1, 10, 'role.updated', 'role', 100);
+        $this->seedRow(1, 10, 'role.updated', 'role', 101);
+
+        $_GET = ['target_id' => '101'];
+        TenantContext::setTenantId(1);
+        $response = $this->handler()->listOwn($this->authedRequest('/api/me/audit-logs', 10));
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(1, $body['pagination']['total']);
+        $this->assertSame(101, $body['data'][0]['targetId']);
+    }
+
     public function testFilterByDateRange(): void
     {
         $this->seedRowAt(1, 10, 'role.created', '2026-01-01 10:00:00');

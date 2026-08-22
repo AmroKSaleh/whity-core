@@ -330,7 +330,7 @@ class RolesApiHandlerTest extends TestCase
     public function testListReturnsTenantScopedRoles(): void
     {
         $rows = [
-            ['id' => 1, 'name' => 'Custom Admin', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 3],
+            ['id' => 1, 'name' => 'Custom Admin', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 3, 'tenant_id' => 1],
         ];
         $stmt = $this->statement(false, $rows);
 
@@ -346,6 +346,10 @@ class RolesApiHandlerTest extends TestCase
         $this->assertSame('Custom Admin', $data[0]['name']);
         $this->assertSame(3, $data[0]['permissionCount']);
         $this->assertArrayNotHasKey('permission_count', $data[0]);
+        // #886: an owned row is not global, and the raw owner never leaves the
+        // handler — `global` and `manageable` are the whole per-row contract.
+        $this->assertFalse($data[0]['global']);
+        $this->assertArrayNotHasKey('tenant_id', $data[0]);
     }
 
     /**
@@ -373,8 +377,8 @@ class RolesApiHandlerTest extends TestCase
         MockRequestFactory::setTestTenant(0); // SYSTEM tenant
 
         $rows = [
-            ['id' => 1, 'name' => 'Tenant A Role', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 0],
-            ['id' => 2, 'name' => 'Tenant B Role', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 0],
+            ['id' => 1, 'name' => 'Tenant A Role', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 0, 'tenant_id' => 1],
+            ['id' => 2, 'name' => 'Tenant B Role', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 0, 'tenant_id' => 2],
         ];
         // Pagination adds a COUNT query before the SELECT — provide two stmts.
         $countStmt = $this->statement(['cnt' => 2]);
@@ -400,11 +404,22 @@ class RolesApiHandlerTest extends TestCase
     public function testGetReturnsRoleWithPermissions(): void
     {
         $visibility = $this->statement(['1' => 1]);       // role visible to tenant
-        $roleRow = $this->statement(['id' => 5, 'name' => 'Editor', 'description' => '', 'parent_id' => null, 'created_at' => 'now']);
+        // `tenant_id` is part of what get() SELECTs (#886) — a mocked row that
+        // omits a selected column is a mock that lies about the query, and the
+        // handler reading it emitted an "Undefined array key" warning that
+        // failOnWarning turns into a red suite.
+        $roleRow = $this->statement(['id' => 5, 'name' => 'Editor', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'tenant_id' => 1]);
         $perms = $this->statement(false, [['id' => 7, 'name' => 'posts:read', 'description' => null]]);
+        // #882: the detail payload now carries `manageable`, resolved through the
+        // same roleManageableByTenant() guard the writes use — one more prepared
+        // statement, owned by this tenant, so the flag comes back true. The guard
+        // only asks whether the row exists (`fetch() !== false`), so the column
+        // name is arbitrary; a STRING key keeps this off the baselined
+        // `array{1: 1}` ignore pattern the neighbouring statements sit on.
+        $manageable = $this->statement(['owned' => 1]);
 
         $pdo = $this->createMock(PDO::class);
-        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $perms);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $perms, $manageable);
 
         $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
         $response = $handler->get(new Request('GET', '/api/roles/5'), ['id' => '5']);
@@ -414,6 +429,11 @@ class RolesApiHandlerTest extends TestCase
         $this->assertSame('Editor', $data['name']);
         $this->assertCount(1, $data['permissions']);
         $this->assertSame('posts:read', $data['permissions'][0]['name']);
+        $this->assertTrue($data['manageable'], 'A record page reached by URL reads editability from here.');
+        // #886: a tenant-OWNED row is not global, and the owning tenant itself is
+        // never disclosed — `global` is the whole contract the UI consumes.
+        $this->assertFalse($data['global'], 'A tenant-owned role is not a shared base role.');
+        $this->assertArrayNotHasKey('tenant_id', $data);
     }
 
     /**

@@ -302,7 +302,38 @@ Visibility rules:
 
 - **Read** (`GET /api/roles`, `/api/roles/{id}`, `/api/roles/{id}/permissions`): a tenant sees `WHERE (r.tenant_id = ? OR r.tenant_id IS NULL)`; the **system tenant (id 0)** sees every role.
 - **Write** (`PATCH`/`DELETE /api/roles/{id}`): a tenant may modify only its *own* roles; a global (NULL) base role returns `404` for a tenant and is manageable only by the system tenant.
-- **Create** (`POST /api/roles`): stamps the new role with the current tenant id. A role with active user assignments cannot be deleted (`409`).
+- **Create** (`POST /api/roles`): stamps the new role with the current tenant id, unless a **system-tenant (0)** caller names another owner — see below. A role with active user assignments cannot be deleted (`409`).
+- Every list/detail row carries two independent server-computed booleans: `manageable` (may THIS caller write the row) and `global` (is this a NULL-tenant role shared by every tenant). They are not interchangeable — for the system tenant `manageable` is true for every role — and the admin UI gates its Edit/Delete actions on the first while marking rows and warning about blast radius with the second. The raw owning `tenant_id` is never returned.
+
+### Creating a role for another tenant, or for everyone (#888)
+
+The platform is administered *from* the system tenant, so deriving the owner from the caller made every operator-created role a tenant-0 role — owned by the system tenant, and therefore invisible to every other tenant. Two optional fields fix that, honoured **only** for a tenant-0 caller:
+
+| Body | Owner written | Meaning |
+| --- | --- | --- |
+| neither field | `TenantContext::getTenantId()` | Unchanged behaviour; every pre-existing client. |
+| `"tenant_id": 7` | `7` | A role owned by tenant 7. |
+| `"global": true` | `NULL` | A global base role every tenant sees. |
+
+```json
+POST /api/v1/roles
+{
+  "name": "Ward Supervisor",
+  "description": "Runs a ward",
+  "permissions": [3, "users:read"],
+  "tenant_id": 7
+}
+```
+
+Rules, and the reasons for them:
+
+- Either field sent by a **non-system caller** is a `403`, not a silent ignore — a field accepted and discarded teaches the caller it worked.
+- `tenant_id` is **integer-only** (a digit string is accepted). `null` and `""` are a `400`, deliberately **not** a synonym for absent: ownership has three states, and over HTTP an omitted field and an explicit null are not reliably distinguishable by clients, so overloading `null` for "global" would make the target tenant depend on a JSON serialiser's habits. `global: true` is the separate, unmistakable form. (This is a deliberate divergence from the more tolerant `tenant_id` on `POST /api/users/{id}/memberships`, which has no third state to confuse.)
+- Sending **both** is a `400` rather than a precedence rule.
+- A named tenant that does not exist is a `404`, not a `403` — consistent with how an invisible role is answered elsewhere in the handler.
+- Name uniqueness is checked in the **target** namespace: tenant 7's own names plus the global base names it inherits, or — for a `global` create — the global namespace alone, so a tenant's private role name cannot block naming a base role.
+- The response echoes the resolved owner as `tenantId` (`null` ⇒ global) and `global`.
+- Ownership is settled at create and never moves: `PATCH` accepts no tenant field.
 
 ### Assigning permissions (ids OR names)
 

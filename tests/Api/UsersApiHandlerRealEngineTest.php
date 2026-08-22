@@ -1097,6 +1097,96 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         return $request;
     }
 
+    // ── Single-record read (#882) ────────────────────────────────────────────
+
+    /**
+     * `GET /api/users/{id}` returns one person in the caller's tenant.
+     *
+     * The handler has carried this method since the identity cutover but NO
+     * ROUTE reached it until #882 registered one, so it was never exercised.
+     * A record page is addressable by definition — a pasted URL has to work —
+     * and the alternative, fetching the list and searching it, silently caps at
+     * the page size.
+     */
+    public function testGetReturnsTheUserInTheCallersTenant(): void
+    {
+        $this->seedProfile(120, 'p120@example.com');
+        $this->seedMembership(120, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->get($this->authedRequest('GET', '/api/users/120'), ['id' => '120']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+        $this->assertSame(120, $decoded['data']['id'], 'the id is the canonical profile_id');
+        $this->assertSame('p120@example.com', $decoded['data']['email']);
+        $this->assertSame('user', $decoded['data']['role'], 'role id 2 is the seeded `user` role');
+        $this->assertSame(1, $decoded['data']['tenantId']);
+        $this->assertArrayNotHasKey('password_hash', $decoded['data'], 'never expose the credential');
+    }
+
+    /**
+     * The two statuses are DIFFERENT facts and both are reported.
+     *
+     * `status` is the per-tenant membership lifecycle and `accountStatus` is the
+     * global profile switch (ADR 0005 §1). The record page states both, because
+     * an operator looking at an `invited` membership on a deactivated profile
+     * needs both sentences — reading either one as "active" says nothing about
+     * the other.
+     */
+    public function testGetReportsTheMembershipStatusAndTheAccountStatusSeparately(): void
+    {
+        $this->seedProfile(121, 'p121@example.com', 'inactive');
+        $this->seedMembership(121, 1, 2, 'invited');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->get($this->authedRequest('GET', '/api/users/121'), ['id' => '121']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+        $this->assertSame('invited', $decoded['data']['status']);
+        $this->assertSame('inactive', $decoded['data']['accountStatus']);
+    }
+
+    /**
+     * A profile with no membership HERE is a 404, not another tenant's record.
+     *
+     * The route is reachable by typing an id into the address bar, so this is
+     * the first place a cross-tenant read would be attempted — deliberately or
+     * by pasting the wrong link.
+     */
+    public function testGetRefusesAProfileWithoutAMembershipInThisTenant(): void
+    {
+        $this->seedProfile(122, 'p122@example.com');
+        $this->seedMembership(122, 2, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->get($this->authedRequest('GET', '/api/users/122'), ['id' => '122']);
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
+     * The SYSTEM tenant (id 0) reads a membership in any tenant — the same
+     * cross-tenant authority the list and the memberships endpoints already
+     * grant it.
+     */
+    public function testGetLetsTheSystemTenantReadAnotherTenantsMember(): void
+    {
+        $this->seedProfile(123, 'p123@example.com');
+        $this->seedMembership(123, 2, 2, 'active');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->get(
+            $this->authedRequest('GET', '/api/users/123', null, 0),
+            ['id' => '123']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $decoded = json_decode($response->getBody(), true);
+        $this->assertSame(2, $decoded['data']['tenantId'], 'the membership it found, with its own tenant');
+    }
+
     // ── Secondary memberships (WC-712 §1) ────────────────────────────────────
 
     /**
@@ -1670,5 +1760,331 @@ final class UsersApiHandlerRealEngineTest extends TestCase
 
         $still = $this->pdo->query('SELECT two_factor_enabled FROM profiles WHERE id = 82')->fetchColumn();
         $this->assertTrue((bool) $still, 'a password reset must leave an enrolled authenticator in place');
+    }
+    // ==================== #917: IdP-backed accounts and the local password ====================
+
+    /**
+     * THE reported defect. `PATCH /api/users/{id}` with a `password` against an
+     * account that signs in through an identity provider used to answer 200 and
+     * mint a working local credential.
+     *
+     * Every consequence is asserted, not just the status code: no hash, no
+     * epoch bump, no change to the held fact. A version that returned 409 after
+     * writing would satisfy a status-only assertion and still be the bug.
+     */
+    public function testAdminPasswordOnAnIdpBackedAccountIsRefused(): void
+    {
+        $this->seedIdpProfile(120, 'sso-refuse@example.com', 'sub-refuse');
+        $this->seedMembership(120, 1, 2, 'active');
+
+        $epochBefore = (int) $this->profileColumn(120, 'token_epoch');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->update(
+            $this->authedRequest('PATCH', '/api/users/120', ['password' => 'Injected-Pw-1!']),
+            ['id' => '120']
+        );
+
+        $this->assertSame(409, $response->getStatusCode(), $response->getBody());
+        $this->assertStringContainsString('identity provider', $response->getBody());
+
+        $hash = $this->profileColumn(120, 'password_hash');
+
+        $this->assertSame('', $hash, 'no credential may be created');
+        $this->assertSame('idp', $this->profileColumn(120, 'auth_method'), 'the held fact must not move');
+        $this->assertSame(
+            $epochBefore,
+            (int) $this->profileColumn(120, 'token_epoch'),
+            'a refused change must not evict sessions'
+        );
+        $this->assertFalse(
+            password_verify('Injected-Pw-1!', $hash),
+            'the refused password must not be usable to log in'
+        );
+    }
+
+    /**
+     * The override is the deliberate way through, and it is recorded.
+     *
+     * Coexistence was never the thing to forbid — the ask was that the platform
+     * know which case it is in. So this must work, must move the account to
+     * 'both', and must not be reachable without saying so.
+     */
+    public function testAdminPasswordOnAnIdpBackedAccountSucceedsWithTheExplicitOverride(): void
+    {
+        $this->seedIdpProfile(121, 'sso-override@example.com', 'sub-override');
+        $this->seedMembership(121, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->update(
+            $this->authedRequest('PATCH', '/api/users/121', [
+                'password' => 'Deliberate-Pw-1!',
+                'allowLocalPasswordOnIdpAccount' => true,
+            ]),
+            ['id' => '121']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        $this->assertTrue(password_verify('Deliberate-Pw-1!', $this->profileColumn(121, 'password_hash')));
+        $this->assertSame(
+            'both',
+            $this->profileColumn(121, 'auth_method'),
+            'an account that now holds two credentials must say so'
+        );
+
+        $this->assertSame('both', json_decode($response->getBody(), true)['data']['authMethod']);
+    }
+
+    /**
+     * A truthy-looking override that is not literally `true` does not open the
+     * door.
+     *
+     * The flag is compared with `===` on purpose. `"false"`, `"0"` and `1` are
+     * all things a hand-rolled client or a form serialiser produces, and a loose
+     * comparison would let the string `"false"` — which any reader would take
+     * as a refusal — authorise the write.
+     */
+    public function testAStringyOverrideDoesNotAuthoriseTheWrite(): void
+    {
+        $this->seedIdpProfile(122, 'sso-stringy@example.com', 'sub-stringy');
+        $this->seedMembership(122, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->update(
+            $this->authedRequest('PATCH', '/api/users/122', [
+                'password' => 'Sneaky-Pw-1!',
+                'allowLocalPasswordOnIdpAccount' => 'false',
+            ]),
+            ['id' => '122']
+        );
+
+        $this->assertSame(409, $response->getStatusCode(), $response->getBody());
+        $this->assertSame('', $this->profileColumn(122, 'password_hash'));
+    }
+
+    /**
+     * The override on its own changes nothing.
+     *
+     * It authorises a password write; it is not a switch that converts an
+     * account. Without a `password` there is nothing to authorise, and the
+     * account must stay exactly as IdP-backed as it was.
+     */
+    public function testTheOverrideAloneDoesNotConvertTheAccount(): void
+    {
+        $this->seedIdpProfile(123, 'sso-flag-only@example.com', 'sub-flag-only');
+        $this->seedMembership(123, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->update(
+            $this->authedRequest('PATCH', '/api/users/123', ['allowLocalPasswordOnIdpAccount' => true]),
+            ['id' => '123']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $this->assertSame('idp', $this->profileColumn(123, 'auth_method'));
+    }
+
+    /**
+     * An ordinary local account is unaffected: no override, no refusal.
+     *
+     * The guard has to be narrow or it breaks every administrator resetting a
+     * forgotten password, which is the common case by a wide margin.
+     */
+    public function testAdminPasswordOnALocalAccountStillWorksUntouched(): void
+    {
+        $this->seedProfile(124, 'local-pw@example.com');
+        $this->seedMembership(124, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->update(
+            $this->authedRequest('PATCH', '/api/users/124', ['password' => 'Rotated-Pw-1!']),
+            ['id' => '124']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        $this->assertTrue(password_verify('Rotated-Pw-1!', $this->profileColumn(124, 'password_hash')));
+        $this->assertSame('local', $this->profileColumn(124, 'auth_method'));
+    }
+
+    /**
+     * The read surface says which authority holds the account.
+     *
+     * The reporter's sharpest point was that an IdP-backed account was invisible
+     * to anyone reviewing it. It is not enough for the write path to know — the
+     * person deciding whether an account looks right has to be able to see it.
+     */
+    public function testTheUserPayloadCarriesTheAuthMethod(): void
+    {
+        $this->seedIdpProfile(125, 'visible-sso@example.com', 'sub-visible');
+        $this->seedMembership(125, 1, 2, 'active');
+        $this->seedProfile(126, 'visible-local@example.com');
+        $this->seedMembership(126, 1, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+
+        $one = $this->handler()->get($this->authedRequest('GET', '/api/users/125'), ['id' => '125']);
+        $this->assertSame(200, $one->getStatusCode());
+        $this->assertSame('idp', json_decode($one->getBody(), true)['data']['authMethod']);
+
+        $list = $this->handler()->list($this->authedRequest('GET', '/api/users'));
+        $this->assertSame(200, $list->getStatusCode());
+        $byId = [];
+        foreach (json_decode($list->getBody(), true)['data'] as $row) {
+            $byId[(int) $row['id']] = $row['authMethod'];
+        }
+        $this->assertSame('idp', $byId[125] ?? null, 'the list must carry it too, not only the record read');
+        $this->assertSame('local', $byId[126] ?? null);
+    }
+
+    /**
+     * Adding an existing IdP-backed address to a tenant does not quietly give
+     * that account a password.
+     *
+     * `POST /api/users` REQUIRES a password, and when the address already maps to
+     * a profile that profile is reused. So an administrator adding a federated
+     * colleague to a second workspace types a password that must go nowhere —
+     * which is what ProfileProvisioner has always done, and is asserted here
+     * because nothing was stopping a future change from "helpfully" applying it.
+     */
+    public function testAddingAnExistingIdpBackedAddressMintsNoCredential(): void
+    {
+        $this->seedIdpProfile(127, 'federated@example.com', 'sub-federated');
+        // Present in tenant 2, so tenant 1 is genuinely "adding" them.
+        $this->seedMembership(127, 2, 2, 'active');
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'federated@example.com',
+            'password' => 'Typed-Into-The-Form-1!',
+            'role' => 'user',
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+
+        $hash = $this->profileColumn(127, 'password_hash');
+        $this->assertSame('', $hash, 'the reused profile keeps its credential state');
+        $this->assertSame('idp', $this->profileColumn(127, 'auth_method'));
+        $this->assertFalse(password_verify('Typed-Into-The-Form-1!', $hash));
+
+        $this->assertSame(
+            1,
+            $this->countRows('SELECT COUNT(*) FROM memberships WHERE profile_id = 127 AND tenant_id = 1'),
+            'the membership is still created — only the credential is refused'
+        );
+    }
+
+    // ==================== #917 / A4: an absent role vs an empty one ====================
+
+    /**
+     * A role field supplied with NOTHING behind it is a 400, and creates
+     * nothing.
+     *
+     * This is the half of the reporter's A4 that reproduced: an account intended
+     * to be an administrator came out an ordinary user. Absence still defaults
+     * (see testCreateWithoutRoleDefaultsToUser, deliberately unchanged) because
+     * that is a documented contract clients depend on — but a client that NAMED
+     * the field and supplied null or an empty string has lost track of what it
+     * is asking for, and substituting the least-privileged role there is the
+     * silent downgrade.
+     *
+     * @dataProvider emptyRoleFields
+     * @param array<string, mixed> $body
+     */
+    public function testCreateRejectsARoleFieldSuppliedEmpty(array $body, string $label): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->create($this->authedRequest(
+            'POST',
+            '/api/users',
+            $body + ['email' => 'empty-role@example.com', 'password' => 'secret-123']
+        ));
+
+        $this->assertSame(400, $response->getStatusCode(), "{$label}: {$response->getBody()}");
+        $this->assertSame(
+            0,
+            $this->countRows("SELECT COUNT(*) FROM profile_emails WHERE email = 'empty-role@example.com'"),
+            "{$label}: a rejected create must leave no profile behind"
+        );
+    }
+
+    /**
+     * @return array<string, array{0: array<string, mixed>, 1: string}>
+     */
+    public static function emptyRoleFields(): array
+    {
+        return [
+            'role null'    => [['role' => null], 'role: null'],
+            'role empty'   => [['role' => ''], "role: ''"],
+            'role_id null' => [['role_id' => null], 'role_id: null'],
+            'role_id empty' => [['role_id' => ''], "role_id: ''"],
+        ];
+    }
+
+    /**
+     * A null `role` beside a usable `role_id` is not an empty field.
+     *
+     * The handler reads `role ?? role_id`, so a client that sends both — a
+     * generated one filling in every key it knows about — still expressed a
+     * role. Refusing that would be pedantry dressed up as strictness.
+     */
+    public function testANullRoleBesideAUsableRoleIdIsAccepted(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'null-role-with-id@example.com',
+            'password' => 'secret-123',
+            'role' => null,
+            'role_id' => 1,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+        $this->assertSame('admin', json_decode($response->getBody(), true)['data']['role']);
+    }
+
+    /**
+     * One column of one profile, as a string.
+     *
+     * Guarded rather than chaining onto `query()`: PDO::query() returns
+     * PDOStatement|false, so the chain is a static-analysis error and the
+     * project's phpstan baseline counts the existing occurrences exactly. New
+     * assertions go through here rather than raising that count.
+     *
+     * The column name is a literal at every call site, never input.
+     */
+    private function profileColumn(int $profileId, string $column): string
+    {
+        $stmt = $this->pdo->prepare("SELECT {$column} FROM profiles WHERE id = :id");
+        self::assertInstanceOf(PDOStatement::class, $stmt);
+        $stmt->execute([':id' => $profileId]);
+
+        return (string) $stmt->fetchColumn();
+    }
+
+    /** A passwordless, IdP-backed profile with one linked identity. */
+    private function seedIdpProfile(int $id, string $email, string $subject): void
+    {
+        // `auth_method` is stated rather than left on migration 104's 'local'
+        // DEFAULT — a fixture that inserts an empty password_hash and says
+        // nothing else claims a credential it does not hold, exactly the
+        // inference #917 removed. FederatedIdentityLinker carries the same
+        // obligation in production.
+        $this->pdo->prepare(
+            "INSERT INTO profiles (id, display_name, password_hash, auth_method, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, status, created_at, updated_at)
+             VALUES (?, ?, '', 'idp', false, 0, 0, 'active', datetime('now'), datetime('now'))"
+        )->execute([$id, strstr($email, '@', true) ?: $email]);
+
+        $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, datetime('now'))"
+        )->execute([$id, $email]);
+
+        $this->pdo->prepare(
+            "INSERT INTO external_identities
+                 (profile_id, provider_id, provider_key, issuer, subject, email, linked_at, created_at)
+             VALUES (?, NULL, 'google', 'https://accounts.google.com', ?, ?, datetime('now'), datetime('now'))"
+        )->execute([$id, $subject, $email]);
     }
 }
