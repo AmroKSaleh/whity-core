@@ -745,7 +745,23 @@ jobs:
             exit 0
           fi
 
-          gh pr create \n            --base develop \n            --head main \n            --title "chore: back-merge main into develop after ${RELEASE_TAG}" \n            --body "Opened automatically after **${RELEASE_TAG}** published.
+          # The body goes through a FILE, not an inline --body string. Two bugs lived
+          # in the inline version and only one of them was visible:
+          #
+          #  - it used a literal \n where a line continuation was meant, so `gh` got
+          #    four bare `n` arguments and refused. This step therefore failed on EVERY
+          #    release since it was added, which is why main's ancestry had to be
+          #    repaired by hand rather than by the job that exists to prevent that;
+          #  - a multi-line string inside this block scalar carries the step's own
+          #    indentation into the body, and Markdown reads indented lines as a code
+          #    block. The whole explanation would have rendered as monospace even after
+          #    the quoting was fixed -- so fixing only the visible bug would have looked
+          #    done without being done.
+          #
+          # Heredoc body lines sit at this step's indentation on purpose: YAML strips it,
+          # so the shell (and the rendered Markdown) see column 0.
+          cat > "${RUNNER_TEMP}/back-merge-body.md" <<EOF
+          Opened automatically after **${RELEASE_TAG}** published.
 
           Expect **zero file changes**. This carries main's release merge commit back onto develop so git stops reporting develop as behind.
 
@@ -755,4 +771,11 @@ jobs:
 
           ## If that window closed, closing this is correct
 
-          The merge commit it carries has a tree IDENTICAL to its develop-side parent, which develop already contains. main introduces no content develop lacks, so every future develop-to-main merge is still clean. What you lose by closing is cosmetic: git reports develop as N behind after N releases, which misleads a reader but breaks nothing."
+          The merge commit it carries has a tree IDENTICAL to its develop-side parent, which develop already contains. main introduces no content develop lacks, so every future develop-to-main merge is still clean. What you lose by closing is cosmetic: git reports develop as N behind after N releases, which misleads a reader but breaks nothing.
+          EOF
+
+          gh pr create \
+            --base develop \
+            --head main \
+            --title "chore: back-merge main into develop after ${RELEASE_TAG}" \
+            --body-file "${RUNNER_TEMP}/back-merge-body.md"
