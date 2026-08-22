@@ -2685,6 +2685,11 @@ class PluginLoader
         //    callbacks are wrapped in the same error boundary as route handlers.
         $registeredHooks = [];
         if ($this->hookManager !== null) {
+            // Record the namespace this plugin owns so a dispatch under a
+            // MIS-SPELLED namespaced name can be reported rather than matching
+            // no listener in silence (#843). Diagnostic bookkeeping only.
+            $this->hookManager->registerPluginNamespace($plugin->getName());
+
             foreach ($plugin->getHooks() as $eventName => $hookData) {
                 foreach ($this->registerHook($pluginKey, $eventName, $hookData) as $callback) {
                     $registeredHooks[] = ['event' => $eventName, 'callback' => $callback];

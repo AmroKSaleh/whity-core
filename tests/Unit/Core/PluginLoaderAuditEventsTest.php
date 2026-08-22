@@ -6,6 +6,7 @@ namespace Tests\Unit\Core;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Audit\AuditContext;
 use Whity\Core\Audit\AuditLogger;
@@ -33,6 +34,18 @@ final class PluginLoaderAuditEventsTest extends TestCase
     private PDO $pdo;
 
     private HookManager $hooks;
+
+    private PluginEventSpyLogger $hookLogs;
+
+    /**
+     * Backup of APP_ENV so the one test that switches on the dev-gated
+     * unmatched-event diagnostic (#843) cannot leak it into the rest of the
+     * suite. Presence is tracked apart from the value: absent is the fail-quiet
+     * default every other test here relies on.
+     */
+    private bool $hadAppEnv = false;
+
+    private ?string $previousAppEnv = null;
 
     public static function setUpBeforeClass(): void
     {
@@ -178,15 +191,28 @@ PHP);
     protected function setUp(): void
     {
         $this->pdo = self::makeSqliteSchema();
-        $this->hooks = new HookManager();
+        // Wired with a logger as the host wires one, so the loader's own
+        // diagnostics are observable. With APP_ENV absent the unmatched-event
+        // warning is off by default, exactly as it is in production.
+        $this->hookLogs = new PluginEventSpyLogger();
+        $this->hooks = new HookManager(null, $this->hookLogs);
         TenantContext::reset();
         AuditContext::reset();
+
+        $this->hadAppEnv = array_key_exists('APP_ENV', $_ENV);
+        $this->previousAppEnv = isset($_ENV['APP_ENV']) ? (string) $_ENV['APP_ENV'] : null;
     }
 
     protected function tearDown(): void
     {
         TenantContext::reset();
         AuditContext::reset();
+
+        if ($this->hadAppEnv) {
+            $_ENV['APP_ENV'] = $this->previousAppEnv;
+        } else {
+            unset($_ENV['APP_ENV']);
+        }
     }
 
     private function loadedLoader(?string $dir = null): PluginLoader
@@ -314,6 +340,38 @@ PHP);
         $this->assertSame([], $this->allRows(), 'refusal is whole-declaration, not per entry');
     }
 
+    /**
+     * The end-to-end shape of #843: a real load, then a dispatch under a name
+     * the plugin got slightly wrong.
+     *
+     * Everything about this dispatch looks fine from inside the plugin — it
+     * returns, nothing throws, no other behaviour changes — and the audit table
+     * simply stays empty, which is why the failure is normally found by whoever
+     * later needs the record. Here the loader has told the hook manager which
+     * namespace `EventsA` owns, so the same dispatch says so out loud in
+     * development while STILL writing no row: the diagnostic reports the
+     * mistake, it does not paper over it by guessing what was meant.
+     */
+    public function testAMisTypedDispatchIsReportedAfterARealLoad(): void
+    {
+        $_ENV['APP_ENV'] = 'development';
+        $this->loadedLoader();
+        TenantContext::setTenantId(1);
+
+        $result = $this->hooks->dispatch('eventsa:task.completd', ['task_id' => 42, 'tenant_id' => 1]);
+
+        $this->assertSame([], $this->allRows(), 'the mis-spelled name is still audited by nobody');
+        $this->assertCount(1, $this->hookLogs->records);
+        $this->assertStringContainsString("Plugin 'EventsA'", $this->hookLogs->records[0]['message']);
+        $this->assertContains(
+            'eventsa:task.completed',
+            $this->hookLogs->records[0]['context']['bound_events'],
+            'the author is handed the names their namespace really is bound to'
+        );
+        // Never at the expense of the payload the caller passed.
+        $this->assertSame(['task_id' => 42, 'tenant_id' => 1], $result);
+    }
+
     public function testAHostWithNoAuditLoggerWiredLoadsPluginsUnchanged(): void
     {
         // The CLI and the plugin smoke test wire no audit writer; a declaring
@@ -422,5 +480,30 @@ PHP);
         $pdo = SchemaFromMigrations::make(true);
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 't1')");
         return $pdo;
+    }
+}
+
+/**
+ * In-memory PSR-3 logger double for the loader's hook manager. The
+ * unmatched-event diagnostic's whole contract is a warning that names the plugin
+ * and the events its namespace really carries, so both halves are asserted
+ * rather than merely allowed to happen somewhere.
+ */
+final class PluginEventSpyLogger extends AbstractLogger
+{
+    /** @var list<array{level: string, message: string, context: array<string, mixed>}> */
+    public array $records = [];
+
+    /**
+     * @param mixed $level
+     * @param array<string, mixed> $context
+     */
+    public function log($level, string|\Stringable $message, array $context = []): void
+    {
+        $this->records[] = [
+            'level' => (string) $level,
+            'message' => (string) $message,
+            'context' => $context,
+        ];
     }
 }
