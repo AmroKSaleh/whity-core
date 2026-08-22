@@ -20,12 +20,25 @@ declare(strict_types=1);
  * is how a linter stops being read. See
  * {@see Whity\Sdk\Schema\UndeclaredReferenceLinter} for the full rule.
  *
+ * CORE IS IN SCOPE TOO (#751)
+ * ---------------------------
+ * This guard used to lint plugins ONLY, treating core tables purely as
+ * resolvable TARGETS — so core's own migrations were never the subject of the
+ * scan. #751 found two core columns naming a profile with no foreign key and no
+ * later migration adding one (`notifications.recipient_profile_id`,
+ * `user_notification_preferences.profile_id`), which is exactly the orphaning
+ * bug described above, in the codebase that ships the linter written to catch
+ * it. They were found by grep. Core's migration directory is therefore linted
+ * alongside every plugin's, so the next one fails a build instead of waiting to
+ * be noticed.
+ *
  * Mirrors scripts/ci-tenant-predicate-guard.php and
  * scripts/ci-plugin-tenant-conformance.php: standalone, no HTTP, no DB, exits
  * non-zero on any violation.
  *
- * Usage:  php scripts/ci-undeclared-reference-guard.php [pluginDir ...]
- *         (defaults to every in-tree plugin under plugins/)
+ * Usage:  php scripts/ci-undeclared-reference-guard.php [migrationDir ...]
+ *         (defaults to database/migrations plus every in-tree plugin under
+ *          plugins/)
  */
 
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -39,18 +52,23 @@ use Whity\Sdk\Tenant\PluginTablesInterface;
 
 $root = dirname(__DIR__);
 $pluginRoot = $root . '/plugins';
+$coreMigrations = $root . '/database/migrations';
 
 $targets = array_slice($argv, 1);
 if ($targets === []) {
-    $targets = array_filter(
+    $plugins = array_filter(
         glob($pluginRoot . '/*') ?: [],
         static fn (string $path): bool => is_dir($path) && is_dir($path . '/Migrations')
     );
-    sort($targets);
+    sort($plugins);
+
+    // Core first: it owns the tables everything else points at, so its own
+    // violations are the ones worth reading before a plugin's.
+    $targets = is_dir($coreMigrations) ? array_merge([$coreMigrations], $plugins) : $plugins;
 }
 
 if ($targets === []) {
-    fwrite(STDERR, "FAIL: no plugin directories with a Migrations/ folder were found.\n");
+    fwrite(STDERR, "FAIL: no migration directories were found.\n");
     exit(2);
 }
 
@@ -126,7 +144,8 @@ if ($violations !== []) {
 }
 
 printf(
-    "OK: every reference in %d plugin migration set(s) is either enforced by a foreign key or declared to core.\n",
+    "OK: every reference in %d migration set(s) (core + in-tree plugins) is either enforced by a "
+    . "foreign key or declared to core.\n",
     count($targets)
 );
 exit(0);

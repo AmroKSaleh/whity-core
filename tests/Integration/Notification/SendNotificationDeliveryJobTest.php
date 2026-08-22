@@ -7,6 +7,7 @@ namespace Tests\Integration\Notification;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Tests\Support\RecipientProfiles;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Notification\Jobs\SendNotificationDeliveryJob;
@@ -34,6 +35,9 @@ final class SendNotificationDeliveryJobTest extends TestCase
     {
         $this->pdo = SchemaFromMigrations::make(true);
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a')");
+        // The recipients these fixtures address must exist: #751 gave
+        // notifications.recipient_profile_id a real foreign key to profiles.
+        RecipientProfiles::seed($this->pdo);
         $this->repo = new NotificationRepository($this->pdo);
     }
 

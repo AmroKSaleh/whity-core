@@ -6,6 +6,7 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RecipientProfiles;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\NotificationPreferencesApiHandler;
 use Whity\Auth\TokenValidator;
@@ -30,6 +31,11 @@ final class NotificationPreferencesApiHandlerRealEngineTest extends TestCase
     protected function setUp(): void
     {
         $this->pdo = SchemaFromMigrations::make(true);
+
+        // The preference fixtures below address profiles by id, and #751 gave
+        // `user_notification_preferences.profile_id` a real foreign key — so the
+        // person whose preferences these are has to exist first.
+        RecipientProfiles::seed($this->pdo);
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a')");
         $this->repo = new NotificationPreferenceRepository($this->pdo);
         $this->resolver = new NotificationPreferenceResolver($this->repo);

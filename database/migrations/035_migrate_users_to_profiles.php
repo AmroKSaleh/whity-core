@@ -111,6 +111,12 @@ class MigrateUsersToProfiles
         // remove exactly the rows this migration created.
         $db->exec("
             CREATE TABLE IF NOT EXISTS migration_035_profile_ids (
+                -- @reference-lint-ignore-table: a historical id MAP, not a live
+                -- reference. It exists so down() can name exactly the rows up()
+                -- created, which means it has to keep naming ids AFTER those rows
+                -- are gone -- a cascade would delete the record that makes the
+                -- rollback possible. The user_id side cannot be a key at all:
+                -- migration 042 drops `users`.
                 user_id    INTEGER NOT NULL,
                 profile_id INTEGER NOT NULL,
                 PRIMARY KEY (user_id)
