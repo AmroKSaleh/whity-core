@@ -10,6 +10,8 @@
     "./demo-catalog": "./src/demo-catalog/index.ts",
     "./record": "./src/record/index.ts",
     "./roles": "./src/roles/index.ts",
+    "./document-designer": "./src/document-designer/index.ts",
+    "./document-designer/print-document": "./src/document-designer/print-document.tsx",
     "./users": "./src/users/index.ts",
     "./sync": "./src/sync/index.ts",
     "./i18n": "./src/i18n/index.ts"
@@ -19,6 +21,8 @@
   ],
   "peerDependencies": {
     "@hookform/resolvers": ">=5",
+    "katex": ">=0.16",
+    "radix-ui": ">=1",
     "react": ">=19",
     "react-dom": ">=19",
     "react-hook-form": ">=7",
@@ -30,6 +34,9 @@
   },
   "devDependencies": {
     "@hookform/resolvers": "^5.7.1",
+    "@types/katex": "^0.16.8",
+    "katex": "^0.18.4",
+    "radix-ui": "^1.6.7",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "react": "19.2.8",

@@ -28,6 +28,7 @@ COPY render-service/harness ./harness
 COPY web/components/documents /workspace/web/components/documents
 COPY web/lib/documents /workspace/web/lib/documents
 COPY packages/ui/src /workspace/packages/ui/src
+COPY packages/features/src /workspace/packages/features/src
 
 RUN npm run build:harness
 
