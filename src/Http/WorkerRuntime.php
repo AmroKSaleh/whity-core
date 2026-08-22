@@ -29,6 +29,13 @@ namespace Whity\Http;
  * DEBUG flag. No prior DEBUG convention existed in the repo, so a conservative
  * boolean parse is used (1/true/yes/on, case-insensitive) and everything else
  * — including unset — is treated as off.
+ *
+ * That definition has since grown a caller outside the worker loop
+ * ({@see isDebug()}, used by the unmatched-plugin-event diagnostic in
+ * {@see \Whity\Core\Hooks\HookManager}, #843), so it is public rather than
+ * private. Re-deriving "is debug on?" somewhere else is how one gate ends up
+ * honouring DEBUG and another only APP_ENV, leaving an operator who set the
+ * documented flag with half the diagnostics they asked for.
  */
 final class WorkerRuntime
 {
@@ -81,9 +88,12 @@ final class WorkerRuntime
     /**
      * Resolve whether debug-level behavior is enabled for the given environment.
      *
-     * @param array<string, mixed> $env
+     * The repo's single answer to "is this a development/debug run?" — see the
+     * class docblock for why it is shared rather than re-derived per caller.
+     *
+     * @param array<string, mixed> $env Environment map (typically $_ENV).
      */
-    private static function isDebug(array $env): bool
+    public static function isDebug(array $env): bool
     {
         if (($env['APP_ENV'] ?? 'production') === 'development') {
             return true;

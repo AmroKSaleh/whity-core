@@ -6,6 +6,8 @@ use Psr\Log\LoggerInterface;
 use Whity\Core\Audit\AuditContext;
 use Whity\Core\Events\DomainEventStore;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Http\WorkerRuntime;
+use Whity\Sdk\PluginNamespace;
 
 /**
  * HookManager implements a Mediator/Observer pattern for event handling
@@ -36,6 +38,25 @@ class HookManager
 
     private ?LoggerInterface $logger;
 
+    /**
+     * Namespace slug => plugin name, for every plugin registered with a host
+     * that wired this hook manager (#843).
+     *
+     * Read by exactly one thing: the unmatched-dispatch diagnostic in
+     * {@see dispatch()}. It is a MAP rather than a set because the warning has
+     * to name the plugin the way its author would recognise it
+     * (`Acme\Widgets\Plugin`), not the slug they got wrong.
+     *
+     * Entries are never removed. A plugin that is disabled loses its listeners
+     * but keeps its namespace here, which costs at most a development-only
+     * warning that correctly names a real plugin — whereas forgetting the
+     * namespace would silence the diagnostic for the plugin most likely to be
+     * mid-edit.
+     *
+     * @var array<string, string>
+     */
+    private array $pluginNamespaces = [];
+
     public function __construct(?DomainEventStore $eventStore = null, ?LoggerInterface $logger = null)
     {
         $this->eventStore = $eventStore;
@@ -64,6 +85,35 @@ class HookManager
     }
 
     /**
+     * Record that a plugin owns a namespace in the flat event space (#843).
+     *
+     * Called by the plugin loader as each plugin registers its capabilities —
+     * the one place a plugin's NAME and this hook manager meet. Nothing about
+     * dispatching depends on it: an unrecorded namespace only means the
+     * diagnostic in {@see dispatch()} stays quiet, exactly as it did before.
+     *
+     * Registered for EVERY plugin, not only those declaring audited events. Any
+     * plugin may dispatch its own namespaced events, and a diagnostic is only as
+     * good as its idea of which prefixes are real.
+     *
+     * A name yielding no usable slug is ignored rather than refused: such a
+     * plugin cannot namespace anything at all
+     * ({@see PluginNamespace::qualify()} throws for it), so there is no
+     * namespace to record and nothing a diagnostic could say about one.
+     *
+     * @param string $pluginName The plugin name ({@see \Whity\Sdk\PluginInterface::getName()}).
+     */
+    public function registerPluginNamespace(string $pluginName): void
+    {
+        $slug = PluginNamespace::slug($pluginName);
+        if ($slug === null) {
+            return;
+        }
+
+        $this->pluginNamespaces[$slug] = $pluginName;
+    }
+
+    /**
      * Dispatch a synchronous event and return modified data
      *
      * Executes all listeners for the event in priority order, passing data and context
@@ -81,8 +131,11 @@ class HookManager
             'timestamp' => time(),
         ];
 
-        // Return early if no listeners for this event
+        // Return early if no listeners for this event. Most events legitimately
+        // have none, so this stays a plain return — but a NAMESPACED name that
+        // reached nobody is worth a word in development (#843), see below.
         if (!isset($this->listeners[$eventName])) {
+            $this->reportUnmatchedPluginEvent($eventName);
             return $data;
         }
 
@@ -101,6 +154,92 @@ class HookManager
         }
 
         return $data;
+    }
+
+    /**
+     * Warn — in development only — about a namespaced event that reached nobody
+     * (#843).
+     *
+     * An unlistened event is normally unremarkable: core dispatches filter hooks
+     * no plugin has subscribed to on every request, so silence is the right
+     * default. This narrows to the one shape that is almost certainly a mistake:
+     * a name carrying {@see PluginNamespace::SEPARATOR} whose prefix belongs to
+     * a REGISTERED plugin, and which nothing is bound to. A bare name says
+     * nothing; a namespace no plugin claims says nothing either.
+     *
+     * Why the case deserves code at all. Audited plugin events (SDK 1.29) are
+     * bound to the NAMESPACED name, and the prefix is a slug of the plugin name
+     * rather than the name itself — so a hand-spelled
+     * `Acme\Widgets\Plugin:task.completed`, or a one-character typo in
+     * `acme:task.completed`, writes no audit row, logs nothing, and leaves the
+     * plugin behaving normally in every other respect. The incompleteness is
+     * discovered when someone goes looking for who did something and the record
+     * is not there: both the moment the trail exists for and the worst moment to
+     * learn it was never wired up.
+     *
+     * A WARNING, never an exception. The action this observes has already
+     * happened, and a diagnostic that could break what it observes would be a
+     * worse defect than the one it reports — the same reason the audit write
+     * itself is fail-soft. Development-gated ({@see WorkerRuntime::isDebug()} —
+     * the repo's existing APP_ENV/DEBUG answer, not a tunable of its own)
+     * because a plugin looping over a mis-spelled event would otherwise flood a
+     * production log with a message only its author can act on.
+     */
+    private function reportUnmatchedPluginEvent(string $eventName): void
+    {
+        // Cheapest rejection first: every core event name is dotted and carries
+        // no separator, so this returns on all but a plugin-namespaced dispatch
+        // before any env or map lookup happens.
+        $separator = strpos($eventName, PluginNamespace::SEPARATOR);
+        if ($separator === false || $this->pluginNamespaces === [] || $this->logger === null) {
+            return;
+        }
+
+        if (!WorkerRuntime::isDebug($_ENV)) {
+            return;
+        }
+
+        $prefix = substr($eventName, 0, $separator);
+        $bareEvent = substr($eventName, $separator + 1);
+
+        // The prefix as dispatched, then the SLUG of it. The second lookup is
+        // what catches a hand-spelled prefix, where an author wrote the plugin
+        // name where its slug belonged: `Acme\Widgets\Plugin` slugs to the
+        // `plugin` the host actually listens under, `Acme` to `acme`.
+        $slug = isset($this->pluginNamespaces[$prefix])
+            ? $prefix
+            : PluginNamespace::slug($prefix);
+
+        if ($slug === null || !isset($this->pluginNamespaces[$slug])) {
+            return;
+        }
+
+        // Computable only for a wrong PREFIX. A typo in the bare half is not
+        // recoverable, so that author gets the names actually bound under their
+        // namespace instead — which is the string they were reaching for.
+        $expected = $slug === $prefix ? null : $slug . PluginNamespace::SEPARATOR . $bareEvent;
+
+        $bound = [];
+        foreach (array_keys($this->listeners) as $listened) {
+            if (str_starts_with((string) $listened, $slug . PluginNamespace::SEPARATOR)) {
+                $bound[] = (string) $listened;
+            }
+        }
+
+        $this->logger->warning(
+            "Plugin '{$this->pluginNamespaces[$slug]}' dispatched '{$eventName}', which no listener "
+            . 'is bound to'
+            . ($expected !== null ? ", but '{$expected}' is the namespaced form of it" : '')
+            . '. Namespaced event names belong to Whity\\Sdk\\Hooks\\Events::forPlugin(): the prefix '
+            . 'is a SLUG of the plugin name, so a hand-spelled or mis-typed one matches nothing at '
+            . 'all — and a declared audited event then writes no audit row.',
+            [
+                'event' => $eventName,
+                'plugin' => $this->pluginNamespaces[$slug],
+                'expected_event' => $expected,
+                'bound_events' => $bound,
+            ]
+        );
     }
 
     /**
