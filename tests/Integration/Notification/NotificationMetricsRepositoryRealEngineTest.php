@@ -6,6 +6,7 @@ namespace Tests\Integration\Notification;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RecipientProfiles;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Notification\NotificationMetricsRepository;
 use Whity\Core\Notification\NotificationRepository;
@@ -27,6 +28,9 @@ final class NotificationMetricsRepositoryRealEngineTest extends TestCase
     {
         $this->pdo = SchemaFromMigrations::make(true);
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1,'a','a'),(2,'b','b') ON CONFLICT (id) DO NOTHING");
+        // The recipients these fixtures address must exist: #751 gave
+        // notifications.recipient_profile_id a real foreign key to profiles.
+        RecipientProfiles::seed($this->pdo);
         $this->metrics = new NotificationMetricsRepository($this->pdo);
         $this->notifications = new NotificationRepository($this->pdo);
     }

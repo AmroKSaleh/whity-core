@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Integration\Notification;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RecipientProfiles;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Notification\CoreTransports;
 use Whity\Core\Notification\NotificationDispatcher;
@@ -42,6 +43,9 @@ final class NotificationDeliveryEndToEndTest extends TestCase
     {
         $pdo = SchemaFromMigrations::make(true);
         $pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a')");
+        // The recipients these fixtures address must exist: #751 gave
+        // notifications.recipient_profile_id a real foreign key to profiles.
+        RecipientProfiles::seed($pdo);
 
         $repo = new NotificationRepository($pdo);
         $transports = CoreTransports::make(); // in_app + email log transports
