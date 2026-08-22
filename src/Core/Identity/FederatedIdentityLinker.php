@@ -311,7 +311,7 @@ final class FederatedIdentityLinker
             // `auth_method` is named rather than left on migration 104's
             // 'local' DEFAULT: the row is created passwordless, and the column
             // that says so is what every password-write path now consults
-            // (#916). Leaving it defaulted would have ExternalIdentityRepository
+            // (#917). Leaving it defaulted would have ExternalIdentityRepository
             // ::link() read 'local' below and conclude the account holds a local
             // credential, which is exactly the inference this replaced.
             $profileId = $this->insertReturningId(
@@ -416,7 +416,7 @@ final class FederatedIdentityLinker
             // Passwordless profile: empty password_hash means password_verify() can
             // never succeed, so this account is reachable ONLY via its linked IdP.
             // `auth_method = 'idp'` is the HELD form of that same statement, and
-            // the one every password-write path checks (#916) — the empty hash
+            // the one every password-write path checks (#917) — the empty hash
             // alone was never something anything above the storage layer read.
             $profileId = $this->insertReturningId(
                 "INSERT INTO profiles

@@ -37,7 +37,7 @@ final class MeIdentitiesApiHandlerRealEngineTest extends TestCase
      * A profile with (or without) a local credential.
      *
      * `auth_method` is stated, not left to migration 104's 'local' DEFAULT
-     * (#916). A fixture that inserts an empty `password_hash` and says nothing
+     * (#917). A fixture that inserts an empty `password_hash` and says nothing
      * else claims to hold a local credential it does not have, and the handler
      * under test now reads the held fact rather than testing the hash for
      * emptiness — so the fixture would quietly disable the very lockout guard
@@ -155,7 +155,7 @@ final class MeIdentitiesApiHandlerRealEngineTest extends TestCase
      * An account with a local password may drop its last identity — it still has
      * a way in — and afterwards the platform must no longer describe it as
      * IdP-backed, or an administrator setting its password would be refused for
-     * a provider that is no longer attached (#916).
+     * a provider that is no longer attached (#917).
      */
     public function testUnlinkingTheLastIdentityOfAPasswordAccountUpdatesTheHeldFact(): void
     {

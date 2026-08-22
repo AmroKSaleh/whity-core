@@ -63,7 +63,7 @@ use Whity\Core\Db\DbBool;
  * Reusing an existing profile never rewrites its credential — that is
  * {@see \Whity\Core\Identity\ProfileProvisioner}'s contract — so a `password`
  * sent for an address that already has a profile, IdP-backed or not, is
- * discarded rather than applied (#916).
+ * discarded rather than applied (#917).
  *
  * Update (PATCH /api/users/{id})
  * ------------------------------
@@ -76,7 +76,7 @@ use Whity\Core\Db\DbBool;
  *
  * A `password` against an account whose credentials belong to an identity
  * provider (`profiles.auth_method = 'idp'`) is REFUSED with 409 unless the body
- * also carries `allowLocalPasswordOnIdpAccount: true` (#916). This endpoint was
+ * also carries `allowLocalPasswordOnIdpAccount: true` (#917). This endpoint was
  * where the defect was reported: it minted a local credential on an SSO account
  * and answered 200. The override exists because coexistence is a legitimate
  * arrangement — what it can no longer be is accidental, so taking it moves the
@@ -109,7 +109,7 @@ class UsersApiHandler
 
     /**
      * The PATCH body flag that permits a local password on an IdP-backed
-     * account (#916).
+     * account (#917).
      *
      * Spelled out rather than shortened. It appears in an OpenAPI schema, in a
      * refusal message and in an audit payload, and each of those is read by
@@ -273,7 +273,7 @@ class UsersApiHandler
             // a profile blocks login everywhere it holds a membership, not just
             // in this tenant.
             'accountStatus' => (string)($row['account_status'] ?? 'active'),
-            // Which authority holds this account's credentials (#916,
+            // Which authority holds this account's credentials (#917,
             // profiles.auth_method — 'local' | 'idp' | 'both'). Surfaced
             // because the reporter's sharpest point was that an IdP-backed
             // account was invisible to anyone reviewing it: the column that
@@ -382,7 +382,7 @@ class UsersApiHandler
             // numeric role_id). A supplied-but-unresolvable/foreign role is 404,
             // mirroring update.
             //
-            // #916 / A4 — three cases, deliberately not two. An account meant to
+            // #917 / A4 — three cases, deliberately not two. An account meant to
             // be an administrator was created, returned 201, and came out an
             // ordinary user, with nothing anywhere saying a substitution had
             // been made. The line drawn here is: IF THE CALLER NAMED THE FIELD,
@@ -563,7 +563,7 @@ class UsersApiHandler
                 'promoted' => $promoted,
                 'tenant_id' => (int)$tenantId,
                 'tenant_name' => $tenantName,
-                // #916 / A4: true when no role was named and the global `user`
+                // #917 / A4: true when no role was named and the global `user`
                 // role was substituted. The trail now distinguishes "somebody
                 // chose the ordinary role" from "nobody chose anything and the
                 // platform picked the least-privileged one", which is what the
@@ -651,7 +651,7 @@ class UsersApiHandler
             $ownerTenantId = (int)$membership['tenant_id'];
 
             // The HELD fact about which authority owns this account's
-            // credentials (#916), read once from the row the guard above
+            // credentials (#917), read once from the row the guard above
             // already fetched — never inferred from password_hash.
             $idpBacked = ((string)($membership['auth_method'] ?? AuthMethod::LOCAL)) === AuthMethod::IDP;
             $idpOverrideUsed = false;
@@ -697,7 +697,7 @@ class UsersApiHandler
                     return Response::error($validationError, 400);
                 }
 
-                // #916 — THE defect this endpoint carried. An account that signs
+                // #917 — THE defect this endpoint carried. An account that signs
                 // in only through an identity provider stores the empty string
                 // in password_hash, so before migration 104 "has no local
                 // password" and "has an empty local password" were the same row
@@ -829,7 +829,7 @@ class UsersApiHandler
                     // strip 2FA from an account that still has an authenticator
                     // enrolled. Clearing 2FA is a separate, explicit action.
                     //
-                    // The statement itself now lives in AuthMethod (#916), the
+                    // The statement itself now lives in AuthMethod (#917), the
                     // single writer of profiles.password_hash — which also
                     // carries the IdP refusal in its WHERE clause and moves an
                     // overridden 'idp' account to 'both', so the held fact
@@ -949,7 +949,7 @@ class UsersApiHandler
                 $payload['account_status'] = $newAccountStatus;
             }
             if ($idpOverrideUsed) {
-                // #916: an administrator deliberately gave an IdP-backed account
+                // #917: an administrator deliberately gave an IdP-backed account
                 // a local credential, moving it from 'idp' to 'both'. Recorded
                 // because this is precisely the act that used to happen by
                 // accident and leave no trace — an operator auditing which

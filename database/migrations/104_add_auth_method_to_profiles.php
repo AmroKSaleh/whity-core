@@ -8,7 +8,7 @@ use PDO;
 use Whity\Database\Database;
 
 /**
- * AddAuthMethodToProfiles (#916) — makes "which authority holds this account's
+ * AddAuthMethodToProfiles (#917) — makes "which authority holds this account's
  * credentials" a fact the platform STORES instead of one it guesses.
  *
  * WHY THIS EXISTS

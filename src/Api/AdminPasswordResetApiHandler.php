@@ -116,7 +116,7 @@ final class AdminPasswordResetApiHandler
                 );
             }
 
-            // #916: this account signs in through an identity provider and holds
+            // #917: this account signs in through an identity provider and holds
             // no local password, so a reset link would not restore access — it
             // would CREATE a local credential that outlives the provider's
             // control of the account. PasswordResetService::issue() refuses it

@@ -371,7 +371,7 @@ final class AdminPasswordResetApiHandlerRealEngineTest extends TestCase
 
         return $pdo;
     }
-    // ==================== #916: IdP-backed targets ====================
+    // ==================== #917: IdP-backed targets ====================
 
     /**
      * An administrator cannot mail a reset link to an account that signs in

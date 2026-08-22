@@ -88,7 +88,7 @@ final class MeIdentitiesApiHandler
     /**
      * True when the profile has no usable password (SSO-only account).
      *
-     * Reads `profiles.auth_method` — the fact the platform HOLDS (#916, migration
+     * Reads `profiles.auth_method` — the fact the platform HOLDS (#917, migration
      * 104) — rather than testing `password_hash` for the empty string, which is
      * what this method used to do and was, until 104, the only place in the
      * codebase where "is this account IdP-backed?" was answered at all. It was

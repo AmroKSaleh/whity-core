@@ -127,7 +127,7 @@ final class PasswordResetHandler
                         ]);
                     }
                 } catch (LocalPasswordRefusedException $e) {
-                    // #916: the address belongs to an IdP-backed account, which
+                    // #917: the address belongs to an IdP-backed account, which
                     // holds no local password to reset. Caught separately from
                     // the failure below only so the log says what happened —
                     // the RESPONSE is deliberately identical to every other

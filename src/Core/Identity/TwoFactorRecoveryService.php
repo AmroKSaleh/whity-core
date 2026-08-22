@@ -256,7 +256,7 @@ final class TwoFactorRecoveryService
                 return null;
             }
 
-            // #916: recovery ends in a password-reset token, so for an
+            // #917: recovery ends in a password-reset token, so for an
             // IdP-backed profile it would hand out a LOCAL credential for an
             // account the provider governs alone. Checked here, before the
             // status flip and before clearTwoFactor(), so the request stays
@@ -389,7 +389,7 @@ final class TwoFactorRecoveryService
                 return null;
             }
 
-            // #916: same refusal as approveForTenant(), for the same reason —
+            // #917: same refusal as approveForTenant(), for the same reason —
             // a forced recovery for an IdP-backed profile would mint a local
             // credential. Before clearTwoFactor(), so a refused force-reset
             // leaves the account exactly as it found it.

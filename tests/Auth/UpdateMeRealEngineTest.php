@@ -395,13 +395,13 @@ final class UpdateMeRealEngineTest extends TestCase
         $pdo->exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1, 'admin'), (2, 'user')");
         return $pdo;
     }
-    // ==================== #916: IdP-backed accounts ====================
+    // ==================== #917: IdP-backed accounts ====================
 
     /**
      * A profile whose credentials belong to an identity provider is told so,
      * rather than being told its current password is wrong.
      *
-     * Before #916 this request also failed — `password_verify($any, '')` is
+     * Before #917 this request also failed — `password_verify($any, '')` is
      * false for every input — but it failed with 401 "Current password is
      * incorrect", which sends the account owner hunting for a password that has
      * never existed. The refusal is now explicit, and it is a 409 because

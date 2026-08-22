@@ -8,7 +8,7 @@ use RuntimeException;
 
 /**
  * Raised when something tries to mint a local password for a profile whose
- * credentials belong to an identity provider (#916).
+ * credentials belong to an identity provider (#917).
  *
  * This is thrown by {@see AuthMethod::setPasswordHash()} — the single writer of
  * `profiles.password_hash` — so it is the LAST line, not the first. Every entry
