@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-22
+
 ### Fixed
 
 - **Two plugins declaring the same class no longer take the whole instance down, uncatchably, on every request (#841).** `PluginLoader::discover()` `require_once`d each plugin file it found with no guard, and `require_once` deduplicates by PATH, not by class name — so two DIFFERENT files declaring one fully-qualified name were both executed and the second declaration raised `Cannot redeclare class …`. That is a **fatal, not an exception**: the per-plugin error boundary could not catch it, the lifecycle never recorded it, and because discovery runs at BOOT every request 500'd until someone with shell access deleted a directory. All three sites did call `class_exists()` — *after* the require, where it can no longer prevent anything. The likeliest route in was an operator copying `plugins/HelloWorld/` to `plugins/HelloWorld-old/` before editing it, which looks like the safest possible thing to do.
