@@ -6,6 +6,7 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RecipientProfiles;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\NotificationMetricsApiHandler;
 use Whity\Auth\RoleChecker;
@@ -30,6 +31,11 @@ final class NotificationMetricsApiHandlerRealEngineTest extends TestCase
     {
         TenantContext::reset();
         $this->pdo = SchemaFromMigrations::make(true);
+
+        // The notification fixtures below address profiles by id, and #751 gave
+        // `notifications.recipient_profile_id` a real foreign key — so the people
+        // being notified have to exist before a notification can name them.
+        RecipientProfiles::seed($this->pdo);
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1,'a','a') ON CONFLICT (id) DO NOTHING");
         $this->metrics = new NotificationMetricsRepository($this->pdo);
         $this->notifications = new NotificationRepository($this->pdo);
