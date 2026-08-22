@@ -93,6 +93,8 @@ export interface PluginCardLabels {
   installPlugin?: string
   previousScreenshot?: string
   nextScreenshot?: string
+  noVersionHistory?: string
+  noPermissions?: string
 }
 
 const DEFAULT_PLUGIN_CARD_LABELS = {
@@ -126,6 +128,8 @@ const DEFAULT_PLUGIN_CARD_LABELS = {
   installPlugin: "Install Plugin",
   previousScreenshot: "Previous screenshot",
   nextScreenshot: "Next screenshot",
+  noVersionHistory: "No version history available.",
+  noPermissions: "This plugin does not request any special permissions.",
 } satisfies Required<PluginCardLabels>
 
 export interface PluginStoreCardProps extends React.ComponentProps<"div"> {
@@ -318,11 +322,12 @@ export function InstalledPluginCard({
     },
   }[state]
 
-  const pastVersions = (plugin.versions ?? [
-    { version: plugin.version, releasedAt: "Current", isCurrent: true },
-    { version: "2.3.1", releasedAt: "2 weeks ago" },
-    { version: "2.2.0", releasedAt: "1 month ago" },
-  ]).filter((v) => !v.isCurrent && v.version !== plugin.version)
+  // No fallback (#756). Offering a rollback target the plugin never published
+  // is an action the host cannot honour, so an absent history has to REMOVE the
+  // affordance rather than populate it with plausible-looking version numbers.
+  const pastVersions = (plugin.versions ?? []).filter(
+    (v) => !v.isCurrent && v.version !== plugin.version
+  )
 
   return (
     <>
@@ -531,11 +536,14 @@ function PluginDetailsModal({
   labels,
 }: PluginDetailsModalProps) {
   const text = { ...DEFAULT_PLUGIN_CARD_LABELS, ...labels }
-  const versions = plugin.versions ?? [
-    { version: plugin.version, releasedAt: "2 weeks ago", changelog: "Added multi-tenant isolation support and performance indexing." },
-    { version: "2.3.1", releasedAt: "1 month ago", changelog: "Fixed memory leak in background worker queue." },
-    { version: "2.2.0", releasedAt: "2 months ago", changelog: "Initial release with basic telemetry dispatchers." },
-  ]
+  // Both of these are OPTIONAL on PluginItem, so their old sample-array
+  // fallbacks were the DEFAULT rendering, not a defensive branch — this modal
+  // stated release numbers, dates, a changelog and a permission set that
+  // belonged to no plugin, in the screen where someone decides whether to
+  // install third-party code. Empty is the only honest answer; the tabs below
+  // say so explicitly rather than rendering an unexplained blank. (#756)
+  const versions = plugin.versions ?? []
+  const permissions = plugin.permissions ?? []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -600,6 +608,9 @@ function PluginDetailsModal({
 
           <TabsContent value="versions" className="py-4 space-y-3">
             <div className="space-y-2">
+              {versions.length === 0 && (
+                <p className="text-xs text-muted-foreground">{text.noVersionHistory}</p>
+              )}
               {versions.map((ver) => (
                 <div key={ver.version} className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-1">
                   <div className="flex items-center justify-between">
@@ -616,10 +627,12 @@ function PluginDetailsModal({
 
           <TabsContent value="permissions" className="py-4 space-y-3">
             <p className="text-xs text-muted-foreground">
-              This plugin requests the following system permissions when activated:
+              {permissions.length === 0
+                ? text.noPermissions
+                : "This plugin requests the following system permissions when activated:"}
             </p>
             <div className="space-y-1.5">
-              {(plugin.permissions ?? ["storage:read-write", "network:outbound-http", "events:subscribe"]).map((perm) => (
+              {permissions.map((perm) => (
                 <div key={perm} className="flex items-center gap-2 rounded-md bg-muted/30 border border-border/40 px-2.5 py-1 text-xs font-mono">
                   <IconLock className="size-3.5 text-primary shrink-0" />
                   <span>{perm}</span>
