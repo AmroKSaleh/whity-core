@@ -229,8 +229,10 @@ final class PluginInstaller
             // 6. Version gate (WC-211) — never stage an incompatible plugin.
             $this->assertCompatible($meta, $pluginName);
 
-            // 7. Collision = reject (v1, no overwrite/upgrade).
+            // 7. Collision = reject (v1, no overwrite/upgrade). Twice over: the
+            //    name it would take on disk, and the CLASS it declares (#841).
             $this->assertNoCollision($pluginName);
+            $this->assertNoClassCollision($meta['class'], $pluginName);
 
             // 8. Commit to disk landing DISABLED (existing sentinel model).
             $committedPath = $this->commitDisabled($pluginName, $isSingleFile, $artifactPath);
@@ -636,7 +638,7 @@ final class PluginInstaller
      *
      * @param 'zip'|'php' $kind The package kind.
      * @param string $sourceRoot The extraction root (zip) or the staged .php path.
-     * @return array{0: array{name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string}, 1: bool, 2: string}
+     * @return array{0: array{class: string, name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string}, 1: bool, 2: string}
      *   [metadata, isSingleFile, artifactPath]. artifactPath is the top-level
      *   plugin dir (zip) or the staged .php file (single).
      * @throws PluginPackageInvalid On zero or multiple plugin classes / load error.
@@ -666,7 +668,7 @@ final class PluginInstaller
      * single plugin's metadata.
      *
      * @param list<string> $files Absolute paths to load in the child.
-     * @return array{name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string}
+     * @return array{class: string, name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string}
      * @throws PluginPackageInvalid When the child reports zero/multiple plugins
      *                              or fails to load the package.
      */
@@ -837,7 +839,16 @@ final class PluginInstaller
             throw new PluginPackageInvalid('The package could not be inspected.');
         }
 
+        // The declared class is required, not defaulted (#841). It is the input
+        // to the collision gate below, and a gate that quietly passes when its
+        // input is missing is not a gate — so a result without one is an
+        // inspection failure, exactly as a result without a name is.
+        if (!isset($plugin['class']) || !is_string($plugin['class']) || $plugin['class'] === '') {
+            throw new PluginPackageInvalid('The package could not be inspected.');
+        }
+
         return [
+            'class' => $plugin['class'],
             'name' => $plugin['name'],
             'version' => is_string($plugin['version'] ?? null) ? $plugin['version'] : '',
             'routes_count' => is_int($plugin['routes_count'] ?? null) ? $plugin['routes_count'] : 0,
@@ -1165,7 +1176,7 @@ final class PluginInstaller
      * Any value failing `^[A-Za-z0-9_-]+$` is rejected — this name becomes a path
      * under plugins/.
      *
-     * @param array{name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string} $meta
+     * @param array{class: string, name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string} $meta
      * @param string|null $topDirName The archive top-level dir (zip) or null (single).
      * @return string The validated, safe plugin name.
      * @throws PluginNameUnsafe When the name (or dir) is unsafe or they disagree.
@@ -1201,7 +1212,7 @@ final class PluginInstaller
      * {@see CoreVersion::VERSION} via composer/semver. An unparseable constraint
      * fails closed.
      *
-     * @param array{name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string} $meta
+     * @param array{class: string, name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string} $meta
      * @param string $pluginName The plugin's name (for the message; safe).
      * @return void
      * @throws PluginIncompatible When a constraint is unsatisfied/unparseable.
@@ -1268,6 +1279,114 @@ final class PluginInstaller
                 );
             }
         }
+    }
+
+    /**
+     * Reject a package whose plugin class an installed plugin already declares.
+     *
+     * WHY A SECOND COLLISION CHECK (#841)
+     * -----------------------------------
+     * {@see assertNoCollision()} above rejects a duplicate NAME ON DISK, which
+     * is not the same question. Two packages from two authors — different
+     * directory names, so both install cleanly — can declare the same class, and
+     * the second `require` of that class is `Cannot redeclare class …`: a FATAL
+     * the plugin error boundary cannot catch, raised at boot, on every request.
+     * {@see PluginLoader} now refuses such a file rather than dying with it, but
+     * that costs a plugin its load for a reason the operator only sees in a log.
+     * Refusing the INSTALL turns the same condition into a rejected upload with
+     * a reason attached, before anything is written.
+     *
+     * WHERE THE TWO SIDES COME FROM, AND WHY NEITHER LOADS CODE
+     * ---------------------------------------------------------
+     * The package's class is read in the isolated `proc_open()` child that
+     * already inspects it (WC-220/221), so untrusted code still never runs in
+     * this process. The installed side is read LEXICALLY from the sources on
+     * disk ({@see DeclaredClassScanner}) rather than from `class_exists()`,
+     * for two reasons: this worker has only loaded the plugins it happened to
+     * discover — a disabled plugin's code is deliberately never executed
+     * in-host (WC-220 M4) yet its class still collides the moment someone
+     * enables it — and a class already declared in a live worker can be the
+     * residue of a plugin that was UNINSTALLED, which must not block reusing
+     * its name. Disabled artifacts (`.php.disabled`, and directories carrying
+     * the disable sentinel) are therefore included in the scan; classes core
+     * itself declares are not, since a package colliding with core is refused
+     * by the loader and cannot be prevented here without reading all of core.
+     *
+     * @param string $fqcn The plugin class the package declares (from the child).
+     * @param string $pluginName The validated plugin name (safe detail).
+     * @return void
+     * @throws PluginAlreadyInstalled When an installed plugin declares $fqcn.
+     */
+    private function assertNoClassCollision(string $fqcn, string $pluginName): void
+    {
+        // PHP class names are case-insensitive, so the comparison must be.
+        $needle = strtolower(ltrim($fqcn, '\\'));
+
+        foreach ($this->installedPluginSources() as $path) {
+            $source = @file_get_contents($path);
+            if ($source === false) {
+                continue;
+            }
+
+            foreach (DeclaredClassScanner::declaredIn($source) as $declared) {
+                if (strtolower($declared) !== $needle) {
+                    continue;
+                }
+
+                $this->logger->warning('[PluginInstaller] refused a package whose class is taken', [
+                    'event' => 'plugin.upload.class_collision',
+                    'plugin' => $pluginName,
+                    'class' => $fqcn,
+                    'declared_by' => $path,
+                ]);
+
+                throw new PluginAlreadyInstalled(
+                    'An installed plugin already declares this plugin class.',
+                    ['plugin' => $pluginName, 'class' => $fqcn]
+                );
+            }
+        }
+    }
+
+    /**
+     * Every installed plugin source whose classes are (or can become) live.
+     *
+     * `.php.disabled` is in the list on purpose: a disable is a rename, so the
+     * class it declares is one enable away from being declared for real, and an
+     * install that collides with it would only fail later, at the worst moment.
+     *
+     * @return list<string> Absolute paths, sorted for determinism.
+     */
+    private function installedPluginSources(): array
+    {
+        if (!is_dir($this->pluginDir)) {
+            return [];
+        }
+
+        $files = [];
+        try {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($this->pluginDir, \RecursiveDirectoryIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $fileInfo) {
+                if (!$fileInfo instanceof \SplFileInfo || !$fileInfo->isFile()) {
+                    continue;
+                }
+                $name = $fileInfo->getFilename();
+                if (str_ends_with($name, '.php') || str_ends_with($name, '.php.disabled')) {
+                    $files[] = str_replace('\\', '/', (string) $fileInfo->getRealPath());
+                }
+            }
+        } catch (Throwable) {
+            // An unreadable tree cannot be proven collision-free, but refusing
+            // every install because of it would be worse: the loader still
+            // refuses the colliding file at discovery.
+            return [];
+        }
+
+        sort($files);
+
+        return $files;
     }
 
     /**
@@ -1376,7 +1495,7 @@ final class PluginInstaller
      *
      * Shape matches a GET /api/v1/plugins item for a freshly staged plugin.
      *
-     * @param array{name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string} $meta
+     * @param array{class: string, name: string, version: string, routes_count: int, permissions_count: int, sdk_constraint: ?string, core_constraint: ?string} $meta
      * @param string $name The plugin name.
      * @param bool $isSingleFile Whether it landed as a single file.
      * @return array{id: string, name: string, enabled: bool, file: string, version: string|null, status: string, routes_count: int|null, permissions_count: int|null}
