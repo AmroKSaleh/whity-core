@@ -31,6 +31,12 @@
     "infection/infection": "^0.29 || ^0.34 || ^0.35",
     "nikic/php-parser": "^5.0"
   },
+  "scripts": {
+    "phpstan": "phpstan analyse src tests plugins sdk ops --memory-limit=1G"
+  },
+  "scripts-descriptions": {
+    "phpstan": "Static analysis over the same paths, at the same memory limit, as CI (#934)."
+  },
   "autoload": {
     "classmap": [
       "src/Auth/AuthHandler.php"
