@@ -28,11 +28,29 @@ export interface LockState {
   secondsRemaining: number | null
 }
 
+/**
+ * Mirrors `auth::api::TenantMembership` - one tenant the signing-in profile may
+ * complete enrollment into.
+ *
+ * `tenantId` 0 is the system tenant. It is listed like any other choice and is
+ * never pre-selected: per `AuthHandler::handleSelectTenant()`, holding an
+ * active tenant-0 membership and choosing it IS legitimate system authority -
+ * what must never happen is it being picked silently on the operator's behalf.
+ */
+export interface TenantMembership {
+  tenantId: number
+  /** May be empty, and may be Arabic - always render it with `dir="auto"`. */
+  tenantName: string
+  role: string
+}
+
 /** Mirrors `commands::auth::EnrollResult` (internally-tagged on `status`). */
 export type EnrollResult =
   | { status: "enrolled"; email: string; deviceId: number }
   | { status: "requires2fa"; tempToken: string }
-  | { status: "requiresTenantSelection"; selectionToken: string | null }
+  | { status: "requiresTenantSelection"; selectionToken: string | null; memberships: TenantMembership[] }
+  /** The 300s selection token lapsed before a tenant was chosen - retryable. */
+  | { status: "selectionLapsed" }
 
 export const authClient = {
   /** The current enrollment/session snapshot (pure local read). */
@@ -44,6 +62,15 @@ export const authClient = {
   /** Interactive one-time enrollment: login -> register device -> store credential -> first exchange. */
   enroll: (email: string, password: string, deviceName: string) =>
     invoke<EnrollResult>("auth_enroll", { email, password, deviceName }),
+
+  /**
+   * Complete an enrollment that stopped at the tenant prompt (#914): the chosen
+   * `tenantId` plus the login step's `selectionToken`, then the identical
+   * register -> store -> exchange tail. `email` is the typed address, used only
+   * as a fallback for the one the server echoes back with the session.
+   */
+  enrollWithTenant: (selectionToken: string, tenantId: number, deviceName: string, email: string) =>
+    invoke<EnrollResult>("auth_enroll_with_tenant", { selectionToken, tenantId, deviceName, email }),
 
   /** Exchange the stored credential for a fresh session (resets the offline-lock clock). */
   login: () => invoke<AuthStatus>("auth_login"),

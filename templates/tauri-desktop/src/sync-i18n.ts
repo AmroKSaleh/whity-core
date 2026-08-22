@@ -10,6 +10,34 @@ import type { NavTranslate } from "@amroksaleh/features/nav"
  * `dir="auto"`).
  */
 const STRINGS: Record<string, string> = {
+  // Enrollment (app-state-provider.tsx). Every string that screen renders
+  // resolves through appT, so the whole screen is localizable in one place - a
+  // half-translated screen is how the Arabic/RTL requirement rots.
+  "enroll.title": "Welcome to Whity Desktop",
+  "enroll.description":
+    "Sign in once to register this device with the Whity backend. A long-lived credential is stored in your OS keychain; work then continues offline until the login window elapses.",
+  "enroll.emailLabel": "Email",
+  "enroll.passwordLabel": "Password",
+  "enroll.deviceNameLabel": "Device name",
+  "enroll.submit": "Enroll device",
+  "enroll.submitting": "Enrolling…",
+  "enroll.error.requires2fa":
+    "This account has two-factor authentication enabled, which this app cannot complete yet. Enroll with an account that does not require a code.",
+  "enroll.error.noSelectionToken":
+    "The server asked which tenant to use but did not say how to answer. Try signing in again.",
+  // Tenant picker (#914) - shown whenever the server reports more than one
+  // active membership, and never resolved automatically however few the choices.
+  "enroll.tenant.title": "Choose a tenant",
+  "enroll.tenant.description":
+    "This account is active in more than one tenant. Pick the one this device should enroll into.",
+  "enroll.tenant.legend": "Tenant",
+  "enroll.tenant.unnamed": "Tenant",
+  "enroll.tenant.submit": "Enroll device",
+  "enroll.tenant.back": "Use a different account",
+  "enroll.tenant.empty":
+    "The server asked for a tenant but listed none to choose from. Try signing in again.",
+  "enroll.tenant.lapsed":
+    "That sign-in step expired before a tenant was chosen, or the membership changed. Please sign in again.",
   // DemoCatalog list
   "demoCatalog.list.create": "New item",
   "demoCatalog.list.emptyTitle": "No items yet",
