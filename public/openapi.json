@@ -8798,7 +8798,7 @@
                         }
                     },
                     "409": {
-                        "description": "Email already exists in the tenant",
+                        "description": "Email already exists in the tenant, or this account signs in through an identity provider and has no local password",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -21353,7 +21353,7 @@
                         }
                     },
                     "400": {
-                        "description": "Validation failed",
+                        "description": "Validation failed, or a role field was supplied empty",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -21697,7 +21697,7 @@
                         }
                     },
                     "409": {
-                        "description": "Email already exists in the tenant",
+                        "description": "Email already exists in the tenant, or a local password was set on an identity-provider-backed account without the explicit override",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -22107,7 +22107,7 @@
                         }
                     },
                     "409": {
-                        "description": "Password-reset emails are disabled for this instance",
+                        "description": "Password-reset emails are disabled for this instance, or the account signs in through an identity provider and has no local password to reset",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -29590,6 +29590,14 @@
                             "active",
                             "inactive"
                         ]
+                    },
+                    "authMethod": {
+                        "type": "string",
+                        "enum": [
+                            "local",
+                            "idp",
+                            "both"
+                        ]
                     }
                 },
                 "required": [
@@ -29724,6 +29732,9 @@
                             "active",
                             "inactive"
                         ]
+                    },
+                    "allowLocalPasswordOnIdpAccount": {
+                        "type": "boolean"
                     }
                 }
             }

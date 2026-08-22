@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\MeIdentitiesApiHandler;
 use Whity\Auth\TokenValidator;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Core\Identity\ExternalIdentityRepository;
 use Whity\Core\Request;
 
@@ -32,16 +33,32 @@ final class MeIdentitiesApiHandlerRealEngineTest extends TestCase
         $this->otherProfileId = $this->seedProfile('other', password_hash('x', PASSWORD_BCRYPT));
     }
 
+    /**
+     * A profile with (or without) a local credential.
+     *
+     * `auth_method` is stated, not left to migration 104's 'local' DEFAULT
+     * (#916). A fixture that inserts an empty `password_hash` and says nothing
+     * else claims to hold a local credential it does not have, and the handler
+     * under test now reads the held fact rather than testing the hash for
+     * emptiness — so the fixture would quietly disable the very lockout guard
+     * these tests exist to pin. Production has the same obligation:
+     * FederatedIdentityLinker names 'idp' on its passwordless insert for exactly
+     * this reason.
+     */
     private function seedProfile(string $name, string $passwordHash): int
     {
         $stmt = $this->pdo->prepare("INSERT INTO profiles
-            (display_name, password_hash, two_factor_enabled, two_factor_secret,
+            (display_name, password_hash, auth_method, two_factor_enabled, two_factor_secret,
              two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-            VALUES (:dn, :ph, false, NULL, 0, 0, NOW(), NOW())");
+            VALUES (:dn, :ph, :am, false, NULL, 0, 0, NOW(), NOW())");
         if ($stmt === false) {
             self::fail('prepare failed');
         }
-        $stmt->execute([':dn' => $name, ':ph' => $passwordHash]);
+        $stmt->execute([
+            ':dn' => $name,
+            ':ph' => $passwordHash,
+            ':am' => $passwordHash === '' ? AuthMethod::IDP : AuthMethod::LOCAL,
+        ]);
         return (int) $this->pdo->lastInsertId();
     }
 
@@ -131,5 +148,56 @@ final class MeIdentitiesApiHandlerRealEngineTest extends TestCase
             ['id' => (string) $id]
         );
         self::assertSame(204, $res->getStatusCode(), $res->getBody());
+    }
+    /**
+     * The lockout guard reads the HELD fact, and unlinking keeps it true.
+     *
+     * An account with a local password may drop its last identity — it still has
+     * a way in — and afterwards the platform must no longer describe it as
+     * IdP-backed, or an administrator setting its password would be refused for
+     * a provider that is no longer attached (#916).
+     */
+    public function testUnlinkingTheLastIdentityOfAPasswordAccountUpdatesTheHeldFact(): void
+    {
+        $id = $this->identities->link($this->profileId, 'google', 'iss-g', 'sub-held', 'a@b.com');
+        self::assertSame(AuthMethod::BOTH, $this->authMethodOf($this->profileId));
+
+        $res = $this->handlerFor($this->profileId)->unlink(
+            new Request('DELETE', '/api/me/identities/' . $id, [], ''),
+            ['id' => (string) $id]
+        );
+
+        self::assertSame(204, $res->getStatusCode(), $res->getBody());
+        self::assertSame(
+            AuthMethod::LOCAL,
+            $this->authMethodOf($this->profileId),
+            'with the last link gone, no external authority governs this account'
+        );
+    }
+
+    /** The refusal message points at the administrator, not at a path the user has. */
+    public function testTheLockoutRefusalDoesNotTellAPasswordlessUserToSetOneThemselves(): void
+    {
+        $ssoOnly = $this->seedProfile('sso-message', '');
+        $id = $this->identities->link($ssoOnly, 'google', 'iss-g', 'sub-message', 's@sso.com');
+
+        $res = $this->handlerFor($ssoOnly)->unlink(
+            new Request('DELETE', '/api/me/identities/' . $id, [], ''),
+            ['id' => (string) $id]
+        );
+
+        self::assertSame(409, $res->getStatusCode());
+        self::assertStringContainsString('administrator', $res->getBody());
+    }
+
+    private function authMethodOf(int $profileId): string
+    {
+        $stmt = $this->pdo->prepare('SELECT auth_method FROM profiles WHERE id = :id');
+        if ($stmt === false) {
+            self::fail('prepare failed');
+        }
+        $stmt->execute([':id' => $profileId]);
+
+        return (string) $stmt->fetchColumn();
     }
 }

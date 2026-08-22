@@ -5,6 +5,7 @@ namespace Whity\Auth;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\RateLimit\ClientIp;
 use Whity\Core\Request;
@@ -1354,6 +1355,24 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
 
+        // #916: an IdP-backed account has no local password, so it can satisfy
+        // neither the current-password gate below nor the change it guards.
+        // Before this check it still failed — password_verify() against the
+        // empty-string hash is false for every input — but it failed by saying
+        // "Current password is incorrect", which is not what is wrong and sends
+        // the account owner looking for a password that does not exist. Answered
+        // plainly here; the caller IS the account, so there is nothing to
+        // conceal from them. Refused for ANY change, not only a password one:
+        // the gate protects the email change too, and there is no way for this
+        // account to pass it.
+        if ((new AuthMethod($this->db))->refusesLocalPassword($profileId)) {
+            return Response::error(
+                'This account signs in through an identity provider and has no local password. '
+                . 'Manage its credentials with the provider, or ask an administrator to set a local password.',
+                409
+            );
+        }
+
         // The current password must be supplied and verified for ANY change.
         $currentPassword = isset($body['current_password']) && is_string($body['current_password'])
             ? $body['current_password']
@@ -1362,8 +1381,6 @@ class AuthHandler
             return Response::error('Current password is incorrect', 401);
         }
 
-        $profileUpdates    = [];
-        $profileParams     = [];
         $newEmail          = (string) $profileEmail['email'];
         $passwordChanged   = false;
 
@@ -1401,19 +1418,17 @@ class AuthHandler
                 return Response::error($e->getMessage(), 400);
             }
 
-            $profileUpdates[] = 'password_hash = ?';
-            $profileParams[]  = password_hash($newPassword, PASSWORD_BCRYPT);
-            $profileUpdates[] = 'token_epoch = token_epoch + 1';
-            $passwordChanged  = true;
-        }
-
-        if ($profileUpdates !== []) {
-            $profileUpdates[] = 'updated_at = CURRENT_TIMESTAMP';
-            $profileParams[]  = $profileId;
-            // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-            $this->db->prepare(
-                'UPDATE profiles SET ' . implode(', ', $profileUpdates) . ' WHERE id = ?'
-            )->execute($profileParams);
+            // Written through AuthMethod, the single writer of
+            // profiles.password_hash (#916). It bumps token_epoch with the hash,
+            // as this path always has, and refuses an IdP-backed profile a
+            // second time in the statement that writes — unreachable here
+            // because of the guard above, which is the arrangement intended:
+            // the entry point explains, the writer enforces.
+            (new AuthMethod($this->db))->setPasswordHash(
+                $profileId,
+                password_hash($newPassword, PASSWORD_BCRYPT)
+            );
+            $passwordChanged = true;
         }
 
         if ($passwordChanged) {

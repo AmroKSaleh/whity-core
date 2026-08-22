@@ -281,7 +281,13 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('Updated self profile; auth cookies re-issued', 'MeResponse'),
                     400 => self::errorResponse('No changes, invalid email format, or password too short'),
                     401 => self::errorResponse('Missing/invalid token, or current password incorrect'),
-                    409 => self::errorResponse('Email already exists in the tenant'),
+                    // #916: an IdP-backed account has no local password, so it
+                    // can satisfy neither the current-password gate nor the
+                    // change it guards - said plainly rather than as a wrong 401.
+                    409 => self::errorResponse(
+                        'Email already exists in the tenant, or this account signs in through an '
+                        . 'identity provider and has no local password'
+                    ),
                 ],
             ],
         ];
@@ -473,7 +479,11 @@ final class CoreApiSchemas
                 'request' => 'UserCreateRequest',
                 'responses' => [
                     201 => self::jsonResponse('The created user', 'UserResponse'),
-                    400 => self::errorResponse('Validation failed'),
+                    // #916: `role`/`role_id` present but empty or null is a 400,
+                    // distinct from omitting it (which still defaults to the
+                    // global `user` role). A named field with nothing behind it
+                    // is not a request for the default.
+                    400 => self::errorResponse('Validation failed, or a role field was supplied empty'),
                     404 => self::errorResponse('Declared role not found or not visible'),
                     409 => self::errorResponse('Email already exists in the tenant'),
                     422 => self::errorResponse('Email longer than 255 characters'),
@@ -499,7 +509,13 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('The updated user', 'UserResponse'),
                     400 => self::errorResponse('Validation failed'),
                     404 => self::errorResponse('User or role not found'),
-                    409 => self::errorResponse('Email already exists in the tenant'),
+                    // Two causes share the 409: a duplicate email, and a
+                    // `password` for an IdP-backed account without
+                    // `allowLocalPasswordOnIdpAccount`.
+                    409 => self::errorResponse(
+                        'Email already exists in the tenant, or a local password was set on an '
+                        . 'identity-provider-backed account without the explicit override'
+                    ),
                     422 => self::errorResponse('Email longer than 255 characters'),
                 ] + self::authErrors(),
             ]),
@@ -2060,6 +2076,16 @@ final class CoreApiSchemas
             'createdAt' => self::str(true),
             'status' => self::str(),
             'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
+            // #916: which authority holds this account's credentials.
+            // 'local' = a password this platform stores; 'idp' = an external
+            // identity provider and NO local password; 'both' = an external
+            // provider AND a local password. Read-only - it is a consequence of
+            // which credentials exist, not a field to set. Published because
+            // before migration 104 nothing in the API could tell an SSO account
+            // from a password one (`password_hash` was NOT NULL and held '' for
+            // the former), so a reviewer looking at an account could not see
+            // which of them a password even applied to.
+            'authMethod' => ['type' => 'string', 'enum' => ['local', 'idp', 'both']],
         ], ['id', 'name', 'email', 'role', 'tenantId', 'createdAt']);
 
         $permission = self::object([
@@ -3069,6 +3095,13 @@ final class CoreApiSchemas
                 'ou_id' => self::reference('/api/ous', 'name', nullable: true),
                 // WC-user-status: the admin deactivate/reactivate control.
                 'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
+                // #916: permits `password` against an account whose credentials
+                // belong to an identity provider (`authMethod: 'idp'`), which is
+                // otherwise refused with 409. Taking it moves the account to
+                // 'both' and records an audit row - the arrangement stays
+                // available, it just stops being something that can happen by
+                // accident. Ignored when no password is sent.
+                'allowLocalPasswordOnIdpAccount' => self::bool(),
             ], []),
 
             'Permission' => $permission,
@@ -4919,7 +4952,12 @@ final class CoreApiSchemas
                 'responses' => [
                     202 => self::jsonResponse('A reset link has been mailed to the user', 'AdminPasswordResetSentResponse'),
                     404 => self::errorResponse('User not found in this tenant'),
-                    409 => self::errorResponse('Password-reset emails are disabled for this instance'),
+                    // #916: a reset link for an IdP-backed account would create a
+                    // local credential rather than restore access to an existing one.
+                    409 => self::errorResponse(
+                        'Password-reset emails are disabled for this instance, or the account signs in '
+                        . 'through an identity provider and has no local password to reset'
+                    ),
                     422 => self::errorResponse('Invalid user id, or the user has no email address'),
                 ] + self::authErrors(),
             ]),

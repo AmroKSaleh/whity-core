@@ -78,12 +78,30 @@ final class PasswordResetService
      * store nothing of it beyond the returned value; only its hash is
      * persisted.
      *
+     * Refuses outright for an IdP-backed profile (#916). A reset link is a
+     * local credential in transit: mailing one to an account an identity
+     * provider governs alone is how the account quietly acquires a second way
+     * in that outlives the IdP. The refusal is here, at issuance, rather than at
+     * {@see confirm()} — a token that can never be redeemed is still a live
+     * credential-recovery secret sitting in a mailbox, and letting the person
+     * choose a password before telling them it will not work is a worse answer
+     * than not sending the mail.
+     *
      * @param int $profileId The profiles.id the reset is for.
      * @param int $ttlSeconds Lifetime; defaults to {@see DEFAULT_TTL_SECONDS}.
      * @return string The raw token to embed in the reset link.
+     *
+     * @throws LocalPasswordRefusedException When the profile is IdP-backed.
+     *         Callers decide how that surfaces: the public "forgot password"
+     *         endpoint must answer exactly as it does for an unknown address,
+     *         an administrator can be told plainly.
      */
     public function issue(int $profileId, int $ttlSeconds = self::DEFAULT_TTL_SECONDS): string
     {
+        if ((new AuthMethod($this->db))->refusesLocalPassword($profileId)) {
+            throw LocalPasswordRefusedException::forIdpBackedProfile($profileId);
+        }
+
         $rawToken  = bin2hex(random_bytes(self::TOKEN_BYTES));
         $tokenHash = hash('sha256', $rawToken);
         $expiresAt = gmdate('Y-m-d H:i:s', time() + $ttlSeconds);
@@ -176,7 +194,22 @@ final class PasswordResetService
 
             $requestId = (int) $row['id'];
             $profileId = (int) $row['profile_id'];
-            $newHash   = password_hash($newPassword, PASSWORD_BCRYPT);
+
+            // #916: no token should exist for an IdP-backed profile — issue()
+            // refuses to mint one — but a profile can become IdP-backed after a
+            // token was issued, and a token minted before migration 104 landed
+            // knows nothing of any of this. Treat it exactly like an unknown
+            // token: burn nothing, say nothing, change nothing. The caller
+            // answers generically either way, so this leaks no more than an
+            // expired link does.
+            if ((new AuthMethod($this->db))->refusesLocalPassword($profileId)) {
+                if ($ownTx) {
+                    $this->db->commit();
+                }
+                return null;
+            }
+
+            $newHash = password_hash($newPassword, PASSWORD_BCRYPT);
 
             if ($requireApproval) {
                 // Stage only — profiles is untouched until an admin approves.
@@ -192,12 +225,10 @@ final class PasswordResetService
                 // Apply immediately: new password hash + token_epoch bump
                 // (invalidates every existing session for this profile, exactly
                 // like a self-service password change via PATCH /api/me).
-                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-                $this->db->prepare(
-                    'UPDATE profiles
-                        SET password_hash = :hash, token_epoch = token_epoch + 1, updated_at = NOW()
-                      WHERE id = :pid'
-                )->execute([':hash' => $newHash, ':pid' => $profileId]);
+                // Written through AuthMethod, the single writer of
+                // profiles.password_hash (#916), which refuses an IdP-backed
+                // profile a second time in the same statement that writes.
+                (new AuthMethod($this->db))->setPasswordHash($profileId, $newHash);
 
                 $this->db->prepare(
                     "UPDATE password_resets
@@ -384,12 +415,25 @@ final class PasswordResetService
 
             $profileId = (int) $row['profile_id'];
 
-            // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-            $this->db->prepare(
-                'UPDATE profiles
-                    SET password_hash = :hash, token_epoch = token_epoch + 1, updated_at = NOW()
-                  WHERE id = :pid'
-            )->execute([':hash' => $row['staged_password_hash'], ':pid' => $profileId]);
+            // #916: a staged hash can outlive the state it was staged under —
+            // the profile may have been linked to an identity provider between
+            // the request and this approval, and a queue entry from before
+            // migration 104 predates the question entirely. Refuse rather than
+            // apply. Reported as null, the same answer an already-approved or
+            // out-of-tenant request gets: an administrator approving a reset
+            // for an account that no longer takes local passwords has not found
+            // an approvable request.
+            if ((new AuthMethod($this->db))->refusesLocalPassword($profileId)) {
+                if ($ownTx) {
+                    $this->db->commit();
+                }
+                return null;
+            }
+
+            (new AuthMethod($this->db))->setPasswordHash(
+                $profileId,
+                (string) $row['staged_password_hash']
+            );
 
             // The status guard makes this idempotent-safe under a concurrent
             // second approve for the same row (e.g. via a different tenant).

@@ -256,6 +256,21 @@ final class TwoFactorRecoveryService
                 return null;
             }
 
+            // #916: recovery ends in a password-reset token, so for an
+            // IdP-backed profile it would hand out a LOCAL credential for an
+            // account the provider governs alone. Checked here, before the
+            // status flip and before clearTwoFactor(), so the request stays
+            // pending and the target's 2FA stays enrolled — a refusal that had
+            // already stripped 2FA would leave the account weaker than it
+            // started. PasswordResetService::issue() refuses regardless; this
+            // is what stops it doing so halfway through.
+            if ((new AuthMethod($this->db))->refusesLocalPassword((int) $row['profile_id'])) {
+                if ($ownTx) {
+                    $this->db->commit();
+                }
+                return null;
+            }
+
             // The status guard makes this idempotent-safe under a concurrent
             // second approve for the same row.
             $stmt2 = $this->db->prepare(
@@ -368,6 +383,17 @@ final class TwoFactorRecoveryService
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($row === false) {
+                if ($ownTx) {
+                    $this->db->commit();
+                }
+                return null;
+            }
+
+            // #916: same refusal as approveForTenant(), for the same reason —
+            // a forced recovery for an IdP-backed profile would mint a local
+            // credential. Before clearTwoFactor(), so a refused force-reset
+            // leaves the account exactly as it found it.
+            if ((new AuthMethod($this->db))->refusesLocalPassword($targetProfileId)) {
                 if ($ownTx) {
                     $this->db->commit();
                 }
