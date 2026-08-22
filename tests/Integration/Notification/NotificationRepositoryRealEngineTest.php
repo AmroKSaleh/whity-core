@@ -7,6 +7,7 @@ namespace Tests\Integration\Notification;
 use PDO;
 use PDOException;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RecipientProfiles;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Notification\NotificationRepository;
 
@@ -28,6 +29,9 @@ final class NotificationRepositoryRealEngineTest extends TestCase
     {
         $this->pdo = SchemaFromMigrations::make(true);
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a'), (2, 'b', 'b')");
+        // The recipients these fixtures address must exist: #751 gave
+        // notifications.recipient_profile_id a real foreign key to profiles.
+        RecipientProfiles::seed($this->pdo);
         $this->repo = new NotificationRepository($this->pdo);
     }
 

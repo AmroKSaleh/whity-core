@@ -45,6 +45,19 @@ namespace Whity\Sdk\Schema;
  * flagged. Only a column that points at something the platform can actually
  * resolve — and therefore could actually orphan — is considered.
  *
+ * A reference is read from the WHOLE migration set
+ * -----------------------------------------------
+ * Two things follow from "is this relationship enforced or declared?" being a
+ * question about the SCHEMA rather than about one statement, and #751 found the
+ * guard answering both wrongly:
+ *
+ *  - A column is resolved from its stem AND from that stem with leading
+ *    qualifier segments dropped, so `recipient_profile_id` reaches `profiles`.
+ *    Reading only the whole stem, the column #751 is about resolved to nothing
+ *    and was reported as clean. {@see stems()}.
+ *  - A foreign key installed by an `ALTER TABLE` in a LATER file counts, so a
+ *    migration set is judged on what it adds up to. {@see lintDirectory()}.
+ *
  * `tenant_id` is exempt, always
  * -----------------------------
  * Every tenant-owned table has one, none of them carries a foreign key by
@@ -121,12 +134,59 @@ final class UndeclaredReferenceLinter
     /**
      * Lint a directory tree of migration PHP files.
      *
+     * TWO PASSES, because a migration set's schema is what its files ADD UP TO
+     * and not what any one of them says on its own. The rekeys in core's own
+     * history (`ADD COLUMN … NULL`, backfill, then add the constraint in a
+     * later step) and every migration that retro-fits a foreign key somebody
+     * missed install a REAL constraint from a file other than the `CREATE
+     * TABLE`. Judging each file alone calls those undeclared, and the only way
+     * to satisfy that reading is to go back and edit the original `CREATE
+     * TABLE` — so a single-pass guard would spend its authority pushing people
+     * to rewrite migration history in order to silence it. Pass one gathers
+     * every foreign key the set installs anywhere; pass two lints each file
+     * knowing them.
+     *
      * @return list<ReferenceViolation>
      */
     public function lintDirectory(string $dir): array
     {
-        $violations = [];
+        $paths = self::migrationPaths($dir);
 
+        /** @var array<string, array<string, true>> $enforcedElsewhere */
+        $enforcedElsewhere = [];
+        foreach ($paths as $path) {
+            $source = file_get_contents($path);
+            if ($source === false) {
+                continue;
+            }
+            foreach ($this->alterEnforcedColumns($source) as $table => $columns) {
+                foreach (array_keys($columns) as $column) {
+                    $enforcedElsewhere[$table][$column] = true;
+                }
+            }
+        }
+
+        $violations = [];
+        foreach ($paths as $path) {
+            $source = file_get_contents($path);
+            if ($source === false) {
+                continue;
+            }
+            foreach ($this->lintSource($source, $path, $enforcedElsewhere) as $violation) {
+                $violations[] = $violation;
+            }
+        }
+
+        return $violations;
+    }
+
+    /**
+     * Every `.php` file under a directory tree, in a stable order.
+     *
+     * @return list<string>
+     */
+    private static function migrationPaths(string $dir): array
+    {
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
         );
@@ -140,27 +200,24 @@ final class UndeclaredReferenceLinter
         }
         sort($paths);
 
-        foreach ($paths as $path) {
-            $source = file_get_contents($path);
-            if ($source === false) {
-                continue;
-            }
-            foreach ($this->lintSource($source, $path) as $violation) {
-                $violations[] = $violation;
-            }
-        }
-
-        return $violations;
+        return $paths;
     }
 
     /**
      * Lint one source string. Exposed for unit testing.
      *
+     * @param array<string, array<string, true>> $enforcedElsewhere Columns that
+     *        ANOTHER file in the same migration set installs a foreign key on,
+     *        as table => column => true. {@see lintDirectory()} for why a
+     *        constraint added from a later file counts. An `ALTER TABLE` in
+     *        THIS source is picked up without being passed in.
+     *
      * @return list<ReferenceViolation>
      */
-    public function lintSource(string $source, string $file = '<source>'): array
+    public function lintSource(string $source, string $file = '<source>', array $enforcedElsewhere = []): array
     {
         $violations = [];
+        $alterEnforced = $this->alterEnforcedColumns($source);
 
         foreach ($this->createTableBodies($source) as [$table, $body]) {
             // A whole-table exemption carries the same requirement as a
@@ -177,7 +234,9 @@ final class UndeclaredReferenceLinter
                 continue;
             }
 
-            $enforced = $this->foreignKeyColumns($body);
+            $enforced = $this->foreignKeyColumns($body)
+                + ($alterEnforced[$table] ?? [])
+                + ($enforcedElsewhere[$table] ?? []);
 
             foreach ($this->candidateColumns($body) as $column => $line) {
                 if (in_array($column, self::ALWAYS_EXEMPT, true)) {
@@ -383,6 +442,62 @@ final class UndeclaredReferenceLinter
     }
 
     /**
+     * Columns an `ALTER TABLE` in this source installs a foreign key on, as
+     * table => column => true.
+     *
+     * Both spellings are in use here:
+     *
+     *     ALTER TABLE t ADD CONSTRAINT t_c_fkey FOREIGN KEY (c) REFERENCES p(id)
+     *     ALTER TABLE t ADD COLUMN IF NOT EXISTS c BIGINT REFERENCES p(id)
+     *
+     * These statements are read out of PHP source, where the constraint NAME is
+     * routinely an expression rather than a literal — `'… ADD CONSTRAINT ' .
+     * self::FK_NAME . ' FOREIGN KEY …'`. Everything between `ADD` and `FOREIGN
+     * KEY` is therefore SKIPPED rather than matched, bounded by `;` so the scan
+     * cannot run out of one statement and into the next and credit a foreign key
+     * to a table that does not have one.
+     *
+     * @return array<string, array<string, true>>
+     */
+    private function alterEnforcedColumns(string $source): array
+    {
+        $enforced = [];
+
+        // Table-level: ALTER TABLE t ADD [CONSTRAINT <expr>] FOREIGN KEY (a, b) …
+        if (preg_match_all(
+            '/ALTER\s+TABLE\s+["`]?([A-Za-z_][A-Za-z0-9_]*)["`]?\s+ADD\s+[^;]*?FOREIGN\s+KEY\s*\(([^)]*)\)/is',
+            $source,
+            $matches,
+            PREG_SET_ORDER
+        )) {
+            foreach ($matches as $m) {
+                $table = strtolower($m[1]);
+                foreach (explode(',', $m[2]) as $column) {
+                    $name = strtolower(trim($column, " \t\n\r\"`"));
+                    if ($name !== '') {
+                        $enforced[$table][$name] = true;
+                    }
+                }
+            }
+        }
+
+        // Inline on an added column: ALTER TABLE t ADD COLUMN c BIGINT REFERENCES p(id)
+        if (preg_match_all(
+            '/ALTER\s+TABLE\s+["`]?([A-Za-z_][A-Za-z0-9_]*)["`]?\s+ADD\s+COLUMN\s+'
+            . '(?:IF\s+NOT\s+EXISTS\s+)?["`]?([A-Za-z_][A-Za-z0-9_]*)["`]?[^,;]*?\bREFERENCES\b/is',
+            $source,
+            $matches,
+            PREG_SET_ORDER
+        )) {
+            foreach ($matches as $m) {
+                $enforced[strtolower($m[1])][strtolower($m[2])] = true;
+            }
+        }
+
+        return $enforced;
+    }
+
+    /**
      * The table a `<something>_id` column points at, or null when it points at
      * nothing this platform knows.
      *
@@ -418,38 +533,82 @@ final class UndeclaredReferenceLinter
      */
     private function resolveTarget(string $column, string $owner): ?string
     {
-        $stem = substr($column, 0, -3); // strip `_id`
-        if ($stem === '') {
-            return null;
-        }
-
-        $forms = [$stem, $stem . 's', $stem . 'es'];
-        if (str_ends_with($stem, 'y')) {
-            $forms[] = substr($stem, 0, -1) . 'ies';
-        }
-
-        // Pass 1 — the column names the table outright.
-        foreach ($forms as $form) {
-            if (isset($this->knownTables[$form])) {
-                return $form;
+        foreach ($this->stems($column) as $stem) {
+            $forms = [$stem, $stem . 's', $stem . 'es'];
+            if (str_ends_with($stem, 'y')) {
+                $forms[] = substr($stem, 0, -1) . 'ies';
             }
-        }
 
-        // Pass 2 — the column names a neighbour's unprefixed tail.
-        $matches = [];
-        foreach (array_keys($this->knownTables) as $table) {
-            if (!$this->sharePrefix($table, $owner)) {
-                continue;
-            }
+            // Pass 1 — the column names the table outright.
             foreach ($forms as $form) {
-                if (str_ends_with($table, '_' . $form)) {
-                    $matches[$table] = true;
-                    break;
+                if (isset($this->knownTables[$form])) {
+                    return $form;
                 }
             }
+
+            // Pass 2 — the column names a neighbour's unprefixed tail.
+            $matches = [];
+            foreach (array_keys($this->knownTables) as $table) {
+                if (!$this->sharePrefix($table, $owner)) {
+                    continue;
+                }
+                foreach ($forms as $form) {
+                    if (str_ends_with($table, '_' . $form)) {
+                        $matches[$table] = true;
+                        break;
+                    }
+                }
+            }
+
+            if (count($matches) === 1) {
+                return (string) array_key_first($matches);
+            }
         }
 
-        return count($matches) === 1 ? (string) array_key_first($matches) : null;
+        return null;
+    }
+
+    /**
+     * The stems a `<something>_id` column could be naming, longest first.
+     *
+     * The WHOLE stem is tried before any part of it, so a column named after
+     * its table always resolves to that table. After that, leading
+     * `_`-delimited segments are dropped one at a time, because a reference
+     * here is routinely QUALIFIED BY THE ROLE IT PLAYS rather than named after
+     * the table it points at: `recipient_profile_id`, `grantor_profile_id`,
+     * `actor_user_id`, `parent_ou_id`.
+     *
+     * Reading the whole stem only, `notifications.recipient_profile_id`
+     * resolved to nothing at all — there is no `recipient_profiles` table — so
+     * the missing foreign key #751 is about was invisible to this linter even
+     * once core migrations were in scope. A guard that reports nothing because
+     * it could not parse the name is worse than a noisy one: silence is
+     * indistinguishable from a clean pass.
+     *
+     * Trimming from the LEFT ONLY is what keeps this from guessing. The last
+     * segment is the noun and everything before it is the qualifier, so
+     * `stripe_customer_id` still resolves to nothing unless a `customers` table
+     * genuinely exists, `external_ref_id` to nothing at all, and the
+     * one-match-or-nothing rule in pass 2 plus the reasoned escape hatch are
+     * unchanged.
+     *
+     * @return list<string>
+     */
+    private function stems(string $column): array
+    {
+        $stem = substr($column, 0, -3); // strip `_id`
+        if ($stem === '') {
+            return [];
+        }
+
+        $stems = [$stem];
+        $segments = explode('_', $stem);
+        while (count($segments) > 1) {
+            array_shift($segments);
+            $stems[] = implode('_', $segments);
+        }
+
+        return $stems;
     }
 
     /**

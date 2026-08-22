@@ -6,6 +6,7 @@ namespace Tests\Integration\Notification;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RecipientProfiles;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Notification\NotificationPreferenceRepository;
 use Whity\Core\Notification\NotificationPreferenceResolver;
@@ -30,6 +31,9 @@ final class NotificationPreferenceResolverRealEngineTest extends TestCase
     {
         $this->pdo = SchemaFromMigrations::make(true);
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a'), (2, 'b', 'b')");
+        // The recipients these fixtures address must exist: #751 gave
+        // notifications.recipient_profile_id a real foreign key to profiles.
+        RecipientProfiles::seed($this->pdo);
         $this->repo = new NotificationPreferenceRepository($this->pdo);
         $this->resolver = new NotificationPreferenceResolver($this->repo);
     }

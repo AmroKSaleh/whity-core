@@ -754,7 +754,15 @@ class PluginLoader
                         $this->disabledDirectoryPlugins[$fqcn] = $filePath;
                         continue;
                     }
-                    require_once $filePath;
+                    // A refused file is SKIPPED rather than treated as a cache
+                    // miss (#841). The rest of the manifest is still an accurate
+                    // description of the tree — the entry that cannot be loaded
+                    // could not be loaded by a rescan either, and forcing a full
+                    // scan on every warm boot would trade a request-killing
+                    // fatal for a permanent boot cost.
+                    if (!$this->requirePluginFile($filePath, $fqcn)) {
+                        continue;
+                    }
                     // Check if the class is actually a plugin (triggers autoloading if needed)
                     if (class_exists($fqcn)) {
                         try {
@@ -857,8 +865,11 @@ class PluginLoader
                         continue;
                     }
 
-                    // Require the file first so the class is defined
-                    require_once $filePath;
+                    // Require the file — unless doing so would redeclare a class
+                    // another file already declared, which is a FATAL (#841).
+                    if (!$this->requirePluginFile($filePath, $fqcn)) {
+                        continue;
+                    }
 
                     // Attempt to load and inspect class
                     if (class_exists($fqcn)) {
@@ -887,8 +898,7 @@ class PluginLoader
                 // This is a file directly under plugins/
                 if (pathinfo($item, PATHINFO_EXTENSION) === 'php') {
                     $fqcn = $this->resolveClassFromFile($itemPath);
-                    if ($fqcn !== null) {
-                        require_once $itemPath;
+                    if ($fqcn !== null && $this->requirePluginFile($itemPath, $fqcn)) {
                         if (class_exists($fqcn)) {
                             try {
                                 $reflection = new ReflectionClass($fqcn);
@@ -917,6 +927,257 @@ class PluginLoader
         $this->saveManifest($discovered, $fingerprint);
 
         return $discovered;
+    }
+
+    /**
+     * `require_once` a plugin file, unless doing so would take the host down.
+     *
+     * THE FAILURE THIS EXISTS TO PREVENT (#841)
+     * -----------------------------------------
+     * `require_once` deduplicates by PATH, not by class name, so two DIFFERENT
+     * files declaring the same fully-qualified name are both executed and the
+     * second declaration is `Cannot redeclare class …` — a FATAL. Fatals are not
+     * Throwables: the per-plugin error boundary cannot catch one, and discovery
+     * runs at boot, so a single bad pair used to 500 EVERY request until someone
+     * deleted a directory from the disk. There was no in-product way out.
+     *
+     * The `class_exists()` calls at the discovery sites ran AFTER the require,
+     * which is too late to prevent anything. Prevention has to happen before the
+     * file is executed, and the only thing available before execution is the
+     * source — hence {@see DeclaredClassScanner}, a lexical pass that reports
+     * what a plain require of this file WOULD declare, without running it.
+     *
+     * TWO REASONS A FILE IS REFUSED
+     * -----------------------------
+     *  1. COLLISION. Something the file declares is already declared by a
+     *     DIFFERENT file. Requiring it would be the fatal. Note that a
+     *     `class_exists($fqcn, false)` check alone would not have caught the
+     *     likeliest real case — an operator copying `plugins/HelloWorld/` to
+     *     `plugins/HelloWorld-old/` — because the name discovery looks for is
+     *     derived from the PATH (`HelloWorld-old\HelloWorldPlugin`, which nothing
+     *     has declared) while the name the file DECLARES comes from its
+     *     `namespace` line (`HelloWorld\HelloWorldPlugin`, which the original
+     *     already declared). The declaration, not the lookup, is what fatals.
+     *  2. ORPHAN DECLARATION. The file declares class-likes, but none of them is
+     *     the $fqcn its location implies. Such a file can contribute nothing:
+     *     discovery looks up $fqcn and will not find it, and the PSR-4 autoloader
+     *     (which maps a plugin directory to a namespace prefix of the same name)
+     *     could never load its classes either — on a WARM boot, where only the
+     *     manifest's entry file is required, they simply do not exist. Requiring
+     *     it anyway would run its top-level code for nothing AND squat on another
+     *     plugin's class name, which is exactly how the copied-directory case
+     *     turns into case 1 for the ORIGINAL plugin when the copy is scanned
+     *     first (`plugins/Copy of HelloWorld/`). Skipping it makes the outcome
+     *     independent of directory order: the real plugin keeps loading.
+     *
+     * Either way the file is refused, the reason is logged, and — when the file
+     * is a plugin's entry file — quarantined against that plugin so the admin
+     * plugins list shows WHY it did not load. Every other plugin loads normally:
+     * a defective plugin costing itself its load is the established behaviour
+     * here; a defective plugin costing the host every request is not.
+     *
+     * @param string $filePath The plugin file to require.
+     * @param string $fqcn The class discovery expects this path to provide.
+     * @param string|null $source The already-read source, when the caller has it.
+     * @return bool True when the file is loaded; false when it was refused.
+     */
+    private function requirePluginFile(string $filePath, string $fqcn, ?string $source = null): bool
+    {
+        $source ??= @file_get_contents($filePath);
+
+        // An unreadable file tells us nothing about its declarations. Requiring
+        // it fails on its own terms (a warning, and $fqcn stays undefined),
+        // which is not the fatal this guard is about.
+        if ($source === false) {
+            require_once $filePath;
+
+            return true;
+        }
+
+        $declared = DeclaredClassScanner::declaredIn($source);
+
+        $conflict = $this->findRedeclarationConflict($declared, $filePath);
+        if ($conflict !== null) {
+            $this->refusePluginFile(
+                $filePath,
+                $fqcn,
+                $source,
+                "it declares {$conflict['class']}, which {$conflict['declaredIn']} already declares. "
+                . 'Two plugins cannot declare the same class; remove or rename one of them'
+            );
+
+            return false;
+        }
+
+        // PHP class names are case-insensitive, so the lookup has to be too.
+        $names = array_map('strtolower', $declared);
+        if ($declared !== [] && !in_array(strtolower($fqcn), $names, true)) {
+            $this->refusePluginFile(
+                $filePath,
+                $fqcn,
+                $source,
+                'it declares ' . implode(', ', $declared) . " rather than the {$fqcn} its location "
+                . 'implies, so nothing can load it from here'
+            );
+
+            return false;
+        }
+
+        require_once $filePath;
+
+        return true;
+    }
+
+    /**
+     * The first of $declared that a DIFFERENT file has already declared.
+     *
+     * Autoloading is deliberately OFF: the question is whether the name is
+     * already declared in this process, not whether it could be made to load.
+     *
+     * A name already declared BY THIS SAME FILE is not a conflict — that is the
+     * ordinary case of a second discovery pass (a reload) re-requiring a file it
+     * loaded earlier, where `require_once` is a no-op. Sameness is decided on
+     * the resolved path, and it FAILS CLOSED: if the declaring file's path
+     * cannot be resolved (it has since been deleted — a temp fixture, an
+     * uninstalled plugin) we cannot prove the two are the same file, and
+     * refusing costs one plugin its load while being wrong the other way costs
+     * the whole host.
+     *
+     * @param list<string> $declared Names a require of $filePath would declare.
+     * @param string $filePath The file about to be required.
+     * @return array{class: string, declaredIn: string}|null The collision, or
+     *         null when requiring the file declares nothing that is taken.
+     */
+    private function findRedeclarationConflict(array $declared, string $filePath): ?array
+    {
+        foreach ($declared as $name) {
+            // Autoload off, and asked in the positive so the name is narrowed
+            // to a class-string for the reflection below.
+            if (
+                !class_exists($name, false)
+                && !interface_exists($name, false)
+                && !trait_exists($name, false)
+            ) {
+                continue;
+            }
+
+            /** @var class-string $name A name PHP just confirmed is declared. */
+            $owner = $this->declaringFileOf($name);
+            if ($owner !== null && $this->isSameFile($owner, $filePath)) {
+                continue;
+            }
+
+            return [
+                'class' => $name,
+                // Internal (extension) classes have no file. Naming the loaded
+                // definition is still more useful than saying nothing.
+                'declaredIn' => $owner ?? 'a PHP extension or an evaluated definition',
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * The file that declared an already-declared class-like, if it has one.
+     *
+     * @param class-string $name The declared class, interface, or trait name.
+     * @return string|null The declaring file, or null for an internal class.
+     */
+    private function declaringFileOf(string $name): ?string
+    {
+        try {
+            $file = (new ReflectionClass($name))->getFileName();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $file === false ? null : $file;
+    }
+
+    /**
+     * Whether two paths resolve to the same file on disk.
+     *
+     * Compared case-insensitively on Windows, whose filesystem is: the same file
+     * legitimately reaches us spelled two ways (the path an `include` recorded
+     * versus the one a directory scan produced), and reading that as two files
+     * would refuse a plugin for loading itself.
+     *
+     * @param string $left One path.
+     * @param string $right The other path.
+     * @return bool True only when both resolve and refer to the same file.
+     */
+    private function isSameFile(string $left, string $right): bool
+    {
+        $leftReal = realpath($left);
+        $rightReal = realpath($right);
+        if ($leftReal === false || $rightReal === false) {
+            return false;
+        }
+
+        $leftReal = str_replace('\\', '/', $leftReal);
+        $rightReal = str_replace('\\', '/', $rightReal);
+
+        return DIRECTORY_SEPARATOR === '\\'
+            ? strcasecmp($leftReal, $rightReal) === 0
+            : $leftReal === $rightReal;
+    }
+
+    /**
+     * Log a refused plugin file and, when it is a plugin's entry file, record
+     * the refusal against that plugin so an admin can see it.
+     *
+     * The lifecycle record is created for the ENTRY file only — the file whose
+     * source declares a class implementing {@see PluginInterface}, detected
+     * lexically ({@see sourceDeclaresPluginClass()}) because the whole point is
+     * that this code must not run. A package's migrations and helpers are
+     * refused with a log line and nothing else; without that test a copied
+     * directory would post one quarantine record per file in it, all under the
+     * same name.
+     *
+     * @param string $filePath The refused file.
+     * @param string $fqcn The class its location implies (the plugin's key).
+     * @param string $source The file's source (already read).
+     * @param string $reason Why it was refused, phrased to follow "was not loaded:".
+     * @return void
+     */
+    private function refusePluginFile(string $filePath, string $fqcn, string $source, string $reason): void
+    {
+        $this->logWarning("Plugin file {$filePath} was not loaded: {$reason} (#841).");
+
+        if ($this->sourceDeclaresPluginClass($source)) {
+            $this->registerCollisionPlaceholder($fqcn, "Class collision: {$reason}.");
+        }
+    }
+
+    /**
+     * Quarantine a plugin whose entry file was refused before it ever ran.
+     *
+     * Mirrors {@see registerDisabledPlaceholder()}: a lifecycle record WITHOUT a
+     * plugin instance, because the point is that the code was never executed.
+     * The display name is the namespace root of the resolved FQCN, which is the
+     * on-disk directory name — the same key the admin plugins listing matches
+     * on-disk entries by, so a refused copy appears in the list as failed, with
+     * the reason, instead of being invisible outside the log.
+     *
+     * Quarantine (rather than Failed-by-errors) is also what stops an admin from
+     * "enabling" it back into the fatal: {@see reEnablePlugin()} refuses a
+     * quarantined plugin, and only a disk change can clear the condition.
+     *
+     * @param string $fqcn The plugin's stable identity (path-resolved FQCN).
+     * @param string $reason Admin-visible explanation.
+     * @return void
+     */
+    private function registerCollisionPlaceholder(string $fqcn, string $reason): void
+    {
+        if (isset($this->lifecycles[$fqcn])) {
+            return;
+        }
+
+        $lifecycle = new PluginLifecycle($fqcn, explode('\\', $fqcn)[0]);
+        $lifecycle->markLoaded();
+        $lifecycle->quarantine($reason);
+        $this->lifecycles[$fqcn] = $lifecycle;
     }
 
     /**
@@ -2233,7 +2494,9 @@ class PluginLoader
 
         // If we cannot read the source, fall back to a plain require.
         if ($source === false) {
-            require_once $filePath;
+            if (!$this->requirePluginFile($filePath, $fqcn)) {
+                return null;
+            }
             return class_exists($fqcn) ? $fqcn : null;
         }
 
@@ -2244,8 +2507,15 @@ class PluginLoader
         // file as-is. (discover() may already have required it, but no prior
         // version was loaded, so the original definition is correct.) A
         // brand-new class loads cleanly — no recycle needed.
+        //
+        // The guard matters here even though discovery already ran: enabling a
+        // plugin that was discovered DISABLED (WC-220 M4) reaches this line with
+        // a file NOTHING has required yet, so this is the one require of an
+        // unexamined file outside discover() (#841).
         if ($previousHash === null) {
-            require_once $filePath;
+            if (!$this->requirePluginFile($filePath, $fqcn, $source)) {
+                return null;
+            }
             if (!class_exists($fqcn)) {
                 return null;
             }
@@ -2685,6 +2955,11 @@ class PluginLoader
         //    callbacks are wrapped in the same error boundary as route handlers.
         $registeredHooks = [];
         if ($this->hookManager !== null) {
+            // Record the namespace this plugin owns so a dispatch under a
+            // MIS-SPELLED namespaced name can be reported rather than matching
+            // no listener in silence (#843). Diagnostic bookkeeping only.
+            $this->hookManager->registerPluginNamespace($plugin->getName());
+
             foreach ($plugin->getHooks() as $eventName => $hookData) {
                 foreach ($this->registerHook($pluginKey, $eventName, $hookData) as $callback) {
                     $registeredHooks[] = ['event' => $eventName, 'callback' => $callback];

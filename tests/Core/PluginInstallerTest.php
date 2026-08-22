@@ -263,6 +263,114 @@ final class PluginInstallerTest extends TestCase
         $this->installer()->installFromUpload($this->upload($zip2));
     }
 
+    /**
+     * #841: two packages, two DIFFERENT directory names, ONE declared class.
+     *
+     * This is the collision the name-on-disk check cannot see, and it is the
+     * shape a marketplace makes routine: nothing coordinates namespaces between
+     * authors, and forking a reference plugin (HelloWorld exists to be copied)
+     * keeps the original's namespace by default. Both packages install cleanly
+     * under the old rule, and the SECOND file to be required at the next boot
+     * raises `Cannot redeclare class …` — a fatal, so not something the plugin
+     * error boundary can contain, in the code path that runs before any request
+     * is served. The loader now refuses that file instead of dying with it, but
+     * refusing the INSTALL is what turns it into an answer the operator gets at
+     * upload time, with the reason attached, and nothing written to disk.
+     */
+    public function testPackageDeclaringAnInstalledPluginsClassIsRejected(): void
+    {
+        // Installed: plugins/ClassSquatted/Plugin.php, declaring
+        // ClassSquatted\Plugin.
+        $first = PluginPackageFixtures::validDirectoryZip($this->workDir, 'ClassSquatted');
+        $this->installer()->installFromUpload($this->upload($first));
+        self::assertDirectoryExists($this->pluginDir . '/ClassSquatted');
+
+        // Incoming: a package whose NAME is free (ClassSquatter — no such
+        // directory exists) but whose source declares the SAME class as the
+        // plugin already installed above.
+        $secondDir = $this->workDir . '/second';
+        mkdir($secondDir, 0775, true);
+        $second = PluginPackageFixtures::validDirectoryZip(
+            $secondDir,
+            'ClassSquatter',
+            '^1.5',
+            '',
+            'ClassSquatted'
+        );
+
+        try {
+            $this->installer()->installFromUpload($this->upload($second));
+            self::fail('a package declaring an installed plugin class must be rejected');
+        } catch (PluginAlreadyInstalled $e) {
+            self::assertStringContainsString('class', $e->getMessage());
+        }
+
+        // Rejected BEFORE anything was written: no second directory, and the
+        // first plugin is untouched.
+        self::assertDirectoryDoesNotExist($this->pluginDir . '/ClassSquatter');
+        self::assertDirectoryExists($this->pluginDir . '/ClassSquatted');
+        self::assertSame(0, $this->tempWorkDirCount(), 'temp work dir must be cleaned up');
+    }
+
+    /**
+     * The same gate, against a plugin that is installed but DISABLED.
+     *
+     * A disable is a rename (`Foo.php` -> `Foo.php.disabled`) or a sentinel file
+     * in the directory; the source still sits on disk and its class is one
+     * enable away from being declared for real. Reading the collision from
+     * `class_exists()` would miss exactly this case — a disabled plugin's code
+     * is deliberately never executed in the host (WC-220 M4) — which is why the
+     * installed side is read lexically from the sources instead. Allowing the
+     * install here would produce a plugin that can never be enabled.
+     */
+    public function testPackageCollidingWithADisabledPluginsClassIsRejected(): void
+    {
+        // Installs land DISABLED by construction, so the first install already
+        // gives us the disabled-on-disk case (sentinel in the directory).
+        $first = PluginPackageFixtures::validDirectoryZip($this->workDir, 'DisabledSquatted');
+        $this->installer()->installFromUpload($this->upload($first));
+        self::assertFileExists(
+            $this->pluginDir . '/DisabledSquatted/' . PluginLoader::DIR_DISABLED_SENTINEL
+        );
+
+        $secondDir = $this->workDir . '/second-disabled';
+        mkdir($secondDir, 0775, true);
+        $second = PluginPackageFixtures::validDirectoryZip(
+            $secondDir,
+            'DisabledSquatter',
+            '^1.5',
+            '',
+            'DisabledSquatted'
+        );
+
+        $this->expectException(PluginAlreadyInstalled::class);
+        try {
+            $this->installer()->installFromUpload($this->upload($second));
+        } finally {
+            self::assertDirectoryDoesNotExist($this->pluginDir . '/DisabledSquatter');
+        }
+    }
+
+    /**
+     * The gate must not fire on a package that shares nothing but a prefix: a
+     * check that rejects too much is a check operators route around.
+     */
+    public function testPackageWithItsOwnClassStillInstallsBesideAnotherPlugin(): void
+    {
+        $first = PluginPackageFixtures::validDirectoryZip($this->workDir, 'NeighbourOne');
+        $this->installer()->installFromUpload($this->upload($first));
+
+        $secondDir = $this->workDir . '/neighbour';
+        mkdir($secondDir, 0775, true);
+        $second = PluginPackageFixtures::validDirectoryZip($secondDir, 'NeighbourTwo');
+
+        $entry = $this->installer()->installFromUpload($this->upload($second));
+
+        self::assertSame('NeighbourTwo', $entry['name']);
+        self::assertDirectoryExists($this->pluginDir . '/NeighbourOne');
+        self::assertDirectoryExists($this->pluginDir . '/NeighbourTwo');
+    }
+
     public function testNonZipNonPhpUploadIsRejected(): void
     {
         $junk = $this->workDir . '/notes.txt';

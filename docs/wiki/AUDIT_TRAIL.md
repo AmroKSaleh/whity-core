@@ -11,6 +11,7 @@ Related: [PERMISSION_SYSTEM](PERMISSION_SYSTEM.md) · [TENANT_ISOLATION](TENANT_
 | `audit_log` table | Append-only storage for audit entries. | `database/migrations/016_create_audit_log.php` |
 | `AuditLogger` | The single writer. Subscribes to CRUD hooks and exposes `record()`. | `src/Core/Audit/AuditLogger.php` |
 | `AuditContext` | Request-scoped holder for the acting user id + client IP. | `src/Core/Audit/AuditContext.php` |
+| `AuditOrigin` | Process-scoped provenance (`cli`) stamped on rows that did not come from a web request. | `src/Core/Audit/AuditOrigin.php` |
 | `AuditLogApiHandler` | Queryable, RBAC-protected read API. | `src/Api/AuditLogApiHandler.php` |
 | `audit:read` permission | Gates the read API. | `src/Core/RBAC/CorePermissions.php` |
 
@@ -89,6 +90,26 @@ Filtering the trail on a plugin is therefore a prefix match: everything `acme:` 
 
 The actor id and client IP are request-specific, but the logger subscribes to hooks deep inside handlers and has no access to the `Request`. `AuditContext` (`src/Core/Audit/AuditContext.php`) bridges this: `EnforceTenantIsolation` (which already decodes the JWT first) sets the actor/IP once per request, and the logger reads them when it writes. Like `TenantContext`, this is the sanctioned exception to the "no request state in statics" rule on persistent workers and is **reset between requests** (by the HTTP kernel's reflective reset and explicitly in the worker loop's `finally`). The auth path passes the actor/IP explicitly to `record()` because it knows the user before the request context is populated (login is a public route).
 
+### Origin: telling a shell command apart from a web request (#844)
+
+Both entry points audit core CRUD: `public/index.php` and the CLI kernel (`BaseCommand::setupKernel()`) each subscribe the writer to the same hooks. A CLI invocation has no authenticated principal, though, so the row it writes has to answer "who" honestly:
+
+- **`actor_user_id` is never invented.** Nothing authenticated, so the column is `NULL`. A synthetic "system user" id would read exactly like a real account to anyone querying the trail later, and nothing could separate the two after the fact.
+- **The row records its provenance instead.** A logger built for a non-web entry point is given an `AuditOrigin`, and every row it writes carries `"_origin": "cli"` plus `"_origin_command": "tenant"` in its metadata. Two flat keys rather than a nested object, because both readers want scalars: the admin screen joins the details cell as `key: value` pairs, and a future JSONB index wants `metadata->>'_origin'`. Only the command WORD is stored, never its arguments: a command line routinely carries secrets (`--admin-password=…`) and the trail is readable by any tenant admin with `audit:read`.
+- **The stamp cannot be forged.** It is applied after the caller's metadata is sanitised and assigned rather than merged, so a hook payload — or a plugin's declared event, which travels the same path — cannot overwrite where a row came from.
+
+An empty actor column therefore has two readings, and they are distinguished by data rather than guesswork:
+
+| Row | `actor_user_id` | `ip_address` | `metadata._origin` |
+| --- | --- | --- | --- |
+| A person over HTTP | profile id | client IP | absent |
+| A pre-auth HTTP action (failed login) | `NULL` | client IP | absent |
+| An operator's shell command | `NULL` | `NULL` | `"cli"` (+ `_origin_command`) |
+
+Web rows are unchanged — the absence of `_origin` is what "this came from an HTTP request" means, and it is also what every row written before #844 means. If the CLI ever authenticates a real operator (an `--as` flag, a dedicated CLI service principal), `AuditContext` will carry them and the row records **both** the actor and the origin; the origin describes the process, never the person.
+
+**Out of scope, deliberately:** `seed` and `migrate` build no kernel and dispatch no hooks, so a bootstrap writes no audit rows. Fixture data is not activity, and hundreds of actor-less `user.created` rows on day one would bury the first genuine administrator action.
+
 ## Query API
 
 `GET /api/audit-logs` (`src/Api/AuditLogApiHandler.php`) is the read endpoint:
@@ -111,4 +132,5 @@ See the OpenAPI spec (`public/openapi.json`) for the full request/response contr
 - `AuditLogger` is the single writer: it subscribes to the core CRUD hooks, is called explicitly by the auth/2FA endpoints, and subscribes to the events plugins declare; it is fail-soft and worker-safe.
 - Plugin-declared events are namespaced under the declaring plugin (action `acme:task.completed`, target type `acme:task`) from the name the loader supplies, so no plugin can forge a core action or another plugin's.
 - `AuditContext` carries the per-request actor/IP and is reset between requests.
+- Rows written outside a web request carry an `AuditOrigin` (`metadata._origin`) instead of an invented actor, so an empty `actor_user_id` is readable rather than ambiguous. `seed`/`migrate` write nothing.
 - `GET /api/audit-logs` is gated on `audit:read`, tenant-scoped (system tenant 0 sees all), filterable and paginated.

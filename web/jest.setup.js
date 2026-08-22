@@ -2,6 +2,15 @@
 import '@testing-library/jest-dom';
 import { TextEncoder, TextDecoder } from 'node:util';
 
+import { assertWorkspaceResolution } from './jest.workspace-guard';
+
+// Before anything else: prove the workspace packages under test come from THIS
+// checkout. Running from a worktree with no node_modules of its own resolves
+// them to the main checkout instead, which silently unbinds every jest.mock()
+// of a workspace package and presents the result as four broken product suites
+// (#840). Fail here, with the cause named, rather than there.
+assertWorkspaceResolution();
+
 // jsdom ships no TextEncoder/TextDecoder; react-qr-code (rendered by the 2FA
 // setup wizard) needs TextEncoder to encode the QR payload.
 if (typeof global.TextEncoder === 'undefined') {

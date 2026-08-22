@@ -454,6 +454,49 @@ jobs:
       - name: Vendored-SDK parity (desktop template)
         run: php scripts/ci-vendored-sdk-parity.php
 
+  # SDK version-collision guard (#873). The parity gate above is HORIZONTAL —
+  # source tree versus the desktop template's vendored copy, at one commit. A
+  # version collision is VERTICAL, and no horizontal check can see it: #871 and
+  # #872 were built in parallel and both set Sdk::VERSION to 1.30.0. Each branch
+  # agreed with itself, so both passed parity, and whichever merged second
+  # silently overwrote the other's version number with a different meaning —
+  # leaving a plugin that declares `^1.30` bound to a contract nobody can
+  # identify from the constraint, on devices, offline (#849).
+  #
+  # Its own job rather than a step in `static-analysis`, for one reason: it
+  # reads GIT HISTORY, so it needs fetch-depth: 0. A shallow checkout does not
+  # error here — it answers `git log develop -- sdk/src/Sdk.php` with a SMALLER
+  # set of used versions, so a number that is already taken reads as free, which
+  # is the same silent false green the guard exists to remove. Keeping it in its
+  # own job keeps the full fetch off the other jobs, which do not need it.
+  #
+  # No `composer install`: the guard reads two files and shells out to git.
+  sdk-version:
+    name: SDK version collision (against develop's history)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.desktop_host == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code with full history
+        uses: actions/checkout@v7
+        with:
+          # Load-bearing, not a precaution: at the default depth of 1 this
+          # guard's answer is WRONG rather than missing. It refuses to run in a
+          # shallow checkout instead of guessing, so removing this line turns
+          # the job red rather than green.
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring
+          coverage: none
+
+      - name: SDK version-collision guard
+        run: php scripts/ci-sdk-version-collision.php
+
   # The English translation catalogue must stay a faithful projection of the
   # t() calls that produce it. A converted screen whose keys were never
   # extracted degrades silently and looks successful: the fallback renders, the
@@ -1140,6 +1183,7 @@ jobs:
       - test
       - coverage
       - static-analysis
+      - sdk-version
       - i18n-catalogue
       - postgres-migrations
       - postgres-integration
