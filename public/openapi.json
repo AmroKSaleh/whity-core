@@ -6316,8 +6316,8 @@
                     {
                         "name": "entity_type",
                         "in": "query",
-                        "required": false,
-                        "description": "The opaque plugin-supplied entity type (required)",
+                        "required": true,
+                        "description": "The opaque plugin-supplied entity type",
                         "schema": {
                             "type": "string"
                         }
@@ -6325,8 +6325,8 @@
                     {
                         "name": "entity_id",
                         "in": "query",
-                        "required": false,
-                        "description": "The entity whose associations are removed (required)",
+                        "required": true,
+                        "description": "The entity whose associations are removed",
                         "schema": {
                             "type": "integer"
                         }
@@ -15953,6 +15953,16 @@
                             }
                         }
                     },
+                    "422": {
+                        "description": "name over 255 or description over 10000 characters",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "content": {
@@ -16239,6 +16249,16 @@
                     },
                     "409": {
                         "description": "Role name already exists",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "name over 255 or description over 10000 characters",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -21392,6 +21412,16 @@
                             }
                         }
                     },
+                    "422": {
+                        "description": "Email longer than 255 characters",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "content": {
@@ -21668,6 +21698,16 @@
                     },
                     "409": {
                         "description": "Email already exists in the tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Email longer than 255 characters",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -23519,13 +23559,22 @@
                 "type": "object",
                 "properties": {
                     "entity_type": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
                     },
                     "entity_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "minimum": 1
                     },
                     "tag_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "x-whity-reference": {
+                            "resource": "/api/v1/tags",
+                            "valueField": "id",
+                            "labelField": "name"
+                        },
+                        "minimum": 1
                     }
                 },
                 "required": [
@@ -24880,22 +24929,88 @@
                 ]
             },
             "MembershipCreateRequest": {
-                "type": "object",
-                "properties": {
-                    "role_id": {
-                        "type": "integer"
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "role_id": {
+                                "type": "integer",
+                                "x-whity-reference": {
+                                    "resource": "/api/v1/roles",
+                                    "valueField": "id",
+                                    "labelField": "name"
+                                },
+                                "description": "The role to grant, by id. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400, and supplying both is legal with `role_id` winning."
+                            },
+                            "role": {
+                                "oneOf": [
+                                    {
+                                        "type": "integer"
+                                    },
+                                    {
+                                        "type": "string"
+                                    }
+                                ],
+                                "description": "The same grant addressed by role NAME (or by a numeric id). Core's own memberships UI uses this spelling."
+                            },
+                            "ou_id": {
+                                "type": "integer",
+                                "nullable": true,
+                                "x-whity-reference": {
+                                    "resource": "/api/v1/ous",
+                                    "valueField": "id",
+                                    "labelField": "name"
+                                }
+                            },
+                            "tenant_id": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "role_id"
+                        ]
                     },
-                    "role": {
-                        "type": "string"
-                    },
-                    "ou_id": {
-                        "type": "integer",
-                        "nullable": true
-                    },
-                    "tenant_id": {
-                        "type": "integer"
+                    {
+                        "type": "object",
+                        "properties": {
+                            "role_id": {
+                                "type": "integer",
+                                "x-whity-reference": {
+                                    "resource": "/api/v1/roles",
+                                    "valueField": "id",
+                                    "labelField": "name"
+                                },
+                                "description": "The role to grant, by id. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400, and supplying both is legal with `role_id` winning."
+                            },
+                            "role": {
+                                "oneOf": [
+                                    {
+                                        "type": "integer"
+                                    },
+                                    {
+                                        "type": "string"
+                                    }
+                                ],
+                                "description": "The same grant addressed by role NAME (or by a numeric id). Core's own memberships UI uses this spelling."
+                            },
+                            "ou_id": {
+                                "type": "integer",
+                                "nullable": true,
+                                "x-whity-reference": {
+                                    "resource": "/api/v1/ous",
+                                    "valueField": "id",
+                                    "labelField": "name"
+                                }
+                            },
+                            "tenant_id": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "role"
+                        ]
                     }
-                }
+                ]
             },
             "MembershipListResponse": {
                 "type": "object",
@@ -25295,27 +25410,48 @@
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1
                     },
                     "description": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 10000
                     },
                     "parent_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "x-whity-reference": {
+                            "resource": "/api/v1/ous",
+                            "valueField": "id",
+                            "labelField": "name"
+                        }
                     },
                     "ou_type_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "x-whity-reference": {
+                            "resource": "/api/v1/ou-types",
+                            "valueField": "id",
+                            "labelField": "label"
+                        }
                     },
                     "type": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$"
                     }
                 },
                 "required": [
                     "name"
-                ]
+                ],
+                "not": {
+                    "required": [
+                        "ou_type_id",
+                        "type"
+                    ]
+                }
             },
             "OuDetail": {
                 "type": "object",
@@ -25429,7 +25565,13 @@
                 "type": "object",
                 "properties": {
                     "role_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "x-whity-reference": {
+                            "resource": "/api/v1/roles",
+                            "valueField": "id",
+                            "labelField": "name"
+                        },
+                        "minimum": 1
                     }
                 },
                 "required": [
@@ -25562,10 +25704,14 @@
                 "type": "object",
                 "properties": {
                     "key": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$",
+                        "minLength": 1
                     },
                     "label": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 255
                     },
                     "sort_order": {
                         "type": "integer"
@@ -25604,34 +25750,58 @@
                 "type": "object",
                 "properties": {
                     "label": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1
                     },
                     "sort_order": {
                         "type": "integer"
                     }
-                }
+                },
+                "minProperties": 1
             },
             "OuUpdateRequest": {
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1
                     },
                     "description": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 10000
                     },
                     "parent_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "x-whity-reference": {
+                            "resource": "/api/v1/ous",
+                            "valueField": "id",
+                            "labelField": "name"
+                        }
                     },
                     "ou_type_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "x-whity-reference": {
+                            "resource": "/api/v1/ou-types",
+                            "valueField": "id",
+                            "labelField": "label"
+                        }
                     },
                     "type": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$"
                     }
+                },
+                "not": {
+                    "required": [
+                        "ou_type_id",
+                        "type"
+                    ]
                 }
             },
             "Pagination": {
@@ -26950,10 +27120,13 @@
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1
                     },
                     "description": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 10000
                     },
                     "permissions": {
                         "type": "array",
@@ -27214,10 +27387,13 @@
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1
                     },
                     "description": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 10000
                     },
                     "permissions": {
                         "type": "array",
@@ -27873,10 +28049,18 @@
                 "type": "object",
                 "properties": {
                     "group_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "x-whity-reference": {
+                            "resource": "/api/v1/tag-groups",
+                            "valueField": "id",
+                            "labelField": "key"
+                        },
+                        "minimum": 1
                     },
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
                     }
                 },
                 "required": [
@@ -27939,7 +28123,10 @@
                 "type": "object",
                 "properties": {
                     "key": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9_.:-]{1,64}$"
                     },
                     "display_name": {
                         "type": "object",
@@ -27987,7 +28174,10 @@
                 "type": "object",
                 "properties": {
                     "key": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9_.:-]{1,64}$"
                     },
                     "display_name": {
                         "type": "object",
@@ -28001,7 +28191,8 @@
                             }
                         }
                     }
-                }
+                },
+                "minProperties": 1
             },
             "TagListResponse": {
                 "type": "object",
@@ -28021,7 +28212,9 @@
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
                     }
                 },
                 "required": [
@@ -29412,11 +29605,15 @@
                 "type": "object",
                 "properties": {
                     "email": {
-                        "type": "string"
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 255
                     },
                     "password": {
                         "type": "string",
-                        "minLength": 6
+                        "format": "password",
+                        "minLength": 8,
+                        "maxLength": 72
                     },
                     "role": {
                         "oneOf": [
@@ -29428,9 +29625,22 @@
                             }
                         ]
                     },
+                    "role_id": {
+                        "type": "integer",
+                        "x-whity-reference": {
+                            "resource": "/api/v1/roles",
+                            "valueField": "id",
+                            "labelField": "name"
+                        }
+                    },
                     "ou_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "x-whity-reference": {
+                            "resource": "/api/v1/ous",
+                            "valueField": "id",
+                            "labelField": "name"
+                        }
                     }
                 },
                 "required": [
@@ -29471,11 +29681,15 @@
                 "type": "object",
                 "properties": {
                     "email": {
-                        "type": "string"
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 255
                     },
                     "password": {
                         "type": "string",
-                        "minLength": 6
+                        "format": "password",
+                        "minLength": 8,
+                        "maxLength": 72
                     },
                     "role": {
                         "oneOf": [
@@ -29487,9 +29701,22 @@
                             }
                         ]
                     },
+                    "role_id": {
+                        "type": "integer",
+                        "x-whity-reference": {
+                            "resource": "/api/v1/roles",
+                            "valueField": "id",
+                            "labelField": "name"
+                        }
+                    },
                     "ou_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "x-whity-reference": {
+                            "resource": "/api/v1/ous",
+                            "valueField": "id",
+                            "labelField": "name"
+                        }
                     },
                     "accountStatus": {
                         "type": "string",
