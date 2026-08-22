@@ -281,7 +281,7 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('Updated self profile; auth cookies re-issued', 'MeResponse'),
                     400 => self::errorResponse('No changes, invalid email format, or password too short'),
                     401 => self::errorResponse('Missing/invalid token, or current password incorrect'),
-                    // #916: an IdP-backed account has no local password, so it
+                    // #917: an IdP-backed account has no local password, so it
                     // can satisfy neither the current-password gate nor the
                     // change it guards - said plainly rather than as a wrong 401.
                     409 => self::errorResponse(
@@ -479,7 +479,7 @@ final class CoreApiSchemas
                 'request' => 'UserCreateRequest',
                 'responses' => [
                     201 => self::jsonResponse('The created user', 'UserResponse'),
-                    // #916: `role`/`role_id` present but empty or null is a 400,
+                    // #917: `role`/`role_id` present but empty or null is a 400,
                     // distinct from omitting it (which still defaults to the
                     // global `user` role). A named field with nothing behind it
                     // is not a request for the default.
@@ -2076,7 +2076,7 @@ final class CoreApiSchemas
             'createdAt' => self::str(true),
             'status' => self::str(),
             'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
-            // #916: which authority holds this account's credentials.
+            // #917: which authority holds this account's credentials.
             // 'local' = a password this platform stores; 'idp' = an external
             // identity provider and NO local password; 'both' = an external
             // provider AND a local password. Read-only - it is a consequence of
@@ -3076,9 +3076,19 @@ final class CoreApiSchemas
                 // `role_id` was missing from this declaration entirely, so a
                 // generated client had no way to send the id form.
                 //
-                // OPTIONAL, and an absent role DEFAULTS to the global `user`
+                // OPTIONAL, and an ABSENT role DEFAULTS to the global `user`
                 // role (a 500 if that role is missing from the instance). A
                 // supplied-but-invisible role is a 404, not a fallback.
+                //
+                // "Absent" means the key is not present. Either spelling
+                // PRESENT but null or empty is a 400, NOT the default (#917):
+                // substituting the least-privileged role for a key with nothing
+                // behind it is how an account meant to be an administrator was
+                // created as an ordinary user, with a 201 and nothing in any
+                // log. The distinction is not expressible in JSON Schema — a
+                // property can be absent or typed, not "present but must not be
+                // empty" — so it is stated here, where a client author reading
+                // the declaration will see it.
                 'role' => $permissionRef,
                 'role_id' => self::reference('/api/roles', 'name'),
                 // Optional OU placement, so provisioning is one atomic call. The
@@ -3095,7 +3105,7 @@ final class CoreApiSchemas
                 'ou_id' => self::reference('/api/ous', 'name', nullable: true),
                 // WC-user-status: the admin deactivate/reactivate control.
                 'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
-                // #916: permits `password` against an account whose credentials
+                // #917: permits `password` against an account whose credentials
                 // belong to an identity provider (`authMethod: 'idp'`), which is
                 // otherwise refused with 409. Taking it moves the account to
                 // 'both' and records an audit row - the arrangement stays
@@ -4952,7 +4962,7 @@ final class CoreApiSchemas
                 'responses' => [
                     202 => self::jsonResponse('A reset link has been mailed to the user', 'AdminPasswordResetSentResponse'),
                     404 => self::errorResponse('User not found in this tenant'),
-                    // #916: a reset link for an IdP-backed account would create a
+                    // #917: a reset link for an IdP-backed account would create a
                     // local credential rather than restore access to an existing one.
                     409 => self::errorResponse(
                         'Password-reset emails are disabled for this instance, or the account signs in '

@@ -24,7 +24,7 @@ use Whity\Database\Database;
 use Whity\Sdk\Auth\ExternalIdentity;
 
 /**
- * Real-engine tests for `profiles.auth_method` (#916, migration 104) and
+ * Real-engine tests for `profiles.auth_method` (#917, migration 104) and
  * {@see AuthMethod}, the single writer of `profiles.password_hash`.
  *
  * WHY THIS LIVES IN tests/Integration
@@ -204,7 +204,7 @@ final class AuthMethodRealEngineTest extends TestCase
     // ==================== the refusal ====================
 
     /**
-     * THE test for #916: an IdP-backed profile cannot be given a local password,
+     * THE test for #917: an IdP-backed profile cannot be given a local password,
      * and the refusal leaves the row untouched.
      *
      * The hash and the token epoch are both re-read afterwards. Asserting only

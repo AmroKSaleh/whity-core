@@ -421,14 +421,14 @@ final class BootstrapIdentityRealEngineTest extends TestCase
         $_ENV[$name] = $value;
         putenv($name . '=' . $value);
     }
-    // ── (f) #916: the bootstrap reconciliation names the real reason ─────────
+    // ── (f) #917: the bootstrap reconciliation names the real reason ─────────
 
     /**
      * When the bootstrap account signs in through an identity provider, the
      * seeder says THAT — and stops telling the operator to go and set a password
      * through `PATCH /api/users/{id}`.
      *
-     * That instruction is how #916 got exercised in the first place. The
+     * That instruction is how #917 got exercised in the first place. The
      * seeder's mismatch warning printed it unconditionally, so an operator whose
      * bootstrap administrator was federated was being walked into creating
      * exactly the credential this release exists to prevent.

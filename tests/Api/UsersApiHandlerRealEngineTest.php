@@ -1761,7 +1761,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $still = $this->pdo->query('SELECT two_factor_enabled FROM profiles WHERE id = 82')->fetchColumn();
         $this->assertTrue((bool) $still, 'a password reset must leave an enrolled authenticator in place');
     }
-    // ==================== #916: IdP-backed accounts and the local password ====================
+    // ==================== #917: IdP-backed accounts and the local password ====================
 
     /**
      * THE reported defect. `PATCH /api/users/{id}` with a `password` against an
@@ -1975,7 +1975,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         );
     }
 
-    // ==================== #916 / A4: an absent role vs an empty one ====================
+    // ==================== #917 / A4: an absent role vs an empty one ====================
 
     /**
      * A role field supplied with NOTHING behind it is a 400, and creates
@@ -2068,7 +2068,7 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         // `auth_method` is stated rather than left on migration 104's 'local'
         // DEFAULT — a fixture that inserts an empty password_hash and says
         // nothing else claims a credential it does not hold, exactly the
-        // inference #916 removed. FederatedIdentityLinker carries the same
+        // inference #917 removed. FederatedIdentityLinker carries the same
         // obligation in production.
         $this->pdo->prepare(
             "INSERT INTO profiles (id, display_name, password_hash, auth_method, two_factor_enabled,

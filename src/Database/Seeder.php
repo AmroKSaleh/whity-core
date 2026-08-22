@@ -294,7 +294,7 @@ class Seeder
             return;
         }
 
-        // #916: an account whose credentials belong to an identity provider will
+        // #917: an account whose credentials belong to an identity provider will
         // never match ANY configured value, and telling the operator to go and
         // set one through PATCH /api/users/{id} — as the message below used to,
         // unconditionally — is the exact instruction that produced the defect.

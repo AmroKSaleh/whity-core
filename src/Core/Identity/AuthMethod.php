@@ -8,7 +8,7 @@ use PDO;
 
 /**
  * `profiles.auth_method` — which authority holds an account's credentials
- * (#916, migration 104) — and the ONLY writer of `profiles.password_hash`.
+ * (#917, migration 104) — and the ONLY writer of `profiles.password_hash`.
  *
  * WHAT THIS REPLACES
  * ------------------

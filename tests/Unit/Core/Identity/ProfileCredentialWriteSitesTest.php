@@ -10,13 +10,13 @@ use RecursiveIteratorIterator;
 use SplFileInfo;
 
 /**
- * The structural half of #916: nothing outside {@see \Whity\Core\Identity\AuthMethod}
+ * The structural half of #917: nothing outside {@see \Whity\Core\Identity\AuthMethod}
  * may write `profiles.password_hash`, and the set of places that CREATE a
  * profile is frozen.
  *
  * WHY A SCANNER AND NOT A DOCBLOCK
  * --------------------------------
- * #916 was reported as one endpoint minting a local password on an IdP-backed
+ * #917 was reported as one endpoint minting a local password on an IdP-backed
  * account. It was six: the admin PATCH, the self-service PATCH, the
  * forgot-password confirm, the admin approval of a staged reset, the
  * admin-mailed reset link, and 2FA recovery — each of which independently
@@ -130,7 +130,7 @@ final class ProfileCredentialWriteSitesTest extends TestCase
             . 'It carries the refusal for identity-provider-backed accounts in the WHERE clause of the '
             . 'statement that writes, and moves auth_method on so the held fact cannot drift from the '
             . 'credential. A path that writes the column itself is a path where an SSO account can be '
-            . 'given a local password nobody asked for (#916).'
+            . 'given a local password nobody asked for (#917).'
         );
     }
 

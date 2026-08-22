@@ -1355,7 +1355,7 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
 
-        // #916: an IdP-backed account has no local password, so it can satisfy
+        // #917: an IdP-backed account has no local password, so it can satisfy
         // neither the current-password gate below nor the change it guards.
         // Before this check it still failed — password_verify() against the
         // empty-string hash is false for every input — but it failed by saying
@@ -1419,7 +1419,7 @@ class AuthHandler
             }
 
             // Written through AuthMethod, the single writer of
-            // profiles.password_hash (#916). It bumps token_epoch with the hash,
+            // profiles.password_hash (#917). It bumps token_epoch with the hash,
             // as this path always has, and refuses an IdP-backed profile a
             // second time in the statement that writes — unreachable here
             // because of the guard above, which is the arrangement intended:

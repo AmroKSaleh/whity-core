@@ -47,7 +47,7 @@ final class ExternalIdentityRepository
      * external account within that namespace — a duplicate raises a constraint
      * violation (the caller decides whether that is a conflict).
      *
-     * Also moves the profile's `auth_method` on (#916): this is the moment an
+     * Also moves the profile's `auth_method` on (#917): this is the moment an
      * account becomes IdP-backed, and the fact is stamped here rather than at
      * the three call sites so no future one can link an identity without
      * recording that it did. On a duplicate the INSERT throws before the stamp,
@@ -184,7 +184,7 @@ final class ExternalIdentityRepository
      * Unlink an external identity, scoped to its owning profile so a caller can
      * only remove their OWN link (a cross-profile unlink matches zero rows).
      *
-     * Recomputes `auth_method` afterwards (#916) — paired with {@see link()} so
+     * Recomputes `auth_method` afterwards (#917) — paired with {@see link()} so
      * the held fact cannot be left describing an IdP that is no longer attached.
      * Only removing the LAST link changes anything; see
      * {@see AuthMethod::onExternalIdentityUnlinked()}.

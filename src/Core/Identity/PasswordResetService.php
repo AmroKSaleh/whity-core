@@ -78,7 +78,7 @@ final class PasswordResetService
      * store nothing of it beyond the returned value; only its hash is
      * persisted.
      *
-     * Refuses outright for an IdP-backed profile (#916). A reset link is a
+     * Refuses outright for an IdP-backed profile (#917). A reset link is a
      * local credential in transit: mailing one to an account an identity
      * provider governs alone is how the account quietly acquires a second way
      * in that outlives the IdP. The refusal is here, at issuance, rather than at
@@ -195,7 +195,7 @@ final class PasswordResetService
             $requestId = (int) $row['id'];
             $profileId = (int) $row['profile_id'];
 
-            // #916: no token should exist for an IdP-backed profile — issue()
+            // #917: no token should exist for an IdP-backed profile — issue()
             // refuses to mint one — but a profile can become IdP-backed after a
             // token was issued, and a token minted before migration 104 landed
             // knows nothing of any of this. Treat it exactly like an unknown
@@ -226,7 +226,7 @@ final class PasswordResetService
                 // (invalidates every existing session for this profile, exactly
                 // like a self-service password change via PATCH /api/me).
                 // Written through AuthMethod, the single writer of
-                // profiles.password_hash (#916), which refuses an IdP-backed
+                // profiles.password_hash (#917), which refuses an IdP-backed
                 // profile a second time in the same statement that writes.
                 (new AuthMethod($this->db))->setPasswordHash($profileId, $newHash);
 
@@ -415,7 +415,7 @@ final class PasswordResetService
 
             $profileId = (int) $row['profile_id'];
 
-            // #916: a staged hash can outlive the state it was staged under —
+            // #917: a staged hash can outlive the state it was staged under —
             // the profile may have been linked to an identity provider between
             // the request and this approval, and a queue entry from before
             // migration 104 predates the question entirely. Refuse rather than
