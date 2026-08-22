@@ -47,20 +47,39 @@ pub struct BridgeResource {
 }
 
 /// Populated with every plugin whose local route is expected to speak the
-/// sync wire contract. Relaying against a plugin that isn't actually
-/// installed on this device is a safe no-op — each HTTP call simply fails,
-/// is logged, and is retried next cycle (its cursor never advances past the
-/// failure) — so this can be populated ahead of confirming a resource is
-/// entitled/downloadable for any given test tenant.
+/// sync wire contract.
 ///
-/// `demo-catalog/items` intentionally isn't here: demos are being dropped
-/// from the product (see the removal of the bundled demo plugins) and the
-/// backend agent has unseeded DemoCatalog@1.0.0 from the live catalog.
-/// `relations/persons` (PR #818's `PersonResource`/`PersonsApiHandler`,
-/// slice 1 of the Relations plugin — `display_name`, `birth_date`,
-/// `deceased`, `notes`) is the real bridge target going forward, published
-/// through the desktop-plugin-release pipeline like any other plugin.
-pub static BRIDGE_RESOURCES: &[&BridgeResource] = &[&BridgeResource { key: "relations/persons", base_path: "/persons" }];
+/// # EMPTY ON PURPOSE — the relay cannot currently work on either leg
+///
+/// This held `relations/persons`, which failed on BOTH legs on every sync
+/// cycle: 131 failures per leg in a single observed session, logged as
+/// `changes feed failed (404)` and ``invalid changes response: missing field
+/// `cursor` ``. Measured against a running host and the live backend, the two
+/// causes are different and only one is ours:
+///
+/// 1. **Local leg — a path bug here.** The URL is `php_host_base +
+///    base_path`, and plugins register under `/api` (`/api/persons`,
+///    `/api/document-templates`). With `base_path: "/persons"` the request
+///    goes to `http://127.0.0.1:PORT/persons` → 404. Verified against the
+///    running offline host: `/persons` 404s, `/api/persons?updatedSince=0`
+///    returns a proper `{data, cursor, hasMore}` feed.
+/// 2. **Remote leg — the server does not serve a changes feed.**
+///    `GET /api/v1/persons?updatedSince=0` answers `200` with
+///    `{"data":[…],"pagination":{…}}` — a paginated LIST that ignores
+///    `updatedSince` and carries no `cursor`/`hasMore`. That body is 73 bytes
+///    long, which is exactly where the deserializer reports the missing field.
+///    Core's document routes behave the same way.
+///
+/// Fixing only (1) would be WORSE than leaving it broken: the local leg would
+/// start succeeding and `relay_local_to_remote` would begin pushing real rows
+/// at a server that cannot honour the contract. So the relay stays off until
+/// the server side exists, rather than half-working.
+///
+/// Re-enabling needs: server-side sync endpoints (the cutover `DocumentsPlugin`
+/// defers, and the equivalent for Relations), plus a per-leg path on
+/// `BridgeResource` — one `base_path` cannot express `/api/persons` locally and
+/// `/persons` under `api_base` remotely.
+pub static BRIDGE_RESOURCES: &[&BridgeResource] = &[];
 
 #[derive(Debug, Default, Clone)]
 pub struct BridgeSummary {
