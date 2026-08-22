@@ -46,3 +46,7 @@ phpunit_full.log
 # artifact and scripts/ci-local.sh deletes it afterwards — but a `git add -A`
 # mid-run would otherwise commit 37k lines of it).
 /coverage.xml
+
+# Bytecode from the python CI helpers (scripts/ci-mutation-gate.py). Running one
+# locally leaves it behind, and a `git add -A` would otherwise commit it.
+__pycache__/

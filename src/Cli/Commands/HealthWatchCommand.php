@@ -42,6 +42,27 @@ use Whity\Database\Database;
  * (Cloudflare health check, UptimeRobot) against the public URL for full
  * outside-in coverage.
  *
+ * Surviving a dependency blip, and saying so (WC-766)
+ * ---------------------------------------------------
+ * The loop NEVER gives up. A pass that cannot reach the database records
+ * nothing, says so, backs off, and comes back — indefinitely. There is no
+ * attempt budget, because a monitor that exhausts one stops being a monitor at
+ * exactly the moment the thing it watches is in trouble.
+ *
+ * It also emits POSITIVE evidence of liveness, which matters more than it
+ * sounds. This process used to be silent on success and loud only on failure,
+ * so `docker logs --tail 1` showed the last thing that went wrong — with no way
+ * to tell a collector that died six days ago from one that recovered six days
+ * ago and has been fine since. (That is not hypothetical: on 2026-08-22 a
+ * healthy collector's last log line was a six-day-old "database unreachable",
+ * and it was read as six days of silence.) So: an explicit line when the
+ * database comes BACK, and a periodic "alive" line while it is up.
+ *
+ * Finally it writes a HEARTBEAT FILE — the one artefact that lets the container
+ * healthcheck assert something about THIS process rather than about the shared
+ * `health_samples` table. See {@see writeHeartbeat()} and
+ * ops/health-watch-healthcheck.php.
+ *
  *   health:watch                 # loop forever, 60s between passes
  *   health:watch --once          # single pass (cron-style, and what tests use)
  *   health:watch --interval=30   # override the pass interval
@@ -58,6 +79,31 @@ final class HealthWatchCommand
     /** Samples older than this are pruned; matches the status page's window. */
     private const RETENTION_DAYS = 90;
 
+    /**
+     * Ceiling on the retry backoff after consecutive failed passes.
+     *
+     * Backoff exists so a multi-hour outage is not hammered once a minute, NOT
+     * so the loop can wind down to nothing — it is capped, never abandoned. The
+     * cap is the healthcheck's default freshness budget
+     * (WHITY_HEALTH_SAMPLE_MAX_AGE, 300s): while the dependency is down the
+     * container is correctly UNHEALTHY, and once it returns the next pass is at
+     * most one budget away, so the green comes back promptly.
+     */
+    private const MAX_BACKOFF_SECONDS = 300;
+
+    /**
+     * Successful passes between "still alive" log lines — 60 passes, i.e.
+     * roughly hourly at the default interval.
+     *
+     * Low enough that `docker logs --tail 1` on a working collector shows a
+     * RECENT line rather than whatever last failed, high enough not to bury the
+     * log in noise.
+     */
+    private const HEARTBEAT_LOG_EVERY_PASSES = 60;
+
+    /** Default heartbeat location; overridable with WHITY_HEALTH_WATCH_HEARTBEAT. */
+    private const HEARTBEAT_FILENAME = 'whity-health-watch.heartbeat.json';
+
     private ?PDO $pdo = null;
 
     /** @var callable(int): void */
@@ -73,10 +119,36 @@ final class HealthWatchCommand
      */
     private ?HealthProbeRegistry $probes;
 
+    /**
+     * Where operator-facing lines go. STDERR by default — the container log.
+     * Injectable so tests can read what was said without writing to the
+     * PHPUnit process's own stderr.
+     *
+     * @var callable(string): void
+     */
+    private $logger;
+
+    /** Absolute path of the heartbeat file this process owns. */
+    private string $heartbeatPath;
+
+    /** Consecutive passes that recorded nothing; 0 while collection is working. */
+    private int $consecutiveFailures = 0;
+
+    /** Unix time the current unbroken failure streak began, or null. */
+    private ?int $downSince = null;
+
+    /** Unix time of the last pass that actually persisted at least one sample. */
+    private ?int $lastSampleAt = null;
+
+    /** Successful passes since the last "alive" line; forces one on the first. */
+    private int $passesSinceHeartbeatLog = self::HEARTBEAT_LOG_EVERY_PASSES;
+
     public function __construct(
         ?PDO $pdo = null,
         ?callable $sleeper = null,
         ?HealthProbeRegistry $probes = null,
+        ?callable $logger = null,
+        ?string $heartbeatPath = null,
     ) {
         $this->pdo = $pdo;
         $this->probes = $probes;
@@ -85,6 +157,24 @@ final class HealthWatchCommand
                 sleep($seconds);
             }
         };
+        $this->logger = $logger ?? static function (string $line): void {
+            fwrite(STDERR, $line . "\n");
+        };
+        $this->heartbeatPath = $heartbeatPath ?? self::defaultHeartbeatPath();
+    }
+
+    /**
+     * The heartbeat path both this command and ops/health-watch-healthcheck.php
+     * resolve, so the collector and its probe cannot drift apart.
+     */
+    public static function defaultHeartbeatPath(): string
+    {
+        $configured = getenv('WHITY_HEALTH_WATCH_HEARTBEAT');
+        if (is_string($configured) && $configured !== '') {
+            return $configured;
+        }
+
+        return rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . self::HEARTBEAT_FILENAME;
     }
 
     /**
@@ -105,49 +195,60 @@ final class HealthWatchCommand
             }
         }
 
-        $passes = 0;
         while (true) {
-            $this->pass(is_string($url) && $url !== '' ? $url : null);
-            $passes++;
+            $recorded = $this->pass(is_string($url) && $url !== '' ? $url : null);
 
             if ($once) {
                 break;
             }
-            ($this->sleeper)($interval);
+
+            // A pass that recorded nothing waits longer than one that worked,
+            // but the loop itself is unconditional: there is no exit from here
+            // other than --once. Whatever is broken, this process keeps trying.
+            ($this->sleeper)($recorded ? $interval : $this->backoffSeconds($interval));
         }
 
         return 0;
     }
 
-    /** One full pass: internal components, then the public URL, then GC. */
-    private function pass(?string $publicUrl): void
+    /**
+     * One full pass: internal components, then the public URL, then GC.
+     *
+     * @return bool Whether at least one sample was actually PERSISTED. Not
+     *              "did the probes run" — a probe whose INSERT failed produced
+     *              no observation, and this process must not claim otherwise.
+     */
+    private function pass(?string $publicUrl): bool
     {
         $pdo = $this->pdo();
         if ($pdo === null) {
             // The database is the one dependency this process cannot work
-            // without — there is nowhere to record the observation. Say so on
-            // stderr (the container log) and try again next pass.
-            fwrite(STDERR, "[health:watch] database unreachable; cannot record samples\n");
+            // without — there is nowhere to record the observation. Note it,
+            // back off, and come back. Never stop.
+            $this->noteFailedPass('database unreachable');
 
-            return;
+            return false;
         }
 
         $samples = new HealthSampleRepository($pdo);
+        $recorded = 0;
 
         try {
             $renderUrl = getenv('WHITY_RENDER_URL') ?: null;
-            (new HealthProbe(
+            $probe = new HealthProbe(
                 $pdo,
                 $samples,
                 is_string($renderUrl) ? $renderUrl : null,
                 $this->probeRegistry()
-            ))->runAll();
+            );
+            $probe->runAll();
+            $recorded += $probe->recordedCount();
         } catch (Throwable $e) {
-            fwrite(STDERR, '[health:watch] internal probe failed: ' . $e->getMessage() . "\n");
+            $this->log('[health:watch] internal probe failed: ' . $e->getMessage());
         }
 
         if ($publicUrl !== null) {
-            $this->probePublicUrl($samples, $publicUrl);
+            $recorded += $this->probePublicUrl($samples, $publicUrl);
         }
 
         try {
@@ -155,14 +256,144 @@ final class HealthWatchCommand
         } catch (Throwable) {
             // Retention is best-effort; never let GC failure stop collection.
         }
+
+        if ($recorded === 0) {
+            // Connected, probed, and still wrote nothing — every INSERT failed
+            // (read-only replica, missing table, exhausted disk). Identical in
+            // consequence to being unable to connect, so treat it identically
+            // rather than reporting a pass that produced no observation.
+            $this->noteFailedPass('connected but recorded no samples');
+
+            return false;
+        }
+
+        $this->noteSuccessfulPass($recorded);
+
+        return true;
+    }
+
+    /**
+     * A pass that produced no observation.
+     *
+     * Every one of these is logged, with the streak length and how long the
+     * outage has lasted, so a log that has gone quiet means the process is gone
+     * — not that it gave up quietly, which is the ambiguity that cost six days
+     * of misplaced confidence.
+     */
+    private function noteFailedPass(string $reason): void
+    {
+        $this->consecutiveFailures++;
+        $this->downSince ??= time();
+        // Force an "alive" line on the pass that recovers, whenever that is.
+        $this->passesSinceHeartbeatLog = self::HEARTBEAT_LOG_EVERY_PASSES;
+
+        $this->log(sprintf(
+            '[health:watch] %s; cannot record samples '
+            . '(failed pass %d, down %ds) — retrying, this process does not give up',
+            $reason,
+            $this->consecutiveFailures,
+            time() - $this->downSince,
+        ));
+
+        $this->writeHeartbeat($reason);
+    }
+
+    /** A pass that persisted at least one sample. */
+    private function noteSuccessfulPass(int $recorded): void
+    {
+        if ($this->consecutiveFailures > 0) {
+            // The recovery line. Without it the last thing in the log is the
+            // failure, forever, and a collector that healed is indistinguishable
+            // from one that died.
+            $this->log(sprintf(
+                '[health:watch] recovered: recording again after %d failed pass(es) over %ds',
+                $this->consecutiveFailures,
+                time() - ($this->downSince ?? time()),
+            ));
+        }
+
+        $this->consecutiveFailures = 0;
+        $this->downSince = null;
+        $this->lastSampleAt = time();
+
+        if (++$this->passesSinceHeartbeatLog >= self::HEARTBEAT_LOG_EVERY_PASSES) {
+            $this->passesSinceHeartbeatLog = 0;
+            $this->log(sprintf(
+                '[health:watch] alive — recorded %d sample(s) at %sZ',
+                $recorded,
+                gmdate('Y-m-d\TH:i:s', $this->lastSampleAt),
+            ));
+        }
+
+        $this->writeHeartbeat(null);
+    }
+
+    /**
+     * Publish this process's own liveness, for the container healthcheck.
+     *
+     * Why a file and not a query. The healthcheck used to ask the DATABASE "is
+     * there a recent row in health_samples?", which is a fact about the TABLE,
+     * not about this container: any other writer — a second collector, a
+     * backfill, or the rows this process itself wrote before it wedged — keeps
+     * it green while nothing is being collected here. It could never report the
+     * one thing it existed to report: "I have recorded nothing."
+     *
+     * `last_sample_at` is written by, and only by, the process making the
+     * claim, so a stale or absent value IS the failure. Best-effort and never
+     * fatal: an unwritable heartbeat turns the container red (correctly — the
+     * claim cannot be substantiated) but must not stop collection.
+     */
+    private function writeHeartbeat(?string $lastError): void
+    {
+        $payload = json_encode([
+            'pid' => getmypid(),
+            'updated_at' => time(),
+            'last_sample_at' => $this->lastSampleAt,
+            'consecutive_failures' => $this->consecutiveFailures,
+            'last_error' => $lastError,
+        ], JSON_PRETTY_PRINT);
+
+        if ($payload === false) {
+            return;
+        }
+
+        try {
+            // Write-then-rename: a probe reading mid-write must never see a
+            // truncated file and conclude the collector is dead.
+            $tmp = $this->heartbeatPath . '.tmp';
+            if (@file_put_contents($tmp, $payload . "\n") !== false) {
+                @rename($tmp, $this->heartbeatPath);
+            }
+        } catch (Throwable) {
+            // Never let the liveness bookkeeping kill the liveness it reports.
+        }
+    }
+
+    /**
+     * Seconds to wait after a failed pass: the interval doubled per consecutive
+     * failure, capped at {@see MAX_BACKOFF_SECONDS}. Bounded, never abandoned.
+     */
+    private function backoffSeconds(int $interval): int
+    {
+        $doublings = min(max($this->consecutiveFailures - 1, 0), 16);
+
+        return (int) min($interval * (1 << $doublings), self::MAX_BACKOFF_SECONDS);
+    }
+
+    private function log(string $line): void
+    {
+        ($this->logger)($line);
     }
 
     /**
      * The outside-in check: fetch the public health endpoint over real HTTP.
      * A non-2xx or a timeout is recorded against `web`, which is the signal an
      * in-app probe structurally cannot produce.
+     *
+     * @return int How many samples this actually persisted (0 or 2), so the
+     *             caller's liveness claim counts writes rather than intentions.
      */
-    private function probePublicUrl(HealthSampleRepository $samples, string $baseUrl): void
+    private function probePublicUrl(HealthSampleRepository $samples, string $baseUrl): int
     {
         $target = rtrim($baseUrl, '/') . '/api/health';
         $start = microtime(true);
@@ -212,8 +443,12 @@ final class HealthWatchCommand
                 $ms,
                 $detail
             );
+
+            return 2;
         } catch (Throwable $e) {
-            fwrite(STDERR, '[health:watch] could not record web sample: ' . $e->getMessage() . "\n");
+            $this->log('[health:watch] could not record web sample: ' . $e->getMessage());
+
+            return 0;
         }
     }
 
@@ -259,10 +494,9 @@ final class HealthWatchCommand
             );
             $loader->load();
         } catch (Throwable $e) {
-            fwrite(
-                STDERR,
+            $this->log(
                 '[health:watch] plugin probes unavailable, collecting core components only: '
-                . $e->getMessage() . "\n"
+                . $e->getMessage()
             );
         }
 

@@ -13,16 +13,38 @@
  * `docker ps` to ignore the column, and the day the collector actually stops,
  * nothing about the output changes.
  *
- * What it checks
- * --------------
- * The only thing that matters about this container: is a sample being written?
- * Process liveness is not enough — a loop wedged on a socket, or unable to
- * reach Postgres, is a live process producing nothing, which is precisely the
- * silent failure the status page exists to make loud.
+ * What it checks, and what it used to check (WC-766)
+ * --------------------------------------------------
+ * The only thing that matters about this container: is THIS PROCESS writing
+ * samples? Process liveness is not enough — a loop wedged on a socket, or
+ * unable to reach Postgres, is a live process producing nothing, which is
+ * precisely the silent failure the status page exists to make loud.
  *
- * So: healthy iff `health_samples` carries a row newer than the freshness
- * budget. That is the same reasoning StatusReport applies to a component
- * (silence is not health) turned back on the collector itself.
+ * The first version of this probe asked the database instead: "is there a row
+ * in `health_samples` newer than the freshness budget?" That is a fact about
+ * the TABLE, not about this container, and the difference is the whole bug.
+ * `health_samples` is append-only and shared: rows from a second collector, a
+ * backfill, a restored dump, or the ones this very process wrote before it
+ * wedged all keep the answer green. Worse, the question it could never answer
+ * is the important one — "I have recorded nothing" — because a table full of
+ * somebody else's recent rows reads exactly like success.
+ *
+ * A healthcheck that cannot go red when the thing it names is dead is worse
+ * than none, because it actively asserts the opposite.
+ *
+ * So the probe now reads the HEARTBEAT this collector writes after every pass
+ * (see Whity\Cli\Commands\HealthWatchCommand::writeHeartbeat). `last_sample_at`
+ * is set by, and only by, the process making the claim, and only when an INSERT
+ * actually succeeded. Missing file, null timestamp, or a stale one all mean the
+ * same thing and all go red:
+ *
+ *   - no heartbeat at all        -> this collector has never completed a pass
+ *   - last_sample_at is null     -> it is running and has recorded NOTHING
+ *   - last_sample_at is stale    -> it stopped recording, whatever it is doing
+ *
+ * It reads no database, which is deliberate twice over: the claim is about this
+ * process, and a probe that needs the dependency it is reporting on cannot
+ * distinguish "the collector is down" from "the database is down".
  *
  * The budget defaults to 5 minutes — comfortably more than the 60s pass
  * interval, so one slow pass is not an alarm — and is overridable per
@@ -35,65 +57,61 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-use Whity\Database\Database;
+use Whity\Cli\Commands\HealthWatchCommand;
 
-// Database::connect() reads $_ENV. A container supplies its configuration as
-// real environment variables and a checkout supplies it in .env, so accept
-// both — exactly as bin/whity-cli and public/index.php do for the same reason.
-// Neither source overwrites a value already present.
-foreach (['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'] as $key) {
-    $value = getenv($key);
-    if ($value !== false && !isset($_ENV[$key])) {
-        $_ENV[$key] = $value;
-    }
-}
-
-$envFile = dirname(__DIR__) . '/.env';
-if (is_file($envFile)) {
-    foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-        if (trim($line) === '' || str_starts_with(trim($line), '#') || !str_contains($line, '=')) {
-            continue;
-        }
-        [$key, $value] = explode('=', $line, 2);
-        $key = trim($key);
-        if (!isset($_ENV[$key])) {
-            $_ENV[$key] = trim($value);
-        }
-    }
-}
+/** Both halves resolve the path the same way, so they cannot drift apart. */
+$path = HealthWatchCommand::defaultHeartbeatPath();
 
 $maxAgeSeconds = (int) (getenv('WHITY_HEALTH_SAMPLE_MAX_AGE') ?: 300);
 
-try {
-    $pdo = Database::connect()->getPdo();
-    $stmt = $pdo->query('SELECT MAX(observed_at) AS newest FROM health_samples');
-    $newest = $stmt === false ? null : ($stmt->fetch(\PDO::FETCH_ASSOC)['newest'] ?? null);
-} catch (\Throwable $e) {
-    // Cannot even ask. From this container's point of view that IS unhealthy:
-    // with no database there is nowhere to record an observation, so nothing is
-    // being collected no matter how alive the loop is.
-    fwrite(STDERR, '[health-watch] healthcheck could not read health_samples: ' . $e->getMessage() . "\n");
+$fail = static function (string $message) use ($path): never {
+    fwrite(STDERR, '[health-watch] healthcheck: ' . $message . " (heartbeat: {$path})\n");
     exit(1);
+};
+
+if (!is_file($path)) {
+    // Nothing has ever completed a pass in this container. During the compose
+    // `start_period` that is expected and Docker ignores the result; after it,
+    // it is the collector failing to start, which is exactly what the old probe
+    // could not say.
+    $fail('this collector has recorded no samples yet — no heartbeat file');
 }
 
-if ($newest === null) {
-    fwrite(STDERR, "[health-watch] healthcheck: no samples recorded yet\n");
-    exit(1);
+$raw = @file_get_contents($path);
+if ($raw === false || $raw === '') {
+    $fail('heartbeat file is unreadable or empty');
 }
 
-// Timestamps are stored UTC-naive; read them as UTC rather than the container's
-// local zone, or a non-UTC container would compute an age off by hours and
-// flap.
-$observedAt = strtotime((string) $newest . ' UTC');
-if ($observedAt === false) {
-    fwrite(STDERR, "[health-watch] healthcheck: unparseable observed_at '{$newest}'\n");
-    exit(1);
+/** @var mixed $decoded */
+$decoded = json_decode((string) $raw, true);
+if (!is_array($decoded)) {
+    $fail('heartbeat file is not valid JSON');
 }
 
-$age = time() - $observedAt;
+/** @var array<string, mixed> $decoded */
+$lastSampleAt = $decoded['last_sample_at'] ?? null;
+$failures = (int) ($decoded['consecutive_failures'] ?? 0);
+$lastError = is_string($decoded['last_error'] ?? null) ? (string) $decoded['last_error'] : null;
+
+if (!is_int($lastSampleAt) && !is_float($lastSampleAt)) {
+    // Running, and has never persisted an observation. The collector is alive
+    // and useless, which the previous probe reported as healthy.
+    $fail(sprintf(
+        'this collector is running but has recorded NOTHING (%d consecutive failed pass(es)%s)',
+        $failures,
+        $lastError === null ? '' : ': ' . $lastError,
+    ));
+}
+
+$age = time() - (int) $lastSampleAt;
 if ($age > $maxAgeSeconds) {
-    fwrite(STDERR, "[health-watch] healthcheck: newest sample is {$age}s old (budget {$maxAgeSeconds}s)\n");
-    exit(1);
+    $fail(sprintf(
+        'this collector last recorded a sample %ds ago, budget %ds (%d consecutive failed pass(es)%s)',
+        $age,
+        $maxAgeSeconds,
+        $failures,
+        $lastError === null ? '' : ': ' . $lastError,
+    ));
 }
 
 exit(0);
