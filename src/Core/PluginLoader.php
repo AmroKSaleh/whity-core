@@ -754,7 +754,12 @@ class PluginLoader
                         $this->disabledDirectoryPlugins[$fqcn] = $filePath;
                         continue;
                     }
-                    require_once $filePath;
+                    if (!$this->declarePluginClass($fqcn, $filePath)) {
+                        // A collision invalidates the cached manifest: it names
+                        // a file this process must not load.
+                        $cacheValid = false;
+                        break;
+                    }
                     // Check if the class is actually a plugin (triggers autoloading if needed)
                     if (class_exists($fqcn)) {
                         try {
@@ -857,8 +862,11 @@ class PluginLoader
                         continue;
                     }
 
-                    // Require the file first so the class is defined
-                    require_once $filePath;
+                    // Declare the class, refusing a name another file already
+                    // declared (#841) rather than fatalling the host.
+                    if (!$this->declarePluginClass($fqcn, $filePath)) {
+                        continue;
+                    }
 
                     // Attempt to load and inspect class
                     if (class_exists($fqcn)) {
@@ -887,8 +895,7 @@ class PluginLoader
                 // This is a file directly under plugins/
                 if (pathinfo($item, PATHINFO_EXTENSION) === 'php') {
                     $fqcn = $this->resolveClassFromFile($itemPath);
-                    if ($fqcn !== null) {
-                        require_once $itemPath;
+                    if ($fqcn !== null && $this->declarePluginClass($fqcn, $itemPath)) {
                         if (class_exists($fqcn)) {
                             try {
                                 $reflection = new ReflectionClass($fqcn);
@@ -1029,6 +1036,236 @@ class PluginLoader
         }
 
         return false;
+    }
+
+    /**
+     * Declare a discovered plugin file's classes, refusing a redeclaration.
+     *
+     * `require_once` guards against requiring the same FILE twice; it does
+     * nothing about two DIFFERENT files declaring the same class name. That
+     * second declaration raises `Cannot redeclare class`, which is a FATAL and
+     * not an exception — the plugin lifecycle error boundary cannot catch it,
+     * and because discovery runs at boot every request 500s until someone
+     * removes a directory from disk. There is no in-product exit (#841).
+     *
+     * The `class_exists()` calls at each discovery site run AFTER the require,
+     * so they could never have prevented this: by the time they ran, the
+     * redeclaration had already happened.
+     *
+     * ## Why this cannot check the discovered FQCN
+     *
+     * {@see resolveClassFromFile()} derives a name from the PATH, not from the
+     * source: `plugins/HelloWorld-old/Plugin.php` derives
+     * `HelloWorld-old\Plugin`. A copied plugin directory still declares the
+     * ORIGINAL `namespace HelloWorld;`, so the derived name and the declared
+     * name differ — and it is the declared one that collides. Guarding on the
+     * derived name would look correct and prevent nothing, which is exactly how
+     * the copied-directory case (the likeliest route of all) reaches the fatal.
+     *
+     * So the source is tokenized and every name it declares is checked, using
+     * the same non-executing lexical pass {@see sourceDeclaresPluginClass()}
+     * relies on. Reading a file cannot run it; requiring it is the irreversible
+     * step, and by then it is too late to decide.
+     *
+     * A defective plugin costing itself its load is the established pattern
+     * here; a defective plugin costing the host every request is not.
+     *
+     * @param string $fqcn     Name discovery expects this file to provide.
+     * @param string $filePath File to require.
+     * @return bool True when the file was required (or was already loaded from
+     *              this same path), so the caller may inspect it. False when it
+     *              must be skipped because another file declared one of its
+     *              names first.
+     */
+    private function declarePluginClass(string $fqcn, string $filePath): bool
+    {
+        $source = @file_get_contents($filePath);
+        $incoming = realpath($filePath);
+
+        // Unreadable source: nothing can be determined lexically, so fall back
+        // to the pre-existing behaviour rather than refusing a plugin over a
+        // transient read error.
+        if ($source === false) {
+            require_once $filePath;
+
+            return true;
+        }
+
+        foreach ($this->sourceDeclaredNames($source) as $declared) {
+            // Autoload OFF: the question is whether the name is ALREADY
+            // DECLARED in this process, not whether it could be resolved.
+            if (
+                !class_exists($declared, false)
+                && !interface_exists($declared, false)
+                && !trait_exists($declared, false)
+                && !enum_exists($declared, false)
+            ) {
+                continue;
+            }
+
+            // Reaching the SAME file again is legitimate — a cached manifest
+            // re-scan, or a path listed twice — and `require_once` already made
+            // that a no-op, so it must not read as a collision.
+            $declaredIn = $this->declaringFile($declared);
+            if ($declaredIn !== null && $incoming !== false && $declaredIn === $incoming) {
+                continue;
+            }
+
+            $this->logWarning(sprintf(
+                'Plugin file %s declares %s, which is already declared by %s. '
+                . 'Skipping this file; loading it would be a fatal '
+                . '"Cannot redeclare class" at boot. Two plugins cannot share a '
+                . 'fully qualified class name — rename the namespace of one of '
+                . 'them (a copied plugin directory is the usual cause). The '
+                . 'plugin class expected here was %s.',
+                $filePath,
+                $declared,
+                $declaredIn ?? 'an unknown location',
+                $fqcn
+            ));
+
+            return false;
+        }
+
+        require_once $filePath;
+
+        return true;
+    }
+
+    /**
+     * Every class/interface/trait/enum name a PHP source declares, fully
+     * qualified, found by tokenizing and never by executing (#841).
+     *
+     * Deliberately lexical, for the same reason {@see detectPluginEntryFile()}
+     * is: this runs on untrusted plugin source BEFORE the decision to load it,
+     * so it must not be able to run that source.
+     *
+     * Handles the two token shapes that are not declarations — `Foo::class`
+     * (preceded by `::`) and an anonymous `new class {…}` (no name follows) —
+     * and treats a file with no namespace as declaring into the global one.
+     *
+     * @param string $source PHP source to inspect.
+     * @return list<string> Declared fully-qualified names, in source order.
+     */
+    private function sourceDeclaredNames(string $source): array
+    {
+        try {
+            $tokens = \PhpToken::tokenize($source);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $namespace = '';
+        $names = [];
+        $count = count($tokens);
+
+        for ($i = 0; $i < $count; $i++) {
+            $token = $tokens[$i];
+
+            if ($token->is(T_NAMESPACE)) {
+                $namespace = $this->readNameAfter($tokens, $i) ?? '';
+                continue;
+            }
+
+            if (!$token->is([T_CLASS, T_INTERFACE, T_TRAIT, T_ENUM])) {
+                continue;
+            }
+
+            // `Foo::class` is a constant expression, not a declaration.
+            $previous = $this->previousMeaningful($tokens, $i);
+            if ($previous !== null && $previous->is(T_DOUBLE_COLON)) {
+                continue;
+            }
+
+            // `new class {…}` declares nothing addressable by name.
+            $name = $this->readNameAfter($tokens, $i);
+            if ($name === null || $name === '') {
+                continue;
+            }
+
+            $names[] = $namespace === '' ? $name : $namespace . '\\' . $name;
+        }
+
+        return $names;
+    }
+
+    /**
+     * The first name token after position $i, skipping trivia.
+     *
+     * @param list<\PhpToken> $tokens Token stream.
+     * @param int             $i      Index to scan forward from.
+     * @return string|null The name, or null when the next meaningful token is
+     *                     not one (an anonymous class, a global `namespace {`).
+     */
+    private function readNameAfter(array $tokens, int $i): ?string
+    {
+        $count = count($tokens);
+
+        for ($j = $i + 1; $j < $count; $j++) {
+            $token = $tokens[$j];
+
+            if ($token->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
+                continue;
+            }
+
+            if ($token->is([T_STRING, T_NAME_QUALIFIED])) {
+                return $token->text;
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
+    /**
+     * The last non-trivia token before position $i.
+     *
+     * @param list<\PhpToken> $tokens Token stream.
+     * @param int             $i      Index to scan back from.
+     * @return \PhpToken|null
+     */
+    private function previousMeaningful(array $tokens, int $i): ?\PhpToken
+    {
+        for ($j = $i - 1; $j >= 0; $j--) {
+            if (!$tokens[$j]->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
+                return $tokens[$j];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Absolute path of the file that declared $name, or null when unknowable.
+     *
+     * Null covers both an internal class (no file) and a name that cannot be
+     * reflected at all; in either case the caller reports the collision without
+     * naming the other side rather than guessing at it.
+     *
+     * @param string $name Declared class/interface/trait/enum name.
+     * @return string|null Canonical path, or null.
+     */
+    private function declaringFile(string $name): ?string
+    {
+        try {
+            // $name comes from tokenizing plugin source, so it is a runtime
+            // string rather than a class-string the analyser can prove. The
+            // caller has already established that it IS declared, and the
+            // catch below covers the case where it somehow is not.
+            // @phpstan-ignore argument.type
+            $file = (new \ReflectionClass($name))->getFileName();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($file === false) {
+            return null;
+        }
+
+        $real = realpath($file);
+
+        return $real === false ? $file : $real;
     }
 
     /**
