@@ -10,6 +10,7 @@ use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
@@ -50,12 +51,19 @@ use Whity\Core\Db\DbBool;
  * (profile_id, tenant_id, role_id, status='active'). An active membership that
  * already exists for that profile in this tenant is rejected (409). The role is
  * resolved the same way as update via {@see self::resolveVisibleRoleId()} (a
- * role NAME as the Create form sends it, or a numeric role_id; absent role
- * defaults to the global `user` role; an unresolvable/foreign role is 404). An
+ * role NAME as the Create form sends it, or a numeric role_id; an ABSENT role
+ * defaults to the global `user` role and the substitution is recorded; a role
+ * field supplied EMPTY is 400; an unresolvable/foreign role is 404 — see
+ * {@see self::create()} for why absent and empty are not the same case). An
  * optional `ou_id` places the new membership in an organizational unit in the
  * same one call — validated by the SAME gate update() uses
  * ({@see self::resolveOuIdForTenant()}), so a foreign OU is a 403; omitting it
  * leaves the membership's `ou_id` NULL exactly as before.
+ *
+ * Reusing an existing profile never rewrites its credential — that is
+ * {@see \Whity\Core\Identity\ProfileProvisioner}'s contract — so a `password`
+ * sent for an address that already has a profile, IdP-backed or not, is
+ * discarded rather than applied (#916).
  *
  * Update (PATCH /api/users/{id})
  * ------------------------------
@@ -65,6 +73,14 @@ use Whity\Core\Db\DbBool;
  * tenant predicate on the write itself (defense in depth). A role/OU change
  * invalidates the worker-level effective-permission cache via
  * {@see RoleChecker::clearCache()} (WC-15), mirroring {@see RolesApiHandler}.
+ *
+ * A `password` against an account whose credentials belong to an identity
+ * provider (`profiles.auth_method = 'idp'`) is REFUSED with 409 unless the body
+ * also carries `allowLocalPasswordOnIdpAccount: true` (#916). This endpoint was
+ * where the defect was reported: it minted a local credential on an SSO account
+ * and answered 200. The override exists because coexistence is a legitimate
+ * arrangement — what it can no longer be is accidental, so taking it moves the
+ * account to `auth_method = 'both'` and writes an audit row saying so.
  *
  * Delete (DELETE /api/users/{id})
  * -------------------------------
@@ -90,6 +106,17 @@ class UsersApiHandler
 {
     /** The reserved identifier for the system (cross-tenant authority) tenant. */
     private const SYSTEM_TENANT_ID = 0;
+
+    /**
+     * The PATCH body flag that permits a local password on an IdP-backed
+     * account (#916).
+     *
+     * Spelled out rather than shortened. It appears in an OpenAPI schema, in a
+     * refusal message and in an audit payload, and each of those is read by
+     * somebody deciding whether the thing that happened was meant — a name that
+     * needs the documentation open to interpret is the wrong name for that.
+     */
+    private const IDP_PASSWORD_OVERRIDE = 'allowLocalPasswordOnIdpAccount';
 
     /**
      * Most memberships enumerated into a single audit payload (#889).
@@ -156,7 +183,7 @@ class UsersApiHandler
                 $stmt = $this->db->prepare("
                     SELECT m.profile_id AS id, pe.email, r.name AS role,
                            m.tenant_id, m.ou_id, m.created_at, m.status,
-                           p.status AS account_status
+                           p.status AS account_status, p.auth_method
                     FROM memberships m
                     JOIN roles r ON m.role_id = r.id
                     JOIN profiles p ON p.id = m.profile_id
@@ -180,7 +207,7 @@ class UsersApiHandler
                 $stmt = $this->db->prepare("
                     SELECT m.profile_id AS id, pe.email, r.name AS role,
                            m.tenant_id, m.ou_id, m.created_at, m.status,
-                           p.status AS account_status
+                           p.status AS account_status, p.auth_method
                     FROM memberships m
                     JOIN roles r ON m.role_id = r.id
                     JOIN profiles p ON p.id = m.profile_id
@@ -220,8 +247,8 @@ class UsersApiHandler
      * required). Snake_case columns are aliased to the camelCase keys the
      * frontend `User` type binds; the password hash is never included.
      *
-     * @param array<string, mixed> $row Raw row (id = profile_id, email, role, tenant_id, ou_id, created_at, status, account_status).
-     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null, status: string, accountStatus: string}
+     * @param array<string, mixed> $row Raw row (id = profile_id, email, role, tenant_id, ou_id, created_at, status, account_status, auth_method).
+     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null, status: string, accountStatus: string, authMethod: string}
      */
     private function toPublicUser(array $row): array
     {
@@ -246,6 +273,16 @@ class UsersApiHandler
             // a profile blocks login everywhere it holds a membership, not just
             // in this tenant.
             'accountStatus' => (string)($row['account_status'] ?? 'active'),
+            // Which authority holds this account's credentials (#916,
+            // profiles.auth_method — 'local' | 'idp' | 'both'). Surfaced
+            // because the reporter's sharpest point was that an IdP-backed
+            // account was invisible to anyone reviewing it: the column that
+            // would have told you was populated for every account, so nothing
+            // in the UI or the API could say which of them a local password
+            // even applies to. Read-only — PATCH does not accept it, because
+            // auth_method is a consequence of which credentials exist, not a
+            // switch to be flipped independently of them.
+            'authMethod' => (string)($row['auth_method'] ?? AuthMethod::LOCAL),
         ];
     }
 
@@ -342,14 +379,50 @@ class UsersApiHandler
             }
 
             // Resolve the submitted role (a NAME as the Create form sends it, or a
-            // numeric role_id). Absent role defaults to the global `user` role;
-            // a supplied-but-unresolvable/foreign role is 404, mirroring update.
+            // numeric role_id). A supplied-but-unresolvable/foreign role is 404,
+            // mirroring update.
+            //
+            // #916 / A4 — three cases, deliberately not two. An account meant to
+            // be an administrator was created, returned 201, and came out an
+            // ordinary user, with nothing anywhere saying a substitution had
+            // been made. The line drawn here is: IF THE CALLER NAMED THE FIELD,
+            // THEY MEANT SOMETHING BY IT.
+            //
+            //  - `role`/`role_id` ABSENT: the documented default still applies.
+            //    This is a real contract — the OpenAPI schema does not require
+            //    the field, {@see \Tests\Api\UsersApiHandlerRealEngineTest
+            //    ::testCreateWithoutRoleDefaultsToUser} pins it, and provisioning
+            //    scripts that only ever make ordinary users rely on it. Making
+            //    absence a hard error would break them to fix a problem they do
+            //    not have. What changes is that the substitution is now RECORDED
+            //    (see the hook payload and log line at the end of this method)
+            //    rather than happening in silence.
+            //  - `role`/`role_id` PRESENT but null or empty: 400. This is not the
+            //    same as absence. A key with nothing behind it is the shape an
+            //    unresolved variable takes — a form field that rendered blank, a
+            //    lookup that returned nothing — and quietly substituting the
+            //    least-privileged role there is the silent downgrade. A caller
+            //    who wants the default omits the field; one who sends it empty
+            //    has lost track of what they are asking for and should be told.
+            //  - PRESENT and unresolvable: 404, unchanged.
+            $roleNamed = array_key_exists('role', $body) || array_key_exists('role_id', $body);
             $roleRef = $body['role'] ?? $body['role_id'] ?? null;
-            $roleId = $this->resolveVisibleRoleId($roleRef, $tenantId, $tenantId);
-            if ($roleRef !== null && $roleRef !== '' && $roleId === null) {
+
+            if ($roleNamed && ($roleRef === null || $roleRef === '')) {
+                return Response::error(
+                    'A role was supplied with no value. Send a role name or role_id, or omit the field '
+                    . 'entirely to accept the default role — an empty one is not treated as either.',
+                    400
+                );
+            }
+
+            $roleDefaulted = false;
+            $roleId = $roleNamed ? $this->resolveVisibleRoleId($roleRef, $tenantId, $tenantId) : null;
+            if ($roleNamed && $roleId === null) {
                 return Response::error('Role not found', 404);
             }
             if ($roleId === null) {
+                $roleDefaulted = true;
                 $roleId = $this->resolveVisibleRoleId('user', $tenantId, $tenantId);
                 if ($roleId === null) {
                     return Response::error('Default role not found', 500);
@@ -490,6 +563,13 @@ class UsersApiHandler
                 'promoted' => $promoted,
                 'tenant_id' => (int)$tenantId,
                 'tenant_name' => $tenantName,
+                // #916 / A4: true when no role was named and the global `user`
+                // role was substituted. The trail now distinguishes "somebody
+                // chose the ordinary role" from "nobody chose anything and the
+                // platform picked the least-privileged one", which is what the
+                // reporter could not tell apart afterwards — the 201 and the
+                // audit row looked identical either way.
+                'role_defaulted' => $roleDefaulted,
             ]);
 
             // Dispatch asynchronous hook for background tasks.
@@ -503,6 +583,7 @@ class UsersApiHandler
                 'tenant_id' => $tenantId,
                 'user_id' => $profileId,
                 'role_id' => $roleId,
+                'role_defaulted' => $roleDefaulted,
             ]);
 
             $row = $this->fetchMembershipRow($profileId, $tenantId);
@@ -569,6 +650,12 @@ class UsersApiHandler
             // tenant's membership: validate against THAT tenant, not tenant 0).
             $ownerTenantId = (int)$membership['tenant_id'];
 
+            // The HELD fact about which authority owns this account's
+            // credentials (#916), read once from the row the guard above
+            // already fetched — never inferred from password_hash.
+            $idpBacked = ((string)($membership['auth_method'] ?? AuthMethod::LOCAL)) === AuthMethod::IDP;
+            $idpOverrideUsed = false;
+
             $roleChanged = false;
             $ouChanged = false;
             $emailChanged = false;
@@ -609,6 +696,41 @@ class UsersApiHandler
                     $validationError = $e->getMessage();
                     return Response::error($validationError, 400);
                 }
+
+                // #916 — THE defect this endpoint carried. An account that signs
+                // in only through an identity provider stores the empty string
+                // in password_hash, so before migration 104 "has no local
+                // password" and "has an empty local password" were the same row
+                // and nothing here could tell them apart. A `password` in this
+                // body therefore answered 200 and minted a working local
+                // credential on an IdP-backed account: one that keeps working
+                // after the provider deprovisions the person, is not subject to
+                // the provider's MFA, appears in no SSO audit trail, and is
+                // invisible to anyone reviewing the account afterwards. It was
+                // reported by someone who did it BY ACCIDENT.
+                //
+                // Coexistence is still allowed — the ask was that the platform
+                // know which case it is in, not that it forbid one — so this is
+                // a refusal with an explicit way through rather than a wall.
+                // What it can no longer be is silent.
+                $idpOverride = ($body[self::IDP_PASSWORD_OVERRIDE] ?? false) === true;
+                if ($idpBacked && !$idpOverride) {
+                    return Response::error(
+                        'This account signs in through an identity provider and holds no local password. '
+                        . 'Setting one creates a second way in that the provider does not control and cannot '
+                        . 'revoke. Resend `' . self::IDP_PASSWORD_OVERRIDE . '`: true with the password if that '
+                        . 'is genuinely intended.',
+                        409
+                    );
+                }
+                // Recorded so an operator can find, after the fact, every
+                // account that was deliberately given a local credential beside
+                // its IdP. `$idpBacked` alone is the whole condition here: the
+                // refusal above already returned for every IdP-backed account
+                // that did NOT carry the override, so reaching this line while
+                // still IdP-backed means the override was given.
+                $idpOverrideUsed = $idpBacked;
+
                 $newPasswordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
                 $passwordChanged = true;
             }
@@ -707,12 +829,16 @@ class UsersApiHandler
                     // strip 2FA from an account that still has an authenticator
                     // enrolled. Clearing 2FA is a separate, explicit action.
                     //
-                    // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-                    $this->db->prepare(
-                        'UPDATE profiles
-                            SET password_hash = ?, token_epoch = token_epoch + 1, updated_at = NOW()
-                          WHERE id = ?'
-                    )->execute([$newPasswordHash, $profileId]);
+                    // The statement itself now lives in AuthMethod (#916), the
+                    // single writer of profiles.password_hash — which also
+                    // carries the IdP refusal in its WHERE clause and moves an
+                    // overridden 'idp' account to 'both', so the held fact
+                    // cannot fall out of step with the credential.
+                    (new AuthMethod($this->db))->setPasswordHash(
+                        $profileId,
+                        $newPasswordHash,
+                        $idpOverrideUsed
+                    );
                 }
                 if ($accountStatusChanged && $newAccountStatus !== null) {
                     // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
@@ -781,6 +907,7 @@ class UsersApiHandler
                 'role_changed' => $roleChanged,
                 'ou_changed' => $ouChanged,
                 'account_status_changed' => $accountStatusChanged,
+                'idp_local_password_override' => $idpOverrideUsed,
             ]);
 
             // Notify listeners (e.g. the audit trail, WC-34) after a successful
@@ -820,6 +947,17 @@ class UsersApiHandler
             if ($accountStatusChanged && $newAccountStatus !== null) {
                 $payload['previous_account_status'] = (string) ($membership['account_status'] ?? 'active');
                 $payload['account_status'] = $newAccountStatus;
+            }
+            if ($idpOverrideUsed) {
+                // #916: an administrator deliberately gave an IdP-backed account
+                // a local credential, moving it from 'idp' to 'both'. Recorded
+                // because this is precisely the act that used to happen by
+                // accident and leave no trace — an operator auditing which
+                // federated accounts acquired a password beside their provider
+                // needs one thing to search for, and this is it.
+                $payload['idp_local_password_override'] = true;
+                $payload['previous_auth_method'] = AuthMethod::IDP;
+                $payload['auth_method'] = AuthMethod::BOTH;
             }
 
             $this->hookManager->dispatch('user.updated', $payload);
@@ -1397,7 +1535,7 @@ class UsersApiHandler
             $stmt = $this->db->prepare("
                 SELECT m.profile_id AS id, pe.email, r.name AS role,
                        m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id,
-                       p.status AS account_status
+                       p.status AS account_status, p.auth_method
                 FROM memberships m
                 JOIN roles r ON m.role_id = r.id
                 JOIN profiles p ON p.id = m.profile_id
@@ -1411,7 +1549,7 @@ class UsersApiHandler
             $stmt = $this->db->prepare("
                 SELECT m.profile_id AS id, pe.email, r.name AS role,
                        m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id,
-                       p.status AS account_status
+                       p.status AS account_status, p.auth_method
                 FROM memberships m
                 JOIN roles r ON m.role_id = r.id
                 JOIN profiles p ON p.id = m.profile_id
@@ -1561,6 +1699,7 @@ class UsersApiHandler
             'createdAt' => null,
             'status' => '',
             'accountStatus' => 'active',
+            'authMethod' => AuthMethod::LOCAL,
         ];
     }
 

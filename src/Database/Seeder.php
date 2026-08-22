@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Database;
 
 use PDO;
+use Whity\Core\Identity\AuthMethod;
 
 /**
  * Seeder class for database initialization
@@ -285,11 +286,35 @@ class Seeder
 
         // @tenant-guard-ignore: profiles is a sanctioned GLOBAL table (ADR 0005 §1)
         $row = $db->query(
-            'SELECT password_hash FROM profiles WHERE id = :id',
+            'SELECT password_hash, auth_method FROM profiles WHERE id = :id',
             [':id' => $profileId]
         )->fetch(PDO::FETCH_ASSOC);
 
         if ($row === false) {
+            return;
+        }
+
+        // #916: an account whose credentials belong to an identity provider will
+        // never match ANY configured value, and telling the operator to go and
+        // set one through PATCH /api/users/{id} — as the message below used to,
+        // unconditionally — is the exact instruction that produced the defect.
+        // Name the real reason instead. Reported rather than silently skipped:
+        // an operator who has set INITIAL_ADMIN_PASSWORD for an account that
+        // signs in through an IdP has a belief about that deployment worth
+        // correcting.
+        if (((string) ($row['auth_method'] ?? AuthMethod::LOCAL)) === AuthMethod::IDP) {
+            $idpMessage = sprintf(
+                '[whity] %s signs in through an identity provider and holds no local password, so %s '
+                . 'is inert for this account and always will be. Manage its credentials with the provider. '
+                . 'A local password can still be set deliberately (PATCH /api/users/{id} with '
+                . 'allowLocalPasswordOnIdpAccount), but that gives the account a second way in that the '
+                . 'provider does not control.',
+                $email,
+                $envVar
+            );
+            echo $idpMessage . "\n";
+            error_log($idpMessage);
+
             return;
         }
 

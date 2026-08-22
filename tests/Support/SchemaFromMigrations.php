@@ -52,7 +52,9 @@ use Whity\Database\Database;
  *   - DEFAULT NOW() → DEFAULT (datetime('now'))
  *   - DEFAULT false/true → DEFAULT 0/1
  *   - PostgreSQL cast operator (::typename) → stripped
- *   - ALTER TABLE … ADD COLUMN IF NOT EXISTS → IF NOT EXISTS stripped (SQLite ≥ 3.37)
+ *   - ALTER TABLE … ADD COLUMN IF NOT EXISTS / DROP COLUMN IF EXISTS → clause
+ *     stripped, and the guard emulated against PRAGMA table_info so a
+ *     re-run up() or a down() behaves as it does on PostgreSQL
  *   - DROP TABLE … CASCADE → CASCADE stripped
  *   - ALTER SEQUENCE … / ALTER TABLE … ALTER COLUMN … TYPE → silently skipped
  *   - Multi-column ADD COLUMN (PG extension) → split into separate statements
@@ -849,8 +851,14 @@ final class SchemaFromMigrations
                 $sql = preg_replace('/\bDROP\s+TABLE\s+(IF\s+EXISTS\s+)?(\w+)\s+CASCADE\b/i', 'DROP TABLE IF EXISTS $2', $sql) ?? $sql;
                 $sql = preg_replace('/\bDROP\s+INDEX\s+(IF\s+EXISTS\s+)?(\w+)\s+CASCADE\b/i', 'DROP INDEX IF EXISTS $2', $sql) ?? $sql;
 
-                // ADD COLUMN IF NOT EXISTS — strip "IF NOT EXISTS"
+                // ADD COLUMN IF NOT EXISTS / DROP COLUMN IF EXISTS — SQLite has
+                // neither guard, so the clause is stripped here and the guard
+                // itself is emulated in exec() by looking the column up first.
+                // Stripping alone would turn a re-run of a guarded migration
+                // into a "duplicate column name" error, which is the opposite of
+                // what the guard is there for.
                 $sql = preg_replace('/\bADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+/i', 'ADD COLUMN ', $sql) ?? $sql;
+                $sql = preg_replace('/\bDROP\s+COLUMN\s+IF\s+EXISTS\s+/i', 'DROP COLUMN ', $sql) ?? $sql;
 
                 // bare NOW() in DEFAULT clauses (not already translated)
                 $sql = preg_replace('/\bDEFAULT\s+NOW\s*\(\)/i', "DEFAULT (datetime('now'))", $sql) ?? $sql;
@@ -867,6 +875,9 @@ final class SchemaFromMigrations
             {
                 $result = 0;
                 foreach (self::splitIfMultiAddColumn($statement) as $stmt) {
+                    if ($this->guardedColumnDdlIsSatisfied($stmt)) {
+                        continue;
+                    }
                     $r = parent::exec(self::translate($stmt));
                     if ($r === false) {
                         return false;
@@ -874,6 +885,58 @@ final class SchemaFromMigrations
                     $result = $r;
                 }
                 return $result;
+            }
+
+            /**
+             * Whether a guarded column DDL statement has nothing left to do.
+             *
+             * `ADD COLUMN IF NOT EXISTS` and `DROP COLUMN IF EXISTS` are the
+             * idiom every migration in this repository uses, and SQLite supports
+             * neither clause. Translation strips the guard, so without this the
+             * statement would be executed unconditionally: re-running a
+             * migration's up() would fail with "duplicate column name", and its
+             * down() would fail on a column that is already gone — both of them
+             * no-ops on PostgreSQL. The point of this loader is that the test
+             * schema IS the migration schema, which it cannot be while the
+             * guarded forms behave differently on the two engines.
+             */
+            private function guardedColumnDdlIsSatisfied(string $sql): bool
+            {
+                if (preg_match(
+                    '/^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+(\w+)/i',
+                    $sql,
+                    $add
+                ) === 1) {
+                    return $this->hasColumn($add[1], $add[2]);
+                }
+
+                if (preg_match(
+                    '/^\s*ALTER\s+TABLE\s+(\w+)\s+DROP\s+COLUMN\s+IF\s+EXISTS\s+(\w+)/i',
+                    $sql,
+                    $drop
+                ) === 1) {
+                    return !$this->hasColumn($drop[1], $drop[2]);
+                }
+
+                return false;
+            }
+
+            private function hasColumn(string $table, string $column): bool
+            {
+                // Identifiers come from a migration file's own SQL, and both are
+                // matched as \w+ above, so there is nothing here to inject with.
+                $stmt = parent::query('PRAGMA table_info(' . $table . ')');
+                if ($stmt === false) {
+                    return false;
+                }
+
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $col) {
+                    if (strcasecmp((string) ($col['name'] ?? ''), $column) === 0) {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
             /** @param array<int, mixed> $options */

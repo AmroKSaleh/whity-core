@@ -4844,6 +4844,8 @@ export interface components {
             status?: string;
             /** @enum {string} */
             accountStatus?: "active" | "inactive";
+            /** @enum {string} */
+            authMethod?: "local" | "idp" | "both";
         };
         UserCreateRequest: {
             /** Format: email */
@@ -4871,6 +4873,7 @@ export interface components {
             ou_id?: number | null;
             /** @enum {string} */
             accountStatus?: "active" | "inactive";
+            allowLocalPasswordOnIdpAccount?: boolean;
         };
     };
     responses: never;
@@ -12095,7 +12098,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Email already exists in the tenant */
+            /** @description Email already exists in the tenant, or this account signs in through an identity provider and has no local password */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -22329,7 +22332,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserResponse"];
                 };
             };
-            /** @description Validation failed */
+            /** @description Validation failed, or a role field was supplied empty */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22606,7 +22609,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Email already exists in the tenant */
+            /** @description Email already exists in the tenant, or a local password was set on an identity-provider-backed account without the explicit override */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -22924,7 +22927,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Password-reset emails are disabled for this instance */
+            /** @description Password-reset emails are disabled for this instance, or the account signs in through an identity provider and has no local password to reset */
             409: {
                 headers: {
                     [name: string]: unknown;
