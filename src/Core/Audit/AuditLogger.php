@@ -45,13 +45,20 @@ use Whity\Core\Tenant\TenantContext;
  *    which knows the user before the request context is populated).
  *  - No secrets/PII: {@see self::sanitizeMetadata()} drops any key that could
  *    carry a password hash, TOTP secret/code or backup code before it is stored.
+ *  - Origin: a logger built for a non-web entry point is given an
+ *    {@see AuditOrigin} and stamps it on every row it writes (#844), so a row
+ *    with no actor states WHY it has none instead of leaving a reader to guess
+ *    between "pre-auth" and "typed into a shell". A web logger is given none
+ *    and its rows are unchanged — absence of the key means an HTTP request,
+ *    which is also what every row written before #844 means.
  *  - Fail-soft: a write failure is logged via the PSR-3 logger and swallowed —
  *    auditing must never break the user-facing action it is recording.
  *
  * Worker safety: this is process-scoped infrastructure (a single instance shared
  * across the requests a FrankenPHP worker serves). It holds only its collaborators
- * (PDO, logger), never per-request state — the request-specific actor/IP live in
- * the reset-between-requests {@see AuditContext}.
+ * (PDO, logger, and an immutable origin decided once at bootstrap), never
+ * per-request state — the request-specific actor/IP live in the
+ * reset-between-requests {@see AuditContext}.
  */
 final class AuditLogger implements AuditLoggerInterface
 {
@@ -88,13 +95,28 @@ final class AuditLogger implements AuditLoggerInterface
     private LoggerInterface $logger;
 
     /**
+     * Where this logger's rows come from, or null for the web entry point.
+     *
+     * Set ONCE at construction because it is a property of the PROCESS, not of
+     * a request: a `whity-cli` command is a CLI invocation for its whole life.
+     * Deliberately NOT routed through {@see AuditContext} for that reason — that
+     * context is reset between requests and between queue jobs, so a
+     * process-level fact stored there would survive exactly one dispatch and
+     * then silently stop being recorded.
+     */
+    private ?AuditOrigin $origin;
+
+    /**
      * @param PDO                  $db     Database connection.
      * @param LoggerInterface|null $logger Optional PSR-3 logger for write failures.
+     * @param AuditOrigin|null     $origin Optional provenance stamped on every row (#844);
+     *                                     null for the HTTP entry point.
      */
-    public function __construct(PDO $db, ?LoggerInterface $logger = null)
+    public function __construct(PDO $db, ?LoggerInterface $logger = null, ?AuditOrigin $origin = null)
     {
         $this->db = $db;
         $this->logger = $logger ?? new NullLogger();
+        $this->origin = $origin;
     }
 
     /**
@@ -130,6 +152,17 @@ final class AuditLogger implements AuditLoggerInterface
             $targetType = $options['target_type'] ?? null;
             $targetId = $options['target_id'] ?? null;
             $metadata = $this->sanitizeMetadata($options['metadata'] ?? []);
+
+            // Stamped AFTER sanitising, and assigned key by key so the writer's
+            // account of where a row came from always wins. The metadata above
+            // is caller data — a hook payload, or a plugin's declared event
+            // travelling the same path — and provenance a caller could
+            // overwrite would be provenance an attacker could launder.
+            if ($this->origin !== null) {
+                foreach ($this->origin->toMetadata() as $key => $value) {
+                    $metadata[$key] = $value;
+                }
+            }
 
             $encodedMetadata = json_encode($metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             if ($encodedMetadata === false) {
