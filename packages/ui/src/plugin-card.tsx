@@ -95,6 +95,7 @@ export interface PluginCardLabels {
   nextScreenshot?: string
   noVersionHistory?: string
   noPermissions?: string
+  permissionsUndeclared?: string
 }
 
 const DEFAULT_PLUGIN_CARD_LABELS = {
@@ -130,6 +131,7 @@ const DEFAULT_PLUGIN_CARD_LABELS = {
   nextScreenshot: "Next screenshot",
   noVersionHistory: "No version history available.",
   noPermissions: "This plugin does not request any special permissions.",
+  permissionsUndeclared: "This plugin has not declared which system permissions it requests.",
 } satisfies Required<PluginCardLabels>
 
 export interface PluginStoreCardProps extends React.ComponentProps<"div"> {
@@ -543,7 +545,14 @@ function PluginDetailsModal({
   // install third-party code. Empty is the only honest answer; the tabs below
   // say so explicitly rather than rendering an unexplained blank. (#756)
   const versions = plugin.versions ?? []
-  const permissions = plugin.permissions ?? []
+  // Deliberately NOT defaulted to [] alongside `versions`: for permissions the
+  // two are different statements. An empty array is the plugin saying it asks
+  // for nothing; `undefined` is nobody having told us what it asks for, and
+  // answering that with "does not request any special permissions" is a
+  // reassurance about third-party code that nobody actually made — the same
+  // class of invention as the sample array it replaced, only in the safe
+  // direction. The tab below says which of the two it has.
+  const permissions = plugin.permissions
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -627,12 +636,14 @@ function PluginDetailsModal({
 
           <TabsContent value="permissions" className="py-4 space-y-3">
             <p className="text-xs text-muted-foreground">
-              {permissions.length === 0
-                ? text.noPermissions
-                : "This plugin requests the following system permissions when activated:"}
+              {permissions === undefined
+                ? text.permissionsUndeclared
+                : permissions.length === 0
+                  ? text.noPermissions
+                  : "This plugin requests the following system permissions when activated:"}
             </p>
             <div className="space-y-1.5">
-              {permissions.map((perm) => (
+              {(permissions ?? []).map((perm) => (
                 <div key={perm} className="flex items-center gap-2 rounded-md bg-muted/30 border border-border/40 px-2.5 py-1 text-xs font-mono">
                   <IconLock className="size-3.5 text-primary shrink-0" />
                   <span>{perm}</span>

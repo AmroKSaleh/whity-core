@@ -18,6 +18,13 @@
  * an explicit empty state and NONE of the old sample values, and supplied data
  * still renders in full — the fallback was the bug, not the feature.
  *
+ * Permissions carry a third case, added after #925 landed the first two. An
+ * empty array is the plugin stating that it asks for nothing; `undefined` is
+ * nobody having told us what it asks for. Collapsing the second into the first
+ * answers missing data with a reassurance about third-party code that no one
+ * made — the same invention as the sample array, only in the safe direction —
+ * so the two are asserted separately here.
+ *
  * Lives in `web/__tests__` rather than beside the component because
  * `packages/ui` has no Jest project of its own; `web/jest.config.mjs` is the
  * only runner in the repo, and a test file it does not scan is worse than no
@@ -109,18 +116,44 @@ describe('PluginDetailsModal version history', () => {
 });
 
 describe('PluginDetailsModal permissions', () => {
-  it('does not invent permissions the plugin never requested', async () => {
+  it('does not invent permissions, and does not vouch for an undeclared list', async () => {
     render(<PluginStoreCard plugin={barePlugin()} />);
     await openDetailsTab(/permissions/i);
 
     expect(
-      await screen.findByText(/does not request any special permissions/i)
+      await screen.findByText(/has not declared which system permissions it requests/i)
     ).toBeInTheDocument();
+    // Not "asks for nothing": that is a claim about the plugin, and an absent
+    // field is not the plugin making it.
+    expect(
+      screen.queryByText(/does not request any special permissions/i)
+    ).not.toBeInTheDocument();
 
     for (const permission of FABRICATED_PERMISSIONS) {
       expect(screen.queryByText(permission)).not.toBeInTheDocument();
     }
     // The lead-in promises a list; with nothing to list it must not appear.
+    expect(
+      screen.queryByText(/requests the following system permissions/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it('reports a declared-empty list as the plugin asking for nothing', async () => {
+    // An explicit [] IS the plugin making that statement, and only it earns
+    // this copy.
+    render(<PluginStoreCard plugin={barePlugin({ permissions: [] })} />);
+    await openDetailsTab(/permissions/i);
+
+    expect(
+      await screen.findByText(/does not request any special permissions/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/has not declared which system permissions/i)
+    ).not.toBeInTheDocument();
+
+    for (const permission of FABRICATED_PERMISSIONS) {
+      expect(screen.queryByText(permission)).not.toBeInTheDocument();
+    }
     expect(
       screen.queryByText(/requests the following system permissions/i)
     ).not.toBeInTheDocument();
@@ -135,6 +168,9 @@ describe('PluginDetailsModal permissions', () => {
     expect(
       screen.queryByText(/does not request any special permissions/i)
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/has not declared which system permissions/i)
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -147,7 +183,7 @@ describe('InstalledPluginCard rollback affordance', () => {
     expect(screen.queryByRole('button', { name: /rollback/i })).not.toBeInTheDocument();
   });
 
-  it('offers rollback to genuinely earlier releases', () => {
+  it('offers rollback to genuinely earlier releases, and only those', async () => {
     render(
       <InstalledPluginCard
         plugin={barePlugin({
@@ -161,6 +197,14 @@ describe('InstalledPluginCard rollback affordance', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: /rollback/i })).toBeInTheDocument();
+    const rollback = screen.getByRole('button', { name: /rollback/i });
+    expect(rollback).toBeInTheDocument();
+
+    // What the menu LISTS is the part that can be wrong quietly: the installed
+    // version is not a rollback target, and nothing else exists to offer.
+    await userEvent.click(rollback);
+
+    expect(await screen.findByRole('menuitem', { name: /v1.9.0/ })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /v2.0.0/ })).not.toBeInTheDocument();
   });
 });

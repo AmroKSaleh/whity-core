@@ -17806,7 +17806,12 @@ export interface operations {
     };
     get_api_v1_roles: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100). A client that needs every role must follow the `pagination` envelope to the last page; one request only ever describes page one. */
+                per_page?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -22247,7 +22252,12 @@ export interface operations {
     };
     get_api_v1_users: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100). A client that needs every user must follow the `pagination` envelope to the last page; one request only ever describes page one. */
+                per_page?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
