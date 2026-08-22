@@ -102,6 +102,10 @@ export function usePluginData<T>(source: string, parse: (body: unknown) => T | n
   }, [])
 
   useEffect(() => {
+    // #883: an empty source means "no record named yet" (a `dataRecord` whose
+    // token has not resolved), not a path to fetch. Same guard as the web hook.
+    if (source === "") return
+
     const key = fetchKey
     let cancelled = false
 

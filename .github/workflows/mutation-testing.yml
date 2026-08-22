@@ -12,10 +12,44 @@ name: Mutation Testing (scheduled)
 # The `changes` guard skips the run when `main` has had no new commits since the
 # previous window ("only if there is new code") — no point re-mutating an
 # unchanged tree every 6 hours. `workflow_dispatch` always runs (manual force).
+#
+# Why there is a gate job below (WC-877)
+# --------------------------------------
+# Skipping the Infection job used to make the RUN report `success`. GitHub
+# ignores skipped jobs when it computes a run conclusion, so `gh run list` and
+# the API both said green whether the mutation suite had passed or had never
+# started. Nothing at run level told the two apart.
+#
+# That is not theoretical here. Run 32107507319 executed Infection against
+# 896b0962 and FAILED; the next nine scheduled runs, on the SAME commit, skipped
+# the job and reported `success`. The history read as an unbroken green streak
+# over a tree whose mutation suite was broken throughout — and reading it that
+# way sent an investigation eleven days in the wrong direction, blaming a
+# same-day merge for a regression that predated it.
+#
+# The gate does not merely make the skip louder. It changes what green MEANS:
+#
+#     this run is green only if the current tip of main has actually been
+#     mutation-tested, and passed.
+#
+# A skipped window therefore inherits the verdict of the last window that really
+# executed — including its red — and says in the run summary exactly which run
+# that was. A tip that no run has ever mutated (a dropped cron walks the 6h30m
+# window past a commit) is red as stale, which is the general form of the bug:
+# a gate that has not executed is indistinguishable from one that always passes.
+# The logic lives in scripts/ci-mutation-gate.py so it can be replayed against
+# any historical run id, because a gate nobody has watched fail is not known to
+# work.
 on:
   schedule:
     - cron: '0 */6 * * *'   # scoped run — every 6 hours, on the hour
   workflow_dispatch: {}
+
+permissions:
+  contents: read
+  # The gate reads this workflow's own run and job history to find the last
+  # window in which Infection really executed.
+  actions: read
 
 jobs:
   changes:
@@ -43,9 +77,23 @@ jobs:
           if [ -n "$(git log --since='390 minutes ago' --format=%H)" ]; then
             echo "New commits on main in the last 6h30m — running mutation tests."
             echo "should_run=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Mutation window"
+              echo
+              echo "RUNNING — main moved in the last 6h30m (tip \`$(git rev-parse --short HEAD)\`)."
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No new commits since the last window — skipping mutation run."
             echo "should_run=false" >> "$GITHUB_OUTPUT"
+            # Say it on the run page, not only in this job's log. The run
+            # conclusion cannot express "did not run", so the summary has to.
+            {
+              echo "## Mutation window"
+              echo
+              echo "SKIPPED — main has not moved since the last window"
+              echo "(tip \`$(git rev-parse --short HEAD)\`). The Infection job did NOT run;"
+              echo "see the Mutation gate job below for what this run actually verified."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   mutation-testing:
@@ -97,6 +145,80 @@ jobs:
             infection-summary.txt
           retention-days: 14
 
+  # ---------------------------------------------------------------------------
+  # The one job that always runs and always reports — the aggregator pattern
+  # `automated-tests.yml` (`CI gate`) and `e2e.yml` (`E2E gate`) already use,
+  # brought to the workflow that most needed it.
+  #
+  # This is NOT a required check: mutation testing is a quality-TREND gate on
+  # `main`, not a PR gate. It exists so the run page states what the run
+  # verified, and so a run that verified nothing cannot pass itself off as one
+  # that did.
+  #
+  # Adding a job above? Add it to `needs` here, or it is not covered.
+  mutation-gate:
+    name: Mutation gate
+    if: always()
+    needs:
+      - changes
+      - mutation-testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same self-check as the other two gates. Without it, adding a job above
+      # and forgetting to list it in `needs` silently drops it from the verdict:
+      # it still runs, still goes red, and this job still reports green.
+      - name: The gate must cover every job in this workflow
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sys, yaml
+          d = yaml.safe_load(open('.github/workflows/mutation-testing.yml'))
+          jobs = set(d['jobs']) - {'mutation-gate'}
+          needs = set(d['jobs']['mutation-gate']['needs'])
+          missing = sorted(jobs - needs)
+          if missing:
+              for j in missing:
+                  print(f"::error::job '{j}' is not in the mutation gate's `needs`, so the gate does not cover it")
+              sys.exit(1)
+          print(f"gate covers all {len(jobs)} job(s)")
+          PY
+
+      # `skipped` is allowed here — a skipped Infection job is the `changes`
+      # filter working, and whether that skip is ACCEPTABLE is the next step's
+      # question, not this one's. `failure` and `cancelled` are not allowed: a
+      # cancelled job finished nothing, so nothing was verified.
+      - name: Every job succeeded or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          bad=$(echo "$RESULTS" | jq -r '
+            to_entries[]
+            | select(.value.result == "failure" or .value.result == "cancelled")
+            | .key')
+          if [ -n "$bad" ]; then
+            echo "::error::Mutation gate failed — these jobs did not pass:"
+            printf '::error::  %s\n' $bad
+            exit 1
+          fi
+          echo "All jobs succeeded or were skipped."
+
+      # The part that makes green mean something. Runs even when the step above
+      # failed, so the run summary always records what was actually verified.
+      - name: Report what this run actually verified
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/ci-mutation-gate.py \
+            --repo "${{ github.repository }}" \
+            --run-id "${{ github.run_id }}" \
+            --head-sha "${{ github.sha }}" \
+            --this-result "${{ needs.mutation-testing.result }}"
+
 # NOTE (WC-232ec317, corrected): a nightly whole-src "deep" Infection scan was
 # prototyped here but deferred. The original note blamed test-ORDER isolation.
 # That diagnosis was wrong, and it cost a later investigation a day, so the real
@@ -129,7 +251,9 @@ jobs:
 # The scoped run above was NOT "unaffected": it failed this way on every run
 # that actually executed from 5bc5c2f1 (#722, 2026-08-09) until the fix, hidden
 # because the `changes` gate above skips the job when main has not moved and
-# GitHub reports a run whose only real job was SKIPPED as green.
+# GitHub reports a run whose only real job was SKIPPED as green. That hiding
+# place is closed (WC-877): a skipped window now inherits the last real
+# verdict, so the same breakage would have shown as an unbroken RED streak.
 #
 # Prerequisite for the deep scan (infection.full.json5) is therefore that the
 # `default` suite reach no error_log() on a green run — the tenant-scoping bug

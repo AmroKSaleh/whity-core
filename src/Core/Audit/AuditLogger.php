@@ -14,8 +14,9 @@ use Whity\Core\Tenant\TenantContext;
  * AuditLogger writes the platform's security audit trail (WC-34).
  *
  * It is the SINGLE writer for the `audit_log` table: security-relevant actions
- * (logins, 2FA changes, role/permission/tenant/user/OU mutations) flow through
- * {@see self::record()} rather than scattering ad-hoc INSERTs across handlers.
+ * (logins, 2FA changes, role/permission/tenant/user/OU mutations, membership
+ * grants and revocations) flow through {@see self::record()} rather than
+ * scattering ad-hoc INSERTs across handlers.
  * Two wiring paths feed it:
  *
  *  1. Event subscription ({@see self::subscribe()}) — the CRUD handlers already
@@ -190,6 +191,56 @@ final class AuditLogger implements AuditLoggerInterface
             'ou.created'      => ['ou.created', 'ou', 'id'],
             'ou.updated'      => ['ou.updated', 'ou', 'id'],
             'ou.deleted'      => ['ou.deleted', 'ou', 'id'],
+
+            // Membership grant / revocation (#889). THE TARGET IS THE USER, and
+            // the id key is therefore `profile_id` rather than `id`.
+            //
+            // WHY THE USER AND NOT THE ROLE. A membership change has two
+            // plausible targets and only one `target_type`/`target_id` pair to
+            // put one in, so this is a decision, not a default — and an
+            // append-only trail cannot be re-targeted later, because every row
+            // already written keeps the shape it was written with.
+            //
+            //  1. The role is not what changed. Granting Alice `manager` does
+            //     not modify the `manager` role in any way; it modifies what
+            //     Alice may do. An audit row states what happened, and what
+            //     happened here happened to Alice.
+            //
+            //  2. The `ou.role_assigned` precedent AGREES, read structurally.
+            //     It targets the OU and carries `role_id` in metadata — the
+            //     POSSESSOR is the target and the thing possessed is metadata.
+            //     A membership is the same sentence with a person in the
+            //     possessor slot, so the analogue of `ou` here is `user`, not
+            //     `role`. Reading that precedent as "so target the role"
+            //     swaps the two halves of it.
+            //
+            //  3. It is the only choice that keeps a person's authority history
+            //     in ONE query. `user.created`, `user.updated`, `user.deleted`
+            //     already target `user`, and between them they carry most
+            //     authority changes on this platform (the primary role is
+            //     changed by PUT /api/users/{id}, not through the membership
+            //     endpoints). Targeting the role would scatter one person's
+            //     history across N role ids with no way to reassemble it, so
+            //     `target_type=user&target_id=N` — the filter #885 added —
+            //     would answer the question for four of six action keys and
+            //     silently omit the two that matter most in an incident.
+            //
+            // THE ACCEPTED COST, stated plainly: a ROLE's page cannot ask "who
+            // was removed from this role" with a `target_id` filter, because
+            // `role_id` lives in metadata and #885's filter works on the target.
+            // A role's page answers "who holds it now" from live `memberships`
+            // and defers revocation history until metadata is queryable (a JSONB
+            // index on PostgreSQL, or a narrow projection table). That is a
+            // missing INDEX over data the trail already holds — recoverable by
+            // writing a query later. The reverse mistake is not recoverable:
+            // rows targeted at the role can never be re-pointed at the user.
+            //
+            // Everything the revoked row held — `membership_id`, `role_id`,
+            // `role_name`, `ou_id`, `status`, `granted_at` — arrives in the
+            // payload and lands in metadata untouched, because after the DELETE
+            // this row is the only place any of it still exists.
+            'user.membership.added'   => ['user.membership.added', 'user', 'profile_id'],
+            'user.membership.removed' => ['user.membership.removed', 'user', 'profile_id'],
         ];
 
         foreach ($crudEvents as $event => [$action, $targetType, $idKey]) {

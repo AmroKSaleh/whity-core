@@ -21,6 +21,7 @@ namespace Whity\Core\Identity;
  *
  * This is stateless and safe for FrankenPHP worker persistence.
  */
+use Whity\Core\Db\DbBool;
 final class TenantEmailDomainPolicyService
 {
     private TenantEmailDomainsRepository $domains;
@@ -56,7 +57,7 @@ final class TenantEmailDomainPolicyService
         foreach ($claimingTenants as $policy) {
             $tenantId      = (int) $policy['tenant_id'];
             $defaultRoleId = (int) $policy['default_role_id'];
-            $autoProvision = (bool) $policy['auto_provision'];
+            $autoProvision = DbBool::of($policy['auto_provision']);
             $isVerified    = ($policy['verified_at'] ?? null) !== null;
 
             // Never auto-provision or accept into the system tenant (id 0): a

@@ -362,3 +362,394 @@ describe('web ⇄ desktop fetched-collection parity', () => {
     expect(screen.queryByText('Row 1')).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #883: same record tree ⇒ same rendered facts, and the same fields WITHHELD.
+//
+// The record blocks are where a twin divergence would be worst. The web and
+// desktop renderers each hold their own copy of the projection that decides
+// which of a payload's fields reach the tree, and that projection IS the #895
+// guard's structural half — so one renderer publishing a field the other drops
+// is not a cosmetic difference, it is one platform able to state a caller
+// permission as a fact and the other not. Both are run over the same tree
+// against the same payload here, and both are asserted to withhold the flags.
+// ---------------------------------------------------------------------------
+
+/** A record endpoint's honest answer: the record's own fields AND the caller's
+ * permissions on it, which is what a real one returns. */
+const RECORD = {
+  name: 'Ada Lovelace',
+  role: 'Administrator',
+  status: 'Active',
+  manageable: true,
+  canEdit: true,
+};
+
+/** A record page in miniature: the container, a bound heading/badge/stat, and
+ * the description list. `manageable` and `canEdit` are named nowhere. */
+const RECORD_TREE = [
+  {
+    type: 'dataRecord',
+    id: 'person',
+    source: '/api/v1/people/7',
+    fields: [
+      { field: 'name', label: 'Name' },
+      { field: 'role', label: 'Role' },
+      { field: 'status', label: 'Status' },
+    ],
+    children: [
+      { type: 'heading', level: 2, text: 'Untitled record', textFrom: 'person.name' },
+      { type: 'badge', variant: 'info', label: 'No role', labelFrom: 'person.role' },
+      { type: 'stat', label: 'Status', value: 'Unknown', valueFrom: 'person.status' },
+      { type: 'text', value: 'No role', valueFrom: 'person.role' },
+      { type: 'recordFields', from: 'person' },
+    ],
+  },
+];
+
+/** What a rendered record tree SAYS, as a sorted list of its text content —
+ * enough to compare two renderers that lay the same facts out differently. */
+function renderedFacts(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('h2, dt, dd, p, span'))
+    .map((node) => (node.textContent ?? '').trim())
+    .filter((text) => text !== '')
+    .sort();
+}
+
+describe('web ⇄ desktop record-block parity (#883)', () => {
+  it('agrees on the facts a record tree states', async () => {
+    cleanup();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: RECORD }));
+    const web = render(<WebBlockRenderer blocks={RECORD_TREE as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findAllByText('Ada Lovelace');
+    const webFacts = renderedFacts(web.container);
+
+    cleanup();
+    mockInvoke.mockImplementation(() => Promise.resolve({ status: 200, body: { data: RECORD } }));
+    const desktop = render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: RECORD_TREE as unknown as DesktopBlock[] }}
+      />
+    );
+    await screen.findAllByText('Ada Lovelace');
+    const desktopFacts = renderedFacts(desktop.container);
+
+    // Both must show the record's own values...
+    for (const value of ['Ada Lovelace', 'Administrator', 'Active']) {
+      expect(webFacts).toContain(value);
+      expect(desktopFacts).toContain(value);
+    }
+    // ...and both must have replaced every declared literal fallback.
+    for (const fallback of ['Untitled record', 'No role', 'Unknown']) {
+      expect(webFacts).not.toContain(fallback);
+      expect(desktopFacts).not.toContain(fallback);
+    }
+  });
+
+  it('agrees that an undeclared caller-permission field never reaches the tree', async () => {
+    // The payload carries `manageable` and `canEdit`; the declaration names
+    // neither. Neither renderer may publish them, so neither can render them —
+    // this is the runtime half of the #895 guard, asserted on both twins.
+    cleanup();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: RECORD }));
+    const web = render(<WebBlockRenderer blocks={RECORD_TREE as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findAllByText('Ada Lovelace');
+    expect(web.container.textContent).not.toMatch(/manageable|canEdit/i);
+    // A boolean flag would render as "Yes" through `formatFactValue` — assert on
+    // the rendered form too, since the field NAME never appears either way.
+    expect(web.container.querySelectorAll('dd')).toHaveLength(3);
+
+    cleanup();
+    mockInvoke.mockImplementation(() => Promise.resolve({ status: 200, body: { data: RECORD } }));
+    const desktop = render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: RECORD_TREE as unknown as DesktopBlock[] }}
+      />
+    );
+    await screen.findAllByText('Ada Lovelace');
+    expect(desktop.container.textContent).not.toMatch(/manageable|canEdit/i);
+    expect(desktop.container.querySelectorAll('dd')).toHaveLength(3);
+  });
+
+  it('agrees that an unresolved record token costs ZERO requests', async () => {
+    // The failure this prevents: `/api/v1/people/{record}` with nothing bound
+    // becomes `/api/v1/people/`, which is the COLLECTION endpoint — so the block
+    // would fetch every record the caller can see and render one of them as "the
+    // record this page is about". Both renderers must decline to fetch at all.
+    const UNBOUND = [{ ...RECORD_TREE[0], source: '/api/v1/people/{record}' }];
+
+    cleanup();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: RECORD }));
+    render(<WebBlockRenderer blocks={UNBOUND as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findByText('No record selected.');
+    expect(mockApiClient).not.toHaveBeenCalled();
+
+    cleanup();
+    mockInvoke.mockClear();
+    mockInvoke.mockImplementation(() => Promise.resolve({ status: 200, body: { data: RECORD } }));
+    render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: UNBOUND as unknown as DesktopBlock[] }}
+      />
+    );
+    await screen.findByText('No record selected');
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it('agrees on the request a route-bound record costs once the host seeds it', async () => {
+    // The page-level record binding (#883 gap 2): the host publishes the route's
+    // record id under `record`, and the SAME declaration that fetched nothing
+    // above now addresses exactly one resource.
+    const UNBOUND = [{ ...RECORD_TREE[0], source: '/api/v1/people/{record}' }];
+
+    cleanup();
+    mockApiClient.mockClear();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: RECORD }));
+    render(<WebBlockRenderer blocks={UNBOUND as unknown as WebBlock[]} record="7" />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findAllByText('Ada Lovelace');
+    const webPaths = mockApiClient.mock.calls.map((call) => String(call[0]));
+
+    cleanup();
+    mockInvoke.mockClear();
+    mockInvoke.mockImplementation(() => Promise.resolve({ status: 200, body: { data: RECORD } }));
+    render(
+      <DesktopBlockRenderer
+        feature={{ ...FEATURE, blocks: UNBOUND as unknown as DesktopBlock[] }}
+        record="7"
+      />
+    );
+    await screen.findAllByText('Ada Lovelace');
+    const desktopPaths = mockInvoke.mock.calls.map(([, args]) => String((args as { path: string }).path));
+
+    expect(webPaths).toEqual(['/api/v1/people/7']);
+    expect(desktopPaths).toEqual(['/api/v1/people/7']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #909: same gated tree ⇒ same region, on both renderers.
+//
+// This is the twin divergence that would matter most of all. Each renderer holds
+// its own copy of the walk that collects a page's `accessGate` checks, its own
+// substitution of their `{token}` endpoints, and its own mapping from an answer
+// to a rendering. One twin resolving a gate the other skips is one platform
+// showing an editor where the other shows a description list — a permission
+// difference between two builds of the same declaration, which is worse than a
+// layout difference by every measure.
+//
+// The mocks answer the permitted-actions batch for both hosts. The paths differ
+// (`/api/v1/me/permitted-actions` on the server, `/__whity/permitted-actions`
+// offline) and the ANSWER must not.
+// ---------------------------------------------------------------------------
+
+const WEB_PERMITTED_ACTIONS = '/api/v1/me/permitted-actions';
+const DESKTOP_PERMITTED_ACTIONS = '/__whity/permitted-actions';
+
+/** One record page's editable/read-only pair, plus a leaf gated by condition. */
+const GATED_TREE = [
+  {
+    type: 'dataRecord',
+    id: 'person',
+    source: '/api/v1/people/{record}',
+    fields: [
+      { field: 'name', label: 'Name' },
+      { field: 'role', label: 'Role' },
+    ],
+    children: [
+      {
+        type: 'accessGate',
+        id: 'may-write',
+        check: { method: 'PATCH', endpoint: '/api/v1/people/{record}' },
+        children: [{ type: 'text', value: 'EDITABLE' }],
+        otherwise: [{ type: 'text', value: 'READ ONLY' }],
+      },
+      { type: 'text', value: 'BADGE FOR READERS', visibleWhen: { access: 'may-write', equals: false } },
+      { type: 'text', value: 'NOTICE FOR ADMINS', visibleWhen: { from: 'person.role', equals: 'Administrator' } },
+    ],
+  },
+];
+
+/**
+ * The batch each host handed over, normalized.
+ *
+ * Web serializes it into a fetch body (a JSON string); the Tauri bridge passes
+ * the object straight through. That difference is transport, not contract — the
+ * CHECKS have to be identical, and reading both into the same shape is what lets
+ * this file assert that.
+ */
+function readBatch(body: unknown): { checks: { ref: string }[] } {
+  return (typeof body === 'string' ? JSON.parse(body) : body) as { checks: { ref: string }[] };
+}
+
+/** The batch bodies each host was asked, and what it rendered. */
+async function runGated(
+  allowed: string[]
+): Promise<{ web: { batches: unknown[]; text: string }; desktop: { batches: unknown[]; text: string } }> {
+  const answer = (body: unknown) => ({
+    data: readBatch(body).checks.map((c) => ({
+      ref: c.ref,
+      allowed: allowed.includes(c.ref),
+      required: null,
+    })),
+  });
+
+  cleanup();
+  const webBatches: unknown[] = [];
+  mockApiClient.mockImplementation((url, init) => {
+    if (String(url) === WEB_PERMITTED_ACTIONS) {
+      const body = (init as RequestInit | undefined)?.body ?? '{"checks":[]}';
+      webBatches.push(readBatch(body));
+      return Promise.resolve(stubResponse(200, answer(body)));
+    }
+    return Promise.resolve(stubResponse(200, { data: RECORD }));
+  });
+  const web = render(<WebBlockRenderer blocks={GATED_TREE as unknown as WebBlock[]} record="7" />, {
+    wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+  });
+  await screen.findByText(allowed.includes('may-write') ? 'EDITABLE' : 'READ ONLY');
+  const webText = web.container.textContent ?? '';
+
+  cleanup();
+  const desktopBatches: unknown[] = [];
+  mockInvoke.mockImplementation((_command: string, args?: unknown) => {
+    const { path, body } = args as { path: string; body?: unknown };
+    if (path === DESKTOP_PERMITTED_ACTIONS) {
+      const raw = body ?? { checks: [] };
+      desktopBatches.push(readBatch(raw));
+      return Promise.resolve({ status: 200, body: answer(raw) });
+    }
+    return Promise.resolve({ status: 200, body: { data: RECORD } });
+  });
+  const desktop = render(
+    <DesktopBlockRenderer
+      feature={{ ...FEATURE, blocks: GATED_TREE as unknown as DesktopBlock[] }}
+      record="7"
+    />
+  );
+  await screen.findByText(allowed.includes('may-write') ? 'EDITABLE' : 'READ ONLY');
+  const desktopText = desktop.container.textContent ?? '';
+
+  return {
+    web: { batches: webBatches, text: webText },
+    desktop: { batches: desktopBatches, text: desktopText },
+  };
+}
+
+describe('web ⇄ desktop access-gate parity (#909)', () => {
+  it('agrees on which rendering a refused gate produces', async () => {
+    const { web, desktop } = await runGated([]);
+
+    for (const rendered of [web.text, desktop.text]) {
+      expect(rendered).toContain('READ ONLY');
+      expect(rendered).not.toContain('EDITABLE');
+      expect(rendered).toContain('BADGE FOR READERS');
+      expect(rendered).toContain('NOTICE FOR ADMINS');
+    }
+  });
+
+  it('agrees on which rendering a permitted gate produces', async () => {
+    const { web, desktop } = await runGated(['may-write']);
+
+    for (const rendered of [web.text, desktop.text]) {
+      expect(rendered).toContain('EDITABLE');
+      expect(rendered).not.toContain('READ ONLY');
+      expect(rendered).not.toContain('BADGE FOR READERS');
+    }
+  });
+
+  it('agrees on the question asked: one batch, one check, the same substituted path', async () => {
+    const { web, desktop } = await runGated(['may-write']);
+
+    const expected = [{ checks: [{ ref: 'may-write', method: 'PATCH', path: '/api/v1/people/7' }] }];
+    expect(web.batches).toEqual(expected);
+    expect(desktop.batches).toEqual(expected);
+  });
+
+  it('agrees that a gate answer is never renderable as a fact about the record', async () => {
+    // The #895 seam, on both twins. Each fact binding names the gate; each must
+    // fall back to its literal, because the access namespace is not what
+    // `…From` resolves against on either platform.
+    const FACT_ATTEMPT = [
+      { type: 'accessGate', id: 'may-write', check: { method: 'PATCH', endpoint: '/api/v1/people/7' } },
+      { type: 'heading', level: 2, text: 'LITERAL HEADING', textFrom: 'may-write' },
+      { type: 'badge', variant: 'info', label: 'LITERAL BADGE', labelFrom: 'may-write.allowed' },
+    ];
+    const permit = (body: unknown) => ({
+      data: readBatch(body).checks.map((c) => ({ ref: c.ref, allowed: true, required: null })),
+    });
+
+    cleanup();
+    mockApiClient.mockImplementation((url, init) =>
+      Promise.resolve(
+        String(url) === WEB_PERMITTED_ACTIONS
+          ? stubResponse(200, permit((init as RequestInit | undefined)?.body ?? '{"checks":[]}'))
+          : stubResponse(200, { data: RECORD })
+      )
+    );
+    const web = render(<WebBlockRenderer blocks={FACT_ATTEMPT as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findByText('LITERAL HEADING');
+    expect(web.container.textContent).toContain('LITERAL BADGE');
+    expect(web.container.textContent).not.toMatch(/\btrue\b/);
+
+    cleanup();
+    mockInvoke.mockImplementation((_command: string, args?: unknown) => {
+      const { path, body } = args as { path: string; body?: unknown };
+      return Promise.resolve(
+        path === DESKTOP_PERMITTED_ACTIONS
+          ? { status: 200, body: permit(body ?? { checks: [] }) }
+          : { status: 200, body: { data: RECORD } }
+      );
+    });
+    const desktop = render(
+      <DesktopBlockRenderer feature={{ ...FEATURE, blocks: FACT_ATTEMPT as unknown as DesktopBlock[] }} />
+    );
+    await screen.findByText('LITERAL HEADING');
+    expect(desktop.container.textContent).toContain('LITERAL BADGE');
+    expect(desktop.container.textContent).not.toMatch(/\btrue\b/);
+  });
+
+  it('agrees that a gate with an unresolved token is never asked', async () => {
+    const UNBOUND = [
+      {
+        type: 'accessGate',
+        id: 'may-write',
+        check: { method: 'PATCH', endpoint: '/api/v1/people/{record}' },
+        children: [{ type: 'text', value: 'EDITABLE' }],
+        otherwise: [{ type: 'text', value: 'READ ONLY' }],
+      },
+    ];
+
+    cleanup();
+    mockApiClient.mockClear();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: [] }));
+    const web = render(<WebBlockRenderer blocks={UNBOUND as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await waitFor(() => expect(mockApiClient).not.toHaveBeenCalled());
+    // Not a skeleton either: an unasked gate renders nothing, on both twins.
+    expect(web.container.querySelector('[data-slot="block-access-pending"]')).toBeNull();
+    expect(web.container.textContent).not.toContain('EDITABLE');
+    expect(web.container.textContent).not.toContain('READ ONLY');
+
+    cleanup();
+    mockInvoke.mockClear();
+    mockInvoke.mockResolvedValue({ status: 200, body: { data: [] } });
+    const desktop = render(
+      <DesktopBlockRenderer feature={{ ...FEATURE, blocks: UNBOUND as unknown as DesktopBlock[] }} />
+    );
+    await waitFor(() => expect(mockInvoke).not.toHaveBeenCalled());
+    expect(desktop.container.querySelector('[data-slot="block-access-pending"]')).toBeNull();
+    expect(desktop.container.textContent).not.toContain('EDITABLE');
+    expect(desktop.container.textContent).not.toContain('READ ONLY');
+  });
+});

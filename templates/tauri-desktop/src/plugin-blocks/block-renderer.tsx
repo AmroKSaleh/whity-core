@@ -34,9 +34,11 @@ import { Textarea } from "@amroksaleh/ui/textarea"
 import { resolveTablerIcon } from "./resolve-tabler-icon"
 import { submitPluginAction } from "./submit-plugin-action"
 import type {
+  AccessGateBlock,
   Block,
   ChartBlock,
   DataListBlock,
+  DataRecordBlock,
   DataStatBlock,
   DataTableBlock,
   DrawerBlock,
@@ -49,6 +51,8 @@ import type {
   OuScopePickerBlock,
   OuScopeValue,
   PluginFeature,
+  RecordFact,
+  RecordFieldsBlock,
   RowAction,
   SelectorBlock,
   SourceParam,
@@ -104,6 +108,20 @@ interface MasterDetailContextValue {
   rows: Record<string, Record<string, unknown>>
   openTargets: Record<string, boolean>
   openTarget: (id: string, row?: Record<string, unknown>) => void
+  /** #883: a `dataRecord` publishes its fetched record under its own id, into
+   * the SAME `rows` map an `open` row action writes — so `{id}.{field}` means
+   * one thing whether the record came from a route, a selector, or a clicked
+   * row. Separate from `openTarget` only because publishing a record must not
+   * also mark an overlay open; the addressing is deliberately identical. */
+  publishRecord: (id: string, fields: Record<string, unknown>, facts: RecordFact[]) => void
+  /** The DECLARATION behind each published record: which fields it names and
+   * under which labels. Held beside `rows` rather than inside it because `rows`
+   * is the addressing surface every `{id}.{field}` reference resolves against,
+   * and a parallel label map in there would make `{rec.label}` mean something.
+   * Provider-level rather than scoped to the `dataRecord`'s subtree, so a
+   * `recordFields` that is its SIBLING resolves too — `from` names a record,
+   * not a position in the tree. */
+  recordFacts: Record<string, RecordFact[]>
   /** `refresh: true` (only ever passed by a successful form submit, see
    * `FormRenderer`) is what bumps `refreshSignal` — a plain dismiss/cancel/
    * backdrop-click close does NOT refetch anything, matching the web
@@ -120,12 +138,22 @@ const MasterDetailContext = React.createContext<MasterDetailContextValue>({
   openTargets: {},
   openTarget: () => {},
   closeTarget: () => {},
+  publishRecord: () => {},
+  recordFacts: {},
   refreshSignal: 0,
 })
 
-function MasterDetailProvider({ children }: { children: React.ReactNode }) {
-  const [selections, setSelections] = React.useState<Record<string, string>>({})
+/** #883: the reserved binding a host seeds with the record its ROUTE is about.
+ * Kept in step with the SDK's `BlockValidator::PAGE_RECORD_BINDING`, which
+ * refuses a `selector` that would shadow it. */
+export const PAGE_RECORD_BINDING = "record"
+
+function MasterDetailProvider({ children, record }: { children: React.ReactNode; record?: string }) {
+  const [selections, setSelections] = React.useState<Record<string, string>>(
+    record !== undefined && record !== "" ? { [PAGE_RECORD_BINDING]: record } : {},
+  )
   const [rows, setRows] = React.useState<Record<string, Record<string, unknown>>>({})
+  const [recordFacts, setRecordFacts] = React.useState<Record<string, RecordFact[]>>({})
   const [openTargets, setOpenTargets] = React.useState<Record<string, boolean>>({})
   const [refreshSignal, setRefreshSignal] = React.useState(0)
 
@@ -140,12 +168,87 @@ function MasterDetailProvider({ children }: { children: React.ReactNode }) {
     setOpenTargets((prev) => (prev[id] ? { ...prev, [id]: false } : prev))
     if (options?.refresh) setRefreshSignal((n) => n + 1)
   }, [])
+  /** Bails out when nothing changed. `dataRecord` publishes from an effect on
+   * every settled fetch and the projection builds a fresh object each time, so
+   * an unconditional setState here would re-render the feature tree forever. */
+  const publishRecord = React.useCallback((id: string, fields: Record<string, unknown>, facts: RecordFact[]) => {
+    setRows((prev) => {
+      const current = prev[id]
+      if (current !== undefined && shallowEqualRecords(current, fields)) return prev
+      return { ...prev, [id]: fields }
+    })
+    setRecordFacts((prev) => (prev[id] === facts ? prev : { ...prev, [id]: facts }))
+  }, [])
+
+  // The route's record is a PROP, so it has to survive a re-render that changes
+  // it (one record page navigating to another) without discarding selections
+  // the user has made on the screen.
+  const seededRecord = React.useRef(record)
+  React.useEffect(() => {
+    if (seededRecord.current === record) return
+    seededRecord.current = record
+    setSelections((prev) => ({ ...prev, [PAGE_RECORD_BINDING]: record ?? "" }))
+  }, [record])
 
   const value = React.useMemo<MasterDetailContextValue>(
-    () => ({ selections, setSelection, rows, openTargets, openTarget, closeTarget, refreshSignal }),
-    [selections, setSelection, rows, openTargets, openTarget, closeTarget, refreshSignal],
+    () => ({ selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, publishRecord, refreshSignal }),
+    [selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, publishRecord, refreshSignal],
   )
   return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>
+}
+
+/** Whether two published records hold the same values, compared one level
+ * deep. Mirrors the web renderer's `shallowEqualRecords` — one level is enough
+ * because the projection's values are whatever the payload held for the
+ * declared fields, and a nested object that changed identity but not content
+ * costs one extra render rather than a loop. */
+function shallowEqualRecords(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  return aKeys.every((key) => Object.is(a[key], b[key]))
+}
+
+/** #883: the value a literal leaf actually shows — the record field named by
+ * its `...From` twin when that resolves, otherwise the declared literal. The
+ * literal is the FALLBACK rather than the alternative, which is why the
+ * contract keeps it required: a record page needs a title before its record
+ * has arrived, and on a screen where nothing publishes one at all. */
+function boundText(
+  ctx: Pick<MasterDetailContextValue, "selections" | "rows">,
+  literal: string,
+  ref: string | undefined,
+): string {
+  if (ref === undefined || ref === "") return literal
+  const resolved = resolveFromContext(ref, ctx)
+  if (resolved === undefined || resolved === null || resolved === "") return literal
+  return String(resolved)
+}
+
+/** #883: project a fetched payload down to the facts the declaration NAMED.
+ *
+ * The structural half of the #895 guard, and deliberately the only path by
+ * which a record reaches the master-detail context. A payload's `manageable`,
+ * `canEdit` or `mayModify` is not filtered out here so much as never picked up:
+ * the projection reads the declared field names and nothing else. The SDK
+ * validator refuses the eleven names #897 knows; this refuses everything that
+ * was not asked for. */
+function projectRecordFacts(payload: Record<string, unknown>, fields: RecordFact[]): Record<string, unknown> {
+  const facts: Record<string, unknown> = {}
+  for (const fact of fields) {
+    if (typeof fact?.field === "string" && fact.field !== "") facts[fact.field] = payload[fact.field]
+  }
+  return facts
+}
+
+/** A published fact as display text. `null`/`undefined` become an EM DASH
+ * rather than an empty cell or "null" — the record-page shell's answer for a
+ * value the server has not stated, kept identical to the web renderer's so a
+ * described record page does not disagree with itself across platforms. */
+function formatFactValue(value: unknown): string {
+  if (value === null || value === undefined) return "—"
+  if (typeof value === "boolean") return value ? "Yes" : "No"
+  if (typeof value === "object") return JSON.stringify(value)
+  return String(value)
 }
 
 /** Resolves a `params`/`defaultFrom` address: a bare name reads the
@@ -210,6 +313,51 @@ function useEffectiveSource(source: string, params?: SourceParam[]): string {
   }, [source, params, ctx.selections, ctx.rows])
 }
 
+/**
+ * #883: a `dataRecord`'s EFFECTIVE source, with its `{token}` segments
+ * substituted from the master-detail context — or `null` when any token is
+ * still unresolved.
+ *
+ * `null` MATTERS, and it is the one place this differs from `interpolateEndpoint`
+ * above. That one substitutes `""` for an unresolved token, which is right for a
+ * submit the user explicitly triggered. Here it would be a silent bug of the
+ * worst kind: `/api/v1/things/{record}` with nothing bound becomes
+ * `/api/v1/things/`, which is very often the COLLECTION endpoint — so the block
+ * would fetch every record the caller can see and render it as "the record this
+ * page is about". Not fetching is the only honest answer to "which record?"
+ * when nothing has said.
+ */
+function useResolvedRecordSource(baseSource: string, params?: SourceParam[]): string | null {
+  const ctx = React.useContext(MasterDetailContext)
+  return React.useMemo(() => {
+    // Split on the tokens rather than replacing through a callback, matching
+    // the web renderer exactly: a callback recording "something did not
+    // resolve" in a closure variable is a reassignment during render. Splitting
+    // on a CAPTURING pattern puts every token at an odd index, so this is a map
+    // and a join with nothing mutable in it.
+    const parts = baseSource.split(/(\{[^{}]*\})/)
+    const resolvedParts = parts.map((part, index) => {
+      if (index % 2 === 0) return part
+      const value = resolveFromContext(part.slice(1, -1), ctx)
+      return value === undefined || value === null || value === "" ? null : encodeURIComponent(String(value))
+    })
+    if (resolvedParts.some((part) => part === null)) return null
+    const substituted = resolvedParts.join("")
+    if (!params || params.length === 0) return substituted
+    const pairs = params
+      .map((param) => {
+        const value = resolveFromContext(param.from, ctx)
+        return value === undefined || value === null || value === ""
+          ? null
+          : `${encodeURIComponent(param.param)}=${encodeURIComponent(String(value))}`
+      })
+      .filter((pair): pair is string => pair !== null)
+    if (pairs.length === 0) return substituted
+    return `${substituted}${substituted.includes("?") ? "&" : "?"}${pairs.join("&")}`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseSource, params, ctx.selections, ctx.rows])
+}
+
 /** Refetches a data-bound block's `usePluginData` result whenever a
  * successful form submit closes an overlay anywhere in this feature
  * (skipped on first mount) — every data-bound block refetches, not just
@@ -246,24 +394,218 @@ const FormScopeContext = React.createContext<FormScope | null>(null)
  * submit (a renderer convention; there is no contract prop for it). */
 const ModalScopeContext = React.createContext<string | null>(null)
 
-function isVisible(visibleWhen: VisibleWhen | undefined, values: Record<string, unknown>): boolean {
+// ---------------------------------------------------------------- #909 access
+
+/** What a gate's question currently answers.
+ *
+ * Neither unsettled state is a synonym for refused: an unanswered gate renders
+ * NEITHER branch, because showing the read-only rendering for a frame and
+ * replacing it with the editor is a worse lie than showing nothing for a frame.
+ * They are told apart because they look different — `"pending"` is in flight and
+ * gets a skeleton, while `"unasked"` (an unresolved endpoint token, or an id
+ * nothing declared) gets nothing: a skeleton that never resolves promises an
+ * answer no one is fetching. */
+type AccessAnswer = "unasked" | "pending" | "allowed" | "refused"
+
+/**
+ * The access namespace: gate id -> the host's answer.
+ *
+ * SEPARATE FROM THE MASTER-DETAIL CONTEXT ON PURPOSE — the #895 property
+ * restated for #909. A record's published fields live in `MasterDetailContext.rows`,
+ * which `resolveFromContext` reads, and that function is the single resolver
+ * behind every fact binding (`textFrom`/`valueFrom`/`labelFrom`/`hintFrom`) and
+ * every plumbing binding (`defaultFrom`, `params.from`, a `{token}` in a
+ * source). It does not read this map. So a page can ACT on what the caller may
+ * do and still cannot SAY it about the record.
+ */
+interface AccessScope {
+  answer: (gateId: string) => AccessAnswer
+}
+
+const AccessContext = React.createContext<AccessScope | null>(null)
+
+/** One gate's declaration, as collected from the tree. */
+interface CollectedGate {
+  id: string
+  method: string
+  endpoint: string
+}
+
+/** Collect every `accessGate` in a tree, in document order, descending through
+ * BOTH child slots — `otherwise` holds real blocks and can hold nested gates.
+ * Derived from the tree rather than registered by the gates as they mount: the
+ * declarations are static, and a registration pass would cost a second render
+ * with every gated region absent in between. */
+function collectAccessGates(blocks: Block[] | undefined, into: CollectedGate[] = []): CollectedGate[] {
+  if (!Array.isArray(blocks)) return into
+  for (const block of blocks) {
+    if (block === null || typeof block !== "object") continue
+    if (
+      block.type === "accessGate" &&
+      typeof block.id === "string" &&
+      block.id !== "" &&
+      typeof block.check === "object" &&
+      block.check !== null &&
+      typeof block.check.method === "string" &&
+      typeof block.check.endpoint === "string" &&
+      block.check.endpoint !== "" &&
+      !into.some((gate) => gate.id === block.id)
+    ) {
+      into.push({ id: block.id, method: block.check.method, endpoint: block.check.endpoint })
+    }
+    const node = block as { children?: Block[]; otherwise?: Block[] }
+    collectAccessGates(node.children, into)
+    collectAccessGates(node.otherwise, into)
+  }
+  return into
+}
+
+/** Substitute a gate endpoint's `{token}` segments, or null when any is
+ * unresolved. Null means NOT ASKED, exactly as it does for a `dataRecord.source`:
+ * a half-substituted path names a different route with a different gate. */
+function resolveGateEndpoint(endpoint: string, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): string | null {
+  const parts = endpoint.split(/(\{[^{}]*\})/)
+  const resolved = parts.map((part, index) => {
+    if (index % 2 === 0) return part
+    const value = resolveFromContext(part.slice(1, -1), ctx)
+    return value === undefined || value === null || value === "" ? null : encodeURIComponent(String(value))
+  })
+  return resolved.some((part) => part === null) ? null : resolved.join("")
+}
+
+/** The methods the host will resolve. Mirrors `BlockValidator::ACCESS_CHECK_METHODS`. */
+const ACCESS_CHECK_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const
+
+function isAccessCheckMethod(value: string): value is PermittedActionCheck["method"] {
+  return (ACCESS_CHECK_METHODS as readonly string[]).includes(value)
+}
+
+/** Resolves every gate on the screen in ONE batch through the offline host's own
+ * authority (`POST /__whity/permitted-actions`) — the same endpoint, the same
+ * fail-closed policy and the same batching argument as the `inbox` block. */
+function AccessProvider({ blocks, children }: { blocks: Block[]; children: React.ReactNode }) {
+  const ctx = React.useContext(MasterDetailContext)
+  const gates = React.useMemo(() => collectAccessGates(blocks), [blocks])
+
+  const { checks, resolvable } = React.useMemo(() => {
+    const list: PermittedActionCheck[] = []
+    const ids = new Set<string>()
+    for (const gate of gates) {
+      const method = gate.method.toUpperCase()
+      if (!isAccessCheckMethod(method)) continue
+      const path = resolveGateEndpoint(gate.endpoint, ctx)
+      if (path === null) continue
+      list.push({ ref: gate.id, method, path })
+      ids.add(gate.id)
+    }
+    return { checks: list, resolvable: ids }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gates, ctx.selections, ctx.rows])
+
+  const batchKey = React.useMemo(() => JSON.stringify(checks), [checks])
+  const permitted = usePermittedActions(checks, batchKey)
+  const status = permitted.status
+  const isAllowed = permitted.isAllowed
+
+  const value = React.useMemo<AccessScope>(
+    () => ({
+      answer: (gateId: string): AccessAnswer => {
+        if (!resolvable.has(gateId)) return "unasked"
+        if (status === "loading") return "pending"
+        // An error is a REFUSAL, not a pending state: the alternative is a
+        // region that never resolves, which for the read-only pair is a record
+        // page with no body at all when the resolver is down.
+        return status === "ready" && isAllowed(gateId) ? "allowed" : "refused"
+      },
+    }),
+    [resolvable, status, isAllowed],
+  )
+
+  return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>
+}
+
+/** The two renderings of a gated region, declared together so they cannot drift
+ * apart. A pending answer renders a skeleton and NOT the refused branch — "you
+ * may not edit this" is a statement, and stating it before the answer arrives
+ * states something not yet known. */
+function AccessGateRenderer({ block }: { block: AccessGateBlock }) {
+  const access = React.useContext(AccessContext)
+  const answer = access?.answer(block.id) ?? "unasked"
+  const permitted = Array.isArray(block.children) ? block.children : []
+  const refused = Array.isArray(block.otherwise) ? block.otherwise : []
+
+  if (permitted.length === 0 && refused.length === 0) return null
+  if (answer === "unasked") return null
+  if (answer === "pending") return <Skeleton className="h-16 w-full" data-slot="block-access-pending" />
+
+  const shown = answer === "allowed" ? permitted : refused
+  if (shown.length === 0) return null
+  return <BlockList blocks={shown} />
+}
+
+/** Normalize a form value / rule operand to a comparable string, matching the
+ * web renderer exactly: booleans become `"true"`/`"false"` so a checkbox matches
+ * `equals: true` and `equals: "true"` alike, and everything else is
+ * `String()`-coerced so a numeric `equals: 5` matches a field holding `"5"`.
+ * This renderer used to compare with `===` and therefore disagreed with the web
+ * one on exactly those two cases. */
+function normalizeVisibilityOperand(value: unknown): string {
+  if (typeof value === "boolean") return value ? "true" : "false"
+  if (value !== null && typeof value === "object") return " object"
+  return value === undefined || value === null ? "" : String(value)
+}
+
+/**
+ * Evaluate a block's optional `visibleWhen` facet (WC-532 A3, widened by #909).
+ *
+ * FACTS FAIL OPEN, AUTHORITY FAILS CLOSED. A `field`/`from` rule that cannot be
+ * evaluated leaves the block visible; an `access` rule that has not been
+ * answered hides it, whichever polarity it asked for — a control drawn before
+ * its permission is known is a control drawn for somebody who may not have it.
+ */
+function isVisible(
+  visibleWhen: VisibleWhen | undefined,
+  values: Record<string, unknown>,
+  ctx: Pick<MasterDetailContextValue, "selections" | "rows">,
+  access: AccessScope | null,
+): boolean {
   if (!visibleWhen) return true
-  const current = values[visibleWhen.field]
-  if (visibleWhen.equals !== undefined) return current === visibleWhen.equals
-  if (visibleWhen.in !== undefined) return visibleWhen.in.includes(current as never)
+
+  if (typeof visibleWhen.access === "string" && visibleWhen.access !== "") {
+    const answer = access?.answer(visibleWhen.access) ?? "unasked"
+    if (answer === "unasked" || answer === "pending") return false
+    if (typeof visibleWhen.equals !== "boolean" || visibleWhen.in !== undefined) return false
+    return (answer === "allowed") === visibleWhen.equals
+  }
+
+  let current: string | undefined
+  if (typeof visibleWhen.from === "string" && visibleWhen.from !== "") {
+    const resolved = resolveFromContext(visibleWhen.from, ctx)
+    current = resolved === undefined || resolved === null ? undefined : normalizeVisibilityOperand(resolved)
+  } else if (typeof visibleWhen.field === "string" && visibleWhen.field !== "") {
+    current = normalizeVisibilityOperand(values[visibleWhen.field])
+  }
+
+  if (current === undefined) return true
+  if (visibleWhen.equals !== undefined) return current === normalizeVisibilityOperand(visibleWhen.equals)
+  if (visibleWhen.in !== undefined) return visibleWhen.in.some((v) => current === normalizeVisibilityOperand(v))
   return true
 }
 
 // ---------------------------------------------------------------- public entry
 
-export function BlockRenderer({ feature }: { feature: PluginFeature }) {
+export function BlockRenderer({ feature, record }: { feature: PluginFeature; record?: string }) {
   const blocks = feature.blocks
   if (!Array.isArray(blocks)) {
     return <ErrorState title="No content" description="This feature declared no renderable blocks." />
   }
   return (
-    <MasterDetailProvider>
-      <BlockList blocks={blocks} />
+    <MasterDetailProvider record={record}>
+      {/* Inside the master-detail provider: a gate's endpoint may carry
+          `{record}` and resolves through the same context every source does. */}
+      <AccessProvider blocks={blocks}>
+        <BlockList blocks={blocks} />
+      </AccessProvider>
     </MasterDetailProvider>
   )
 }
@@ -286,10 +628,26 @@ function UnsupportedBlock({ reason }: { reason: string }) {
 
 function BlockNode({ block }: { block: Block }) {
   const form = React.useContext(FormScopeContext)
+  // #883: read once at the top rather than per case — a `switch` body cannot
+  // call a hook, and the literal leaves below each need the context to resolve
+  // their `...From` twin. The cost is that EVERY node now subscribes to the
+  // master-detail context and re-renders when a selection changes, where the
+  // web renderer subscribes only from the four leaves that can bind. Accepted
+  // rather than worked around: splitting the switch into per-leaf components to
+  // narrow the subscription would restructure the one file that most needs to
+  // stay diffable against its twin, to save re-rendering nodes that render
+  // text.
+  const md = React.useContext(MasterDetailContext)
+  const access = React.useContext(AccessContext)
+
+  // #909: `visibleWhen` is carried by EVERY block type now, so it is evaluated
+  // ONCE here rather than per case. It used to be checked in the three branches
+  // that could carry it, which is exactly the shape that makes a universal facet
+  // impossible to add without missing one.
+  if (!isVisible(block.visibleWhen, form?.values ?? {}, md, access)) return null
 
   switch (block.type) {
     case "section": {
-      if (!isVisible(block.visibleWhen, form?.values ?? {})) return null
       return (
         <div className="space-y-3">
           {block.title && <h3 className="text-sm font-semibold">{block.title}</h3>}
@@ -298,7 +656,6 @@ function BlockNode({ block }: { block: Block }) {
       )
     }
     case "card": {
-      if (!isVisible(block.visibleWhen, form?.values ?? {})) return null
       return (
         <Card>
           {(block.title || block.description) && (
@@ -332,18 +689,24 @@ function BlockNode({ block }: { block: Block }) {
       )
     }
     case "tabs": {
-      const first = block.children[0]?.label
+      // A `tab`'s children render from here rather than through `BlockNode`, so
+      // this is the one place a `visibleWhen` would otherwise be silently
+      // ignored — a contract that says every block carries the facet has to mean
+      // it (#909), and hiding a tab the caller may not open is the point of
+      // carrying it here at all.
+      const tabs = block.children.filter((tab) => isVisible(tab.visibleWhen, form?.values ?? {}, md, access))
+      const first = tabs[0]?.label
       if (!first) return null
       return (
         <Tabs defaultValue={first}>
           <TabsList>
-            {block.children.map((tab) => (
+            {tabs.map((tab) => (
               <TabsTrigger key={tab.label} value={tab.label}>
                 {tab.label}
               </TabsTrigger>
             ))}
           </TabsList>
-          {block.children.map((tab) => (
+          {tabs.map((tab) => (
             <TabsContent key={tab.label} value={tab.label} className="pt-3">
               <BlockList blocks={tab.children} />
             </TabsContent>
@@ -354,15 +717,21 @@ function BlockNode({ block }: { block: Block }) {
     case "tab":
       // Only meaningful as a direct child of `tabs`, handled above.
       return <BlockList blocks={block.children} />
+    case "accessGate":
+      return <AccessGateRenderer block={block} />
     case "divider":
       return <hr className="border-border" />
     case "heading": {
       const Tag = (`h${block.level}` as const) as "h1" | "h2" | "h3" | "h4"
       const size = { 1: "text-xl", 2: "text-lg", 3: "text-base", 4: "text-sm" }[block.level]
-      return <Tag className={`font-semibold ${size}`}>{block.text}</Tag>
+      return <Tag className={`font-semibold ${size}`}>{boundText(md, block.text, block.textFrom)}</Tag>
     }
     case "text":
-      return <p className={`text-sm ${block.tone === "muted" ? "text-muted-foreground" : ""}`}>{block.value}</p>
+      return (
+        <p className={`text-sm ${block.tone === "muted" ? "text-muted-foreground" : ""}`}>
+          {boundText(md, block.value, block.valueFrom)}
+        </p>
+      )
     case "alert":
       return (
         <Alert variant={toAlertVariant(block.variant)}>
@@ -371,17 +740,19 @@ function BlockNode({ block }: { block: Block }) {
         </Alert>
       )
     case "badge":
-      return <Badge variant={toBadgeVariant(block.variant)}>{block.label}</Badge>
+      return <Badge variant={toBadgeVariant(block.variant)}>{boundText(md, block.label, block.labelFrom)}</Badge>
     case "stat": {
       const trendIcons: Record<"up" | "down" | "flat", string> = { up: "↑", down: "↓", flat: "→" }
       const trendIcon = block.trend ? trendIcons[block.trend] : null
+      const statValue = boundText(md, block.value, block.valueFrom)
+      const statHint = boundText(md, block.hint ?? "", block.hintFrom)
       return (
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs text-muted-foreground">{block.label}</p>
           <p className="text-2xl font-semibold">
-            {block.value} {trendIcon && <span className="text-sm text-muted-foreground">{trendIcon}</span>}
+            {statValue} {trendIcon && <span className="text-sm text-muted-foreground">{trendIcon}</span>}
           </p>
-          {block.hint && <p className="text-xs text-muted-foreground">{block.hint}</p>}
+          {statHint && <p className="text-xs text-muted-foreground">{statHint}</p>}
         </div>
       )
     }
@@ -465,6 +836,10 @@ function BlockNode({ block }: { block: Block }) {
       return <TimelineRenderer block={block} />
     case "inbox":
       return <InboxRenderer block={block} />
+    case "dataRecord":
+      return <DataRecordRenderer block={block} />
+    case "recordFields":
+      return <RecordFieldsRenderer block={block} />
     case "modal":
       return <ModalRenderer block={block} />
     case "drawer":
@@ -492,7 +867,6 @@ function BlockNode({ block }: { block: Block }) {
     case "referenceSelect":
     case "ouScopePicker":
       if (!form) return <UnsupportedBlock reason={`${block.type} outside a form`} />
-      if ("visibleWhen" in block && !isVisible(block.visibleWhen, form.values)) return null
       return <FormInput block={block} form={form} />
     default:
       return <UnsupportedBlock reason={(block as { type?: string }).type ?? "unknown"} />
@@ -584,6 +958,106 @@ function DataStatRenderer({ block }: { block: DataStatBlock }) {
       <p className="text-2xl font-semibold">{String(value ?? "")}</p>
       {hint !== undefined && <p className="text-xs text-muted-foreground">{String(hint)}</p>}
     </div>
+  )
+}
+
+/**
+ * DataRecordRenderer (#883) — the record-bound primitive.
+ *
+ * Fetches ONE resource, publishes the fields its declaration NAMES into the
+ * master-detail context under `block.id`, and renders its children beneath. It
+ * owns loading and failure for the whole subtree, which is the reason it is a
+ * container: a record page assembled from a dozen leaves that each own their
+ * own skeleton shows a dozen skeletons resolving in an arbitrary order, and a
+ * record that failed to load renders as a page of empty fields rather than as a
+ * page that could not be loaded.
+ */
+function DataRecordRenderer({ block }: { block: DataRecordBlock }) {
+  const { publishRecord, rows } = React.useContext(MasterDetailContext)
+  const source = useResolvedRecordSource(block.source, block.params)
+  // `usePluginData` is a hook, so it cannot be skipped when the source has not
+  // resolved. An empty source is never fetched (the hook bails), which keeps
+  // hook order stable without requesting a record nobody has named yet.
+  const state = usePluginData<Record<string, unknown>>(source ?? "", (data) =>
+    data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : null,
+  )
+  useRefetchOnSignal(state)
+
+  // Keyed on the fetched payload rather than on `state`, which is a fresh object
+  // every render (see the web renderer for the full rationale). `source === null`
+  // forces it back to null so a record whose token stopped resolving stops being
+  // published, rather than leaving a sibling `recordFields` rendering the record
+  // the page is no longer about.
+  const fetched = state.status === "ready" && source !== null ? state.data : null
+  const facts = React.useMemo(
+    () => (fetched === null ? null : projectRecordFacts(fetched, block.fields)),
+    [fetched, block.fields],
+  )
+
+  React.useEffect(() => {
+    if (facts === null) return
+    publishRecord(block.id, facts, block.fields)
+  }, [facts, publishRecord, block.id, block.fields])
+
+  // Nothing has named a record yet — a record page before its route resolves,
+  // or a detail pane before the user has picked a master row. Deliberately the
+  // same shape as `empty` rather than an error: no record chosen is a state,
+  // not a failure.
+  if (source === null) return <EmptyState title={block.emptyText ?? "No record selected"} />
+  if (state.status === "loading") return <Skeleton className="h-24 w-full" />
+  if (state.status === "error")
+    return <ErrorState title="Couldn't load this record" action={<Button onClick={state.retry}>Retry</Button>} />
+  if (state.status === "empty") return <EmptyState title={block.emptyText ?? "This record is not available"} />
+
+  // The record is fetched but not yet IN CONTEXT. `publishRecord` runs from an
+  // effect, which commits after this render — so rendering the children now
+  // mounts them against an empty context, and everything that reads the record
+  // AT MOUNT rather than on every render silently gets nothing. A form's
+  // `defaultFrom` is exactly that: seeded once, when the input mounts (see
+  // `collectDefaults`). Holding the loading state for one extra frame is what
+  // makes "a record page is a form WITH its record" true instead of nearly true.
+  if (rows[block.id] === undefined) return <Skeleton className="h-24 w-full" />
+
+  return (
+    <div className="space-y-4">
+      <BlockList blocks={block.children} />
+    </div>
+  )
+}
+
+/**
+ * RecordFieldsRenderer (#883) — the data-bound `keyValue`.
+ *
+ * Reads the record published under `block.from` and renders its declared facts
+ * as a description list. `fields` picks a subset in the order given; omitted,
+ * every declared fact is shown. An unresolvable `from` renders nothing, which
+ * is the no-op an unresolvable reference already is everywhere else here.
+ */
+function RecordFieldsRenderer({ block }: { block: RecordFieldsBlock }) {
+  const { rows, recordFacts } = React.useContext(MasterDetailContext)
+  const row = rows[block.from]
+  const declared = recordFacts[block.from]
+
+  if (row === undefined || declared === undefined) return null
+
+  const wanted =
+    Array.isArray(block.fields) && block.fields.length > 0
+      ? block.fields
+          .map((name) => declared.find((fact) => fact.field === name))
+          .filter((fact): fact is RecordFact => fact !== undefined)
+      : declared
+
+  if (wanted.length === 0) return <EmptyState title={block.emptyText ?? "No fields to show"} />
+
+  return (
+    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+      {wanted.map((fact) => (
+        <React.Fragment key={fact.field}>
+          <dt className="text-muted-foreground">{fact.label}</dt>
+          <dd>{formatFactValue(row[fact.field])}</dd>
+        </React.Fragment>
+      ))}
+    </dl>
   )
 }
 
@@ -1283,8 +1757,18 @@ function collectFormInputs(blocks: Block[]): Block[] {
       continue
     }
     if (block.type === "form") continue
-    const nested = (block as { children?: unknown }).children
-    if (Array.isArray(nested)) inputs.push(...collectFormInputs(nested as Block[]))
+    // #909: BOTH child lists. An `accessGate` carries two, and a walk that knew
+    // only `children` would seed defaults for the permitted rendering and not
+    // for the refused one — so the same field name would be in the value map or
+    // absent from it depending on which branch the author put it in, which is
+    // not a distinction anyone declared. Hidden inputs staying in the value map
+    // is the standing convention for `visibleWhen` (the server re-validates and
+    // is authoritative over what it accepts); this keeps the two slots equal to
+    // each other rather than inventing a third rule for one of them.
+    for (const slot of ["children", "otherwise"] as const) {
+      const nested = (block as { children?: unknown; otherwise?: unknown })[slot]
+      if (Array.isArray(nested)) inputs.push(...collectFormInputs(nested as Block[]))
+    }
   }
   return inputs
 }

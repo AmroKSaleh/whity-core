@@ -15,8 +15,15 @@ operator-driven runbook — no deployment self-mutates.
   | What | Where to read it | Note |
   | --- | --- | --- |
   | Core (backend) | `GET /api/health` → `version` | unauthenticated |
-  | Plugin SDK contract | `GET /api/v1/platform/version` → `sdk_version` | system-tenant admin |
+  | Plugin SDK contract | `GET /api/health` → `sdk_version` | unauthenticated |
+  | | `GET /api/v1/platform/version` → `sdk_version` | system-tenant admin; same value |
   | Frontend bundle | `GET /web-build` → `core_version` | unauthenticated, served by the WEB tier |
+
+  The SDK contract version is on the PUBLIC probe deliberately: a plugin that
+  stops loading after an upgrade is nearly always this number moving, and that
+  is diagnosed from monitoring rather than from an admin session. See the
+  disclosure note on `src/Api/HealthApiHandler.php` — it is one line to remove
+  if an operator disagrees, and nothing in the product reads it from there.
 
   `/web-build` is answered by the Next.js service, not the backend, because
   only the process that loaded a bundle knows which bundle it loaded (an

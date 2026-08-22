@@ -32,10 +32,11 @@ class HealthApiHandlerTest extends TestCase
         $body = json_decode($response->getBody(), true);
         $this->assertIsArray($body);
 
-        // Exact contract: status, version, workers_active, memory_usage_mb,
-        // uptime_seconds, db_connected.
+        // Exact contract: status, version, sdk_version, workers_active,
+        // memory_usage_mb, uptime_seconds, db_connected.
         $this->assertArrayHasKey('status', $body);
         $this->assertArrayHasKey('version', $body);
+        $this->assertArrayHasKey('sdk_version', $body);
         $this->assertArrayHasKey('workers_active', $body);
         $this->assertArrayHasKey('memory_usage_mb', $body);
         $this->assertArrayHasKey('uptime_seconds', $body);
@@ -44,6 +45,12 @@ class HealthApiHandlerTest extends TestCase
         $this->assertSame('ok', $body['status']);
         // WC-172: operators read a deployment's running version remotely.
         $this->assertSame(\Whity\Core\CoreVersion::VERSION, $body['version']);
+        // The plugin-SDK contract version, deliberately served on this
+        // UNAUTHENTICATED probe (see HealthApiHandler's disclosure note). The
+        // same number is also behind settings:manage on
+        // GET /api/v1/platform/version; this asserts the public copy exists and
+        // is the same value, so the two can never silently diverge.
+        $this->assertSame(\Whity\Sdk\Sdk::VERSION, $body['sdk_version']);
         $this->assertTrue($body['db_connected']);
         $this->assertIsInt($body['workers_active']);
         $this->assertGreaterThanOrEqual(1, $body['workers_active']);
@@ -84,6 +91,11 @@ class HealthApiHandlerTest extends TestCase
         // is exactly when an operator checks which build is misbehaving.
         $this->assertArrayHasKey('version', $body);
         $this->assertSame(\Whity\Core\CoreVersion::VERSION, $body['version']);
+        // Both version fields are computed from constants, so they survive a
+        // dead database — which is exactly the moment an operator asks "which
+        // build is this, and which SDK do its plugins expect?".
+        $this->assertArrayHasKey('sdk_version', $body);
+        $this->assertSame(\Whity\Sdk\Sdk::VERSION, $body['sdk_version']);
         $this->assertArrayHasKey('workers_active', $body);
         $this->assertArrayHasKey('memory_usage_mb', $body);
         $this->assertArrayHasKey('uptime_seconds', $body);

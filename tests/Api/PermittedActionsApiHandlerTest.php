@@ -333,20 +333,64 @@ final class PermittedActionsApiHandlerTest extends TestCase
         $this->assertFalse($result['allowed']);
     }
 
-    public function testAReadVerbIsRefusedOutright(): void
+    /**
+     * GET is answered like any other verb (#909).
+     *
+     * It used to be refused outright, because the only caller was `inbox` and an
+     * inbox action carries a write verb. #909's `accessGate` asks a READ
+     * question — "may I see this region at all?" — to decide whether a region
+     * exists, and without an answer to that the hidden state has no authority to
+     * consult and an author has to fake it by gating a read-only panel on a
+     * write request, which answers a different question and answers it wrong for
+     * every caller who may look but not touch.
+     *
+     * The endpoint promises no less than before: its identity is "allowed
+     * implies the middleware would admit exactly this request", and that is the
+     * same route lookup, the same tenant guard and the same two RoleChecker
+     * calls whatever the verb.
+     */
+    public function testAReadVerbIsAnsweredLikeAnyOther(): void
     {
         $router = new Router('');
-        $router->register('GET', '/api/v1/tasks', static fn (): Response => Response::json([]), null, null, null);
+        $router->register('GET', '/api/v1/tasks', static fn (): Response => Response::json([]), null, null, 'tasks:read');
 
-        // The endpoint exists and is unprotected, but GET is not a verb an inbox
-        // action can carry — this endpoint answers about WRITES.
-        $result = $this->firstResult(
+        $refused = $this->firstResult(
             (new PermittedActionsApiHandler($this->roleChecker([], []), $router))->resolve($this->batch([
                 ['ref' => 'a', 'method' => 'GET', 'path' => '/api/v1/tasks'],
             ]))
         );
 
-        $this->assertFalse($result['allowed']);
+        $this->assertFalse($refused['allowed'], 'a caller without tasks:read may not read');
+        $this->assertSame('tasks:read', $refused['required']);
+
+        $allowed = $this->firstResult(
+            (new PermittedActionsApiHandler($this->roleChecker([], ['tasks:read']), $router))->resolve($this->batch([
+                ['ref' => 'a', 'method' => 'GET', 'path' => '/api/v1/tasks'],
+            ]))
+        );
+
+        $this->assertTrue($allowed['allowed']);
+        $this->assertNull($allowed['required']);
+    }
+
+    /**
+     * A verb outside the accepted set is still refused. The set widened by
+     * exactly one entry; it did not become "anything the caller types".
+     */
+    public function testAnUnknownVerbIsStillRefusedOutright(): void
+    {
+        $router = new Router('');
+        $router->register('GET', '/api/v1/tasks', static fn (): Response => Response::json([]), null, null, null);
+
+        foreach (['HEAD', 'OPTIONS', 'TRACE', 'CONNECT'] as $method) {
+            $result = $this->firstResult(
+                (new PermittedActionsApiHandler($this->roleChecker([], []), $router))->resolve($this->batch([
+                    ['ref' => 'a', 'method' => $method, 'path' => '/api/v1/tasks'],
+                ]))
+            );
+
+            $this->assertFalse($result['allowed'], "{$method} must not be resolvable");
+        }
     }
 
     // ==================== batch shape ====================

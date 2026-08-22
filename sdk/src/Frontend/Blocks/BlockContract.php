@@ -50,9 +50,9 @@ namespace Whity\Sdk\Frontend\Blocks;
  *
  * ```
  * array{
- *   container: bool,                          // may carry a `children` array
+ *   container: bool,                          // may carry child blocks (see childSlots())
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -75,12 +75,78 @@ final class BlockContract
     public const MAX_NODES = 500;
 
     /**
-     * The whitelist: block type => its rule. The ordering here is the canonical
-     * documentation order (containers first, then leaves).
+     * Props EVERY block type carries, merged into each rule by {@see rules()}.
+     *
+     * `visibleWhen` used to be declared type by type — on `section`, `card` and
+     * the eleven input leaves — because WC-532 A3 only ever meant "hide an input
+     * when a sibling field says so". #909 makes it a condition over the RECORD
+     * and over the CALLER'S ACCESS as well, and at that point a facet only some
+     * types may carry stops being a small restriction and becomes a second
+     * mechanism: a page that can gate a `card` but not the `dataTable` inside it
+     * has to grow a wrapper for every gated leaf, and granular gating is then
+     * expressed one way in some places and another way in others.
+     *
+     * So it is declared ONCE, here, and merged. Adding a block type gets the
+     * facet for free, which is the property that keeps the vocabulary uniform as
+     * it grows.
+     *
+     * @var array<string, PropRule>
+     */
+    public const UNIVERSAL_PROPS = [
+        'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
+    ];
+
+    /**
+     * The child-list keys a type may carry, for the types that carry more than
+     * the usual one.
+     *
+     * `children` is the default and the only slot almost every container has.
+     * `accessGate` has two, because the two renderings of a gated region have to
+     * be declared TOGETHER (see the type's own note), and a second slot is the
+     * only way to say that in a tree.
+     *
+     * DECLARED HERE, NOT RESTATED PER WALKER. Several things walk a block tree —
+     * the validator, the host loader's ownership check and version rewrite, the
+     * showcase's coverage tests — and a walker that does not know about a slot
+     * silently skips everything in it. For the loader that is not a cosmetic
+     * miss: an unchecked slot is a `source` that never got ownership-checked. So
+     * every walker asks {@see childSlots()} instead of restating a list, which
+     * is the same lesson #908 drew when it made the source-bearing types derived
+     * rather than listed.
+     *
+     * @var array<string, list<string>>
+     */
+    private const CHILD_SLOTS = [
+        'accessGate' => ['children', 'otherwise'],
+    ];
+
+    /**
+     * The whitelist: block type => its rule, with {@see UNIVERSAL_PROPS} merged
+     * into every entry.
      *
      * @return array<string, BlockRule>
      */
     public static function rules(): array
+    {
+        $rules = self::declaredRules();
+
+        foreach ($rules as $type => $rule) {
+            // Declared props win: the merge ADDS the universal facet and can
+            // never quietly redefine a prop a type states for itself.
+            $rules[$type]['props'] = $rule['props'] + self::UNIVERSAL_PROPS;
+        }
+
+        return $rules;
+    }
+
+    /**
+     * The whitelist as WRITTEN, before the universal facet is merged in. The
+     * ordering here is the canonical documentation order (containers first,
+     * then leaves).
+     *
+     * @return array<string, BlockRule>
+     */
+    private static function declaredRules(): array
     {
         return [
             // ---- containers (may carry `children`) ----
@@ -88,12 +154,6 @@ final class BlockContract
                 'container' => true,
                 'props' => [
                     'title' => ['type' => 'string', 'required' => false],
-                    // WC-532 A3: presentational conditional visibility. When
-                    // inside a `form`, the section (and its subtree) is hidden
-                    // unless the referenced sibling field matches. Purely a
-                    // render-time facet — the server stays authoritative on
-                    // validation and never trusts client-side visibility.
-                    'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
                 ],
             ],
             'card' => [
@@ -101,7 +161,6 @@ final class BlockContract
                 'props' => [
                     'title' => ['type' => 'string', 'required' => false],
                     'description' => ['type' => 'string', 'required' => false],
-                    'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
                 ],
             ],
             'grid' => [
@@ -132,17 +191,33 @@ final class BlockContract
             ],
 
             // ---- leaves (no `children`) ----
+            // #883: the four literal leaves each carry an optional `…From`
+            // twin — a `contextPath` naming a field of a record in the
+            // master-detail context (a `dataRecord`'s published facts, or a row
+            // an `open` row action published). The LITERAL stays required and
+            // is the fallback: a record page that titles itself with the
+            // record's own name still has a title while the record loads, and
+            // still has one if the reference never resolves. That is why these
+            // are additive twins rather than an either/or — "exactly one of"
+            // would have made an unresolved reference render as nothing, and a
+            // page with no heading is a worse failure than a generic one.
+            //
+            // These are FACT bindings — the page STATING something about the
+            // record — so the validator refuses one that names a field in
+            // {@see BlockValidator::CALLER_DECISION_FIELDS}. See #895.
             'heading' => [
                 'container' => false,
                 'props' => [
                     'level' => ['type' => 'intEnum', 'required' => true, 'values' => [1, 2, 3, 4]],
                     'text' => ['type' => 'string', 'required' => true],
+                    'textFrom' => ['type' => 'contextPath', 'required' => false],
                 ],
             ],
             'text' => [
                 'container' => false,
                 'props' => [
                     'value' => ['type' => 'string', 'required' => true],
+                    'valueFrom' => ['type' => 'contextPath', 'required' => false],
                     'tone' => ['type' => 'enum', 'required' => false, 'values' => ['default', 'muted']],
                 ],
             ],
@@ -159,6 +234,7 @@ final class BlockContract
                 'props' => [
                     'variant' => ['type' => 'enum', 'required' => true, 'values' => ['neutral', 'info', 'success', 'warning', 'danger']],
                     'label' => ['type' => 'string', 'required' => true],
+                    'labelFrom' => ['type' => 'contextPath', 'required' => false],
                 ],
             ],
             'stat' => [
@@ -166,7 +242,9 @@ final class BlockContract
                 'props' => [
                     'label' => ['type' => 'string', 'required' => true],
                     'value' => ['type' => 'string', 'required' => true],
+                    'valueFrom' => ['type' => 'contextPath', 'required' => false],
                     'hint' => ['type' => 'string', 'required' => false],
+                    'hintFrom' => ['type' => 'contextPath', 'required' => false],
                     'trend' => ['type' => 'enum', 'required' => false, 'values' => ['up', 'down', 'flat']],
                 ],
             ],
@@ -368,6 +446,168 @@ final class BlockContract
                 'params'         => ['type' => 'sourceParamList', 'required' => false],
             ]],
 
+            // ---- record blocks (#883) ----
+            // The RECORD-BOUND primitive. Every other data-bound leaf in this
+            // contract assumes a COLLECTION at `source`: `dataTable` renders
+            // rows, `dataStat` reduces a body to one scalar, `keyValue` takes
+            // literals baked into the declaration. Nothing fetched ONE resource
+            // and rendered its fields, so a record page — the platform's
+            // standard for editing a record since #882 — could not be described
+            // at all, only hand-written in React.
+            //
+            // `dataRecord` is a CONTAINER rather than a leaf, and that is the
+            // whole design. It does three jobs that a record page needs done in
+            // one place:
+            //
+            //  1. It fetches one resource at `source`.
+            //  2. It PUBLISHES that record into the master-detail context under
+            //     its `id`, so every block beneath it — and beside it — reads
+            //     the record through the SAME `{id}.{field}` addressing an
+            //     `open` row action already publishes a row under. That is the
+            //     page-level record context #883 asks for, built out of the
+            //     mechanism that already exists instead of a second one.
+            //  3. It owns the loading and failure states for its whole subtree,
+            //     so a half-loaded record is one state on one block rather than
+            //     a dozen skeletons that arrive in an arbitrary order.
+            //
+            // WHICH record. `source` is a `recordPath`: an owned apiPath that
+            // may carry `{token}` segments in the SAME addressing as
+            // `params.from` / `defaultFrom` / `submit.endpoint`. So a detail
+            // pane reads `/api/x/rows/{picker}` from a `selector`, an overlay
+            // reads `/api/x/rows/{edit-modal.id}` from the row that opened it,
+            // and a record ROUTE reads `/api/x/rows/{record}` — `record` being
+            // the reserved name a host seeds with the route's own record id
+            // (which is why a `selector` may not be named `record`; see
+            // {@see BlockValidator::PAGE_RECORD_BINDING}). The block does not
+            // fetch until every token resolves: an unresolved token would
+            // otherwise request a DIFFERENT resource than the one meant, and
+            // silently render it as the record.
+            //
+            // `fields` IS THE #895 GUARD, and it is a whitelist rather than a
+            // warning. #895: the roles record page derived "is this a global
+            // role" from `manageable` — the server's answer to "may YOU write
+            // this?" — and for a tenant-0 caller `manageable` is true of every
+            // role, so the system tenant, the one caller whose edit reaches
+            // every tenant, saw a deployment-wide role labelled "Your tenant's
+            // role". #897 made that unwriteable in TypeScript by splitting the
+            // payload into `fields` (what the record IS) and `access` (what the
+            // caller MAY DO) and refusing a fields type that carries a caller
+            // flag. A block tree is runtime data, not a type, so the same split
+            // is enforced two ways here:
+            //
+            //  - The declaration NAMES the record's facts, and ONLY the named
+            //    fields are published into context. A payload's `manageable`,
+            //    `canEdit` or `mayModify` is not reachable by any binding in
+            //    the tree because it was never published — whatever it is
+            //    called, and whether or not the author thought about it. That
+            //    is the structural half, and it does not depend on a vocabulary.
+            //  - A `fields` entry naming a field the contract recognises as a
+            //    caller decision ({@see BlockValidator::CALLER_DECISION_FIELDS},
+            //    the same list #897 checks in TypeScript) is REFUSED, which
+            //    drops the whole feature. That is the half that names the
+            //    mistake, so an author who tries to declare `manageable` as a
+            //    fact is told why rather than watching it silently vanish.
+            //
+            // A record's caller-permission flags therefore have exactly one
+            // route into a record page: none. What the caller may do decides
+            // which CONTROLS exist, and controls are gated by
+            // `requiredPermission` on `form`/`submitButton`/`actionButton` and
+            // by the host's own per-caller resolution — never by a sentence the
+            // page states about the record.
+            'dataRecord' => ['container' => true, 'props' => [
+                'id'        => ['type' => 'blockId',        'required' => true],
+                'source'    => ['type' => 'recordPath',     'required' => true],
+                'fields'    => ['type' => 'recordFactList', 'required' => true],
+                'emptyText' => ['type' => 'string',         'required' => false],
+                'params'    => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+            // The data-bound `keyValue`: a description list of a record's facts,
+            // read from the context a `dataRecord` published rather than from
+            // literals baked into the declaration.
+            //
+            // It carries no `source` and no labels of its own. The labels were
+            // declared once beside the facts on `dataRecord.fields`, because a
+            // record page shows the same field in more than one place (a card, a
+            // side panel, a read-only rendering) and a label restated per
+            // placement is a label that drifts per placement. `fields` picks a
+            // SUBSET, in the order given; omitted, the block renders every fact
+            // the named record declared. A name that is not one of them renders
+            // nothing — the same no-op an unresolvable `params.from` already is.
+            'recordFields' => ['container' => false, 'props' => [
+                'from'      => ['type' => 'blockId',    'required' => true],
+                'fields'    => ['type' => 'stringList', 'required' => false],
+                'emptyText' => ['type' => 'string',     'required' => false],
+            ]],
+
+            // ---- access blocks (#909) ----
+            // The CALLER-ACCESS primitive, and the other half of #895's split.
+            //
+            // #883 gave a record page everything except the half the record-page
+            // shell exists to enforce. `RecordPageShell` takes `main: {editor,
+            // readOnly}` — TWO renderings, and it picks. A block tree could not
+            // pick: `visibleWhen` matched a sibling FORM FIELD and nothing else,
+            // so a described record page rendered its editor unconditionally and
+            // a caller who may not write got a disabled Save button beside fully
+            // editable inputs. That is precisely the greyed-out form #882 was
+            // written to make unshippable.
+            //
+            // WHAT IT IS. A gate declares ONE question about the CALLER — "would
+            // you let me make this request?" — publishes the host's answer under
+            // its `id`, and renders `children` when the answer is yes and
+            // `otherwise` when it is no.
+            //
+            // WHO ANSWERS IT, which is the whole reason this type lives in the
+            // contract rather than in each plugin. `check` names a concrete
+            // request, and the host resolves it through
+            // `POST /api/v1/me/permitted-actions` — the SAME route lookup feeding
+            // the SAME RoleChecker calls RbacMiddleware makes, against the live
+            // route table (#868). A plugin therefore does NOT declare the
+            // permission the region is gated on: that is not its to restate, and
+            // a restated slug is a second answer to a question the route table
+            // already answers, drifting the day someone re-gates the route and
+            // updates one of the two places. This is the property that made
+            // `inbox` correct by construction, applied to a region of a page
+            // instead of to a row's buttons.
+            //
+            // WHY TWO SLOTS RATHER THAN TWO NEGATED CONDITIONS. `children` and
+            // `otherwise` could be written as two siblings carrying
+            // `visibleWhen` with opposite polarity, and that is exactly what
+            // must not be the recommended shape: two conditions that are
+            // supposed to be each other's negation drift, and when they drift
+            // the editable half is the one that ends up showing. Declared as one
+            // node they cannot disagree — the same reason `RecordPageShell`
+            // takes both renderings as required props rather than one plus a
+            // flag.
+            //
+            // THE THREE-STATE CASE COMPOSES. hidden / read-only / editable is
+            // two nested gates: the outer one on the READ request with no
+            // `otherwise` (refused ⇒ the region is absent), the inner one on the
+            // WRITE request with both (refused ⇒ the read-only rendering, and
+            // its own subtree is where "which gate refused" is said). Nesting
+            // also gives #897's "first refusal wins" structurally: an outer gate
+            // that refuses never renders the inner one, so exactly one refusal
+            // is ever on screen.
+            //
+            // A GATE MAY CARRY NO CHILDREN AT ALL. Then it is purely a
+            // declaration, and `visibleWhen: {access: <id>}` reads it from
+            // anywhere on the screen — which is how a single question gates a
+            // heading here, a column there, and a whole card somewhere else
+            // without wrapping each of them.
+            //
+            // WHAT A GATE'S ANSWER IS NOT. It is a CONTROL binding, never a
+            // fact. The answer is published into a namespace of its own, which
+            // `textFrom`/`valueFrom`/`labelFrom`/`hintFrom`/`defaultFrom`/
+            // `params.from` do not resolve against — they read records and
+            // selections, and always have. There is exactly one prop in this
+            // contract that names a gate, `visibleWhen.access`, and it decides
+            // whether something renders. So a page can act on what the caller
+            // may do and still cannot SAY it about the record, which is #895's
+            // rule kept intact while the thing it forbade becomes expressible.
+            'accessGate' => ['container' => true, 'props' => [
+                'id'    => ['type' => 'blockId',     'required' => true],
+                'check' => ['type' => 'accessCheck', 'required' => true],
+            ]],
+
             // ---- interactive blocks (SP3, WC-233) ----
             'form' => ['container' => true, 'props' => [
                 'submit'             => ['type' => 'submitSpec', 'required' => true],
@@ -386,10 +626,10 @@ final class BlockContract
                 'min'       => ['type' => 'int',       'required' => false],
                 'max'       => ['type' => 'int',       'required' => false],
             ]],
-            // WC-532 A3: every input carries an optional `visibleWhen`
-            // presentational facet — the web renderer hides the input unless a
-            // sibling field in the same form matches (equals / in). It never
-            // affects submission or server validation.
+            // WC-532 A3 / #909: `visibleWhen` is no longer declared per type.
+            // It is a UNIVERSAL facet ({@see self::UNIVERSAL_PROPS}) merged into
+            // every rule, because a condition that only some blocks may carry is
+            // a condition granular gating has to route around.
             'textInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
@@ -397,7 +637,6 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'textArea' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
@@ -406,7 +645,6 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             // WC-532 A5: a Markdown-aware multi-line input. Submits Markdown
             // SOURCE (a plain string) like textArea; the web renderer shows a
@@ -418,7 +656,6 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'numberInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
@@ -429,7 +666,6 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'select' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName',    'required' => true],
@@ -438,14 +674,12 @@ final class BlockContract
                 'required'    => ['type' => 'bool',         'required' => false],
                 'default'     => ['type' => 'string',       'required' => false],
                 'defaultFrom' => ['type' => 'contextPath',  'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'checkbox' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'default'     => ['type' => 'bool',      'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'slider' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
@@ -455,7 +689,6 @@ final class BlockContract
                 'step'        => ['type' => 'int',       'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'dateInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
@@ -463,21 +696,18 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'fileInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'accept'      => ['type' => 'string',    'required' => false],
                 'required'    => ['type' => 'bool',      'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'colorInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             // WC-532 A4: a paired Arabic/English bilingual text input. Submits a
             // `{ar?, en?}` LocalizedText object under `name` (matching the
@@ -664,12 +894,59 @@ final class BlockContract
     }
 
     /**
-     * Whether the type may carry a `children` array. Unknown types are not
-     * containers.
+     * Whether the type may carry child blocks. Unknown types are not containers.
      */
     public static function isContainer(string $type): bool
     {
         return self::rules()[$type]['container'] ?? false;
+    }
+
+    /**
+     * The child-list keys this type may carry, in declaration order.
+     *
+     * `['children']` for every container that has not said otherwise, and the
+     * empty list for a leaf or an unknown type — so a caller can iterate the
+     * answer unconditionally.
+     *
+     * EVERY TREE WALKER SHOULD USE THIS rather than reaching for `children`
+     * directly: the validator, the host's ownership/version rewrite and the
+     * coverage tests all descend through it, and a walker that hard-codes the
+     * name skips whatever lives in a slot added later. For the loader the miss
+     * is not cosmetic — an unwalked slot is a `source` that never got
+     * ownership-checked.
+     *
+     * @return list<string>
+     */
+    public static function childSlots(string $type): array
+    {
+        if (!self::isContainer($type)) {
+            return [];
+        }
+
+        return self::CHILD_SLOTS[$type] ?? ['children'];
+    }
+
+    /**
+     * Every child-list key any type in the whitelist may carry.
+     *
+     * The validator uses it to refuse a slot on a type that does not declare one
+     * — an `otherwise` on a `card` is an author who meant something, and what
+     * they meant is a subtree that would silently never render.
+     *
+     * @return list<string>
+     */
+    public static function knownChildSlots(): array
+    {
+        $slots = ['children'];
+        foreach (self::CHILD_SLOTS as $declared) {
+            foreach ($declared as $slot) {
+                if (!\in_array($slot, $slots, true)) {
+                    $slots[] = $slot;
+                }
+            }
+        }
+
+        return $slots;
     }
 
     /**

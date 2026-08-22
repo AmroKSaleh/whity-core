@@ -32,6 +32,7 @@ const RENDER_SERVICE_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(RENDER_SERVICE_ROOT, '..');
 const WEB_ROOT = path.join(REPO_ROOT, 'web');
 const UI_SRC_ROOT = path.join(REPO_ROOT, 'packages', 'ui', 'src');
+const FEATURES_SRC_ROOT = path.join(REPO_ROOT, 'packages', 'features', 'src');
 const OUT_DIR = path.join(RENDER_SERVICE_ROOT, 'dist', 'harness');
 
 /**
@@ -79,6 +80,19 @@ function resolveWithExtensions(basePath) {
       return candidate;
     }
   }
+  // A DIRECTORY target (e.g. `@amroksaleh/features/document-designer`, a slice
+  // whose entry point is its own index) resolves to that index. Without this
+  // the alias hands esbuild a directory path and the build dies on an
+  // unreadable "file" — on Windows, with the memorably unhelpful "Incorrect
+  // function". packages/ui never hit it because all its subpaths are files.
+  if (fs.existsSync(basePath) && fs.statSync(basePath).isDirectory()) {
+    for (const ext of RESOLVE_EXTENSIONS) {
+      const candidate = path.join(basePath, 'index' + ext);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
   // Fall back to the unresolved path — esbuild's own error message is clearer
   // than a silent wrong-path resolution for a genuinely missing module.
   return basePath;
@@ -112,6 +126,22 @@ function pathAliasPlugin() {
       build.onResolve({ filter: /^@amroksaleh\/ui/ }, (args) => {
         const rest = args.path.slice('@amroksaleh/ui'.length); // '' or '/documents/xyz'
         const target = rest === '' ? path.join(UI_SRC_ROOT, 'index') : path.join(UI_SRC_ROOT, rest);
+        return { path: resolveWithExtensions(target) };
+      });
+      // The designer moved to `@amroksaleh/features/document-designer` so the
+      // Tauri desktop client could render the same code, and
+      // `web/components/documents/print-document.tsx` — which entry.tsx imports
+      // — is now a re-export shim pointing there. Without this resolver the
+      // harness build fails outright.
+      //
+      // That shim deliberately targets the `/print-document` SUBPATH rather
+      // than the slice barrel: the barrel would drag the whole editor (radix,
+      // tabler icons, the canvas) into this production PDF bundle and leave
+      // tree-shaking to take it back out. If bundle.js ever jumps in size,
+      // check that first.
+      build.onResolve({ filter: /^@amroksaleh\/features/ }, (args) => {
+        const rest = args.path.slice('@amroksaleh/features'.length);
+        const target = rest === '' ? path.join(FEATURES_SRC_ROOT, 'index') : path.join(FEATURES_SRC_ROOT, rest);
         return { path: resolveWithExtensions(target) };
       });
     },

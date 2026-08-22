@@ -2285,7 +2285,7 @@ export interface paths {
         /** List the roles visible to the tenant (own + global) */
         get: operations["get_api_v1_roles"];
         put?: never;
-        /** Create a role with optional permission grants */
+        /** Create a role, owned by the caller's tenant unless a system caller names another */
         post: operations["post_api_v1_roles"];
         delete?: never;
         options?: never;
@@ -2310,6 +2310,23 @@ export interface paths {
         head?: never;
         /** Update a role (permissions are replaced when supplied) */
         patch: operations["patch_api_v1_roles_id"];
+        trace?: never;
+    };
+    "/api/v1/roles/{id}/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List who holds this role, newest grant first (total = headcount) */
+        get: operations["get_api_v1_roles_id_assignments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/roles/{id}/permissions": {
@@ -2791,6 +2808,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/uikit/demo/rows/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Demo single record for the record-bound block example */
+        get: operations["get_api_v1_uikit_demo_rows_name"];
+        /** Demo single-record write, behind a permission nothing grants */
+        put: operations["put_api_v1_uikit_demo_rows_name"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uikit/demo/tasks": {
         parameters: {
             query?: never;
@@ -2867,7 +2902,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Read one user */
+        get: operations["get_api_v1_users_id"];
         put?: never;
         post?: never;
         /** Delete a user */
@@ -3392,7 +3428,8 @@ export interface components {
             /** @enum {string} */
             status: "ok" | "degraded";
             version: string;
-            worker_count: number;
+            sdk_version: string;
+            workers_active: number;
             uptime_seconds: number;
             db_connected: boolean;
             /** Format: float */
@@ -3917,7 +3954,7 @@ export interface components {
         PermittedActionCheck: {
             ref: string;
             /** @enum {string} */
-            method: "POST" | "PUT" | "PATCH" | "DELETE";
+            method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
             path: string;
             resourceType?: string | null;
             resourceId?: number | null;
@@ -4161,11 +4198,29 @@ export interface components {
             created_at: string | null;
             permissionCount: number;
             manageable: boolean;
+            global: boolean;
+        };
+        RoleAssignment: {
+            membershipId: number;
+            profileId: number;
+            tenantId: number;
+            displayName: string;
+            email?: string | null;
+            ouId?: number | null;
+            isPrimary: boolean;
+            status: string;
+            assignedAt?: string | null;
+        };
+        RoleAssignmentListResponse: {
+            data: components["schemas"]["RoleAssignment"][];
+            pagination: components["schemas"]["Pagination"];
         };
         RoleCreateRequest: {
             name: string;
             description?: string;
             permissions?: (number | string)[];
+            tenant_id?: number;
+            global?: boolean;
         };
         RoleCreateResponse: {
             data: {
@@ -4173,6 +4228,8 @@ export interface components {
                 name: string;
                 description?: string;
                 permissionCount?: number;
+                tenantId?: number | null;
+                global?: boolean;
             };
         };
         RoleDetail: {
@@ -4181,6 +4238,8 @@ export interface components {
             description: string | null;
             parent_id: number | null;
             created_at: string | null;
+            manageable: boolean;
+            global: boolean;
             permissions: components["schemas"]["Permission"][];
         };
         RoleDetailResponse: {
@@ -4727,6 +4786,16 @@ export interface components {
                 value: string;
                 trend: string;
                 hint: string;
+            };
+        };
+        UiKitDemoRecordResponse: {
+            data: {
+                name: string;
+                role: string;
+                status: string;
+                joined: string;
+                manageable: boolean;
+                canEdit: boolean;
             };
         };
         UiKitDemoRow: {
@@ -5732,6 +5801,8 @@ export interface operations {
                 actor?: number;
                 /** @description Filter by target type */
                 target_type?: string;
+                /** @description Filter by target id — the history of ONE record. Normally paired with target_type; alone it matches that id across every target type. */
+                target_id?: number;
                 /** @description Inclusive ISO-8601 lower bound */
                 from?: string;
                 /** @description Inclusive ISO-8601 upper bound */
@@ -12036,6 +12107,8 @@ export interface operations {
                 action?: string;
                 /** @description Filter by target type */
                 target_type?: string;
+                /** @description Filter by target id — the caller's own entries about ONE record */
+                target_id?: number;
                 /** @description Inclusive ISO-8601 lower bound */
                 from?: string;
                 /** @description Inclusive ISO-8601 upper bound */
@@ -17800,7 +17873,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoleCreateResponse"];
                 };
             };
-            /** @description Validation failed */
+            /** @description Validation failed, or tenant_id and global both sent */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17818,7 +17891,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Insufficient permissions */
+            /** @description Only the system tenant may name a target tenant or create a global role */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -17827,7 +17900,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Not found */
+            /** @description The named target tenant does not exist */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -18079,6 +18152,78 @@ export interface operations {
             };
             /** @description Role name already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_roles_id_assignments: {
+        parameters: {
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100) */
+                per_page?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The role's holders with pagination */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleAssignmentListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Role not found or not visible */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21741,6 +21886,136 @@ export interface operations {
             };
         };
     };
+    get_api_v1_uikit_demo_rows_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoRecordResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoRecordResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_uikit_demo_rows_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoRecordResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoRecordResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:manage permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_uikit_demo_tasks: {
         parameters: {
             query?: never;
@@ -22068,6 +22343,73 @@ export interface operations {
             };
             /** @description Email already exists in the tenant */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_users_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description User not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };

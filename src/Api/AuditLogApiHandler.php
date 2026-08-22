@@ -38,9 +38,21 @@ use Whity\Http\PaginationParams;
  * Filtering & pagination
  * ----------------------
  * Optional query parameters: `action`, `actor` (actor_user_id), `target_type`,
- * `from` / `to` (inclusive ISO-8601 date or datetime bounds on `created_at`),
- * `page` and `per_page`. Results are newest-first (`created_at DESC, id DESC`).
- * The response carries the page slice under `data` and a `pagination` block.
+ * `target_id`, `from` / `to` (inclusive ISO-8601 date or datetime bounds on
+ * `created_at`), `page` and `per_page`. Results are newest-first
+ * (`created_at DESC, id DESC`). The response carries the page slice under
+ * `data` and a `pagination` block.
+ *
+ * `target_id` (#882) is what makes "the history of THIS record" expressible.
+ * Without it the trail could be narrowed to a KIND of thing — every role, every
+ * user — but never to one row, so a record page had no way to ask for its own
+ * entries and would have had to page the whole tenant's trail and filter
+ * client-side. It is normally paired with `target_type`, and the two compose as
+ * a conjunction like every other filter here; supplied alone it matches that id
+ * across every target type, which is meaningful when `action` already pins the
+ * kind (`action=role.updated&target_id=7`) and is the caller's business
+ * otherwise. It is deliberately NOT a widening parameter: it can only ever
+ * narrow rows the tenant scope has already admitted.
  *
  * No direct DB writes happen here — this is a read-only handler; the single
  * writer is {@see \Whity\Core\Audit\AuditLogger}.
@@ -132,6 +144,14 @@ final class AuditLogApiHandler
             if (isset($query['actor']) && ctype_digit((string) $query['actor'])) {
                 $conditions[] = 'actor_user_id = :actor';
                 $params[':actor'] = (int) $query['actor'];
+            }
+
+            // Bound as an INT after a digit check, like `actor` above: the column
+            // is an integer and a non-numeric value is dropped rather than
+            // compared, so no cast error can reach the driver.
+            if (isset($query['target_id']) && ctype_digit((string) $query['target_id'])) {
+                $conditions[] = 'target_id = :target_id';
+                $params[':target_id'] = (int) $query['target_id'];
             }
 
             if (isset($query['from']) && $query['from'] !== '') {
@@ -246,6 +266,16 @@ final class AuditLogApiHandler
             if (isset($query['target_type']) && $query['target_type'] !== '') {
                 $conditions[] = 'target_type = :target_type';
                 $params[':target_type'] = (string) $query['target_type'];
+            }
+
+            // Same narrowing filter as the admin endpoint (#882) — kept symmetric
+            // deliberately. The two are documented as analogues differing only in
+            // `actor` (pinned to the caller here, so it cannot be widened); an
+            // extra asymmetry would need a reason, and "the record page happened
+            // to call the other one" is not one.
+            if (isset($query['target_id']) && ctype_digit((string) $query['target_id'])) {
+                $conditions[] = 'target_id = :target_id';
+                $params[':target_id'] = (int) $query['target_id'];
             }
 
             if (isset($query['from']) && $query['from'] !== '') {

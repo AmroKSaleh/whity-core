@@ -24,6 +24,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { IconChevronDown, IconSearch } from '@tabler/icons-react';
+import { groupPermissions, titleCase } from './permission-groups';
 import type { Permission, RolesTranslate } from './types';
 
 interface PermissionCheckboxProps {
@@ -34,8 +35,10 @@ interface PermissionCheckboxProps {
   t: RolesTranslate;
 }
 
-/**
- * Group key = the resource segment before the first colon (e.g. users:write → users).
+/*
+ * Grouping (resource segment before the first colon) lives in
+ * `./permission-groups` — one implementation shared with the read-only panel and
+ * the record page's in-page grid.
  *
  * The group name, the permission slug and its description are all rows from the
  * permissions table — tenant DATA, not source strings — so they render verbatim
@@ -43,12 +46,6 @@ interface PermissionCheckboxProps {
  * labels, counts and empty state) is translated below. Nothing here reaches
  * `t()` with a computed key, so there is no dynamic call site to declare.
  */
-function groupOf(name: string): string {
-  const i = name.indexOf(':');
-  return i > 0 ? name.slice(0, i) : 'general';
-}
-
-const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
  * Permission picker for the granular RBAC role editor. Presents permissions
@@ -75,14 +72,7 @@ export function PermissionCheckbox({ permissions, selectedIds, onChange, t }: Pe
           (p) => (p.name ?? '').toLowerCase().includes(q) || (p.description ?? '').toLowerCase().includes(q)
         )
       : all;
-    const map = new Map<string, Permission[]>();
-    for (const p of filtered) {
-      const g = groupOf(p.name ?? '');
-      const list = map.get(g);
-      if (list) list.push(p);
-      else map.set(g, [p]);
-    }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return groupPermissions(filtered);
   }, [all, query]);
 
   const toggle = (id: number) => {
@@ -201,7 +191,7 @@ export function PermissionCheckbox({ permissions, selectedIds, onChange, t }: Pe
                         }
                         className="flex flex-1 items-center justify-between text-start"
                       >
-                        <span className="text-xs font-semibold uppercase tracking-wide text-foreground">{title(group)}</span>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-foreground">{titleCase(group)}</span>
                         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                           {inGroup}/{perms.length}
                           <IconChevronDown size={12} className={`transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
