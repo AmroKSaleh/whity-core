@@ -9,12 +9,28 @@
  * the MAIN checkout's `node_modules`, whose `@amroksaleh/ui` entry is an
  * npm-workspaces symlink to the MAIN checkout's `packages/ui`.
  *
- * The component under test is then loaded from a different physical path than
- * the one `jest.mock('@amroksaleh/ui/...')` is registered against. The mock
- * factory becomes dead code, every importer silently gets the real component,
- * and the assertions that depended on the mock fail.
+ * Which half of the mock that strands is worth stating precisely, because it
+ * decides where the fix belongs. The component under test keeps loading the
+ * LOCAL copy: `web/tsconfig.json` maps `@amroksaleh/ui/*` to
+ * `../packages/ui/src/*`, `next/jest` hands those `paths` to SWC, and SWC emits
+ * every ESM import as a RELATIVE require — `require("../../../packages/ui/
+ * src/dialog")` — which cannot leave the checkout. It is the string in
+ * `jest.mock('@amroksaleh/ui/dialog')` that escapes: a call argument rather
+ * than an import, so SWC leaves it alone and Jest resolves it as a bare
+ * specifier, walking node_modules up and out.
  *
- * ## Why a guard rather than a resolver fix
+ * So the mock is registered against a file nothing imports. The factory becomes
+ * dead code, every importer silently gets the real component, and the
+ * assertions that depended on the mock fail.
+ *
+ * ## Why this guard remains now that the resolver is also fixed
+ *
+ * `jest.config.mjs` now mirrors those tsconfig `paths` in its
+ * `moduleNameMapper`, so both halves of a mock land on one file and this
+ * divergence cannot arise from a missing `node_modules` alone. The guard is
+ * what keeps that honest: remove or misdirect those mapper entries and every
+ * suite aborts here, naming the cause, instead of four suites failing as
+ * product bugs.
  *
  * The cost of #840 was never the broken run — it was that the breakage
  * IMPERSONATED A PRODUCT BUG. Four suites (`user-modals-password-reset`,
@@ -31,8 +47,9 @@
  *
  * There is deliberately **no escape hatch**. An environment variable to silence
  * this would be set once, in frustration, and would restore precisely the
- * blindness the guard exists to remove. `npm install` in the checkout is the
- * fix, it takes one command, and it leaves the suite genuinely trustworthy.
+ * blindness the guard exists to remove. Restoring the mapper entries, or
+ * `npm install` in the checkout, is the fix — either one leaves the suite
+ * genuinely trustworthy.
  */
 
 import fs from 'node:fs';
@@ -105,7 +122,9 @@ export function foreignResolutionMessage({ resolved, workspaceRoot }) {
     'becomes dead code and the assertions depending on it fail, which reads as',
     'a broken component rather than a broken environment (#840).',
     '',
-    'Fix: run `npm install` once in this checkout, then re-run.',
+    "Fix: restore the '@amroksaleh/*' moduleNameMapper entries in",
+    'jest.config.mjs, which pin these packages to this checkout — or run',
+    '`npm install` once here, giving the checkout its own node_modules.',
   ].join('\n');
 }
 
