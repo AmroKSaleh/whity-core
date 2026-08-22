@@ -161,6 +161,10 @@ PHP;
      * @param string $coreConstraint Core constraint (default: none).
      * @param string|null $migrationClass Migration class short name.
      * @param string|null $table Table name the migration creates.
+     * @param string|null $namespace Namespace to declare the class in. Defaults
+     *        to the plugin name (the PSR-4 convention the installer enforces);
+     *        pass a different one to build the #841 shape — a package whose
+     *        DIRECTORY name is free but whose declared CLASS is already taken.
      * @return string The PHP source.
      */
     public static function directoryPluginSource(
@@ -169,12 +173,13 @@ PHP;
         string $coreConstraint = '',
         ?string $migrationClass = null,
         ?string $table = null,
+        ?string $namespace = null,
     ): string {
         $migrationClass ??= 'Create' . $pluginName . 'Table';
         $table ??= strtolower($pluginName) . '_items';
 
         return strtr(self::PLUGIN_TEMPLATE, [
-            '{NAMESPACE}' => $pluginName,
+            '{NAMESPACE}' => $namespace ?? $pluginName,
             '{CLASS}' => 'Plugin',
             '{PLUGIN_NAME}' => $pluginName,
             '{MIGRATION_CLASS}' => $migrationClass,
@@ -191,6 +196,8 @@ PHP;
      * @param string $pluginName Plugin/dir name.
      * @param string $sdkConstraint SDK constraint.
      * @param string $coreConstraint Core constraint.
+     * @param string|null $namespace Namespace override (see
+     *        {@see directoryPluginSource()}); null keeps it equal to the name.
      * @return string Absolute path to the created .zip.
      */
     public static function validDirectoryZip(
@@ -198,6 +205,7 @@ PHP;
         string $pluginName = 'AcmeUploaded',
         string $sdkConstraint = '^1.5',
         string $coreConstraint = '',
+        ?string $namespace = null,
     ): string {
         $zipPath = $workDir . '/' . $pluginName . '.zip';
         $zip = new ZipArchive();
@@ -207,7 +215,7 @@ PHP;
 
         $zip->addFromString(
             $pluginName . '/Plugin.php',
-            self::directoryPluginSource($pluginName, $sdkConstraint, $coreConstraint)
+            self::directoryPluginSource($pluginName, $sdkConstraint, $coreConstraint, null, null, $namespace)
         );
         // A non-PHP companion file proves the extractor copies the whole tree.
         $zip->addFromString($pluginName . '/README.md', "# {$pluginName}\n");

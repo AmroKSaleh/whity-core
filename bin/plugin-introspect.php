@@ -9,8 +9,9 @@
  *  - loads the host autoloader so the SDK contract types resolve;
  *  - requires each staged file, catching parse/load errors;
  *  - finds the classes implementing {@see \Whity\Sdk\PluginInterface};
- *  - requires EXACTLY ONE, instantiates it, and reads getName()/getVersion()
- *    plus the route/permission counts and (optional) SDK/core constraints;
+ *  - requires EXACTLY ONE, instantiates it, and reads its class name plus
+ *    getName()/getVersion(), the route/permission counts and (optional)
+ *    SDK/core constraints;
  *  - prints a single JSON object to stdout, delimited by unique sentinel
  *    markers, and exits.
  *
@@ -53,7 +54,7 @@
  * Output contract (stdout):
  *  - ===WC-INTROSPECT-BEGIN:<nonce>==={json}===WC-INTROSPECT-END:<nonce>===
  *  - the JSON object is either
- *    {"status":"ok","plugin":{name,version,routes_count,permissions_count,
+ *    {"status":"ok","plugin":{class,name,version,routes_count,permissions_count,
  *    sdk_constraint,core_constraint}} or
  *    {"status":"error","reason":"none|multiple|load|instantiate|introspect"}
  *
@@ -201,6 +202,12 @@ declare(strict_types=1);
     $emit([
         'status' => 'ok',
         'plugin' => [
+            // The declared CLASS, not just the name (#841): the parent refuses
+            // an install whose plugin class an already-installed plugin has
+            // taken, because two files declaring one class is a fatal the host
+            // cannot catch. Read here, where the package is already loaded, so
+            // the parent never has to run plugin code to learn it.
+            'class' => $fqcn,
             'name' => $name,
             'version' => $version,
             'routes_count' => $routesCount,
