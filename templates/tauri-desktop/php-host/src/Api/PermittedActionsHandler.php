@@ -47,8 +47,13 @@ final class PermittedActionsHandler
     /** Maximum checks accepted in one batch. Matches the server handler. */
     public const MAX_CHECKS = 200;
 
-    /** The HTTP methods a check may name — the write verbs an inbox action can carry. */
-    private const ALLOWED_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+    /**
+     * The HTTP methods a check may name. Matches the server handler, GET
+     * included (#909): an `accessGate` asks a read question to decide whether a
+     * region exists at all, and the two hosts must answer the same set or the
+     * same tree renders differently offline.
+     */
+    private const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
     public function __construct(
         private readonly Router $router,

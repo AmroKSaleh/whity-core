@@ -9,16 +9,33 @@
  * rather than crashing — see `block-renderer.tsx`.
  */
 
+/**
+ * A presentational conditional-visibility predicate (WC-532 A3, widened by
+ * #909). Names exactly one subject — a sibling form `field`, a master-detail
+ * reference (`from`), or an `accessGate` id (`access`) — and how to test it.
+ * All three are optional here because the renderer revalidates a payload it did
+ * not build; the SDK validator is what enforces "exactly one".
+ *
+ * Facts fail OPEN, authority fails CLOSED: an unresolvable `field`/`from` leaves
+ * the block visible, an unanswered `access` hides it.
+ */
 export interface VisibleWhen {
-  field: string
+  field?: string
+  from?: string
+  access?: string
   equals?: string | number | boolean
   in?: (string | number | boolean)[]
+}
+
+/** The facets EVERY block carries (`BlockContract::UNIVERSAL_PROPS`), merged
+ * into {@link Block} rather than repeated on each interface. */
+export interface BlockFacets {
+  visibleWhen?: VisibleWhen
 }
 
 export interface SectionBlock {
   type: "section"
   title?: string
-  visibleWhen?: VisibleWhen
   children: Block[]
 }
 
@@ -26,7 +43,6 @@ export interface CardBlock {
   type: "card"
   title?: string
   description?: string
-  visibleWhen?: VisibleWhen
   children: Block[]
 }
 
@@ -44,7 +60,10 @@ export interface RowBlock {
 
 export interface TabsBlock {
   type: "tabs"
-  children: TabBlock[]
+  /** Intersected with the universal facet because a `tab` renders from inside
+   * `TabsRenderer` rather than through `BlockNode`, so its `visibleWhen` is read
+   * there directly (#909). */
+  children: (TabBlock & BlockFacets)[]
 }
 
 export interface TabBlock {
@@ -288,7 +307,6 @@ export interface TextInputBlock {
   default?: string
   defaultFrom?: string
   sensitive?: boolean
-  visibleWhen?: VisibleWhen
 }
 
 export interface TextAreaBlock {
@@ -299,7 +317,6 @@ export interface TextAreaBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface RichTextInputBlock {
@@ -310,7 +327,6 @@ export interface RichTextInputBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface NumberInputBlock {
@@ -323,7 +339,6 @@ export interface NumberInputBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface SelectBlock {
@@ -334,7 +349,6 @@ export interface SelectBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface CheckboxBlock {
@@ -343,7 +357,6 @@ export interface CheckboxBlock {
   label: string
   default?: boolean
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface SliderBlock {
@@ -355,7 +368,6 @@ export interface SliderBlock {
   step?: number
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface DateInputBlock {
@@ -365,7 +377,6 @@ export interface DateInputBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface FileInputBlock {
@@ -376,7 +387,6 @@ export interface FileInputBlock {
   required?: boolean
   encoding?: "base64"
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface ColorInputBlock {
@@ -385,7 +395,6 @@ export interface ColorInputBlock {
   label: string
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface LocalizedTextValue {
@@ -581,8 +590,35 @@ export interface RecordFieldsBlock {
   emptyText?: string
 }
 
-export type Block =
-  | SectionBlock
+/** The one concrete request an {@link AccessGateBlock} asks the host about. Its
+ * `endpoint` may carry `{token}` segments in the master-detail addressing; the
+ * gate is not asked until every token resolves. */
+export interface AccessCheck {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+  endpoint: string
+}
+
+/**
+ * Container (#909): the CALLER-ACCESS primitive. Declares one question about
+ * the caller, publishes the host's answer under `id`, and renders `children`
+ * when the answer is yes and `otherwise` when it is no — the two renderings
+ * declared TOGETHER so they cannot drift apart. Both slots are optional; a gate
+ * with neither is purely a declaration `visibleWhen: {access: id}` can name.
+ *
+ * The answer comes from the host's own resolver (`POST /__whity/permitted-actions`
+ * here, `POST /api/v1/me/permitted-actions` on the server), so the plugin never
+ * states which permission gates the region.
+ */
+export interface AccessGateBlock {
+  type: "accessGate"
+  id: string
+  check: AccessCheck
+  children?: Block[]
+  otherwise?: Block[]
+}
+
+export type Block = BlockFacets &
+  ( | SectionBlock
   | CardBlock
   | GridBlock
   | RowBlock
@@ -630,6 +666,7 @@ export type Block =
   | DrawerBlock
   | DataRecordBlock
   | RecordFieldsBlock
+  | AccessGateBlock )
 
 /** A single plugin-contributed UI feature, as published by the offline host's
  * `GET /__whity/frontend-features` (mirrors the server's `GET /api/v1/frontend/features`). */

@@ -3423,6 +3423,53 @@ class PluginLoader
                         $node['actions'] = $rewrittenActions;
                     }
 
+                    // (c3-e) #909: an `accessGate`'s `check` names the one
+                    // concrete request whose permission the host resolves for the
+                    // caller. Ownership-checked and version-rewritten exactly like
+                    // an inbox action's endpoint, and for the same two reasons: a
+                    // plugin may only ask about routes it actually owns, and the
+                    // permitted-actions resolver matches the CONCRETE path against
+                    // the live route table, so an unversioned endpoint would match
+                    // no route and resolve to "not permitted" — fail-closed, but
+                    // silently, and the gated region would be refused for everyone.
+                    //
+                    // Not permission-pinned, and that is the point of the type:
+                    // the gate declares no permission of its own, so there is no
+                    // second value here to fall out of step with the route.
+                    if ($type === 'accessGate' && isset($node['check']) && is_array($node['check'])) {
+                        $checkMethod = strtoupper((string) ($node['check']['method'] ?? ''));
+                        $checkEndpoint = $node['check']['endpoint'] ?? null;
+                        if (!is_string($checkEndpoint)) {
+                            // Shape is BlockValidator's job and it already ran.
+                            $dropReason = 'accessGate check endpoint is not a string';
+                            return null;
+                        }
+
+                        // GET lives in the path-keyed map (a `check` may carry
+                        // `{token}` segments, so it is compared with route params
+                        // normalized, as a `recordPath` source is); the write verbs
+                        // live in the method+path-keyed one an inbox action uses.
+                        $owned = $checkMethod === 'GET'
+                            ? self::matchesRegisteredGetRoute($checkEndpoint, $registeredGetRoutes)
+                            : array_key_exists(
+                                self::normalizeRouteKey($checkMethod, $checkEndpoint),
+                                $registeredWriteRoutes
+                            );
+
+                        if (!$owned) {
+                            $dropReason = "accessGate check '{$checkMethod} {$checkEndpoint}' is not a route "
+                                . 'this plugin registered';
+                            return null;
+                        }
+
+                        if ($vp !== '') {
+                            $pos = strpos($checkEndpoint, '/', 1);
+                            $node['check']['endpoint'] = $pos === false
+                                ? $checkEndpoint . $vp
+                                : substr($checkEndpoint, 0, $pos) . $vp . substr($checkEndpoint, $pos);
+                        }
+                    }
+
                     if ($endpointSpec !== null) {
                         $key = strtoupper((string) $endpointSpec['method']) . ' ' . (string) $endpointSpec['endpoint'];
                         if (!array_key_exists($key, $registeredActionRoutes)) {
@@ -3448,10 +3495,29 @@ class PluginLoader
                     }
                 }
 
-                // Recurse into children (container nodes).
-                if (isset($node['children']) && is_array($node['children'])) {
+                // Recurse into EVERY child list the type declares, not just
+                // `children` (#909). `accessGate` carries a second one, and a walk
+                // that hard-codes the name would leave everything in it
+                // unchecked — which for this walk means a `source` that never got
+                // ownership-checked and never got version-rewritten. The contract
+                // states its own slots so this stays true of whatever is added
+                // next.
+                $slots = \Whity\Sdk\Frontend\Blocks\BlockContract::childSlots(is_string($type) ? $type : '');
+                if (!in_array('children', $slots, true)) {
+                    // Defence in depth. BlockValidator already refuses a
+                    // `children` list on a type that declares none, but this walk
+                    // is the OWNERSHIP gate: it must never stop descending into a
+                    // list merely because the contract says it should not be there.
+                    $slots[] = 'children';
+                }
+
+                foreach ($slots as $slot) {
+                    if (!isset($node[$slot]) || !is_array($node[$slot])) {
+                        continue;
+                    }
+
                     $rewrittenChildren = [];
-                    foreach ($node['children'] as $child) {
+                    foreach ($node[$slot] as $child) {
                         if (!is_array($child)) {
                             $rewrittenChildren[] = $child;
                             continue;
@@ -3462,7 +3528,7 @@ class PluginLoader
                         }
                         $rewrittenChildren[] = $rewritten;
                     }
-                    $node['children'] = $rewrittenChildren;
+                    $node[$slot] = $rewrittenChildren;
                 }
 
                 return $node;

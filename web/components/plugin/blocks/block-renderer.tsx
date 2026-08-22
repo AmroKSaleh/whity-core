@@ -73,6 +73,7 @@ import type {
   TextInputBlock,
   TimelineBlock,
   VisibleWhen,
+  AccessGateBlock,
 } from '@/lib/plugin-features';
 import { OU_SCOPE_KINDS, isOuScopeValue } from '@/lib/plugin-features';
 import { Chart } from '@amroksaleh/ui/chart';
@@ -429,10 +430,20 @@ function RowRenderer({ block }: { block: RowBlock }) {
 }
 
 function TabsRenderer({ block }: { block: TabsBlock }) {
+  // A `tab`'s children are rendered from here rather than through `BlockNode`,
+  // so this is the one place a `visibleWhen` would otherwise be silently
+  // ignored — a contract that says every block carries the facet has to mean it
+  // (#909). Hiding a tab the caller may not open is also the point of carrying
+  // it here at all.
+  const form = useFormBlockContext();
+  const md = useMasterDetail();
+  const access = useAccess();
   // Keep only valid tab children; ignore anything else defensively.
   const tabs = block.children.filter(
     (child): child is TabBlock =>
-      child.type === 'tab' && isNonEmptyString(child.label)
+      child.type === 'tab' &&
+      isNonEmptyString(child.label) &&
+      isBlockVisible(child, form, md, access)
   );
   if (tabs.length === 0) {
     return <UnsupportedBlock type="tabs" />;
@@ -876,6 +887,225 @@ function shallowEqualRecords(
   const aKeys = Object.keys(a);
   if (aKeys.length !== Object.keys(b).length) return false;
   return aKeys.every((key) => Object.is(a[key], b[key]));
+}
+
+// ---- #909: caller access, resolved by the HOST -----------------------------
+
+/**
+ * What a gate's question currently answers.
+ *
+ * NEITHER unsettled state is a synonym for refused. A gate that has not been
+ * answered renders NEITHER branch, because showing the read-only rendering for a
+ * frame and then replacing it with the editor is a worse lie than showing
+ * nothing for a frame; and a `visibleWhen` reading an unsettled gate hides its
+ * block whichever polarity it asked for (see {@link isBlockVisible}).
+ *
+ * They are told apart because they LOOK different. `'pending'` is in flight and
+ * gets a skeleton — something is coming. `'unasked'` is a gate whose endpoint
+ * still has an unresolved token (nothing has said which record) or an id nothing
+ * declared, and it gets NOTHING: a skeleton that never resolves is a spinner
+ * promising an answer no one is fetching.
+ */
+type AccessAnswer = 'unasked' | 'pending' | 'allowed' | 'refused';
+
+/**
+ * The access namespace: gate id -> the host's answer.
+ *
+ * SEPARATE FROM THE MASTER-DETAIL CONTEXT ON PURPOSE, and this separation is the
+ * #895 property restated for #909. A record's published fields live in
+ * `MasterDetail.rows`, which is what `resolveContextRef` reads — and
+ * `resolveContextRef` is the single resolver behind every fact binding
+ * (`textFrom`/`valueFrom`/`labelFrom`/`hintFrom`) and every plumbing binding
+ * (`defaultFrom`, `params.from`, a `{token}` in a source). It does not read this
+ * map and has no reason to: a gate answer is not a field of anything.
+ *
+ * So a page can ACT on what the caller may do — that is `visibleWhen.access`,
+ * the only prop in the contract that names a gate — and still cannot SAY it
+ * about the record. #895 was a page stating "your tenant's role" because a
+ * permission flag was reachable as a fact; nothing here makes an answer
+ * reachable as a fact, whatever the gate is called.
+ */
+interface AccessScope {
+  answer: (gateId: string) => AccessAnswer;
+}
+
+const AccessContext = React.createContext<AccessScope | null>(null);
+
+function useAccess(): AccessScope | null {
+  return React.useContext(AccessContext);
+}
+
+/** One gate's declaration, as collected from the tree. */
+interface CollectedGate {
+  id: string;
+  method: string;
+  endpoint: string;
+}
+
+/**
+ * Collect every `accessGate` in a tree, in document order.
+ *
+ * The batch is derived from the TREE rather than registered by the gates as
+ * they mount, and that is what makes one request enough. A registration pass
+ * would need the gates to render before their own answer could be asked for,
+ * which is a second render and a frame of every gated region being absent. The
+ * declarations are static, so they can simply be read.
+ *
+ * Descends through both child slots — `otherwise` holds real blocks and can hold
+ * nested gates.
+ */
+function collectAccessGates(blocks: Block[] | undefined, into: CollectedGate[] = []): CollectedGate[] {
+  if (!Array.isArray(blocks)) return into;
+  for (const block of blocks) {
+    if (block === null || typeof block !== 'object') continue;
+    if (
+      block.type === 'accessGate' &&
+      isNonEmptyString(block.id) &&
+      typeof block.check === 'object' &&
+      block.check !== null &&
+      isNonEmptyString(block.check.method) &&
+      isNonEmptyString(block.check.endpoint)
+    ) {
+      // First declaration wins, matching how the router resolves a duplicate
+      // route: two gates under one id is a declaration bug, and picking the
+      // later one would make the answer depend on document order in a way
+      // nothing else in this contract does.
+      if (!into.some((gate) => gate.id === block.id)) {
+        into.push({ id: block.id, method: block.check.method, endpoint: block.check.endpoint });
+      }
+    }
+    const node = block as { children?: Block[]; otherwise?: Block[] };
+    collectAccessGates(node.children, into);
+    collectAccessGates(node.otherwise, into);
+  }
+  return into;
+}
+
+/**
+ * Substitute a gate endpoint's `{token}` segments from the master-detail
+ * context, or return null when any is unresolved.
+ *
+ * Null means NOT ASKED, exactly as it does for a `dataRecord.source`, and for
+ * the same reason: `/api/v1/roles/{record}` with nothing bound is
+ * `/api/v1/roles/`, a different route with a different gate. Being told whether
+ * you may write the collection, and rendering an editor for one record on the
+ * strength of it, is worse than being told nothing.
+ */
+function resolveGateEndpoint(md: MasterDetail | null, endpoint: string): string | null {
+  const parts = endpoint.split(/(\{[^{}]*\})/);
+  const resolved = parts.map((part, index) => {
+    if (index % 2 === 0) return part;
+    const value = resolveContextRef(md, part.slice(1, -1));
+    return value === undefined || value === '' ? null : encodeURIComponent(value);
+  });
+  return resolved.some((part) => part === null) ? null : resolved.join('');
+}
+
+/** The methods the host will resolve. Mirrors `BlockValidator::ACCESS_CHECK_METHODS`. */
+const ACCESS_CHECK_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+function isAccessCheckMethod(value: string): value is PermittedActionCheck['method'] {
+  return (ACCESS_CHECK_METHODS as readonly string[]).includes(value);
+}
+
+/**
+ * Resolves every gate on the screen in ONE batch, through the host's own
+ * authority (`POST /api/v1/me/permitted-actions`).
+ *
+ * ONE batch, not one per gate. The endpoint was built for exactly this shape
+ * (#868): a page's worth of questions answered together, so the answers arrive
+ * at one moment rather than making the page assemble itself region by region.
+ *
+ * Fail-closed all the way down. `usePermittedActions` denies every ref while
+ * loading, on error, and whenever the batch has moved on from the answer in
+ * hand; a gate whose endpoint has an unresolved token is never in the batch and
+ * stays pending; and a gate id nothing declared is pending forever. The answers
+ * are UI hints regardless — every request is re-gated when it is actually made.
+ */
+function AccessProvider({ blocks, children }: { blocks: Block[]; children: React.ReactNode }) {
+  const md = useMasterDetail();
+
+  const gates = React.useMemo(() => collectAccessGates(blocks), [blocks]);
+
+  // A gate is only asked once its endpoint fully resolves. `resolvable` is the
+  // set of ids that made it into the batch, so a gate that dropped out can be
+  // told apart from one the host refused.
+  const { checks, resolvable } = React.useMemo(() => {
+    const list: PermittedActionCheck[] = [];
+    const ids = new Set<string>();
+    for (const gate of gates) {
+      const method = gate.method.toUpperCase();
+      if (!isAccessCheckMethod(method)) continue;
+      const path = resolveGateEndpoint(md, gate.endpoint);
+      if (path === null) continue;
+      list.push({ ref: gate.id, method, path });
+      ids.add(gate.id);
+    }
+    return { checks: list, resolvable: ids };
+  }, [gates, md]);
+
+  const batchKey = React.useMemo(() => JSON.stringify(checks), [checks]);
+  const permitted = usePermittedActions(checks, batchKey);
+  const status = permitted.status;
+  const isAllowed = permitted.isAllowed;
+
+  const value = React.useMemo<AccessScope>(
+    () => ({
+      answer: (gateId: string): AccessAnswer => {
+        if (!resolvable.has(gateId)) return 'unasked';
+        if (status === 'loading') return 'pending';
+        // An error is a REFUSAL, not a pending state. The alternative is a
+        // region that never resolves, and for the read-only pair that means a
+        // record page with no body at all when the resolver is down.
+        return status === 'ready' && isAllowed(gateId) ? 'allowed' : 'refused';
+      },
+    }),
+    [resolvable, status, isAllowed]
+  );
+
+  return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>;
+}
+
+/**
+ * AccessGateRenderer (#909) — the two renderings of a gated region, declared
+ * together so they cannot drift apart.
+ *
+ * Renders `children` when the host permits the gate's request and `otherwise`
+ * when it refuses. While the answer is pending it renders a skeleton and NOT the
+ * refused branch: "you may not edit this" is a statement, and stating it before
+ * the answer arrives is stating something not yet known.
+ *
+ * A gate with neither slot renders nothing at all and exists purely so
+ * `visibleWhen: {access: id}` elsewhere on the page has something to name.
+ */
+function AccessGateRenderer({ block }: { block: AccessGateBlock }) {
+  const access = useAccess();
+  const answer = access?.answer(block.id) ?? 'unasked';
+  const permitted = Array.isArray(block.children) ? block.children : [];
+  const refused = Array.isArray(block.otherwise) ? block.otherwise : [];
+
+  if (permitted.length === 0 && refused.length === 0) return null;
+  if (answer === 'unasked') return null;
+
+  if (answer === 'pending') {
+    return (
+      <div className="space-y-2" data-slot="block-access-pending">
+        <Skeleton className="h-16 w-full" />
+      </div>
+    );
+  }
+
+  const shown = answer === 'allowed' ? permitted : refused;
+  if (shown.length === 0) return null;
+
+  return (
+    <div
+      className="space-y-4"
+      data-slot={answer === 'allowed' ? 'block-access-permitted' : 'block-access-refused'}
+    >
+      <BlockList blocks={shown} />
+    </div>
+  );
 }
 
 /**
@@ -3211,22 +3441,49 @@ function normalizeVisibilityOperand(
 }
 
 /**
- * Evaluate a block's optional `visibleWhen` facet against the enclosing form's
- * live values. Returns true (visible) when there is no facet, when the block is
- * outside any form (no sibling field to test), or when the rule is malformed —
- * i.e. it FAILS OPEN so content is never permanently hidden by a missing
- * context or a bad rule. The SDK validator already rejects malformed rules at
- * publish time; this is the render-time counterpart.
+ * Evaluate a block's optional `visibleWhen` facet (WC-532 A3, widened by #909).
+ *
+ * The rule names one of three subjects and this reads the matching one:
+ *   - `field`  the enclosing form's live values;
+ *   - `from`   the master-detail context — the record the page is about;
+ *   - `access` the host's answer for the named `accessGate`.
+ *
+ * FACTS FAIL OPEN, AUTHORITY FAILS CLOSED, and the asymmetry is deliberate. A
+ * `field`/`from` rule that cannot be evaluated — no form around it, an
+ * unresolved reference, a malformed rule — leaves the block VISIBLE, so content
+ * is never permanently hidden by a missing context and the SDK validator stays
+ * the place malformed rules are caught. An `access` rule that cannot be
+ * evaluated hides the block, whichever polarity it asked for: a control drawn
+ * before its permission is known is a control drawn for somebody who may not
+ * have it, and the read-only half declaring `equals: false` must not flash on
+ * screen before the answer says it should.
  */
-function isBlockVisible(block: Block, form: FormBlockContextValue | null): boolean {
+function isBlockVisible(
+  block: Block,
+  form: FormBlockContextValue | null,
+  md: MasterDetail | null,
+  access: AccessScope | null
+): boolean {
   const rule = (block as { visibleWhen?: VisibleWhen }).visibleWhen;
-  if (!rule || typeof rule.field !== 'string' || rule.field === '') {
-    return true;
+  if (!rule) return true;
+
+  if (isNonEmptyString(rule.access)) {
+    const answer = access?.answer(rule.access) ?? 'unasked';
+    if (answer === 'unasked' || answer === 'pending') return false;
+    // Anything other than a boolean equality is a rule the validator refuses;
+    // hide, because the safe reading of an unintelligible authority rule is "no".
+    if (typeof rule.equals !== 'boolean' || rule.in !== undefined) return false;
+    return (answer === 'allowed') === rule.equals;
   }
-  if (form === null) {
-    return true;
-  }
-  const current = normalizeVisibilityOperand(form.values[rule.field]);
+
+  const current = isNonEmptyString(rule.from)
+    ? resolveContextRef(md, rule.from)
+    : typeof rule.field === 'string' && rule.field !== '' && form !== null
+      ? normalizeVisibilityOperand(form.values[rule.field])
+      : undefined;
+
+  if (current === undefined) return true;
+
   if (rule.equals !== undefined) {
     return current === normalizeVisibilityOperand(rule.equals);
   }
@@ -3314,7 +3571,12 @@ function DrawerRenderer({ block }: { block: DrawerBlock }) {
 
 function BlockNode({ block }: { block: Block }): React.ReactElement | null {
   const form = useFormBlockContext();
-  if (!isBlockVisible(block, form)) {
+  // Read at the top, before the switch: a `visibleWhen` is carried by EVERY
+  // block type now, so the contexts it may consult have to be in scope for
+  // every branch, and a switch body cannot call a hook.
+  const md = useMasterDetail();
+  const access = useAccess();
+  if (!isBlockVisible(block, form, md, access)) {
     return null;
   }
   switch (block.type) {
@@ -3546,6 +3808,15 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       ) : (
         <UnsupportedBlock type="recordFields" />
       );
+    case 'accessGate':
+      return isNonEmptyString(block.id) &&
+        typeof block.check === 'object' &&
+        block.check !== null &&
+        isNonEmptyString(block.check.endpoint) ? (
+        <AccessGateRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="accessGate" />
+      );
     case 'modal':
       return isNonEmptyString(block.id) && isNonEmptyString(block.title) && Array.isArray(block.children) ? <ModalRenderer block={block} /> : <UnsupportedBlock type="modal" />;
     case 'drawer':
@@ -3584,9 +3855,13 @@ function BlockList({ blocks }: { blocks: Block[] }) {
 export function BlockRenderer({ blocks, record }: { blocks: Block[]; record?: string }) {
   return (
     <MasterDetailProvider record={record}>
-      <div className="space-y-4" data-slot="block-renderer">
-        <BlockList blocks={blocks} />
-      </div>
+      {/* Inside the master-detail provider, because a gate's endpoint may carry
+          `{record}` and resolves through the same context every source does. */}
+      <AccessProvider blocks={blocks}>
+        <div className="space-y-4" data-slot="block-renderer">
+          <BlockList blocks={blocks} />
+        </div>
+      </AccessProvider>
     </MasterDetailProvider>
   );
 }

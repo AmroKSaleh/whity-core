@@ -530,9 +530,9 @@ final class BlockValidatorTest extends TestCase
 
         // SP1 display types + SP2 data-bound types + SP3 interactive types
         // (WC-233) + SP4 chart type (WC-240) + workflow types and the OU scope
-        // picker (#868) + the record blocks (#883)
+        // picker (#868) + the record blocks (#883) + the access gate (#909)
         $expected = [
-            'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
+            'accessGate', 'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataRecord', 'dataStat', 'dataTable', 'dateInput', 'divider', 'drawer',
             'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'inbox', 'keyValue', 'list', 'markdown', 'math',
             'modal', 'numberInput', 'ouScopePicker', 'recordFields', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
@@ -1812,6 +1812,10 @@ final class BlockValidatorTest extends TestCase
         $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
     }
 
+    /**
+     * A rule with no subject at all. #909 turned `field` into one of three
+     * subjects, so the refusal now names the choice rather than the one key.
+     */
     public function testVisibleWhenMissingFieldIsRejected(): void
     {
         $tree = [[
@@ -1825,7 +1829,11 @@ final class BlockValidatorTest extends TestCase
 
         $result = BlockValidator::validate($tree);
         $this->assertFalse($result['ok']);
-        $this->assertStringContainsString('visibleWhen.field', implode(' | ', $result['errors']));
+        $this->assertStringContainsString(
+            "must name exactly one of 'field'",
+            implode(' | ', $result['errors'])
+        );
+        $this->assertStringContainsString('got none', implode(' | ', $result['errors']));
     }
 
     public function testVisibleWhenWithBothEqualsAndInIsRejected(): void
@@ -1915,7 +1923,379 @@ final class BlockValidatorTest extends TestCase
 
         $result = BlockValidator::validate($tree);
         $this->assertFalse($result['ok']);
-        $this->assertStringContainsString('{field, equals|in} object', implode(' | ', $result['errors']));
+        $this->assertStringContainsString('{field|from|access, equals|in} object', implode(' | ', $result['errors']));
+    }
+
+    // ==================== #909: context-aware visibleWhen + accessGate ====================
+
+    /**
+     * A minimal valid gate: an id and one concrete request.
+     *
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private static function validGate(array $overrides = []): array
+    {
+        return array_merge([
+            'type'  => 'accessGate',
+            'id'    => 'may-write',
+            'check' => ['method' => 'PATCH', 'endpoint' => '/api/acme/things/{record}'],
+        ], $overrides);
+    }
+
+    public function testAccessGateWithBothRenderingsIsValid(): void
+    {
+        $tree = [self::validGate([
+            'children'  => [['type' => 'text', 'value' => 'the editor']],
+            'otherwise' => [['type' => 'text', 'value' => 'the read-only view']],
+        ])];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    /**
+     * A gate with NEITHER slot is valid, and deliberately so: it is a pure
+     * declaration that `visibleWhen: {access: id}` reads from anywhere on the
+     * screen, which is how one question gates a heading here and a column there
+     * without a wrapper around each of them.
+     */
+    public function testAccessGateWithNoRenderingsIsAPureDeclaration(): void
+    {
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate([self::validGate()]));
+    }
+
+    public function testAccessGateCheckAcceptsGetForTheHiddenState(): void
+    {
+        $tree = [self::validGate([
+            'id'    => 'may-read',
+            'check' => ['method' => 'GET', 'endpoint' => '/api/acme/things/{record}'],
+        ])];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testAccessGateRejectsAnUnknownMethod(): void
+    {
+        $tree = [self::validGate(['check' => ['method' => 'TRACE', 'endpoint' => '/api/acme/things']])];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('check.method', implode(' | ', $result['errors']));
+    }
+
+    public function testAccessGateRejectsAForeignShapedEndpoint(): void
+    {
+        foreach (['https://evil.test/api/x', '/nope/x', '/api/x/../y', '/api/x/{unclosed'] as $endpoint) {
+            $result = BlockValidator::validate([
+                self::validGate(['check' => ['method' => 'POST', 'endpoint' => $endpoint]]),
+            ]);
+            $this->assertFalse($result['ok'], "endpoint '{$endpoint}' must be refused");
+        }
+    }
+
+    /**
+     * A gate declares NO permission slug, and no prop exists to carry one.
+     *
+     * This is the type's whole safety argument, so it is pinned rather than
+     * assumed. The host reads the gate off the ROUTE the `check` names; a slug
+     * beside it would be a second answer to a question the route table already
+     * answers, and nothing would compare the two. An unknown prop is ignored by
+     * the contract, so the guarantee is not that this is rejected — it is that
+     * there is no such prop to be honoured.
+     */
+    public function testAccessGateDeclaresNoPermissionOfItsOwn(): void
+    {
+        $rule = BlockContract::rulesFor('accessGate');
+        $this->assertNotNull($rule);
+
+        foreach (['permission', 'requiredPermission', 'scopedPermission', 'requiredRole'] as $prop) {
+            $this->assertArrayNotHasKey($prop, $rule['props'], "accessGate must not declare '{$prop}'");
+        }
+
+        // And a declaration that states one anyway still validates — ignored,
+        // not honoured.
+        $this->assertTrue(
+            BlockValidator::validate([self::validGate(['requiredPermission' => 'acme:write'])])['ok']
+        );
+    }
+
+    /** `otherwise` belongs to `accessGate` and to nothing else. */
+    public function testOtherwiseOnAnyOtherContainerIsRefused(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'      => 'card',
+            'title'     => 'Nope',
+            'children'  => [['type' => 'text', 'value' => 'a']],
+            'otherwise' => [['type' => 'text', 'value' => 'b']],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'card' has no 'otherwise' list", implode(' | ', $result['errors']));
+    }
+
+    public function testOtherwiseOnALeafIsRefused(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'      => 'text',
+            'value'     => 'x',
+            'otherwise' => [['type' => 'text', 'value' => 'b']],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("cannot have 'otherwise'", implode(' | ', $result['errors']));
+    }
+
+    /**
+     * Both slots are validated, not just the first. A read-only rendering that
+     * nothing checked is the half of a gated region most likely to be wrong,
+     * because it is the half the author sees least.
+     */
+    public function testTheOtherwiseSlotIsValidatedToo(): void
+    {
+        $result = BlockValidator::validate([self::validGate([
+            'children'  => [['type' => 'text', 'value' => 'fine']],
+            'otherwise' => [['type' => 'wormhole']],
+        ])]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('otherwise[0]', implode(' | ', $result['errors']));
+        $this->assertStringContainsString("unknown block type 'wormhole'", implode(' | ', $result['errors']));
+    }
+
+    /**
+     * The two branches of a gate never coexist, so the same input name in both
+     * is not a duplicate. A registry shared across them would refuse a correct
+     * program — the read-only branch reusing a name is exactly what an author
+     * writes when both branches edit the same field.
+     */
+    public function testTheTwoBranchesOfAGateMayReuseAnInputName(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/acme/things'],
+            'children' => [
+                self::validGate([
+                    'children'  => [['type' => 'textInput', 'name' => 'title', 'label' => 'Title']],
+                    'otherwise' => [['type' => 'textInput', 'name' => 'title', 'label' => 'Title']],
+                ]),
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    /** ...but a name a branch introduces still collides with a later sibling. */
+    public function testANameInsideAGateStillCollidesWithALaterSibling(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/acme/things'],
+            'children' => [
+                self::validGate([
+                    'children' => [['type' => 'textInput', 'name' => 'title', 'label' => 'Title']],
+                ]),
+                ['type' => 'textInput', 'name' => 'title', 'label' => 'Title again'],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate input name 'title'", implode(' | ', $result['errors']));
+    }
+
+    /**
+     * #909: `visibleWhen` is a UNIVERSAL facet. It used to be declared on
+     * `section`, `card` and the input leaves only, which is the shape that makes
+     * per-section gating grow a wrapper around every gated leaf.
+     */
+    public function testEveryBlockTypeCarriesVisibleWhen(): void
+    {
+        foreach (BlockContract::types() as $type) {
+            $rule = BlockContract::rulesFor($type);
+            $this->assertNotNull($rule);
+            $this->assertArrayHasKey(
+                'visibleWhen',
+                $rule['props'],
+                "'{$type}' must carry the universal visibleWhen facet"
+            );
+            $this->assertSame('visibilityRule', $rule['props']['visibleWhen']['type']);
+            $this->assertFalse($rule['props']['visibleWhen']['required']);
+        }
+    }
+
+    public function testVisibleWhenCanReadThePublishedRecord(): void
+    {
+        $tree = [[
+            'type'   => 'dataRecord',
+            'id'     => 'role',
+            'source' => '/api/acme/roles/{record}',
+            'fields' => [['field' => 'scope', 'label' => 'Scope']],
+            'children' => [
+                [
+                    'type' => 'alert',
+                    'variant' => 'warning',
+                    'body' => 'Editing this reaches every tenant.',
+                    'visibleWhen' => ['from' => 'role.scope', 'equals' => 'global'],
+                ],
+                [
+                    'type' => 'text',
+                    'value' => 'x',
+                    'visibleWhen' => ['from' => 'picker', 'in' => ['a', 'b']],
+                ],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testVisibleWhenFromMustBeAContextReference(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'text',
+            'value' => 'x',
+            'visibleWhen' => ['from' => 'a.b.c', 'equals' => 'y'],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('visibleWhen.from', implode(' | ', $result['errors']));
+    }
+
+    /**
+     * `visibleWhen.from` is NOT fact-guarded, and that is deliberate — the same
+     * line #908 drew for `defaultFrom` and `params.from`.
+     *
+     * A FACT binding is the page STATING something about the record, and stating
+     * a caller decision as a property of the record is what produced #895. A
+     * CONTROL binding decides what exists on screen. Guarding this one would
+     * refuse a correct program, and a guard that refuses correct programs gets
+     * removed. The structural guard applies regardless: a `dataRecord` publishes
+     * only the fields it named, so this cannot reach a flag riding along in the
+     * payload.
+     */
+    public function testVisibleWhenFromIsNotFactGuarded(): void
+    {
+        foreach (BlockValidator::CALLER_DECISION_FIELDS as $word) {
+            $result = BlockValidator::validate([[
+                'type' => 'text',
+                'value' => 'x',
+                'visibleWhen' => ['from' => "rec.{$word}", 'equals' => true],
+            ]]);
+
+            $this->assertTrue(
+                $result['ok'],
+                "visibleWhen.from is a CONTROL binding and must not be fact-guarded on '{$word}': "
+                . implode('; ', $result['errors'])
+            );
+        }
+
+        // The FACT bindings are still guarded — the seam has not moved.
+        $guarded = BlockValidator::validate([[
+            'type' => 'text',
+            'value' => 'x',
+            'valueFrom' => 'rec.manageable',
+        ]]);
+        $this->assertFalse($guarded['ok']);
+    }
+
+    public function testVisibleWhenCanReadAGate(): void
+    {
+        $tree = [self::validGate([
+            'children' => [
+                ['type' => 'text', 'value' => 'shown to a writer', 'visibleWhen' => ['access' => 'may-write', 'equals' => true]],
+                ['type' => 'text', 'value' => 'shown to a reader', 'visibleWhen' => ['access' => 'may-write', 'equals' => false]],
+            ],
+        ])];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    /**
+     * The polarity is never inferred. An omitted `equals` would have to default
+     * to one of them, and defaulting the wrong way renders a control to somebody
+     * who may not use it.
+     */
+    public function testAnAccessConditionMustStateItsPolarity(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'text', 'value' => 'x', 'visibleWhen' => ['access' => 'may-write'],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("must state 'equals: true' or 'equals: false'", implode(' | ', $result['errors']));
+    }
+
+    public function testAnAccessConditionRefusesInAndANonBooleanEquals(): void
+    {
+        $withIn = BlockValidator::validate([[
+            'type' => 'text', 'value' => 'x', 'visibleWhen' => ['access' => 'g', 'in' => [true]],
+        ]]);
+        $this->assertFalse($withIn['ok']);
+        $this->assertStringContainsString("may not carry 'in' beside 'access'", implode(' | ', $withIn['errors']));
+
+        $withString = BlockValidator::validate([[
+            'type' => 'text', 'value' => 'x', 'visibleWhen' => ['access' => 'g', 'equals' => 'true'],
+        ]]);
+        $this->assertFalse($withString['ok']);
+        $this->assertStringContainsString('must be a boolean', implode(' | ', $withString['errors']));
+    }
+
+    public function testAnAccessConditionsGateIdCarriesNoDot(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'text', 'value' => 'x', 'visibleWhen' => ['access' => 'gate.answer', 'equals' => true],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('visibleWhen.access', implode(' | ', $result['errors']));
+    }
+
+    public function testAVisibilityRuleNamesExactlyOneSubject(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'text', 'value' => 'x',
+            'visibleWhen' => ['field' => 'k', 'access' => 'g', 'equals' => true],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('field + access', implode(' | ', $result['errors']));
+    }
+
+    /**
+     * The #895 seam, stated as a contract property rather than a renderer one:
+     * exactly ONE prop in the whole whitelist names a gate, and it is the one
+     * that decides whether something renders.
+     *
+     * If a `...From` prop ever accepted a gate id, a caller decision would
+     * become renderable as a fact about the record, which is the mistake #895
+     * was. Nothing here is "kept in sync" — the check derives the answer from
+     * the contract itself.
+     */
+    public function testOnlyVisibleWhenCanNameAGate(): void
+    {
+        $factBindings = ['textFrom', 'valueFrom', 'labelFrom', 'hintFrom'];
+
+        foreach (BlockContract::types() as $type) {
+            $rule = BlockContract::rulesFor($type);
+            $this->assertNotNull($rule);
+            foreach ($rule['props'] as $prop => $propRule) {
+                if (in_array($prop, $factBindings, true)) {
+                    $this->assertSame(
+                        'contextPath',
+                        $propRule['type'],
+                        "'{$type}.{$prop}' is a FACT binding and must resolve against the record context, "
+                        . 'never against a gate'
+                    );
+                }
+            }
+        }
+
+        // A fact binding pointed at a gate id resolves against the RECORD
+        // context and finds nothing there — it is not a way to read a gate.
+        $this->assertTrue(BlockValidator::validate([self::validGate([
+            'children' => [['type' => 'text', 'value' => 'fallback', 'valueFrom' => 'may-write']],
+        ])])['ok']);
     }
 
     // ==================== WC-532 A4: bilingualText input ====================

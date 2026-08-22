@@ -533,3 +533,223 @@ describe('web ⇄ desktop record-block parity (#883)', () => {
     expect(desktopPaths).toEqual(['/api/v1/people/7']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #909: same gated tree ⇒ same region, on both renderers.
+//
+// This is the twin divergence that would matter most of all. Each renderer holds
+// its own copy of the walk that collects a page's `accessGate` checks, its own
+// substitution of their `{token}` endpoints, and its own mapping from an answer
+// to a rendering. One twin resolving a gate the other skips is one platform
+// showing an editor where the other shows a description list — a permission
+// difference between two builds of the same declaration, which is worse than a
+// layout difference by every measure.
+//
+// The mocks answer the permitted-actions batch for both hosts. The paths differ
+// (`/api/v1/me/permitted-actions` on the server, `/__whity/permitted-actions`
+// offline) and the ANSWER must not.
+// ---------------------------------------------------------------------------
+
+const WEB_PERMITTED_ACTIONS = '/api/v1/me/permitted-actions';
+const DESKTOP_PERMITTED_ACTIONS = '/__whity/permitted-actions';
+
+/** One record page's editable/read-only pair, plus a leaf gated by condition. */
+const GATED_TREE = [
+  {
+    type: 'dataRecord',
+    id: 'person',
+    source: '/api/v1/people/{record}',
+    fields: [
+      { field: 'name', label: 'Name' },
+      { field: 'role', label: 'Role' },
+    ],
+    children: [
+      {
+        type: 'accessGate',
+        id: 'may-write',
+        check: { method: 'PATCH', endpoint: '/api/v1/people/{record}' },
+        children: [{ type: 'text', value: 'EDITABLE' }],
+        otherwise: [{ type: 'text', value: 'READ ONLY' }],
+      },
+      { type: 'text', value: 'BADGE FOR READERS', visibleWhen: { access: 'may-write', equals: false } },
+      { type: 'text', value: 'NOTICE FOR ADMINS', visibleWhen: { from: 'person.role', equals: 'Administrator' } },
+    ],
+  },
+];
+
+/**
+ * The batch each host handed over, normalized.
+ *
+ * Web serializes it into a fetch body (a JSON string); the Tauri bridge passes
+ * the object straight through. That difference is transport, not contract — the
+ * CHECKS have to be identical, and reading both into the same shape is what lets
+ * this file assert that.
+ */
+function readBatch(body: unknown): { checks: { ref: string }[] } {
+  return (typeof body === 'string' ? JSON.parse(body) : body) as { checks: { ref: string }[] };
+}
+
+/** The batch bodies each host was asked, and what it rendered. */
+async function runGated(
+  allowed: string[]
+): Promise<{ web: { batches: unknown[]; text: string }; desktop: { batches: unknown[]; text: string } }> {
+  const answer = (body: unknown) => ({
+    data: readBatch(body).checks.map((c) => ({
+      ref: c.ref,
+      allowed: allowed.includes(c.ref),
+      required: null,
+    })),
+  });
+
+  cleanup();
+  const webBatches: unknown[] = [];
+  mockApiClient.mockImplementation((url, init) => {
+    if (String(url) === WEB_PERMITTED_ACTIONS) {
+      const body = (init as RequestInit | undefined)?.body ?? '{"checks":[]}';
+      webBatches.push(readBatch(body));
+      return Promise.resolve(stubResponse(200, answer(body)));
+    }
+    return Promise.resolve(stubResponse(200, { data: RECORD }));
+  });
+  const web = render(<WebBlockRenderer blocks={GATED_TREE as unknown as WebBlock[]} record="7" />, {
+    wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+  });
+  await screen.findByText(allowed.includes('may-write') ? 'EDITABLE' : 'READ ONLY');
+  const webText = web.container.textContent ?? '';
+
+  cleanup();
+  const desktopBatches: unknown[] = [];
+  mockInvoke.mockImplementation((_command: string, args?: unknown) => {
+    const { path, body } = args as { path: string; body?: unknown };
+    if (path === DESKTOP_PERMITTED_ACTIONS) {
+      const raw = body ?? { checks: [] };
+      desktopBatches.push(readBatch(raw));
+      return Promise.resolve({ status: 200, body: answer(raw) });
+    }
+    return Promise.resolve({ status: 200, body: { data: RECORD } });
+  });
+  const desktop = render(
+    <DesktopBlockRenderer
+      feature={{ ...FEATURE, blocks: GATED_TREE as unknown as DesktopBlock[] }}
+      record="7"
+    />
+  );
+  await screen.findByText(allowed.includes('may-write') ? 'EDITABLE' : 'READ ONLY');
+  const desktopText = desktop.container.textContent ?? '';
+
+  return {
+    web: { batches: webBatches, text: webText },
+    desktop: { batches: desktopBatches, text: desktopText },
+  };
+}
+
+describe('web ⇄ desktop access-gate parity (#909)', () => {
+  it('agrees on which rendering a refused gate produces', async () => {
+    const { web, desktop } = await runGated([]);
+
+    for (const rendered of [web.text, desktop.text]) {
+      expect(rendered).toContain('READ ONLY');
+      expect(rendered).not.toContain('EDITABLE');
+      expect(rendered).toContain('BADGE FOR READERS');
+      expect(rendered).toContain('NOTICE FOR ADMINS');
+    }
+  });
+
+  it('agrees on which rendering a permitted gate produces', async () => {
+    const { web, desktop } = await runGated(['may-write']);
+
+    for (const rendered of [web.text, desktop.text]) {
+      expect(rendered).toContain('EDITABLE');
+      expect(rendered).not.toContain('READ ONLY');
+      expect(rendered).not.toContain('BADGE FOR READERS');
+    }
+  });
+
+  it('agrees on the question asked: one batch, one check, the same substituted path', async () => {
+    const { web, desktop } = await runGated(['may-write']);
+
+    const expected = [{ checks: [{ ref: 'may-write', method: 'PATCH', path: '/api/v1/people/7' }] }];
+    expect(web.batches).toEqual(expected);
+    expect(desktop.batches).toEqual(expected);
+  });
+
+  it('agrees that a gate answer is never renderable as a fact about the record', async () => {
+    // The #895 seam, on both twins. Each fact binding names the gate; each must
+    // fall back to its literal, because the access namespace is not what
+    // `…From` resolves against on either platform.
+    const FACT_ATTEMPT = [
+      { type: 'accessGate', id: 'may-write', check: { method: 'PATCH', endpoint: '/api/v1/people/7' } },
+      { type: 'heading', level: 2, text: 'LITERAL HEADING', textFrom: 'may-write' },
+      { type: 'badge', variant: 'info', label: 'LITERAL BADGE', labelFrom: 'may-write.allowed' },
+    ];
+    const permit = (body: unknown) => ({
+      data: readBatch(body).checks.map((c) => ({ ref: c.ref, allowed: true, required: null })),
+    });
+
+    cleanup();
+    mockApiClient.mockImplementation((url, init) =>
+      Promise.resolve(
+        String(url) === WEB_PERMITTED_ACTIONS
+          ? stubResponse(200, permit((init as RequestInit | undefined)?.body ?? '{"checks":[]}'))
+          : stubResponse(200, { data: RECORD })
+      )
+    );
+    const web = render(<WebBlockRenderer blocks={FACT_ATTEMPT as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await screen.findByText('LITERAL HEADING');
+    expect(web.container.textContent).toContain('LITERAL BADGE');
+    expect(web.container.textContent).not.toMatch(/\btrue\b/);
+
+    cleanup();
+    mockInvoke.mockImplementation((_command: string, args?: unknown) => {
+      const { path, body } = args as { path: string; body?: unknown };
+      return Promise.resolve(
+        path === DESKTOP_PERMITTED_ACTIONS
+          ? { status: 200, body: permit(body ?? { checks: [] }) }
+          : { status: 200, body: { data: RECORD } }
+      );
+    });
+    const desktop = render(
+      <DesktopBlockRenderer feature={{ ...FEATURE, blocks: FACT_ATTEMPT as unknown as DesktopBlock[] }} />
+    );
+    await screen.findByText('LITERAL HEADING');
+    expect(desktop.container.textContent).toContain('LITERAL BADGE');
+    expect(desktop.container.textContent).not.toMatch(/\btrue\b/);
+  });
+
+  it('agrees that a gate with an unresolved token is never asked', async () => {
+    const UNBOUND = [
+      {
+        type: 'accessGate',
+        id: 'may-write',
+        check: { method: 'PATCH', endpoint: '/api/v1/people/{record}' },
+        children: [{ type: 'text', value: 'EDITABLE' }],
+        otherwise: [{ type: 'text', value: 'READ ONLY' }],
+      },
+    ];
+
+    cleanup();
+    mockApiClient.mockClear();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: [] }));
+    const web = render(<WebBlockRenderer blocks={UNBOUND as unknown as WebBlock[]} />, {
+      wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider>,
+    });
+    await waitFor(() => expect(mockApiClient).not.toHaveBeenCalled());
+    // Not a skeleton either: an unasked gate renders nothing, on both twins.
+    expect(web.container.querySelector('[data-slot="block-access-pending"]')).toBeNull();
+    expect(web.container.textContent).not.toContain('EDITABLE');
+    expect(web.container.textContent).not.toContain('READ ONLY');
+
+    cleanup();
+    mockInvoke.mockClear();
+    mockInvoke.mockResolvedValue({ status: 200, body: { data: [] } });
+    const desktop = render(
+      <DesktopBlockRenderer feature={{ ...FEATURE, blocks: UNBOUND as unknown as DesktopBlock[] }} />
+    );
+    await waitFor(() => expect(mockInvoke).not.toHaveBeenCalled());
+    expect(desktop.container.querySelector('[data-slot="block-access-pending"]')).toBeNull();
+    expect(desktop.container.textContent).not.toContain('EDITABLE');
+    expect(desktop.container.textContent).not.toContain('READ ONLY');
+  });
+});

@@ -50,9 +50,9 @@ namespace Whity\Sdk\Frontend\Blocks;
  *
  * ```
  * array{
- *   container: bool,                          // may carry a `children` array
+ *   container: bool,                          // may carry child blocks (see childSlots())
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -75,12 +75,78 @@ final class BlockContract
     public const MAX_NODES = 500;
 
     /**
-     * The whitelist: block type => its rule. The ordering here is the canonical
-     * documentation order (containers first, then leaves).
+     * Props EVERY block type carries, merged into each rule by {@see rules()}.
+     *
+     * `visibleWhen` used to be declared type by type — on `section`, `card` and
+     * the eleven input leaves — because WC-532 A3 only ever meant "hide an input
+     * when a sibling field says so". #909 makes it a condition over the RECORD
+     * and over the CALLER'S ACCESS as well, and at that point a facet only some
+     * types may carry stops being a small restriction and becomes a second
+     * mechanism: a page that can gate a `card` but not the `dataTable` inside it
+     * has to grow a wrapper for every gated leaf, and granular gating is then
+     * expressed one way in some places and another way in others.
+     *
+     * So it is declared ONCE, here, and merged. Adding a block type gets the
+     * facet for free, which is the property that keeps the vocabulary uniform as
+     * it grows.
+     *
+     * @var array<string, PropRule>
+     */
+    public const UNIVERSAL_PROPS = [
+        'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
+    ];
+
+    /**
+     * The child-list keys a type may carry, for the types that carry more than
+     * the usual one.
+     *
+     * `children` is the default and the only slot almost every container has.
+     * `accessGate` has two, because the two renderings of a gated region have to
+     * be declared TOGETHER (see the type's own note), and a second slot is the
+     * only way to say that in a tree.
+     *
+     * DECLARED HERE, NOT RESTATED PER WALKER. Several things walk a block tree —
+     * the validator, the host loader's ownership check and version rewrite, the
+     * showcase's coverage tests — and a walker that does not know about a slot
+     * silently skips everything in it. For the loader that is not a cosmetic
+     * miss: an unchecked slot is a `source` that never got ownership-checked. So
+     * every walker asks {@see childSlots()} instead of restating a list, which
+     * is the same lesson #908 drew when it made the source-bearing types derived
+     * rather than listed.
+     *
+     * @var array<string, list<string>>
+     */
+    private const CHILD_SLOTS = [
+        'accessGate' => ['children', 'otherwise'],
+    ];
+
+    /**
+     * The whitelist: block type => its rule, with {@see UNIVERSAL_PROPS} merged
+     * into every entry.
      *
      * @return array<string, BlockRule>
      */
     public static function rules(): array
+    {
+        $rules = self::declaredRules();
+
+        foreach ($rules as $type => $rule) {
+            // Declared props win: the merge ADDS the universal facet and can
+            // never quietly redefine a prop a type states for itself.
+            $rules[$type]['props'] = $rule['props'] + self::UNIVERSAL_PROPS;
+        }
+
+        return $rules;
+    }
+
+    /**
+     * The whitelist as WRITTEN, before the universal facet is merged in. The
+     * ordering here is the canonical documentation order (containers first,
+     * then leaves).
+     *
+     * @return array<string, BlockRule>
+     */
+    private static function declaredRules(): array
     {
         return [
             // ---- containers (may carry `children`) ----
@@ -88,12 +154,6 @@ final class BlockContract
                 'container' => true,
                 'props' => [
                     'title' => ['type' => 'string', 'required' => false],
-                    // WC-532 A3: presentational conditional visibility. When
-                    // inside a `form`, the section (and its subtree) is hidden
-                    // unless the referenced sibling field matches. Purely a
-                    // render-time facet — the server stays authoritative on
-                    // validation and never trusts client-side visibility.
-                    'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
                 ],
             ],
             'card' => [
@@ -101,7 +161,6 @@ final class BlockContract
                 'props' => [
                     'title' => ['type' => 'string', 'required' => false],
                     'description' => ['type' => 'string', 'required' => false],
-                    'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
                 ],
             ],
             'grid' => [
@@ -480,6 +539,75 @@ final class BlockContract
                 'emptyText' => ['type' => 'string',     'required' => false],
             ]],
 
+            // ---- access blocks (#909) ----
+            // The CALLER-ACCESS primitive, and the other half of #895's split.
+            //
+            // #883 gave a record page everything except the half the record-page
+            // shell exists to enforce. `RecordPageShell` takes `main: {editor,
+            // readOnly}` — TWO renderings, and it picks. A block tree could not
+            // pick: `visibleWhen` matched a sibling FORM FIELD and nothing else,
+            // so a described record page rendered its editor unconditionally and
+            // a caller who may not write got a disabled Save button beside fully
+            // editable inputs. That is precisely the greyed-out form #882 was
+            // written to make unshippable.
+            //
+            // WHAT IT IS. A gate declares ONE question about the CALLER — "would
+            // you let me make this request?" — publishes the host's answer under
+            // its `id`, and renders `children` when the answer is yes and
+            // `otherwise` when it is no.
+            //
+            // WHO ANSWERS IT, which is the whole reason this type lives in the
+            // contract rather than in each plugin. `check` names a concrete
+            // request, and the host resolves it through
+            // `POST /api/v1/me/permitted-actions` — the SAME route lookup feeding
+            // the SAME RoleChecker calls RbacMiddleware makes, against the live
+            // route table (#868). A plugin therefore does NOT declare the
+            // permission the region is gated on: that is not its to restate, and
+            // a restated slug is a second answer to a question the route table
+            // already answers, drifting the day someone re-gates the route and
+            // updates one of the two places. This is the property that made
+            // `inbox` correct by construction, applied to a region of a page
+            // instead of to a row's buttons.
+            //
+            // WHY TWO SLOTS RATHER THAN TWO NEGATED CONDITIONS. `children` and
+            // `otherwise` could be written as two siblings carrying
+            // `visibleWhen` with opposite polarity, and that is exactly what
+            // must not be the recommended shape: two conditions that are
+            // supposed to be each other's negation drift, and when they drift
+            // the editable half is the one that ends up showing. Declared as one
+            // node they cannot disagree — the same reason `RecordPageShell`
+            // takes both renderings as required props rather than one plus a
+            // flag.
+            //
+            // THE THREE-STATE CASE COMPOSES. hidden / read-only / editable is
+            // two nested gates: the outer one on the READ request with no
+            // `otherwise` (refused ⇒ the region is absent), the inner one on the
+            // WRITE request with both (refused ⇒ the read-only rendering, and
+            // its own subtree is where "which gate refused" is said). Nesting
+            // also gives #897's "first refusal wins" structurally: an outer gate
+            // that refuses never renders the inner one, so exactly one refusal
+            // is ever on screen.
+            //
+            // A GATE MAY CARRY NO CHILDREN AT ALL. Then it is purely a
+            // declaration, and `visibleWhen: {access: <id>}` reads it from
+            // anywhere on the screen — which is how a single question gates a
+            // heading here, a column there, and a whole card somewhere else
+            // without wrapping each of them.
+            //
+            // WHAT A GATE'S ANSWER IS NOT. It is a CONTROL binding, never a
+            // fact. The answer is published into a namespace of its own, which
+            // `textFrom`/`valueFrom`/`labelFrom`/`hintFrom`/`defaultFrom`/
+            // `params.from` do not resolve against — they read records and
+            // selections, and always have. There is exactly one prop in this
+            // contract that names a gate, `visibleWhen.access`, and it decides
+            // whether something renders. So a page can act on what the caller
+            // may do and still cannot SAY it about the record, which is #895's
+            // rule kept intact while the thing it forbade becomes expressible.
+            'accessGate' => ['container' => true, 'props' => [
+                'id'    => ['type' => 'blockId',     'required' => true],
+                'check' => ['type' => 'accessCheck', 'required' => true],
+            ]],
+
             // ---- interactive blocks (SP3, WC-233) ----
             'form' => ['container' => true, 'props' => [
                 'submit'             => ['type' => 'submitSpec', 'required' => true],
@@ -498,10 +626,10 @@ final class BlockContract
                 'min'       => ['type' => 'int',       'required' => false],
                 'max'       => ['type' => 'int',       'required' => false],
             ]],
-            // WC-532 A3: every input carries an optional `visibleWhen`
-            // presentational facet — the web renderer hides the input unless a
-            // sibling field in the same form matches (equals / in). It never
-            // affects submission or server validation.
+            // WC-532 A3 / #909: `visibleWhen` is no longer declared per type.
+            // It is a UNIVERSAL facet ({@see self::UNIVERSAL_PROPS}) merged into
+            // every rule, because a condition that only some blocks may carry is
+            // a condition granular gating has to route around.
             'textInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
@@ -509,7 +637,6 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'textArea' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
@@ -518,7 +645,6 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             // WC-532 A5: a Markdown-aware multi-line input. Submits Markdown
             // SOURCE (a plain string) like textArea; the web renderer shows a
@@ -530,7 +656,6 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'numberInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
@@ -541,7 +666,6 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'select' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName',    'required' => true],
@@ -550,14 +674,12 @@ final class BlockContract
                 'required'    => ['type' => 'bool',         'required' => false],
                 'default'     => ['type' => 'string',       'required' => false],
                 'defaultFrom' => ['type' => 'contextPath',  'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'checkbox' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'default'     => ['type' => 'bool',      'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'slider' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
@@ -567,7 +689,6 @@ final class BlockContract
                 'step'        => ['type' => 'int',       'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'dateInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
@@ -575,21 +696,18 @@ final class BlockContract
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'fileInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'accept'      => ['type' => 'string',    'required' => false],
                 'required'    => ['type' => 'bool',      'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'colorInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'default'     => ['type' => 'string',    'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
-                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             // WC-532 A4: a paired Arabic/English bilingual text input. Submits a
             // `{ar?, en?}` LocalizedText object under `name` (matching the
@@ -776,12 +894,59 @@ final class BlockContract
     }
 
     /**
-     * Whether the type may carry a `children` array. Unknown types are not
-     * containers.
+     * Whether the type may carry child blocks. Unknown types are not containers.
      */
     public static function isContainer(string $type): bool
     {
         return self::rules()[$type]['container'] ?? false;
+    }
+
+    /**
+     * The child-list keys this type may carry, in declaration order.
+     *
+     * `['children']` for every container that has not said otherwise, and the
+     * empty list for a leaf or an unknown type — so a caller can iterate the
+     * answer unconditionally.
+     *
+     * EVERY TREE WALKER SHOULD USE THIS rather than reaching for `children`
+     * directly: the validator, the host's ownership/version rewrite and the
+     * coverage tests all descend through it, and a walker that hard-codes the
+     * name skips whatever lives in a slot added later. For the loader the miss
+     * is not cosmetic — an unwalked slot is a `source` that never got
+     * ownership-checked.
+     *
+     * @return list<string>
+     */
+    public static function childSlots(string $type): array
+    {
+        if (!self::isContainer($type)) {
+            return [];
+        }
+
+        return self::CHILD_SLOTS[$type] ?? ['children'];
+    }
+
+    /**
+     * Every child-list key any type in the whitelist may carry.
+     *
+     * The validator uses it to refuse a slot on a type that does not declare one
+     * — an `otherwise` on a `card` is an author who meant something, and what
+     * they meant is a subtree that would silently never render.
+     *
+     * @return list<string>
+     */
+    public static function knownChildSlots(): array
+    {
+        $slots = ['children'];
+        foreach (self::CHILD_SLOTS as $declared) {
+            foreach ($declared as $slot) {
+                if (!\in_array($slot, $slots, true)) {
+                    $slots[] = $slot;
+                }
+            }
+        }
+
+        return $slots;
     }
 
     /**

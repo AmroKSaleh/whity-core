@@ -34,6 +34,7 @@ import { Textarea } from "@amroksaleh/ui/textarea"
 import { resolveTablerIcon } from "./resolve-tabler-icon"
 import { submitPluginAction } from "./submit-plugin-action"
 import type {
+  AccessGateBlock,
   Block,
   ChartBlock,
   DataListBlock,
@@ -393,11 +394,201 @@ const FormScopeContext = React.createContext<FormScope | null>(null)
  * submit (a renderer convention; there is no contract prop for it). */
 const ModalScopeContext = React.createContext<string | null>(null)
 
-function isVisible(visibleWhen: VisibleWhen | undefined, values: Record<string, unknown>): boolean {
+// ---------------------------------------------------------------- #909 access
+
+/** What a gate's question currently answers.
+ *
+ * Neither unsettled state is a synonym for refused: an unanswered gate renders
+ * NEITHER branch, because showing the read-only rendering for a frame and
+ * replacing it with the editor is a worse lie than showing nothing for a frame.
+ * They are told apart because they look different — `"pending"` is in flight and
+ * gets a skeleton, while `"unasked"` (an unresolved endpoint token, or an id
+ * nothing declared) gets nothing: a skeleton that never resolves promises an
+ * answer no one is fetching. */
+type AccessAnswer = "unasked" | "pending" | "allowed" | "refused"
+
+/**
+ * The access namespace: gate id -> the host's answer.
+ *
+ * SEPARATE FROM THE MASTER-DETAIL CONTEXT ON PURPOSE — the #895 property
+ * restated for #909. A record's published fields live in `MasterDetailContext.rows`,
+ * which `resolveFromContext` reads, and that function is the single resolver
+ * behind every fact binding (`textFrom`/`valueFrom`/`labelFrom`/`hintFrom`) and
+ * every plumbing binding (`defaultFrom`, `params.from`, a `{token}` in a
+ * source). It does not read this map. So a page can ACT on what the caller may
+ * do and still cannot SAY it about the record.
+ */
+interface AccessScope {
+  answer: (gateId: string) => AccessAnswer
+}
+
+const AccessContext = React.createContext<AccessScope | null>(null)
+
+/** One gate's declaration, as collected from the tree. */
+interface CollectedGate {
+  id: string
+  method: string
+  endpoint: string
+}
+
+/** Collect every `accessGate` in a tree, in document order, descending through
+ * BOTH child slots — `otherwise` holds real blocks and can hold nested gates.
+ * Derived from the tree rather than registered by the gates as they mount: the
+ * declarations are static, and a registration pass would cost a second render
+ * with every gated region absent in between. */
+function collectAccessGates(blocks: Block[] | undefined, into: CollectedGate[] = []): CollectedGate[] {
+  if (!Array.isArray(blocks)) return into
+  for (const block of blocks) {
+    if (block === null || typeof block !== "object") continue
+    if (
+      block.type === "accessGate" &&
+      typeof block.id === "string" &&
+      block.id !== "" &&
+      typeof block.check === "object" &&
+      block.check !== null &&
+      typeof block.check.method === "string" &&
+      typeof block.check.endpoint === "string" &&
+      block.check.endpoint !== "" &&
+      !into.some((gate) => gate.id === block.id)
+    ) {
+      into.push({ id: block.id, method: block.check.method, endpoint: block.check.endpoint })
+    }
+    const node = block as { children?: Block[]; otherwise?: Block[] }
+    collectAccessGates(node.children, into)
+    collectAccessGates(node.otherwise, into)
+  }
+  return into
+}
+
+/** Substitute a gate endpoint's `{token}` segments, or null when any is
+ * unresolved. Null means NOT ASKED, exactly as it does for a `dataRecord.source`:
+ * a half-substituted path names a different route with a different gate. */
+function resolveGateEndpoint(endpoint: string, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): string | null {
+  const parts = endpoint.split(/(\{[^{}]*\})/)
+  const resolved = parts.map((part, index) => {
+    if (index % 2 === 0) return part
+    const value = resolveFromContext(part.slice(1, -1), ctx)
+    return value === undefined || value === null || value === "" ? null : encodeURIComponent(String(value))
+  })
+  return resolved.some((part) => part === null) ? null : resolved.join("")
+}
+
+/** The methods the host will resolve. Mirrors `BlockValidator::ACCESS_CHECK_METHODS`. */
+const ACCESS_CHECK_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const
+
+function isAccessCheckMethod(value: string): value is PermittedActionCheck["method"] {
+  return (ACCESS_CHECK_METHODS as readonly string[]).includes(value)
+}
+
+/** Resolves every gate on the screen in ONE batch through the offline host's own
+ * authority (`POST /__whity/permitted-actions`) — the same endpoint, the same
+ * fail-closed policy and the same batching argument as the `inbox` block. */
+function AccessProvider({ blocks, children }: { blocks: Block[]; children: React.ReactNode }) {
+  const ctx = React.useContext(MasterDetailContext)
+  const gates = React.useMemo(() => collectAccessGates(blocks), [blocks])
+
+  const { checks, resolvable } = React.useMemo(() => {
+    const list: PermittedActionCheck[] = []
+    const ids = new Set<string>()
+    for (const gate of gates) {
+      const method = gate.method.toUpperCase()
+      if (!isAccessCheckMethod(method)) continue
+      const path = resolveGateEndpoint(gate.endpoint, ctx)
+      if (path === null) continue
+      list.push({ ref: gate.id, method, path })
+      ids.add(gate.id)
+    }
+    return { checks: list, resolvable: ids }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gates, ctx.selections, ctx.rows])
+
+  const batchKey = React.useMemo(() => JSON.stringify(checks), [checks])
+  const permitted = usePermittedActions(checks, batchKey)
+  const status = permitted.status
+  const isAllowed = permitted.isAllowed
+
+  const value = React.useMemo<AccessScope>(
+    () => ({
+      answer: (gateId: string): AccessAnswer => {
+        if (!resolvable.has(gateId)) return "unasked"
+        if (status === "loading") return "pending"
+        // An error is a REFUSAL, not a pending state: the alternative is a
+        // region that never resolves, which for the read-only pair is a record
+        // page with no body at all when the resolver is down.
+        return status === "ready" && isAllowed(gateId) ? "allowed" : "refused"
+      },
+    }),
+    [resolvable, status, isAllowed],
+  )
+
+  return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>
+}
+
+/** The two renderings of a gated region, declared together so they cannot drift
+ * apart. A pending answer renders a skeleton and NOT the refused branch — "you
+ * may not edit this" is a statement, and stating it before the answer arrives
+ * states something not yet known. */
+function AccessGateRenderer({ block }: { block: AccessGateBlock }) {
+  const access = React.useContext(AccessContext)
+  const answer = access?.answer(block.id) ?? "unasked"
+  const permitted = Array.isArray(block.children) ? block.children : []
+  const refused = Array.isArray(block.otherwise) ? block.otherwise : []
+
+  if (permitted.length === 0 && refused.length === 0) return null
+  if (answer === "unasked") return null
+  if (answer === "pending") return <Skeleton className="h-16 w-full" data-slot="block-access-pending" />
+
+  const shown = answer === "allowed" ? permitted : refused
+  if (shown.length === 0) return null
+  return <BlockList blocks={shown} />
+}
+
+/** Normalize a form value / rule operand to a comparable string, matching the
+ * web renderer exactly: booleans become `"true"`/`"false"` so a checkbox matches
+ * `equals: true` and `equals: "true"` alike, and everything else is
+ * `String()`-coerced so a numeric `equals: 5` matches a field holding `"5"`.
+ * This renderer used to compare with `===` and therefore disagreed with the web
+ * one on exactly those two cases. */
+function normalizeVisibilityOperand(value: unknown): string {
+  if (typeof value === "boolean") return value ? "true" : "false"
+  if (value !== null && typeof value === "object") return " object"
+  return value === undefined || value === null ? "" : String(value)
+}
+
+/**
+ * Evaluate a block's optional `visibleWhen` facet (WC-532 A3, widened by #909).
+ *
+ * FACTS FAIL OPEN, AUTHORITY FAILS CLOSED. A `field`/`from` rule that cannot be
+ * evaluated leaves the block visible; an `access` rule that has not been
+ * answered hides it, whichever polarity it asked for — a control drawn before
+ * its permission is known is a control drawn for somebody who may not have it.
+ */
+function isVisible(
+  visibleWhen: VisibleWhen | undefined,
+  values: Record<string, unknown>,
+  ctx: Pick<MasterDetailContextValue, "selections" | "rows">,
+  access: AccessScope | null,
+): boolean {
   if (!visibleWhen) return true
-  const current = values[visibleWhen.field]
-  if (visibleWhen.equals !== undefined) return current === visibleWhen.equals
-  if (visibleWhen.in !== undefined) return visibleWhen.in.includes(current as never)
+
+  if (typeof visibleWhen.access === "string" && visibleWhen.access !== "") {
+    const answer = access?.answer(visibleWhen.access) ?? "unasked"
+    if (answer === "unasked" || answer === "pending") return false
+    if (typeof visibleWhen.equals !== "boolean" || visibleWhen.in !== undefined) return false
+    return (answer === "allowed") === visibleWhen.equals
+  }
+
+  let current: string | undefined
+  if (typeof visibleWhen.from === "string" && visibleWhen.from !== "") {
+    const resolved = resolveFromContext(visibleWhen.from, ctx)
+    current = resolved === undefined || resolved === null ? undefined : normalizeVisibilityOperand(resolved)
+  } else if (typeof visibleWhen.field === "string" && visibleWhen.field !== "") {
+    current = normalizeVisibilityOperand(values[visibleWhen.field])
+  }
+
+  if (current === undefined) return true
+  if (visibleWhen.equals !== undefined) return current === normalizeVisibilityOperand(visibleWhen.equals)
+  if (visibleWhen.in !== undefined) return visibleWhen.in.some((v) => current === normalizeVisibilityOperand(v))
   return true
 }
 
@@ -410,7 +601,11 @@ export function BlockRenderer({ feature, record }: { feature: PluginFeature; rec
   }
   return (
     <MasterDetailProvider record={record}>
-      <BlockList blocks={blocks} />
+      {/* Inside the master-detail provider: a gate's endpoint may carry
+          `{record}` and resolves through the same context every source does. */}
+      <AccessProvider blocks={blocks}>
+        <BlockList blocks={blocks} />
+      </AccessProvider>
     </MasterDetailProvider>
   )
 }
@@ -443,10 +638,16 @@ function BlockNode({ block }: { block: Block }) {
   // stay diffable against its twin, to save re-rendering nodes that render
   // text.
   const md = React.useContext(MasterDetailContext)
+  const access = React.useContext(AccessContext)
+
+  // #909: `visibleWhen` is carried by EVERY block type now, so it is evaluated
+  // ONCE here rather than per case. It used to be checked in the three branches
+  // that could carry it, which is exactly the shape that makes a universal facet
+  // impossible to add without missing one.
+  if (!isVisible(block.visibleWhen, form?.values ?? {}, md, access)) return null
 
   switch (block.type) {
     case "section": {
-      if (!isVisible(block.visibleWhen, form?.values ?? {})) return null
       return (
         <div className="space-y-3">
           {block.title && <h3 className="text-sm font-semibold">{block.title}</h3>}
@@ -455,7 +656,6 @@ function BlockNode({ block }: { block: Block }) {
       )
     }
     case "card": {
-      if (!isVisible(block.visibleWhen, form?.values ?? {})) return null
       return (
         <Card>
           {(block.title || block.description) && (
@@ -489,18 +689,24 @@ function BlockNode({ block }: { block: Block }) {
       )
     }
     case "tabs": {
-      const first = block.children[0]?.label
+      // A `tab`'s children render from here rather than through `BlockNode`, so
+      // this is the one place a `visibleWhen` would otherwise be silently
+      // ignored — a contract that says every block carries the facet has to mean
+      // it (#909), and hiding a tab the caller may not open is the point of
+      // carrying it here at all.
+      const tabs = block.children.filter((tab) => isVisible(tab.visibleWhen, form?.values ?? {}, md, access))
+      const first = tabs[0]?.label
       if (!first) return null
       return (
         <Tabs defaultValue={first}>
           <TabsList>
-            {block.children.map((tab) => (
+            {tabs.map((tab) => (
               <TabsTrigger key={tab.label} value={tab.label}>
                 {tab.label}
               </TabsTrigger>
             ))}
           </TabsList>
-          {block.children.map((tab) => (
+          {tabs.map((tab) => (
             <TabsContent key={tab.label} value={tab.label} className="pt-3">
               <BlockList blocks={tab.children} />
             </TabsContent>
@@ -511,6 +717,8 @@ function BlockNode({ block }: { block: Block }) {
     case "tab":
       // Only meaningful as a direct child of `tabs`, handled above.
       return <BlockList blocks={block.children} />
+    case "accessGate":
+      return <AccessGateRenderer block={block} />
     case "divider":
       return <hr className="border-border" />
     case "heading": {
@@ -659,7 +867,6 @@ function BlockNode({ block }: { block: Block }) {
     case "referenceSelect":
     case "ouScopePicker":
       if (!form) return <UnsupportedBlock reason={`${block.type} outside a form`} />
-      if ("visibleWhen" in block && !isVisible(block.visibleWhen, form.values)) return null
       return <FormInput block={block} form={form} />
     default:
       return <UnsupportedBlock reason={(block as { type?: string }).type ?? "unknown"} />
@@ -1550,8 +1757,18 @@ function collectFormInputs(blocks: Block[]): Block[] {
       continue
     }
     if (block.type === "form") continue
-    const nested = (block as { children?: unknown }).children
-    if (Array.isArray(nested)) inputs.push(...collectFormInputs(nested as Block[]))
+    // #909: BOTH child lists. An `accessGate` carries two, and a walk that knew
+    // only `children` would seed defaults for the permitted rendering and not
+    // for the refused one — so the same field name would be in the value map or
+    // absent from it depending on which branch the author put it in, which is
+    // not a distinction anyone declared. Hidden inputs staying in the value map
+    // is the standing convention for `visibleWhen` (the server re-validates and
+    // is authoritative over what it accepts); this keeps the two slots equal to
+    // each other rather than inventing a third rule for one of them.
+    for (const slot of ["children", "otherwise"] as const) {
+      const nested = (block as { children?: unknown; otherwise?: unknown })[slot]
+      if (Array.isArray(nested)) inputs.push(...collectFormInputs(nested as Block[]))
+    }
   }
   return inputs
 }

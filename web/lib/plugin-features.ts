@@ -24,24 +24,51 @@ import { apiClient } from '@/lib/api-client';
  */
 
 /**
- * WC-532 A3: a presentational conditional-visibility predicate. When a block
- * carrying `visibleWhen` is inside a `form`, the renderer hides it unless the
- * referenced sibling field matches. Render-time only — it never affects the
- * submitted payload or server-side validation. Mirrors the SDK
- * `visibilityRule` prop type; the SDK validator requires exactly one of
- * `equals` / `in`.
+ * A presentational conditional-visibility predicate (WC-532 A3, widened by
+ * #909). Render-time only: it never affects the submitted payload or
+ * server-side validation, and the server never trusts it.
+ *
+ * The rule names exactly ONE subject and then how to test it. The SDK validator
+ * enforces that; this type keeps all three optional because the renderer
+ * revalidates a payload it did not build.
+ *
+ *   - `field`  a sibling input in the same `form` — WC-532 A3's only subject.
+ *   - `from`   a master-detail context reference (`{recordId}.{field}`, or a
+ *              bare `selector` name): the RECORD the page is about.
+ *   - `access` an {@link AccessGateBlock} id — the HOST's answer to "may this
+ *              caller make that request?". Takes a boolean `equals`, never `in`.
+ *
+ * Facts fail OPEN and authority fails CLOSED, which is the one asymmetry worth
+ * knowing: a `field`/`from` reference that does not resolve leaves the block
+ * visible (content is never permanently hidden by a missing context), while an
+ * `access` answer that has not arrived, or cannot be had, hides it — a control
+ * shown before its permission is known is a control shown to somebody who may
+ * not have it.
  */
 export interface VisibleWhen {
-  field: string;
+  field?: string;
+  from?: string;
+  access?: string;
   equals?: string | number | boolean;
   in?: (string | number | boolean)[];
+}
+
+/**
+ * The facets EVERY block carries, whatever its type
+ * (`BlockContract::UNIVERSAL_PROPS`).
+ *
+ * Intersected into {@link Block} rather than repeated on each interface, for
+ * the same reason the SDK merges it into every rule: a condition only some
+ * blocks may carry is a condition granular gating has to route around.
+ */
+export interface BlockFacets {
+  visibleWhen?: VisibleWhen;
 }
 
 /** Container: a labelled vertical grouping of blocks. */
 export interface SectionBlock {
   type: 'section';
   title?: string;
-  visibleWhen?: VisibleWhen;
   children: Block[];
 }
 
@@ -50,7 +77,6 @@ export interface CardBlock {
   type: 'card';
   title?: string;
   description?: string;
-  visibleWhen?: VisibleWhen;
   children: Block[];
 }
 
@@ -71,7 +97,12 @@ export interface RowBlock {
 /** Container: a tab set whose children are `tab` blocks. */
 export interface TabsBlock {
   type: 'tabs';
-  children: TabBlock[];
+  /**
+   * Intersected with the universal facet because a `tab` renders from inside
+   * `TabsRenderer` rather than through `BlockNode`, so its `visibleWhen` is read
+   * there directly (#909).
+   */
+  children: (TabBlock & BlockFacets)[];
 }
 
 /** Container: one labelled tab panel; only valid as a child of `tabs`. */
@@ -377,7 +408,6 @@ export interface TextInputBlock {
   defaultFrom?: string;
   /** When true, renders as type="password". The sentinel value '••••••' is never sent on submit. */
   sensitive?: boolean;
-  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a multi-line text area. */
@@ -390,7 +420,6 @@ export interface TextAreaBlock {
   default?: string;
   /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
   defaultFrom?: string;
-  visibleWhen?: VisibleWhen;
 }
 
 /**
@@ -407,7 +436,6 @@ export interface RichTextInputBlock {
   default?: string;
   /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
   defaultFrom?: string;
-  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a numeric input. */
@@ -422,7 +450,6 @@ export interface NumberInputBlock {
   default?: string;
   /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
   defaultFrom?: string;
-  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a single-select dropdown. */
@@ -435,7 +462,6 @@ export interface SelectBlock {
   default?: string;
   /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
   defaultFrom?: string;
-  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a boolean checkbox. */
@@ -446,7 +472,6 @@ export interface CheckboxBlock {
   default?: boolean;
   /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
   defaultFrom?: string;
-  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a range slider. */
@@ -460,7 +485,6 @@ export interface SliderBlock {
   default?: string;
   /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
   defaultFrom?: string;
-  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a date input. */
@@ -472,7 +496,6 @@ export interface DateInputBlock {
   default?: string;
   /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
   defaultFrom?: string;
-  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a file input. Without encoding the content is read as text; with 'base64' it is encoded as a data URI. */
@@ -484,7 +507,6 @@ export interface FileInputBlock {
   required?: boolean;
   /** When 'base64', the file is converted to a data URI via FileReader.readAsDataURL() before submit. */
   encoding?: 'base64';
-  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a colour picker. */
@@ -495,7 +517,6 @@ export interface ColorInputBlock {
   default?: string;
   /** WC-block-modal-drawer: a dot-path (`{targetId}.{field}`) or bare selector name into the master-detail context; resolved before `default`. */
   defaultFrom?: string;
-  visibleWhen?: VisibleWhen;
 }
 
 /**
@@ -742,6 +763,42 @@ export interface RecordFieldsBlock {
   emptyText?: string;
 }
 
+/**
+ * The one concrete request an {@link AccessGateBlock} asks the host about. Its
+ * `endpoint` may carry `{token}` segments in the master-detail addressing, like
+ * a `dataRecord`'s source; the gate is not asked until every token resolves.
+ */
+export interface AccessCheck {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  endpoint: string;
+}
+
+/**
+ * Container (#909): the CALLER-ACCESS primitive.
+ *
+ * Declares one question about the caller, publishes the host's answer under
+ * `id`, and renders `children` when the answer is yes and `otherwise` when it is
+ * no. Both are optional: a gate with neither is purely a declaration that
+ * `visibleWhen: {access: id}` reads from anywhere on the screen.
+ *
+ * The answer comes from `POST /api/v1/me/permitted-actions` — the same route
+ * lookup feeding the same RoleChecker calls RbacMiddleware makes — so a plugin
+ * never states which permission gates the region and there is no second copy of
+ * that answer to drift.
+ *
+ * The two slots exist so the editable and read-only renderings of a region are
+ * declared TOGETHER. Written as two siblings with opposite `visibleWhen`
+ * polarity they can drift, and when they drift it is the editable half that
+ * ends up showing.
+ */
+export interface AccessGateBlock {
+  type: 'accessGate';
+  id: string;
+  check: AccessCheck;
+  children?: Block[];
+  otherwise?: Block[];
+}
+
 /** Container (→ Sheet): a slide-out panel; same open model as {@link ModalBlock}. */
 export interface DrawerBlock {
   type: 'drawer';
@@ -757,8 +814,8 @@ export interface DrawerBlock {
  * already validated the tree, but the web renderer revalidates defensively so a
  * malformed node degrades to a placeholder rather than crashing.
  */
-export type Block =
-  | SectionBlock
+export type Block = BlockFacets &
+  ( | SectionBlock
   | CardBlock
   | GridBlock
   | RowBlock
@@ -805,7 +862,8 @@ export type Block =
   | ModalBlock
   | DrawerBlock
   | DataRecordBlock
-  | RecordFieldsBlock;
+  | RecordFieldsBlock
+  | AccessGateBlock );
 
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {

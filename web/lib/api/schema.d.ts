@@ -2817,7 +2817,8 @@ export interface paths {
         };
         /** Demo single record for the record-bound block example */
         get: operations["get_api_v1_uikit_demo_rows_name"];
-        put?: never;
+        /** Demo single-record write, behind a permission nothing grants */
+        put: operations["put_api_v1_uikit_demo_rows_name"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3953,7 +3954,7 @@ export interface components {
         PermittedActionCheck: {
             ref: string;
             /** @enum {string} */
-            method: "POST" | "PUT" | "PATCH" | "DELETE";
+            method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
             path: string;
             resourceType?: string | null;
             resourceId?: number | null;
@@ -21915,6 +21916,71 @@ export interface operations {
                 };
             };
             /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_uikit_demo_rows_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoRecordResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoRecordResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:manage permission */
             403: {
                 headers: {
                     [name: string]: unknown;
