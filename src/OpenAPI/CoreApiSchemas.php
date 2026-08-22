@@ -466,9 +466,16 @@ final class CoreApiSchemas
     private static function userRoutes(): array
     {
         return [
+            // #839: same undeclared pagination as GET /api/roles — the handler
+            // paginates, UserListResponse carries the envelope, and the query
+            // parameters were missing from the spec.
             self::adminRoute('GET', '/api/users', [
                 'summary' => 'List the tenant\'s users',
                 'tags' => ['users'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). A client that needs every user must follow the `pagination` envelope to the last page; one request only ever describes page one.'),
+                ],
                 'responses' => [
                     200 => self::jsonResponse('The users visible to the caller\'s tenant', 'UserListResponse'),
                 ] + self::authErrors(),
@@ -576,9 +583,20 @@ final class CoreApiSchemas
     private static function roleRoutes(): array
     {
         return [
+            // #839: the handler has read PaginationParams since it was written and
+            // RoleListResponse has always carried the envelope, but the query
+            // parameters that drive it were never declared — so the generated
+            // client typed `query: never` and a picker literally could not ask
+            // for page 2 without lying about the contract. Declaring them changes
+            // no behaviour; it stops the published spec understating what the
+            // endpoint does.
             self::adminRoute('GET', '/api/roles', [
                 'summary' => 'List the roles visible to the tenant (own + global)',
                 'tags' => ['roles'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). A client that needs every role must follow the `pagination` envelope to the last page; one request only ever describes page one.'),
+                ],
                 'responses' => [
                     200 => self::jsonResponse('Visible roles with permission counts', 'RoleListResponse'),
                 ] + self::authErrors(),

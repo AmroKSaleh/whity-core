@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api/client';
-import { fetchAllPagesTyped } from '@/lib/api/fetch-all-pages';
+import {
+  fetchAllPagesTyped,
+  type FetchAllPagesResult,
+} from '@/lib/api/fetch-all-pages';
 import { useToast } from '@/lib/toast-context';
 import {
   Dialog,
@@ -38,6 +41,57 @@ interface CreateDelegationModalProps {
 }
 
 /**
+ * Why one of the dialog's lists must not be offered.
+ *
+ * `loaded`/`total` are carried rather than a finished sentence because the
+ * alerts render them through `t()`. `total` is null when even the first page
+ * failed, so the size of the gap is unknown — and "we are missing an unknown
+ * amount" is a different statement to the grantor than "we are missing 140 of
+ * 240".
+ */
+interface ListFailure {
+  loaded: number;
+  total: number | null;
+}
+
+/** One entry per list this dialog walks; null means the walk reached the end. */
+interface ListFailures {
+  permissions: ListFailure | null;
+  roles: ListFailure | null;
+  users: ListFailure | null;
+  ous: ListFailure | null;
+}
+
+const NO_LIST_FAILURES: ListFailures = {
+  permissions: null,
+  roles: null,
+  users: null,
+  ous: null,
+};
+
+/**
+ * Every list lost, and by how much unknown — a rejected `loadOptions()`, where
+ * not even a first page arrived to count against a total.
+ */
+const ALL_LISTS_FAILED: ListFailures = {
+  permissions: { loaded: 0, total: null },
+  roles: { loaded: 0, total: null },
+  users: { loaded: 0, total: null },
+  ous: { loaded: 0, total: null },
+};
+
+/**
+ * A completed walk has no failure; an incomplete one carries how far it got, so
+ * the alert can state the size of the gap rather than only that something went
+ * wrong.
+ */
+function listFailure<T>(result: FetchAllPagesResult<T>): ListFailure | null {
+  return result.complete
+    ? null
+    : { loaded: result.items.length, total: result.total };
+}
+
+/**
  * Create-delegation dialog (WC-34).
  *
  * Lets the acting user delegate a SUBSET of their own permissions to a role or a
@@ -65,12 +119,11 @@ export function CreateDelegationModal({
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [ous, setOus] = useState<OuOption[]>([]);
-  // Set when the OU list could not be walked to the end. Non-null disables the
-  // scope picker — see the OU field below for why the dialog stays usable.
-  const [ousFailure, setOusFailure] = useState<{
-    loaded: number;
-    total: number | null;
-  } | null>(null);
+  // All four lists above are paginated, and none of them is ever presented
+  // short: an entry here means that walk did not reach the end, so the list is
+  // withheld and the gap is stated where the picker was. What each field then
+  // does about it differs — see the fields below.
+  const [failures, setFailures] = useState<ListFailures>(NO_LIST_FAILURES);
 
   // Form state. The parent remounts this component (via `key`) each time the
   // dialog opens, so these defaults reset on open — no synchronous setState in
@@ -83,13 +136,24 @@ export function CreateDelegationModal({
   const loadOptions = useCallback(async () => {
     try {
       const [permsRes, rolesRes, usersRes, ousRes] = await Promise.all([
-        // per_page=100 (the max) fetches the WHOLE permission catalogue in one
-        // page — the picker must show every delegatable permission. Without it the
-        // default page size (25) silently drops permissions past the first page as
-        // the catalogue grows (mirrors the roles editor's per_page=100).
-        api.GET('/api/v1/permissions', { params: { query: { per_page: 100 } } }),
-        api.GET('/api/v1/roles'),
-        api.GET('/api/v1/users'),
+        // The catalogue used to be fetched with per_page=100, which is not a fix
+        // but a moved cliff: the server caps per_page at 100, so the list simply
+        // started dropping entries at 101 instead of 26 — and core's registry
+        // plus every installed plugin's contributions grow past that with
+        // installed plugins rather than with tenant size.
+        fetchAllPagesTyped<Permission>((query) =>
+          api.GET('/api/v1/permissions', { params: { query } })
+        ),
+        // The grantee IS the subject of the grant. A role or a user that is
+        // merely on page 2 is indistinguishable from one that does not exist,
+        // and the grantor's next move is to pick the nearest thing that IS
+        // listed — writing real authority against the wrong subject.
+        fetchAllPagesTyped<RoleOption>((query) =>
+          api.GET('/api/v1/roles', { params: { query } })
+        ),
+        fetchAllPagesTyped<UserOption>((query) =>
+          api.GET('/api/v1/users', { params: { query } })
+        ),
         // The OU scope narrows a delegation, so a unit that is merely on page 2
         // reads as "that OU does not exist" and pushes the grantor towards the
         // only remaining option — tenant-wide, a strictly broader grant.
@@ -98,27 +162,28 @@ export function CreateDelegationModal({
         ),
       ]);
 
-      if (permsRes.data !== undefined) {
-        setPermissions(permsRes.data.data);
-      }
-      if (rolesRes.data !== undefined) {
-        setRoles(rolesRes.data.data);
-      }
-      if (usersRes.data !== undefined) {
-        setUsers(usersRes.data.data);
-      }
-      if (ousRes.complete) {
-        setOus(ousRes.items);
-      } else {
-        setOus([]);
-        setOusFailure({ loaded: ousRes.items.length, total: ousRes.total });
-      }
+      // An incomplete list is dropped, not shown short. The rows that did
+      // arrive are real, but a list of them is not: it looks exactly like a
+      // complete list of a smaller tenant, which is the whole defect.
+      setPermissions(permsRes.complete ? permsRes.items : []);
+      setRoles(rolesRes.complete ? rolesRes.items : []);
+      setUsers(usersRes.complete ? usersRes.items : []);
+      setOus(ousRes.complete ? ousRes.items : []);
+      setFailures({
+        permissions: listFailure(permsRes),
+        roles: listFailure(rolesRes),
+        users: listFailure(usersRes),
+        ous: listFailure(ousRes),
+      });
     } catch {
-      // A rejection here loses the OU list too, and an empty scope dropdown is
-      // the same lie as a short one — mark it failed rather than let the toast
-      // scroll away and leave a picker that looks merely empty.
+      // A rejection here loses every list, and an empty picker is the same lie
+      // as a short one — mark them all failed rather than let the toast scroll
+      // away and leave pickers that look merely empty.
+      setPermissions([]);
+      setRoles([]);
+      setUsers([]);
       setOus([]);
-      setOusFailure({ loaded: 0, total: null });
+      setFailures(ALL_LISTS_FAILED);
       addToast(
         t('delegations.create.optionsError', 'Failed to load delegation options'),
         'error'
@@ -196,10 +261,46 @@ export function CreateDelegationModal({
     }
   };
 
+  // Only the SELECTED type's list gates the grantee picker: if roles walked to
+  // the end and users did not, refusing both would remove a capability that
+  // loaded fine. The type toggle itself stays live — switching it is a
+  // deliberate change of subject KIND, not the near-miss substitution being
+  // guarded against, since nobody mistakes an email address for a role name.
+  const granteeFailure =
+    granteeType === 'role' ? failures.roles : failures.users;
+
   const granteeOptions =
     granteeType === 'role'
       ? roles.map((r) => ({ value: String(r.id), label: r.name }))
       : users.map((u) => ({ value: String(u.id), label: u.email }));
+
+  /**
+   * How much of the grantee list is missing, as a sentence.
+   *
+   * Written out per list and per known/unknown total rather than interpolating
+   * the noun into one string: "roles" and "users" decline differently to a
+   * translator, and every key has to stay a literal for the extractor to see
+   * the English at all.
+   */
+  const granteeGap = (failure: ListFailure): string => {
+    if (granteeType === 'role') {
+      return failure.total === null
+        ? t('delegations.create.grantee.rolesError', 'Failed to fetch roles')
+        : t(
+            'delegations.create.grantee.rolesPartial',
+            'Loaded only {loaded} of {total} roles.',
+            { loaded: failure.loaded, total: failure.total }
+          );
+    }
+
+    return failure.total === null
+      ? t('delegations.create.grantee.usersError', 'Failed to fetch users')
+      : t(
+          'delegations.create.grantee.usersPartial',
+          'Loaded only {loaded} of {total} users.',
+          { loaded: failure.loaded, total: failure.total }
+        );
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -256,7 +357,11 @@ export function CreateDelegationModal({
                   ? t('delegations.create.granteeType.role', 'Role')
                   : t('delegations.create.granteeType.user', 'User')}
               </label>
-              <Select value={granteeId} onValueChange={setGranteeId}>
+              <Select
+                disabled={granteeFailure !== null}
+                value={granteeId}
+                onValueChange={setGranteeId}
+              >
                 <SelectTrigger>
                   {/*
                     Two keys rather than one with the grantee type interpolated
@@ -280,6 +385,25 @@ export function CreateDelegationModal({
                   ))}
                 </SelectContent>
               </Select>
+              {/*
+                Unlike the OU scope below, the grantee has no safe fallback: it
+                is the subject of the grant and the form cannot be submitted
+                without one. So the picker refuses rather than offering a short
+                list — an admin who cannot find the role they came for concludes
+                it does not exist and grants to whatever looks closest, which is
+                a real, durable grant of real permissions to the wrong subject.
+              */}
+              {granteeFailure !== null ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {granteeGap(granteeFailure)}{' '}
+                    {t(
+                      'delegations.create.grantee.loadFailed',
+                      'The list is withheld: a partial one hides grantees that exist, and delegating to the nearest listed alternative hands your permissions to the wrong role or user.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
             </div>
 
             {/* OU scope (optional) */}
@@ -298,7 +422,7 @@ export function CreateDelegationModal({
                 )}
               </label>
               <Select
-                disabled={ousFailure !== null}
+                disabled={failures.ous !== null}
                 value={ouId === '' ? 'none' : ouId}
                 onValueChange={(value) => setOuId(value === 'none' ? '' : value)}
               >
@@ -326,15 +450,15 @@ export function CreateDelegationModal({
                 for, so the reason has to be stated rather than left as an
                 empty-looking dropdown they shrug past.
               */}
-              {ousFailure !== null ? (
+              {failures.ous !== null ? (
                 <Alert variant="destructive">
                   <AlertDescription>
-                    {ousFailure.total === null
+                    {failures.ous.total === null
                       ? t('ous.error.load', 'Failed to fetch organizational units')
                       : t(
                           'ous.error.partial',
                           'Loaded only {loaded} of {total} organizational units.',
-                          { loaded: ousFailure.loaded, total: ousFailure.total }
+                          { loaded: failures.ous.loaded, total: failures.ous.total }
                         )}{' '}
                     {t(
                       'delegations.create.ou.loadFailed',
@@ -360,32 +484,76 @@ export function CreateDelegationModal({
               <label className="text-sm font-medium">
                 {t('delegations.create.permissions.label', 'Permissions')}
               </label>
-              <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                {permissions.length === 0 ? (
-                  <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-                    {t('delegations.create.permissions.empty', 'No permissions available.')}
-                  </p>
-                ) : (
-                  permissions.map((permission) => (
-                    <label
-                      // Registry-only permissions carry id: null — the name is
-                      // the stable identity (it is the catalogue's merge key).
-                      key={permission.name}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedPermissions.includes(permission.name)}
-                        onChange={() => togglePermission(permission.name)}
-                        className="size-4 rounded border-border"
-                      />
-                      <span className="text-sm font-medium">
-                        {permission.name}
-                      </span>
-                    </label>
-                  ))
-                )}
-              </div>
+              {/*
+                A partial catalogue blocks the whole dialog, and that is a
+                deliberate call rather than caution.
+                  - The permission set IS the grant, not a qualifier on it. The
+                    OU scope could fall back to tenant-wide, which is a complete
+                    and deliberate choice; there is no equivalent here, so every
+                    tick is made in the belief that the list is the catalogue.
+                  - Under-granting is not the only failure. A missing
+                    `documents:publish` invites the nearest visible neighbour —
+                    `documents:write` — and that is real authority the grantor
+                    never meant to hand over.
+                  - Submitting already requires at least one permission, so
+                    there is no read-only use of this dialog worth preserving:
+                    everything it does is write a grant, and it cannot write a
+                    correct one from a list it cannot vouch for.
+                Reopening the dialog remounts it and retries the walk.
+              */}
+              {failures.permissions !== null ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {failures.permissions.total === null
+                      ? t(
+                          'delegations.create.permissions.error',
+                          'Failed to fetch the permission catalogue'
+                        )
+                      : t(
+                          'delegations.create.permissions.partial',
+                          'Loaded only {loaded} of {total} permissions.',
+                          {
+                            loaded: failures.permissions.loaded,
+                            total: failures.permissions.total,
+                          }
+                        )}{' '}
+                    {t(
+                      'delegations.create.permissions.loadFailed',
+                      'No delegation can be created from a partial catalogue: it hides permissions you hold, and the nearest one that is listed grants something you did not intend.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                  {permissions.length === 0 ? (
+                    // A genuinely empty catalogue, which the walk COMPLETED —
+                    // distinct from the failure above, and the distinction is
+                    // the point.
+                    <p className="px-2 py-4 text-center text-sm text-muted-foreground">
+                      {t('delegations.create.permissions.empty', 'No permissions available.')}
+                    </p>
+                  ) : (
+                    permissions.map((permission) => (
+                      <label
+                        // Registry-only permissions carry id: null — the name is
+                        // the stable identity (it is the catalogue's merge key).
+                        key={permission.name}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedPermissions.includes(permission.name)}
+                          onChange={() => togglePermission(permission.name)}
+                          className="size-4 rounded border-border"
+                        />
+                        <span className="text-sm font-medium">
+                          {permission.name}
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -399,10 +567,21 @@ export function CreateDelegationModal({
           >
             {t('delegations.create.cancel', 'Cancel')}
           </Button>
+          {/*
+            Blocked, not merely validated: without the permission catalogue or
+            the selected type's grantee list there is nothing correct this
+            button can write, and letting it look clickable invites a second
+            attempt at the same impossible submit.
+          */}
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting || isLoadingOptions}
+            disabled={
+              isSubmitting ||
+              isLoadingOptions ||
+              failures.permissions !== null ||
+              granteeFailure !== null
+            }
           >
             {isSubmitting
               ? t('delegations.create.submitting', 'Creating...')
