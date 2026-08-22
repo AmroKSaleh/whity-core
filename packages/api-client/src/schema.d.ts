@@ -3692,10 +3692,17 @@ export interface components {
             status: "active" | "invited" | "suspended";
         };
         MembershipCreateRequest: {
-            /** @description The role to grant. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400. */
+            /** @description The role to grant, by id. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400, and supplying both is legal with `role_id` winning. */
             role_id: number;
-            /** @description The same grant addressed by role NAME (or by a numeric id). An accepted alternative to `role_id`, not an addition to it. */
+            /** @description The same grant addressed by role NAME (or by a numeric id). Core's own memberships UI uses this spelling. */
             role?: number | string;
+            ou_id?: number | null;
+            tenant_id?: number;
+        } | {
+            /** @description The role to grant, by id. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400, and supplying both is legal with `role_id` winning. */
+            role_id?: number;
+            /** @description The same grant addressed by role NAME (or by a numeric id). Core's own memberships UI uses this spelling. */
+            role: number | string;
             ou_id?: number | null;
             tenant_id?: number;
         };

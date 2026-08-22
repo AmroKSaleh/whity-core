@@ -48,10 +48,10 @@ use Whity\OpenAPI\CoreApiSchemas;
  *     is not understated either — this is the half that catches
  *     `MembershipCreateRequest`, which declared nothing required while the
  *     handler answers `400 role_id is required` to an empty body;
- *   - `anyOf: [{required: [a]}, {required: [b]}]` (two spellings of one
- *     mandatory field) would be exercised by dropping BOTH. Nothing declares it
- *     today — openapi-typescript renders it as `unknown` — but the reader
- *     handles it so the shape is not silently unenforced if one appears;
+ *   - a top-level `anyOf` UNION of two fully-typed alternatives (two spellings
+ *     of one mandatory field, as `MembershipCreateRequest` declares them) is
+ *     exercised by dropping EVERY spelling: a field required in only some
+ *     branches may legally be absent on its own, but the group may not;
  *   - `minProperties: 1` (a PATCH that refuses to be a no-op) is exercised with
  *     an empty body;
  *   - `not: {required: [a, b]}` (address one thing two ways) is exercised by
@@ -237,12 +237,12 @@ final class RequestSchemaValidationParityTest extends TestCase
     }
 
     /**
-     * `MembershipCreateRequest` declares `role_id` required and documents `role`
-     * as an accepted alias. That is deliberately NARROWER than the handler —
-     * `anyOf` would have said it exactly, but openapi-typescript renders it as
-     * `unknown` and strips every field from the generated client. Under-permitting
-     * is the safe direction, but only if the alias really does work, so both
-     * spellings are exercised here.
+     * `MembershipCreateRequest` is a union: one alternative requires `role_id`,
+     * the other `role`. Both spellings therefore have to work, and neither may
+     * be the only one that does — a schema that named just one would invalidate
+     * a request the API accepts, and core's own memberships modal sends the
+     * `role` spelling, so getting this backwards breaks the platform's own UI
+     * (which is how the first attempt here was caught).
      */
     public function testTheRoleAliasIsAcceptedInPlaceOfRoleId(): void
     {
@@ -489,18 +489,16 @@ final class RequestSchemaValidationParityTest extends TestCase
     {
         $omissions = [];
 
-        foreach (self::stringList($schema, 'required') as $field) {
+        foreach (self::alwaysRequired($schema) as $field) {
             $omissions["'{$field}'"] = [$field];
         }
 
-        $alternatives = [];
-        foreach (self::asArray($schema['anyOf'] ?? null) as $branch) {
-            foreach (self::stringList(self::asArray($branch), 'required') as $field) {
-                $alternatives[] = $field;
-            }
-        }
-        if ($alternatives !== []) {
-            $omissions['any of ' . implode('/', $alternatives)] = $alternatives;
+        // A field required in SOME union branches but not all is one spelling of
+        // an at-least-one rule: dropping it alone is legal, dropping the whole
+        // group is not. That group is the thing to omit.
+        $group = self::atLeastOneOf($schema);
+        if ($group !== []) {
+            $omissions['any of ' . implode('/', $group)] = $group;
         }
 
         if (self::minProperties($schema) >= 1) {
@@ -518,13 +516,7 @@ final class RequestSchemaValidationParityTest extends TestCase
      */
     private function mandatoryNames(array $schema): array
     {
-        $names = self::stringList($schema, 'required');
-
-        foreach (self::asArray($schema['anyOf'] ?? null) as $branch) {
-            foreach (self::stringList(self::asArray($branch), 'required') as $field) {
-                $names[] = $field;
-            }
-        }
+        $names = array_merge(self::alwaysRequired($schema), self::atLeastOneOf($schema));
 
         // With minProperties every property is load-bearing as a set, so none of
         // them can be dropped one-at-a-time and still be a meaningful test.
@@ -533,6 +525,77 @@ final class RequestSchemaValidationParityTest extends TestCase
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * The union branches of a component, or the component itself when it is a
+     * plain object. `MembershipCreateRequest` is an `anyOf` of two fully-typed
+     * alternatives (the only spelling openapi-typescript renders usefully), so
+     * every reader here has to see through that shape.
+     *
+     * @param array<array-key, mixed> $schema
+     * @return list<array<array-key, mixed>>
+     */
+    private static function branches(array $schema): array
+    {
+        foreach (['anyOf', 'oneOf'] as $keyword) {
+            $branches = self::asArray($schema[$keyword] ?? null);
+            if ($branches !== []) {
+                return array_values(array_map(
+                    static fn (mixed $branch): array => self::asArray($branch),
+                    $branches
+                ));
+            }
+        }
+
+        return [$schema];
+    }
+
+    /**
+     * Fields required by EVERY branch — unconditionally mandatory, so omitting
+     * one on its own must be refused.
+     *
+     * @param array<array-key, mixed> $schema
+     * @return list<string>
+     */
+    private static function alwaysRequired(array $schema): array
+    {
+        $branches = self::branches($schema);
+        $shared = self::stringList($branches[0], 'required');
+
+        foreach (array_slice($branches, 1) as $branch) {
+            $shared = array_intersect($shared, self::stringList($branch, 'required'));
+        }
+
+        return array_values($shared);
+    }
+
+    /**
+     * Fields required by SOME branch but not all — interchangeable spellings of
+     * one mandatory thing. At least one of them must be present.
+     *
+     * @param array<array-key, mixed> $schema
+     * @return list<string>
+     */
+    private static function atLeastOneOf(array $schema): array
+    {
+        $branches = self::branches($schema);
+        if (count($branches) < 2) {
+            return [];
+        }
+
+        $group = [];
+        foreach ($branches as $branch) {
+            foreach (self::stringList($branch, 'required') as $field) {
+                $group[$field] = true;
+            }
+        }
+
+        foreach (self::alwaysRequired($schema) as $field) {
+            unset($group[$field]);
+        }
+
+        return array_keys($group);
     }
 
     /**
@@ -587,11 +650,13 @@ final class RequestSchemaValidationParityTest extends TestCase
     private static function propertyNames(array $schema): array
     {
         $names = [];
-        foreach (array_keys(self::asArray($schema['properties'] ?? null)) as $name) {
-            $names[] = (string) $name;
+        foreach (self::branches($schema) as $branch) {
+            foreach (array_keys(self::asArray($branch['properties'] ?? null)) as $name) {
+                $names[(string) $name] = true;
+            }
         }
 
-        return $names;
+        return array_keys($names);
     }
 
     /**

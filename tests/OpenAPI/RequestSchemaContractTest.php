@@ -192,13 +192,93 @@ final class RequestSchemaContractTest extends TestCase
                 if (self::dig($operation, 'requestBody', 'content', 'application/json') === []) {
                     continue;
                 }
-                if (self::dig($schema, 'properties') === [] && self::dig($schema, 'allOf') === []) {
+                // A top-level anyOf/oneOf union carries its fields inside the
+                // branches (MembershipCreateRequest), so an absent top-level
+                // `properties` is only "empty" when there are no branches either.
+                $hasFields = self::dig($schema, 'properties') !== []
+                    || self::dig($schema, 'allOf') !== []
+                    || self::dig($schema, 'anyOf') !== []
+                    || self::dig($schema, 'oneOf') !== [];
+                if (!$hasFields) {
                     $empty[] = strtoupper((string) $method) . ' ' . $path;
                 }
             }
         }
 
         $this->assertSame([], $empty, "Request bodies declared with no properties:\n" . implode("\n", $empty));
+    }
+
+    /**
+     * `MembershipCreateRequest` has to admit BOTH spellings of the grant, and
+     * neither on its own.
+     *
+     * This exists because the first attempt declared `role_id` required and
+     * nothing else, which reads as a reasonable narrowing until you notice that
+     * core's OWN memberships modal posts `{role: name}` — so the schema
+     * invalidated a call the platform makes itself, and the generated client
+     * made that a compile error. The frontend type check caught it; nothing in
+     * PHP did. This is the PHP-side guard, asserting against the declared
+     * schema rather than against the handler (which
+     * RequestSchemaValidationParityTest already drives).
+     */
+    public function testTheMembershipGrantAdmitsBothSpellingsAndNeitherAlone(): void
+    {
+        $schema = self::dig($this->generateFromLiveRouterShape(), 'components', 'schemas', 'MembershipCreateRequest');
+        $this->assertNotSame([], $schema, 'MembershipCreateRequest must be in the document');
+
+        $this->assertTrue(
+            $this->satisfiesRequired($schema, ['role_id' => 7]),
+            'a grant by role id must satisfy the declared schema'
+        );
+        $this->assertTrue(
+            $this->satisfiesRequired($schema, ['role' => 'admin']),
+            "a grant by role NAME must satisfy the declared schema — it is what core's own "
+            . 'memberships modal sends, and a schema that refused it would make the typed client '
+            . 'reject a working call'
+        );
+        $this->assertTrue(
+            $this->satisfiesRequired($schema, ['role_id' => 7, 'role' => 'admin']),
+            'sending both is legal (role_id wins), so the union must be anyOf rather than oneOf'
+        );
+        $this->assertFalse(
+            $this->satisfiesRequired($schema, ['ou_id' => 3]),
+            'a body with no role at all must satisfy NEITHER alternative — it is the 400 the '
+            . 'reporting team discovered by posting {}'
+        );
+    }
+
+    /**
+     * Whether a body satisfies a schema's REQUIRED fields, seeing through a
+     * top-level anyOf/oneOf union (at least one alternative must be satisfied).
+     *
+     * Deliberately not a full JSON-Schema validator: `required` is the property
+     * this file is about, and a real validator would pull in a dependency to
+     * assert something narrower than it checks.
+     *
+     * @param array<array-key, mixed> $schema
+     * @param array<string, mixed> $body
+     */
+    private function satisfiesRequired(array $schema, array $body): bool
+    {
+        $alternatives = self::dig($schema, 'anyOf') ?: self::dig($schema, 'oneOf');
+        if ($alternatives === []) {
+            $alternatives = [$schema];
+        }
+
+        foreach ($alternatives as $alternative) {
+            $satisfied = true;
+            foreach (self::requiredOf(self::dig($alternative)) as $field) {
+                if (!array_key_exists($field, $body)) {
+                    $satisfied = false;
+                    break;
+                }
+            }
+            if ($satisfied) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // ==================== bounds pinned to the enforcing code ====================

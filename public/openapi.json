@@ -24929,43 +24929,87 @@
                 ]
             },
             "MembershipCreateRequest": {
-                "type": "object",
-                "properties": {
-                    "role_id": {
-                        "type": "integer",
-                        "x-whity-reference": {
-                            "resource": "/api/v1/roles",
-                            "valueField": "id",
-                            "labelField": "name"
-                        },
-                        "description": "The role to grant. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400."
-                    },
-                    "role": {
-                        "oneOf": [
-                            {
-                                "type": "integer"
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "role_id": {
+                                "type": "integer",
+                                "x-whity-reference": {
+                                    "resource": "/api/v1/roles",
+                                    "valueField": "id",
+                                    "labelField": "name"
+                                },
+                                "description": "The role to grant, by id. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400, and supplying both is legal with `role_id` winning."
                             },
-                            {
-                                "type": "string"
+                            "role": {
+                                "oneOf": [
+                                    {
+                                        "type": "integer"
+                                    },
+                                    {
+                                        "type": "string"
+                                    }
+                                ],
+                                "description": "The same grant addressed by role NAME (or by a numeric id). Core's own memberships UI uses this spelling."
+                            },
+                            "ou_id": {
+                                "type": "integer",
+                                "nullable": true,
+                                "x-whity-reference": {
+                                    "resource": "/api/v1/ous",
+                                    "valueField": "id",
+                                    "labelField": "name"
+                                }
+                            },
+                            "tenant_id": {
+                                "type": "integer"
                             }
-                        ],
-                        "description": "The same grant addressed by role NAME (or by a numeric id). An accepted alternative to `role_id`, not an addition to it."
+                        },
+                        "required": [
+                            "role_id"
+                        ]
                     },
-                    "ou_id": {
-                        "type": "integer",
-                        "nullable": true,
-                        "x-whity-reference": {
-                            "resource": "/api/v1/ous",
-                            "valueField": "id",
-                            "labelField": "name"
-                        }
-                    },
-                    "tenant_id": {
-                        "type": "integer"
+                    {
+                        "type": "object",
+                        "properties": {
+                            "role_id": {
+                                "type": "integer",
+                                "x-whity-reference": {
+                                    "resource": "/api/v1/roles",
+                                    "valueField": "id",
+                                    "labelField": "name"
+                                },
+                                "description": "The role to grant, by id. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400, and supplying both is legal with `role_id` winning."
+                            },
+                            "role": {
+                                "oneOf": [
+                                    {
+                                        "type": "integer"
+                                    },
+                                    {
+                                        "type": "string"
+                                    }
+                                ],
+                                "description": "The same grant addressed by role NAME (or by a numeric id). Core's own memberships UI uses this spelling."
+                            },
+                            "ou_id": {
+                                "type": "integer",
+                                "nullable": true,
+                                "x-whity-reference": {
+                                    "resource": "/api/v1/ous",
+                                    "valueField": "id",
+                                    "labelField": "name"
+                                }
+                            },
+                            "tenant_id": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "role"
+                        ]
                     }
-                },
-                "required": [
-                    "role_id"
                 ]
             },
             "MembershipListResponse": {

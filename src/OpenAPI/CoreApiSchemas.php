@@ -2155,6 +2155,23 @@ final class CoreApiSchemas
 
         $permissionRef = ['oneOf' => [self::int(), self::str()]];
 
+        // The grant body shared by both alternatives of MembershipCreateRequest
+        // (see there). One map, so the two branches cannot describe different
+        // fields — which is the failure mode of writing a union out twice.
+        $membershipGrant = [
+            'role_id' => self::reference('/api/roles', 'name') + [
+                'description' => 'The role to grant, by id. Interchangeable with `role`, which the '
+                    . 'handler reads when `role_id` is absent; supplying neither is a 400, and '
+                    . 'supplying both is legal with `role_id` winning.',
+            ],
+            'role' => $permissionRef + [
+                'description' => 'The same grant addressed by role NAME (or by a numeric id). '
+                    . 'Core\'s own memberships UI uses this spelling.',
+            ],
+            'ou_id' => self::reference('/api/ous', 'name', nullable: true),
+            'tenant_id' => self::int(),
+        ];
+
         // ---- Auth component schemas (WC-388a61e3) ----
 
         // The resolved user that appears in login / GET /api/me / PATCH /api/me.
@@ -2998,37 +3015,33 @@ final class CoreApiSchemas
             // field at all, which told a generated client an empty body was legal
             // — the one shape this endpoint always refuses.
             //
-            // Two interchangeable spellings cannot both go in `required`, and
-            // the `anyOf` spelling of "at least one" is NOT usable here:
-            // openapi-typescript renders `anyOf: [{required:[a]},{required:[b]}]`
-            // as `{...} | unknown | unknown`, which collapses to `unknown` and
-            // strips every field from the generated client — strictly worse than
-            // the untyped body this change exists to fix.
+            // Two interchangeable spellings cannot both go in `required`, so the
+            // component is a UNION of the two legal shapes. Every alternative
+            // repeats the full property set, which is what makes it survive code
+            // generation: `anyOf: [{required:[a]}, {required:[b]}]` — branches
+            // carrying a `required` and nothing else — is the terser spelling of
+            // the same rule, and openapi-typescript renders it as
+            // `{...} | unknown | unknown`, collapsing to `unknown` and stripping
+            // every field from the generated client. Full branches generate a
+            // union of two typed objects instead.
             //
-            // So `role_id` is declared required and `role` documented as the
-            // accepted alias. That UNDER-permits (a client sending only `role`
-            // is legal but the schema does not say so) rather than
-            // OVER-permitting, which is the safe direction: a client following
-            // this schema always sends a request the API accepts, whereas the
-            // previous `required: []` told it an empty body was legal — the one
-            // shape this endpoint always refuses with `400 role_id is required`.
+            // `anyOf` and not `oneOf`: sending BOTH spellings is legal (`role_id`
+            // simply wins), so "exactly one" would refuse a request the handler
+            // accepts. Declaring `role_id` alone required is equally wrong in the
+            // other direction — core's own memberships modal sends `{role: name}`,
+            // the alias, so that would invalidate a call the platform makes
+            // itself.
             //
             // `tenant_id` (#797 §2) names the tenant to grant IN and is honoured
             // ONLY for a tenant-0 caller — anyone else sending it gets a 403
             // rather than a silent ignore. Omitted, the tenant is the caller's
             // and the endpoint behaves exactly as it did.
-            'MembershipCreateRequest' => self::object([
-                'role_id' => self::reference('/api/roles', 'name') + [
-                    'description' => 'The role to grant. Interchangeable with `role`, which the handler '
-                        . 'reads when `role_id` is absent; supplying neither is a 400.',
+            'MembershipCreateRequest' => [
+                'anyOf' => [
+                    self::object($membershipGrant, ['role_id']),
+                    self::object($membershipGrant, ['role']),
                 ],
-                'role' => $permissionRef + [
-                    'description' => 'The same grant addressed by role NAME (or by a numeric id). An '
-                        . 'accepted alternative to `role_id`, not an addition to it.',
-                ],
-                'ou_id' => self::reference('/api/ous', 'name', nullable: true),
-                'tenant_id' => self::int(),
-            ], ['role_id']),
+            ],
             'UserCreateRequest' => self::object([
                 'email' => self::email(),
                 'password' => self::password(),
