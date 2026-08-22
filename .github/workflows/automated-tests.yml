@@ -387,7 +387,10 @@ jobs:
       # documented local invocation already uses, so a clean local run no
       # longer disagrees with CI.
       - name: Run PHPStan
-        run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=1G
+        # `ops` is in the list because ops/health-watch-healthcheck.php is a
+        # container HEALTHCHECK: a probe that fatals is a probe that reports
+        # nothing, and nothing was analysing it (WC-766).
+        run: vendor/bin/phpstan analyse src tests plugins sdk ops --memory-limit=1G
 
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php

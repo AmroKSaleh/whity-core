@@ -270,12 +270,27 @@ services:
     profiles:
       - health
     restart: unless-stopped
+    # Same override, and for the same reason, as docker-compose.staging.yml —
+    # without it this container inherits the FrankenPHP base image's
+    # `curl localhost:2019` probe, which is red forever in a CLI container and
+    # so can never distinguish a collector that stopped from one that never
+    # could. The probe asserts THIS process's own heartbeat; see
+    # ops/health-watch-healthcheck.php.
+    healthcheck:
+      test: ["CMD", "php", "/app/ops/health-watch-healthcheck.php"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
+    # exec: php becomes the container process, so a crash is a non-zero
+    # container exit that `restart: unless-stopped` acts on, instead of a shell
+    # that prints "restarting" and exits 0 having restarted nothing.
     command:
       - sh
       - -c
       - |
         echo "[health-watch] service-health collector started";
-        php public/index.php health:watch --interval=60 || echo "[health-watch] exited (code $$?); restarting";
+        exec php public/index.php health:watch --interval=60
 
   # Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
   # Track 2): Node + Puppeteer/headless Chromium loading the SAME React
