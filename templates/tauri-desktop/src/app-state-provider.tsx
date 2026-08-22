@@ -5,9 +5,11 @@ import { Button } from "@amroksaleh/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@amroksaleh/ui/card"
 import { Input } from "@amroksaleh/ui/input"
 import { LockedScreen } from "@amroksaleh/ui/locked-screen"
+import { RadioGroup, RadioGroupItem } from "@amroksaleh/ui/radio-group"
 import { useSyncStatus } from "@amroksaleh/features/sync"
 
-import { authClient, type AuthStatus, type EnrollResult } from "./auth-client"
+import { authClient, type AuthStatus, type EnrollResult, type TenantMembership } from "./auth-client"
+import { appT } from "./sync-i18n"
 import { createTauriSyncController, type TauriSyncController } from "./sync-controller-tauri"
 
 /**
@@ -148,12 +150,28 @@ function FullScreenAuthShell({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * A login the server refused to resolve on its own (#914): the profile holds
+ * ACTIVE memberships in more than one tenant, so no session was issued and a
+ * choice is owed. Held between the two steps of {@link EnrollForm}.
+ */
+interface PendingTenantSelection {
+  /** Short-lived (300s) token binding the choice to this login. */
+  selectionToken: string
+  memberships: TenantMembership[]
+}
+
+/**
  * Renders for both first-enrollment and the `onReenroll` re-entry point (see
  * {@link AuthGate}'s `ReloginScreen`). There is deliberately no Server field
- * here — the backend is fixed for the whole build (`WHITY_BACKEND_URL` in
+ * here - the backend is fixed for the whole build (`WHITY_BACKEND_URL` in
  * `.env`, see `src-tauri/src/config.rs`), never chosen per device, so this
  * app is portable to a different whity-core instance by changing exactly
  * that one setting and rebuilding.
+ *
+ * TWO STEPS, and only when the server asks for the second: credentials, then -
+ * if the profile is active in several tenants - a {@link TenantPicker}. The
+ * enrollment tail (register device, keychain, first exchange, `auth_state`) is
+ * identical either way; it just runs behind a different Rust command.
  */
 function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) {
   const [email, setEmail] = React.useState("")
@@ -161,20 +179,46 @@ function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) 
   const [deviceName, setDeviceName] = React.useState("Whity Desktop")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [pending, setPending] = React.useState<PendingTenantSelection | null>(null)
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
+  /**
+   * Both steps land here, because both Rust commands answer with the same
+   * {@link EnrollResult}. Keeping one reducer is what stops the two call sites
+   * disagreeing about what "enrolled" or "lapsed" means.
+   */
+  const applyResult = async (result: EnrollResult) => {
+    switch (result.status) {
+      case "enrolled":
+        await onEnrolled()
+        return
+      case "requiresTenantSelection":
+        if (result.selectionToken === null) {
+          // Token mode always returns one; without it the flow cannot proceed.
+          setError(appT("enroll.error.noSelectionToken"))
+          return
+        }
+        setError(null)
+        setPending({ selectionToken: result.selectionToken, memberships: result.memberships })
+        return
+      case "selectionLapsed":
+        // RETRYABLE, never a dead end: drop back to the credentials step with
+        // the fields still filled, so re-submitting is a single click.
+        setPending(null)
+        setError(appT("enroll.tenant.lapsed"))
+        return
+      case "requires2fa":
+        // Still a gap - a code against a temp token is a different flow, and
+        // no command completes it (#914's "out of scope").
+        setError(appT("enroll.error.requires2fa"))
+        return
+    }
+  }
+
+  const run = async (action: () => Promise<EnrollResult>) => {
     setBusy(true)
     setError(null)
     try {
-      const result: EnrollResult = await authClient.enroll(email, password, deviceName)
-      if (result.status === "enrolled") {
-        await onEnrolled()
-      } else if (result.status === "requires2fa") {
-        setError("This account requires 2FA. The template's enrollment supports single-tenant, non-2FA accounts only (see src-tauri/src/commands/auth.rs).")
-      } else {
-        setError("This account has multiple tenants. The template's enrollment supports single-tenant accounts only.")
-      }
+      await applyResult(await action())
     } catch (err) {
       setError(String(err))
     } finally {
@@ -182,22 +226,44 @@ function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) 
     }
   }
 
+  const submitCredentials = async (event: React.FormEvent) => {
+    event.preventDefault()
+    await run(() => authClient.enroll(email, password, deviceName))
+  }
+
+  const submitTenant = async (tenantId: number) => {
+    if (pending === null) return
+    await run(() => authClient.enrollWithTenant(pending.selectionToken, tenantId, deviceName, email))
+  }
+
+  if (pending !== null) {
+    return (
+      <TenantPicker
+        memberships={pending.memberships}
+        busy={busy}
+        error={error}
+        onSelect={submitTenant}
+        onBack={() => {
+          setPending(null)
+          setError(null)
+        }}
+      />
+    )
+  }
+
   return (
     // Card/header/form shape matches the website's login page
-    // (web/app/login/page.tsx) exactly — same `w-full max-w-md` card sitting
+    // (web/app/login/page.tsx) exactly - same `w-full max-w-md` card sitting
     // directly in FullScreenAuthShell's centered wrapper (AuthGate, above),
     // centered title + description, labeled fields in space-y-4/space-y-2, an
     // Alert for the error banner, and a full-width submit button.
     <Card className="w-full max-w-md">
       <CardHeader className="text-center">
-        <CardTitle className="text-2xl">Welcome to Whity Desktop</CardTitle>
-        <CardDescription>
-          Sign in once to register this device with the Whity backend. A long-lived credential is
-          stored in your OS keychain; work then continues offline until the login window elapses.
-        </CardDescription>
+        <CardTitle className="text-2xl">{appT("enroll.title")}</CardTitle>
+        <CardDescription>{appT("enroll.description")}</CardDescription>
       </CardHeader>
       <CardContent>
-        <form className="space-y-4" onSubmit={submit}>
+        <form className="space-y-4" onSubmit={submitCredentials}>
           {error ? (
             <Alert variant="destructive">
               <AlertDescription role="alert">{error}</AlertDescription>
@@ -206,7 +272,7 @@ function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) 
 
           <div className="space-y-2">
             <label htmlFor="enroll-email" className="text-sm font-medium">
-              Email
+              {appT("enroll.emailLabel")}
             </label>
             <Input
               id="enroll-email"
@@ -220,7 +286,7 @@ function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) 
 
           <div className="space-y-2">
             <label htmlFor="enroll-password" className="text-sm font-medium">
-              Password
+              {appT("enroll.passwordLabel")}
             </label>
             <Input
               id="enroll-password"
@@ -234,7 +300,7 @@ function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) 
 
           <div className="space-y-2">
             <label htmlFor="enroll-device-name" className="text-sm font-medium">
-              Device name
+              {appT("enroll.deviceNameLabel")}
             </label>
             <Input
               id="enroll-device-name"
@@ -245,7 +311,119 @@ function EnrollForm({ onEnrolled }: { onEnrolled: () => void | Promise<void> }) 
           </div>
 
           <Button type="submit" className="w-full" disabled={busy || !email || !password}>
-            {busy ? "Enrolling…" : "Enroll device"}
+            {busy ? appT("enroll.submitting") : appT("enroll.submit")}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** A tenant's display label, falling back to its id when the row has no name. */
+function tenantLabel(membership: TenantMembership): string {
+  const name = membership.tenantName.trim()
+  return name === "" ? `${appT("enroll.tenant.unnamed")} ${membership.tenantId}` : name
+}
+
+/**
+ * The second enrollment step (#914): which tenant this device enrolls into.
+ *
+ * NOTHING IS PRE-SELECTED, and the submit button stays disabled until the
+ * operator picks. That is the whole point rather than a styling choice: per
+ * `AuthHandler::handleSelectTenant()`'s docblock, a profile that genuinely
+ * holds an active tenant-0 membership choosing it is legitimate system
+ * authority - the escalation that was closed is a multi-membership profile
+ * having tenant 0 silently AUTO-picked. So the system tenant is listed as an
+ * equal choice, no membership is filtered out, and no default is applied even
+ * when only one option looks like the obvious candidate. The server re-validates
+ * the choice against a live ACTIVE membership regardless of what is sent.
+ *
+ * Tenant names are tenant DATA and are frequently Arabic, so every one is
+ * rendered `dir="auto"` (the same treatment the shared sync components give
+ * user content).
+ */
+function TenantPicker({
+  memberships,
+  busy,
+  error,
+  onSelect,
+  onBack,
+}: {
+  memberships: TenantMembership[]
+  busy: boolean
+  error: string | null
+  onSelect: (tenantId: number) => void | Promise<void>
+  onBack: () => void
+}) {
+  // `null` = no choice yet. Never seeded from `memberships`.
+  const [choice, setChoice] = React.useState<string | null>(null)
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault()
+    // `Number("0")` is 0 - the system tenant is a real, selectable id here, so
+    // this must never be guarded with a truthiness check.
+    if (choice !== null) void onSelect(Number(choice))
+  }
+
+  return (
+    <Card className="w-full max-w-md">
+      <CardHeader className="text-center">
+        <CardTitle className="text-2xl">{appT("enroll.tenant.title")}</CardTitle>
+        <CardDescription>{appT("enroll.tenant.description")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form className="space-y-4" onSubmit={submit}>
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription role="alert">{error}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {memberships.length === 0 ? (
+            <Alert variant="destructive">
+              <AlertDescription role="alert">{appT("enroll.tenant.empty")}</AlertDescription>
+            </Alert>
+          ) : (
+            <RadioGroup
+              aria-label={appT("enroll.tenant.legend")}
+              value={choice ?? ""}
+              onValueChange={setChoice}
+            >
+              {memberships.map((membership) => (
+                <label
+                  key={membership.tenantId}
+                  htmlFor={`tenant-${membership.tenantId}`}
+                  className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-accent"
+                >
+                  <RadioGroupItem
+                    id={`tenant-${membership.tenantId}`}
+                    value={String(membership.tenantId)}
+                    className="mt-0.5"
+                  />
+                  <span className="grid gap-0.5">
+                    <span dir="auto" className="text-sm font-medium">
+                      {tenantLabel(membership)}
+                    </span>
+                    {membership.role ? (
+                      <span dir="auto" className="text-xs text-muted-foreground">
+                        {membership.role}
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              ))}
+            </RadioGroup>
+          )}
+
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={busy || choice === null || memberships.length === 0}
+          >
+            {busy ? appT("enroll.submitting") : appT("enroll.tenant.submit")}
+          </Button>
+          <Button type="button" variant="link" className="w-full" onClick={onBack} disabled={busy}>
+            {appT("enroll.tenant.back")}
           </Button>
         </form>
       </CardContent>
