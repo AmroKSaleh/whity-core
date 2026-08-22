@@ -14,7 +14,7 @@
     "@amroksaleh/features": "file:../../packages/features",
     "@amroksaleh/tokens": "file:../../packages/tokens",
     "@amroksaleh/ui": "file:../../packages/ui",
-    "@hookform/resolvers": "^5.7.1",
+    "@hookform/resolvers": "^5.9.1",
     "@tabler/icons-react": "^3.46.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
