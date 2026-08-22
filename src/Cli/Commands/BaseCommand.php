@@ -238,10 +238,28 @@ abstract class BaseCommand
         // background half of a plugin's activity missing from the trail — and
         // missing invisibly, since an unsubscribed event raises nothing.
         //
-        // Deliberately NOT ->subscribe()d here: that would start auditing CORE
-        // CRUD driven from the CLI, which this entry point has never done and
-        // which is a separate decision with its own blast radius.
-        $auditLogger = new \Whity\Core\Audit\AuditLogger($db->getPdo());
+        // Subscribed to core's CRUD hooks here, exactly as public/index.php
+        // does (#844). Before this, the entry point audited a PLUGIN's events
+        // and not core's — the worst of the two readings available, because an
+        // operator who sees a plugin's action in the trail concludes the trail
+        // covers this process, and the `user.deleted` beside it that never
+        // appeared is the one they go looking for during an incident. A hole
+        // nobody knows about is worse than either an honest gap or none at all.
+        //
+        // WHO the row names: nobody, unless something authenticated. A command
+        // typed into a shell has no authenticated principal, so `actor_user_id`
+        // stays NULL and the origin below records WHY it is null. Inventing a
+        // default user id here would be worse than the missing row this replaces
+        // — a row that reads as a person having done it, which nothing could
+        // later distinguish from one that really was. If the CLI ever
+        // authenticates a real operator, {@see AuditContext} carries them and
+        // the row records both facts (see AuditOrigin's docblock).
+        $auditLogger = new \Whity\Core\Audit\AuditLogger(
+            $db->getPdo(),
+            null,
+            \Whity\Core\Audit\AuditOrigin::cli(self::invokedCommand())
+        );
+        $auditLogger->subscribe($hookManager);
         $pluginLoader = new PluginLoader(
             $baseDir . '/plugins',
             $router,
@@ -286,7 +304,11 @@ abstract class BaseCommand
         $permissionsHandler = new PermissionsApiHandler($db->getPdo());
         $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
 
-        $pluginsHandler = new PluginsApiHandler($baseDir . '/plugins', $pluginLoader, $db->getPdo());
+        // The audit writer reaches this handler for the same reason it is
+        // subscribed above: `plugin enable` from a shell installs code into the
+        // platform, and it was the one CLI-driven mutation whose audit rows the
+        // handler already knew how to write and simply had no writer for.
+        $pluginsHandler = new PluginsApiHandler($baseDir . '/plugins', $pluginLoader, $db->getPdo(), $auditLogger);
         $router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], 'admin');
         $router->register('POST', '/api/plugins/{id}/enable', [$pluginsHandler, 'enable'], 'admin');
         $router->register('POST', '/api/plugins/{id}/disable', [$pluginsHandler, 'disable'], 'admin');
@@ -321,6 +343,26 @@ abstract class BaseCommand
                 'token_epoch' => 0
             ]);
         }
+    }
+
+    /**
+     * The command word the operator typed, for the audit trail's origin stamp.
+     *
+     * `argv[1]` in both entry points that dispatch these commands
+     * (`bin/whity-cli <command>` and `php public/index.php <command>`), and only
+     * argv[1]: the rest of the line is arguments, which routinely carry secrets
+     * and must never reach a tenant-readable audit row. {@see AuditOrigin::cli()}
+     * drops anything that does not look like a command name, so a process with
+     * some other argv shape (a test runner) records the channel and no command
+     * rather than a stray path.
+     *
+     * @return string|null The command word, or null when there is no usable one.
+     */
+    private static function invokedCommand(): ?string
+    {
+        $argv = $_SERVER['argv'] ?? null;
+
+        return is_array($argv) && isset($argv[1]) && is_string($argv[1]) ? $argv[1] : null;
     }
 
     /**
