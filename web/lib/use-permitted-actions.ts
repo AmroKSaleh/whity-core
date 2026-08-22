@@ -30,7 +30,12 @@ export const PERMITTED_ACTIONS_ENDPOINT = '/api/v1/me/permitted-actions';
 /** One concrete request to resolve. `ref` is the caller's own correlation key. */
 export interface PermittedActionCheck {
   ref: string;
-  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /**
+   * The verb. GET joined the write verbs for #909's `accessGate`, where "may I
+   * SEE this region at all?" is a read; the server and the offline host accept
+   * the same set.
+   */
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
   /** A registered resource type, for the per-record narrowing. */
   resourceType?: string;

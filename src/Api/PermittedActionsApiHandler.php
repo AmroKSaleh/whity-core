@@ -86,8 +86,22 @@ final class PermittedActionsApiHandler
     /** Maximum checks accepted in one batch. A page of inbox items times its actions. */
     public const MAX_CHECKS = 200;
 
-    /** The HTTP methods a check may name — the write verbs an inbox action can carry. */
-    private const ALLOWED_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+    /**
+     * The HTTP methods a check may name.
+     *
+     * The write verbs are the ones an `inbox` action can carry (#868). GET
+     * joined them for #909's `accessGate`, where the question "may I SEE this
+     * region at all?" is a read and selects between rendering a region and
+     * omitting it — the state a gate cannot otherwise express, since gating a
+     * read-only panel on a write request answers a different question and
+     * answers it wrong for every caller who may look but not touch.
+     *
+     * Widening costs this endpoint nothing it was promising. Its identity is
+     * "allowed implies RbacMiddleware would admit exactly this request", and
+     * that is method-agnostic: the same route lookup, the same tenant guard, the
+     * same two RoleChecker calls, whatever the verb.
+     */
+    private const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
     public function __construct(
         private readonly RoleChecker $roleChecker,

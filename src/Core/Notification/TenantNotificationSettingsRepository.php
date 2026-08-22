@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Notification;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access layer for `tenant_notification_settings` (WC-notifications): a
@@ -183,8 +184,16 @@ final class TenantNotificationSettingsRepository
         return $s === '' ? null : $s;
     }
 
+    /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
+     */
     private static function toBool(mixed $value): bool
     {
-        return $value === true || $value === 1 || $value === '1' || $value === 't' || $value === 'true';
+        return DbBool::of($value);
     }
 }

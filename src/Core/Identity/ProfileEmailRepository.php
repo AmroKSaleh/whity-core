@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Identity;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 use PDOStatement;
 
 /**
@@ -190,17 +191,16 @@ final class ProfileEmailRepository
         ];
     }
 
-    /**
-     * Coerce a DB boolean to PHP bool across drivers. pdo_pgsql returns a boolean
-     * column as the STRING 't'/'f' — and `(bool) 'f' === true` — while the SQLite
-     * shim returns 0/1, so a naive `(bool)` cast reports EVERY Postgres row as
-     * true. That silently disables the verified-email checks that the federated
-     * anti-takeover policy depends on (a half-registered `verified = false` email
-     * would read as verified). Match the canonical true-representations explicitly,
-     * mirroring {@see \Whity\Core\Identity\IdentityProviderRepository::toBool()}.
+        /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
      */
     private static function toBool(mixed $value): bool
     {
-        return in_array((string) $value, ['1', 't', 'true'], true);
+        return DbBool::of($value);
     }
 }

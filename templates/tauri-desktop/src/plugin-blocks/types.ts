@@ -9,16 +9,33 @@
  * rather than crashing — see `block-renderer.tsx`.
  */
 
+/**
+ * A presentational conditional-visibility predicate (WC-532 A3, widened by
+ * #909). Names exactly one subject — a sibling form `field`, a master-detail
+ * reference (`from`), or an `accessGate` id (`access`) — and how to test it.
+ * All three are optional here because the renderer revalidates a payload it did
+ * not build; the SDK validator is what enforces "exactly one".
+ *
+ * Facts fail OPEN, authority fails CLOSED: an unresolvable `field`/`from` leaves
+ * the block visible, an unanswered `access` hides it.
+ */
 export interface VisibleWhen {
-  field: string
+  field?: string
+  from?: string
+  access?: string
   equals?: string | number | boolean
   in?: (string | number | boolean)[]
+}
+
+/** The facets EVERY block carries (`BlockContract::UNIVERSAL_PROPS`), merged
+ * into {@link Block} rather than repeated on each interface. */
+export interface BlockFacets {
+  visibleWhen?: VisibleWhen
 }
 
 export interface SectionBlock {
   type: "section"
   title?: string
-  visibleWhen?: VisibleWhen
   children: Block[]
 }
 
@@ -26,7 +43,6 @@ export interface CardBlock {
   type: "card"
   title?: string
   description?: string
-  visibleWhen?: VisibleWhen
   children: Block[]
 }
 
@@ -44,7 +60,10 @@ export interface RowBlock {
 
 export interface TabsBlock {
   type: "tabs"
-  children: TabBlock[]
+  /** Intersected with the universal facet because a `tab` renders from inside
+   * `TabsRenderer` rather than through `BlockNode`, so its `visibleWhen` is read
+   * there directly (#909). */
+  children: (TabBlock & BlockFacets)[]
 }
 
 export interface TabBlock {
@@ -57,15 +76,22 @@ export interface DividerBlock {
   type: "divider"
 }
 
+/** #883: `textFrom` binds the heading to a field of a record in the
+ * master-detail context, so a record page can title itself with its record's
+ * own name. The literal `text` stays REQUIRED and is the fallback — a page
+ * whose record has not arrived yet still has a heading. */
 export interface HeadingBlock {
   type: "heading"
   level: 1 | 2 | 3 | 4
   text: string
+  textFrom?: string
 }
 
 export interface TextBlock {
   type: "text"
   value: string
+  /** #883: binds the paragraph to a record field; `value` is the fallback. */
+  valueFrom?: string
   tone?: "default" | "muted"
 }
 
@@ -80,13 +106,19 @@ export interface BadgeBlock {
   type: "badge"
   variant: "neutral" | "info" | "success" | "warning" | "danger"
   label: string
+  /** #883: binds the pill to a record field; `label` is the fallback. */
+  labelFrom?: string
 }
 
 export interface StatBlock {
   type: "stat"
   label: string
   value: string
+  /** #883: binds the metric to a record field; `value` is the fallback. */
+  valueFrom?: string
   hint?: string
+  /** #883: binds the hint to a record field; `hint` is the fallback. */
+  hintFrom?: string
   trend?: "up" | "down" | "flat"
 }
 
@@ -275,7 +307,6 @@ export interface TextInputBlock {
   default?: string
   defaultFrom?: string
   sensitive?: boolean
-  visibleWhen?: VisibleWhen
 }
 
 export interface TextAreaBlock {
@@ -286,7 +317,6 @@ export interface TextAreaBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface RichTextInputBlock {
@@ -297,7 +327,6 @@ export interface RichTextInputBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface NumberInputBlock {
@@ -310,7 +339,6 @@ export interface NumberInputBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface SelectBlock {
@@ -321,7 +349,6 @@ export interface SelectBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface CheckboxBlock {
@@ -330,7 +357,6 @@ export interface CheckboxBlock {
   label: string
   default?: boolean
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface SliderBlock {
@@ -342,7 +368,6 @@ export interface SliderBlock {
   step?: number
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface DateInputBlock {
@@ -352,7 +377,6 @@ export interface DateInputBlock {
   required?: boolean
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface FileInputBlock {
@@ -363,7 +387,6 @@ export interface FileInputBlock {
   required?: boolean
   encoding?: "base64"
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface ColorInputBlock {
@@ -372,7 +395,6 @@ export interface ColorInputBlock {
   label: string
   default?: string
   defaultFrom?: string
-  visibleWhen?: VisibleWhen
 }
 
 export interface LocalizedTextValue {
@@ -524,8 +546,79 @@ export interface DrawerBlock {
   children: Block[]
 }
 
-export type Block =
-  | SectionBlock
+/** #883: one FACT a record states about itself — the field to read, and the
+ * label to read it under. Labels live here rather than on `recordFields`
+ * because a record page shows the same field in more than one place, and a
+ * label restated per placement drifts per placement. */
+export interface RecordFact {
+  field: string
+  label: string
+}
+
+/**
+ * Container (#883): fetches ONE resource and publishes it into the
+ * master-detail context under `id`, where every block reads it through the same
+ * `{id}.{field}` addressing an `open` row action already uses.
+ *
+ * ONLY the fields named in `fields` are published. That is the structural half
+ * of the #895 guard: a caller-permission flag riding along in the payload is
+ * unreachable from the tree because it was never published, whatever it is
+ * called. The named-vocabulary half lives in the SDK's `BlockValidator`.
+ *
+ * `source` may carry `{token}` segments in the master-detail addressing — a
+ * selector's value, a row an overlay was opened with, or `{record}`, the record
+ * a record-page route is about. The block does not fetch until every token
+ * resolves.
+ */
+export interface DataRecordBlock {
+  type: "dataRecord"
+  id: string
+  source: string
+  fields: RecordFact[]
+  emptyText?: string
+  params?: SourceParam[]
+  children: Block[]
+}
+
+/** Leaf (#883): the data-bound `keyValue` — a description list of the facts a
+ * `dataRecord` published under `from`. `fields` picks a subset, in the order
+ * given; omitted, every declared fact is rendered. */
+export interface RecordFieldsBlock {
+  type: "recordFields"
+  from: string
+  fields?: string[]
+  emptyText?: string
+}
+
+/** The one concrete request an {@link AccessGateBlock} asks the host about. Its
+ * `endpoint` may carry `{token}` segments in the master-detail addressing; the
+ * gate is not asked until every token resolves. */
+export interface AccessCheck {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+  endpoint: string
+}
+
+/**
+ * Container (#909): the CALLER-ACCESS primitive. Declares one question about
+ * the caller, publishes the host's answer under `id`, and renders `children`
+ * when the answer is yes and `otherwise` when it is no — the two renderings
+ * declared TOGETHER so they cannot drift apart. Both slots are optional; a gate
+ * with neither is purely a declaration `visibleWhen: {access: id}` can name.
+ *
+ * The answer comes from the host's own resolver (`POST /__whity/permitted-actions`
+ * here, `POST /api/v1/me/permitted-actions` on the server), so the plugin never
+ * states which permission gates the region.
+ */
+export interface AccessGateBlock {
+  type: "accessGate"
+  id: string
+  check: AccessCheck
+  children?: Block[]
+  otherwise?: Block[]
+}
+
+export type Block = BlockFacets &
+  ( | SectionBlock
   | CardBlock
   | GridBlock
   | RowBlock
@@ -571,6 +664,9 @@ export type Block =
   | InboxBlock
   | ModalBlock
   | DrawerBlock
+  | DataRecordBlock
+  | RecordFieldsBlock
+  | AccessGateBlock )
 
 /** A single plugin-contributed UI feature, as published by the offline host's
  * `GET /__whity/frontend-features` (mirrors the server's `GET /api/v1/frontend/features`). */

@@ -7,6 +7,7 @@ namespace Whity\Core\Scheduler;
 use DateTimeImmutable;
 use DateTimeZone;
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access for the `scheduled_jobs` registry (WC-scheduler). All SQL touching
@@ -179,7 +180,7 @@ final class ScheduledJobRepository
             'cron_expression' => (string) $row['cron_expression'],
             'payload'         => is_array($payload) ? $payload : [],
             'queue'           => (string) $row['queue'],
-            'enabled'         => (bool) $row['enabled'],
+            'enabled'         => DbBool::of($row['enabled']),
             'last_run_at'     => isset($row['last_run_at']) && $row['last_run_at'] !== null ? (string) $row['last_run_at'] : null,
             'next_run_at'     => isset($row['next_run_at']) && $row['next_run_at'] !== null ? (string) $row['next_run_at'] : null,
         ];

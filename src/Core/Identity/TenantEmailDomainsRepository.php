@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Identity;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Repository for the `tenant_email_domains` table (WC-9b87).
@@ -226,15 +227,16 @@ final class TenantEmailDomainsRepository
         return bin2hex(random_bytes(16));
     }
 
-    /**
-     * Coerce a DB boolean to PHP bool across drivers. pdo_pgsql returns a boolean
-     * column as the STRING 't'/'f' — and `(bool) 'f' === true` — so a naive cast
-     * reports EVERY Postgres row as auto_provision=true, silently forcing
-     * auto-provisioning even where an admin set it FALSE. Match the canonical
-     * true-set explicitly (mirrors IdentityProviderRepository::toBool()).
+        /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
      */
     private static function toBool(mixed $value): bool
     {
-        return in_array((string) $value, ['1', 't', 'true'], true);
+        return DbBool::of($value);
     }
 }

@@ -169,6 +169,66 @@ fail-closed. A renderer must never offer an action the backend will reject.
 
 ---
 
+## Conditional visibility and caller access (#909)
+
+**Every** block carries an optional `visibleWhen`. It names exactly one subject and how to
+test it:
+
+| subject | reads | test |
+|---|---|---|
+| `field` | a sibling input in the same `form` | `equals` or `in` |
+| `from` | the master-detail context — `{recordId}.{field}`, or a bare `selector` name | `equals` or `in` |
+| `access` | an `accessGate` id — the **host's** answer about the caller | `equals: true\|false` |
+
+**Facts fail open, authority fails closed.** A `field`/`from` reference that does not resolve
+leaves the block visible, so content is never permanently hidden by a missing context. An
+`access` answer that has not arrived, or that names a gate nothing declared, **hides** the
+block whichever polarity it asked for — a control drawn before its permission is known is a
+control drawn for somebody who may not have it.
+
+### `accessGate` — one question about the caller, two renderings
+
+| type | props | notes |
+|---|---|---|
+| `accessGate` | `id`, `check: { method: GET\|POST\|PUT\|PATCH\|DELETE, endpoint }` | container with **two** child lists: `children` (permitted) and `otherwise` (refused); both optional |
+
+```php
+['type' => 'accessGate',
+    'id'    => 'may-write',
+    // A concrete REQUEST, never a permission slug.
+    'check' => ['method' => 'PATCH', 'endpoint' => '/api/acme/roles/{record}'],
+    'children'  => [ /* the editor */ ],
+    'otherwise' => [ /* a <dl>, and a notice saying which gate refused */ ],
+]
+```
+
+**The plugin does not declare which permission gates the region, and there is no prop with
+which to say.** The host looks the `check`'s method + path up in the live route table and
+evaluates that route's own gate for the caller — the same `RoleChecker` calls
+`RbacMiddleware` makes, through `POST /api/v1/me/permitted-actions`. Re-gate the route and
+the page follows without an edit. A restated slug would be a second answer to a question the
+route table already answers, and nothing would compare the two.
+
+`endpoint` is an owned API path that may carry `{token}` segments in the ordinary
+master-detail addressing. The gate is **not asked** until every token resolves: a
+half-substituted path names a different route with a different gate.
+
+**Two slots, not two negated conditions.** The pair could be written as siblings with
+opposite `visibleWhen` polarity; declared as one node they cannot drift, and when such a pair
+does drift it is the editable half that ends up showing.
+
+**hidden / read-only / editable** is two nested gates — the outer on the READ request with no
+`otherwise` (refused ⇒ the region is absent), the inner on the WRITE request with both. An
+outer gate that refuses never renders the inner one, so exactly one refusal is ever on screen.
+
+**A gate's answer is a control, never a fact.** It is published into a namespace of its own
+that `textFrom`/`valueFrom`/`labelFrom`/`hintFrom` — and `defaultFrom`/`params.from` — do not
+resolve against. `visibleWhen.access` is the only prop in the contract that names a gate, and
+all it can do is decide whether a subtree renders. A page can act on what the caller may do
+and still cannot state it as a property of the record (#895).
+
+---
+
 ## Writing a new renderer (web / mobile / desktop)
 
 A renderer is a recursive function `render(block)` that switches on `block.type`, maps each
@@ -185,6 +245,12 @@ type to a native widget, and recurses into `children` for containers. Checklist:
    endpoint; render success / `422 {issues}` / error; gate triggers by `requiredPermission`
    via the capabilities endpoint.
 6. **Endpoints are pre-versioned** — fetch/submit them verbatim (no client-side `/v1` rewriting).
+7. **Child lists are declared, not assumed** — descend through `BlockContract::childSlots($type)`,
+   not through a hard-coded `children`. `accessGate` carries a second list.
+8. **Resolve `accessGate` through the host** — collect every gate's `check` from the tree, ask
+   `POST /api/v1/me/permitted-actions` once for the page, and fail closed: while loading, on
+   error, and for a gate whose endpoint still has an unresolved token, render neither branch
+   (a pending gate is not a refused one). Never answer the question locally.
 
 See `web/components/plugin/blocks/block-renderer.tsx` for the reference mapping of all 33
 types and the data-bound/interactive state machines.

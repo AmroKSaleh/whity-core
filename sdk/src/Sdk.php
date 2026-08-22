@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.32).
+ * SDK identity (v1.34).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -334,13 +334,126 @@ namespace Whity\Sdk;
  * restricts which unit may ANCHOR the rule, the second restricts the set it
  * resolves to, and "every department under a faculty" needs both. A `memberType`
  * declared beside a `scopes` list of exactly ['unit'] is refused — a kind filter
- * over the single unit the user just picked can only ever remove it. Additive).
+ * over the single unit the user just picked can only ever remove it. Additive) ->
+ * 1.33 (RECORD BLOCKS: `dataRecord` and `recordFields` join
+ * {@see \Whity\Sdk\Frontend\Blocks\BlockContract}, with the `recordPath` and
+ * `recordFactList` prop-rule kinds, plus optional `textFrom`/`valueFrom`/
+ * `labelFrom`/`hintFrom` twins on `heading`/`text`/`badge`/`stat`.
+ * Every data-bound leaf in the contract assumed a COLLECTION at `source`, so a
+ * record page — the platform's standard for editing a record since #882 — could
+ * not be DESCRIBED at all, only hand-written in React. `keyValue` took literals
+ * baked into the declaration; `dataStat` yielded one scalar per block, so a
+ * twelve-field record header was twelve blocks and twelve fetches. `dataRecord`
+ * is the missing primitive: it fetches ONE resource, publishes it into the
+ * master-detail context under its `id`, and owns the loading and failure states
+ * for its whole subtree.
+ * It is a CONTAINER rather than a leaf so it can be all three at once, and
+ * publishing through the EXISTING context is what collapses the second gap into
+ * the first. `defaultFrom` and `params.from` already address a row as
+ * `{targetId}.{field}`; a record published under a `dataRecord`'s id is addressed
+ * the same way by the same resolver, so no second mechanism was invented for the
+ * page-level record. Its `source` is a `recordPath` — an owned apiPath that may
+ * carry `{token}` segments in that same addressing — which is how the block says
+ * WHICH record: from a `selector`, from the row an overlay was opened with, or
+ * from `{record}`, the one reserved name a host seeds with the record its ROUTE
+ * is about. A `selector` may not claim that name. The block does not fetch until
+ * every token resolves, because a half-substituted path requests a different
+ * resource than the one meant and would render it as the record.
+ * `fields` IS THE #895 GUARD, and it is the reason for this shape rather than a
+ * simpler one. #895: the roles record page derived "is this a global role" from
+ * `manageable` — the server's answer to "may YOU write this?" — and for a
+ * tenant-0 caller that is true of every role, so the system tenant, the one
+ * caller whose edit reaches every tenant, saw a deployment-wide role labelled
+ * "Your tenant's role". #897 made it unwriteable in TypeScript by splitting the
+ * payload into what the record IS and what the caller MAY DO, and refusing a
+ * fields type that carries a caller flag. A block tree is runtime data rather
+ * than a type, so the same split is enforced twice here. Structurally: a
+ * `dataRecord` publishes ONLY the fields its declaration names, so a payload's
+ * `manageable`, `canEdit` or `mayModify` is unreachable from the tree because it
+ * was never published — whatever it is called, and whether or not the author
+ * considered it. By name: a declaration that names one of #897's eleven
+ * caller-decision words as a fact, or binds one through a `...From` twin, is
+ * REFUSED and drops the feature, so the author who tries is told which word and
+ * why instead of watching it silently vanish. Matching is on a case- and
+ * separator-folded form, since the same flag arrives as `canEdit` from one
+ * serializer and `can_edit` or `is_editable` from another.
+ * `defaultFrom` and `params.from` are deliberately NOT guarded: seeding a control
+ * the server re-validates, or narrowing a fetch, is plumbing rather than a
+ * statement about the record, and #897 draws the line in exactly the same place.
+ * A guard that refused those would be refusing correct programs, and a guard that
+ * refuses correct programs gets removed.
+ * `recordFields` is the data-bound `keyValue` — a description list read from a
+ * published record. It carries no labels of its own: those were declared once
+ * beside the facts, because a record page shows the same field in more than one
+ * place and a label restated per placement drifts per placement. Additive; every
+ * tree that validated under 1.32 still validates, and the literal on each
+ * `...From` twin stays required so a record page has a title before its record
+ * arrives) ->
+ * 1.34 (CONTEXT-AWARE `visibleWhen` and the `accessGate` container: a condition
+ * that can read the RECORD and the CALLER'S ACCESS, plus the `accessCheck`
+ * prop-rule kind and the first second child slot in the contract, `otherwise`.
+ * #883 made a record page describable and, in doing so, found the half it could
+ * not describe. `RecordPageShell` (#897) takes `main: {editor, readOnly}` — two
+ * renderings, and it picks — while `visibleWhen` matched a sibling FORM FIELD
+ * and nothing else. So a described record page rendered its editor
+ * unconditionally and a caller who may not write got a disabled Save button
+ * beside fully editable inputs: precisely the greyed-out form #882 exists to
+ * make unshippable. Three of the shell's properties followed from that one
+ * missing primitive — the read-only rendering, "which gate refused", and
+ * conditional notices.
+ * `visibleWhen` now names one of THREE subjects: `field` (a sibling input,
+ * unchanged), `from` (a master-detail reference — the record the page is
+ * about), or `access` (an `accessGate` id). It is also declared ONCE as a
+ * universal facet rather than type by type, so every block carries it. A facet
+ * only some types may carry is one that granular gating has to route around,
+ * and "some parts have permissions, not always everything is allowed" is the
+ * requirement this has to compose to.
+ * `accessGate` declares one question about the CALLER, publishes the host's
+ * answer under its `id`, and renders `children` when the answer is yes and
+ * `otherwise` when it is no. WHO ANSWERS IT is the whole design: `check` names a
+ * concrete `{method, endpoint}` request and the host resolves it through
+ * `POST /api/v1/me/permitted-actions` — the same route lookup feeding the same
+ * RoleChecker calls RbacMiddleware makes. A plugin therefore never states which
+ * permission gates a region, exactly as an `inbox` action never states the
+ * permission of the endpoint it calls, and there is no second copy of that
+ * answer to drift when someone re-gates the route. A permission SLUG was the
+ * shorter spelling and is deliberately not offered: `'permission' => 'acme:write'`
+ * beside a route gated on `acme:manage` hides a control the caller could have
+ * used, and nothing compares the two.
+ * TWO SLOTS RATHER THAN TWO NEGATED CONDITIONS. The pair could be written as
+ * siblings with opposite `visibleWhen` polarity, and that is the shape to avoid:
+ * conditions meant to be each other's negation drift, and when they drift it is
+ * the editable half that ends up showing. Declared as one node they cannot
+ * disagree — the same reason the shell takes both renderings as required props.
+ * hidden / read-only / editable composes as two NESTED gates: the outer on the
+ * read request with no `otherwise` (refused ⇒ absent), the inner on the write
+ * request with both. Nesting also yields #897's "first refusal wins"
+ * structurally, since an outer gate that refuses never renders the inner one.
+ * READING ACCESS DOES NOT RE-OPEN #895. #908 established that FACT bindings are
+ * guarded and CONTROL bindings are not; this is a control binding, and the seam
+ * is kept by construction rather than by rule. A gate's answer is published into
+ * a namespace of its own, which `resolveContextRef` — the single resolver behind
+ * `textFrom`/`valueFrom`/`labelFrom`/`hintFrom` and behind `defaultFrom`/
+ * `params.from`/source tokens — does not read. `visibleWhen.access` is the only
+ * prop in the contract whose value names a gate, and all it can do is decide
+ * whether a subtree renders. So a page can ACT on what the caller may do and
+ * still cannot SAY it about the record.
+ * GET joined the methods `permitted-actions` accepts, because "may I see this at
+ * all?" is a read and is the only way the hidden state has an authority to ask.
+ * The endpoint's identity — allowed implies the middleware would admit exactly
+ * this request — is method-agnostic, so it promises no less than before.
+ * `otherwise` is the contract's first second child slot, and the slots are now
+ * DECLARED ({@see \Whity\Sdk\Frontend\Blocks\BlockContract::childSlots()})
+ * rather than assumed, because several things walk a block tree and a walker
+ * that hard-codes `children` silently skips a slot — for the host loader that
+ * is a `source` that never got ownership-checked. Additive: every tree that
+ * validated under 1.33 still validates)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.32.0';
+    public const VERSION = '1.34.0';
 
     /**
      * Static identity only — never instantiated.

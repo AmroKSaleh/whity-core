@@ -175,9 +175,19 @@ function collectFormInputs(blocks: Block[]): Block[] {
       inputs.push(block);
       continue;
     }
-    const nested = (block as { children?: unknown }).children;
-    if (Array.isArray(nested)) {
-      inputs.push(...collectFormInputs(nested as Block[]));
+    // #909: BOTH child lists. An `accessGate` carries two, and a walk that knew
+    // only `children` would seed defaults for the permitted rendering and not
+    // for the refused one — so the same field name would be in the value map or
+    // absent from it depending on which branch the author put it in, which is
+    // not a distinction anyone declared. Hidden inputs staying in the value map
+    // is the standing convention for `visibleWhen` (the server re-validates and
+    // is authoritative over what it accepts); this keeps the two slots equal to
+    // each other rather than inventing a third rule for one of them.
+    for (const slot of ['children', 'otherwise'] as const) {
+      const nested = (block as { children?: unknown; otherwise?: unknown })[slot];
+      if (Array.isArray(nested)) {
+        inputs.push(...collectFormInputs(nested as Block[]));
+      }
     }
   }
   return inputs;

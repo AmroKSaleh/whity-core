@@ -387,7 +387,10 @@ jobs:
       # documented local invocation already uses, so a clean local run no
       # longer disagrees with CI.
       - name: Run PHPStan
-        run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=1G
+        # `ops` is in the list because ops/health-watch-healthcheck.php is a
+        # container HEALTHCHECK: a probe that fatals is a probe that reports
+        # nothing, and nothing was analysing it (WC-766).
+        run: vendor/bin/phpstan analyse src tests plugins sdk ops --memory-limit=1G
 
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
@@ -417,6 +420,22 @@ jobs:
       # that would fire on the intended design of nearly every plugin table.
       - name: Undeclared-reference guard (in-tree plugins)
         run: php scripts/ci-undeclared-reference-guard.php
+
+      # Database-boolean guard (#891): fail CI on a boolean read whose answer
+      # depends on how the driver spelled it. The same BOOLEAN column arrives
+      # as bool(false), '0', 'f', or — from a `::text` projection — 'false',
+      # and `(bool) 'false'` is TRUE, so the cast reports every row as true
+      # instead of failing. #891 found five such casts on memberships.is_primary
+      # alone, one of them gating the 409 that refuses to remove a primary
+      # membership.
+      #
+      # It knows which columns are booleans by PARSING THE MIGRATIONS, so it
+      # cannot fall behind the schema, and it derives its two common exemptions
+      # (request bodies, `SELECT 1`/`COUNT(` existence probes) rather than
+      # demanding an annotation for them — see the scanner's header for why a
+      # guard that fires on correct code is worse than no guard at all.
+      - name: Database-boolean guard
+        run: php scripts/ci-db-bool-guard.php
 
       # Vendored-SDK parity guard (#849): the Tauri desktop template carries its
       # own copy of sdk/src, because a device boots from a hand-rolled PSR-4

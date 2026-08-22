@@ -20,6 +20,8 @@
  *   roles.description = Manage roles and their permissions
  *   roles.error.load = Failed to fetch roles
  *   roles.header.create = Create Role
+ *   roles.scope.global = Global
+ *   roles.scope.global.hint = Shared by every tenant on this deployment. Editing it changes it everywhere.
  *   roles.searchPlaceholder = Search roles…
  *   roles.table.description = Description
  *   roles.table.name = Name
@@ -40,6 +42,7 @@
 import { useEffect, useState } from 'react';
 import { PageHeader } from '@amroksaleh/ui/page-header';
 import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,
@@ -68,6 +71,8 @@ export function RolesScreen({
   can,
   t: injectedT,
   onNotify,
+  onOpenRecord,
+  scope,
   className,
 }: RolesScreenProps) {
   const t: RolesTranslate = injectedT ?? identityTranslate;
@@ -124,7 +129,15 @@ export function RolesScreen({
     setIsPermissionsPanelOpen(true);
   };
 
+  // #882: with a record-page seam wired the host navigates; without one the
+  // edit MODAL opens exactly as before. Both paths are live on purpose — the
+  // record page is additive, and reverting it is deleting one prop at one call
+  // site rather than restoring a deleted component.
   const handleEditClick = (role: Role) => {
+    if (onOpenRecord) {
+      onOpenRecord(role);
+      return;
+    }
     setSelectedRole(role);
     setIsEditModalOpen(true);
   };
@@ -161,6 +174,47 @@ export function RolesScreen({
       header: t('roles.table.name', 'Name'),
       enableSorting: true,
       enableColumnFilter: true,
+      // Two things live in this cell.
+      //
+      // #882: the row's own name opens the record — the affordance a list gets
+      // once its records have addresses. Only when the host supplied the seam;
+      // otherwise the name stays the plain accessor value it was.
+      //
+      // #886: a GLOBAL base role is marked HERE, next to the name, because the
+      // list is where the action starts. The record page has carried a badge
+      // since #885, but by the time an operator is on the record page they have
+      // already decided which role to change. `role.global`, not
+      // `!role.manageable`: for a tenant-0 operator every role is manageable, so
+      // the flag that gates the Edit action cannot also be the flag that says
+      // "this one is shared by everybody" — and tenant-0 is the only caller who
+      // can actually perform that edit.
+      cell: (role) => (
+        <span className="flex items-center gap-2">
+          {onOpenRecord ? (
+            <button
+              type="button"
+              onClick={() => onOpenRecord(role)}
+              className="text-start font-medium text-primary underline-offset-4 hover:underline"
+            >
+              {role.name}
+            </button>
+          ) : (
+            <span className="font-medium">{role.name}</span>
+          )}
+          {role.global && (
+            <Badge
+              variant="warning"
+              data-testid="role-row-global-badge"
+              title={t(
+                'roles.scope.global.hint',
+                'Shared by every tenant on this deployment. Editing it changes it everywhere.'
+              )}
+            >
+              {t('roles.scope.global', 'Global')}
+            </Badge>
+          )}
+        </span>
+      ),
     },
     {
       accessorKey: 'description',
@@ -188,7 +242,11 @@ export function RolesScreen({
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm">
+          {/* Named explicitly: an icon-only trigger had no accessible name at
+              all, and #882 puts a SECOND button in the row (the name, which
+              opens the record) — so "the button in this row" stopped being
+              unambiguous for a screen reader and for a test alike. */}
+          <Button variant="ghost" size="icon-sm" aria-label={t('ui.table.actions', 'Actions')}>
             <IconMenu2 size={16} />
           </Button>
         </DropdownMenuTrigger>
@@ -289,6 +347,7 @@ export function RolesScreen({
       <CreateRoleModal
         isOpen={isCreateModalOpen}
         initial={cloneInitial}
+        scope={scope}
         adapter={adapter}
         t={t}
         onNotify={onNotify}

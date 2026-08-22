@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Identity;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Repository for the `identity_providers` table (WC-e6287).
@@ -45,6 +46,8 @@ final class IdentityProviderRepository
         // a TRUE/FALSE literal — portable across Postgres + the SQLite test shim.
         // Binding an int/PHP-bool to a PG boolean column is the classic 42804 trap
         // (and PHP false binds as '' which PG rejects), so avoid it entirely.
+        // @db-bool-ignore: write path — $data is the caller's API payload being
+        // turned into a SQL literal, not a value read back from the column.
         $enabledLiteral = ((bool) ($data['enabled'] ?? true)) ? 'TRUE' : 'FALSE';
 
         $stmt = $this->db->prepare(
@@ -154,6 +157,7 @@ final class IdentityProviderRepository
         // `enabled` (controlled boolean) inlined as a TRUE/FALSE literal — portable,
         // and avoids the PG boolean-bind trap (see insert()).
         if (array_key_exists('enabled', $data)) {
+            // @db-bool-ignore: write path — see insert(); $data is the API payload.
             $sets[] = 'enabled = ' . ((bool) $data['enabled'] ? 'TRUE' : 'FALSE');
         }
         if ($sets === []) {
@@ -205,14 +209,16 @@ final class IdentityProviderRepository
         ];
     }
 
-    /**
-     * Coerce a DB boolean to PHP bool across drivers. PDO_pgsql returns a boolean
-     * column as the STRING 't'/'f' (and `(bool) 'f' === true`), while the SQLite
-     * shim returns '1'/'0' — so a naive `(bool)` cast reports every Postgres row
-     * as enabled. Match the canonical true-representations explicitly.
+        /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
      */
     private static function toBool(mixed $value): bool
     {
-        return in_array((string) $value, ['1', 't', 'true'], true);
+        return DbBool::of($value);
     }
 }

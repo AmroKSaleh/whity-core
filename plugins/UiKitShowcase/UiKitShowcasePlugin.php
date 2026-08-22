@@ -110,13 +110,17 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Four demo endpoints (WC-232 + WC-236 + WC-240). All are gated on `uikit:view`
-     * (the single existing permission — no new permission or migration).
+     * The demo endpoints (WC-232 + WC-236 + WC-240 + #909). All are DB-free
+     * fixtures, and all but one are gated on `uikit:view`.
      *
-     * GET /api/uikit/demo/rows        — static fixture collection (SP2 data-bound demos)
-     * GET /api/uikit/demo/metric      — static fixture metric (SP2 data-bound stat demo)
-     * GET /api/uikit/demo/chart-rows  — static fixture series (SP4 chart demo)
-     * POST /api/uikit/demo/echo       — interactive echo for SP3 form + actionButton demos
+     * GET  /api/uikit/demo/rows        — static fixture collection (SP2 data-bound demos)
+     * GET  /api/uikit/demo/rows/{name} — one record (#883 dataRecord demo)
+     * PUT  /api/uikit/demo/rows/{name} — the WRITE route behind the #909 accessGate demo,
+     *                                    gated on `uikit:manage`, which is declared and
+     *                                    never granted so the gate refuses for real
+     * GET  /api/uikit/demo/metric      — static fixture metric (SP2 data-bound stat demo)
+     * GET  /api/uikit/demo/chart-rows  — static fixture series (SP4 chart demo)
+     * POST /api/uikit/demo/echo        — interactive echo for SP3 form + actionButton demos
      *
      * @inheritDoc
      */
@@ -135,6 +139,52 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'responses' => [
                         200 => 'UiKitDemoRowsResponse',
                         403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+            // #883: the RECORD endpoint behind the `dataRecord` demo — one
+            // resource, not a collection. Its payload deliberately carries
+            // caller-permission flags (`manageable`, `canEdit`) alongside the
+            // record's own facts, because that is what a real endpoint returns
+            // and it is the exact shape #895 went wrong on. The block
+            // declaration names neither of them, and cannot: they are refused
+            // as facts by the validator and never published by the renderer.
+            [
+                'method' => 'GET',
+                'path' => '/api/uikit/demo/rows/{name}',
+                'handler' => [$this, 'demoRecord'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo single record for the record-bound block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoRecordResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+            // #909: the WRITE route behind the `accessGate` demo. Gated on
+            // `uikit:manage`, which the plugin DECLARES and deliberately never
+            // GRANTS — so on a stock install the gate refuses for everybody,
+            // including the platform admin, and the Record tab renders its
+            // read-only branch live rather than describing one. Grant
+            // `uikit:manage` to a role and the same tree renders the editor
+            // instead, with nothing in the declaration changing.
+            [
+                'method' => 'PUT',
+                'path' => '/api/uikit/demo/rows/{name}',
+                'handler' => [$this, 'demoRecordUpdate'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:manage',
+                'schema' => [
+                    'summary' => 'Demo single-record write, behind a permission nothing grants',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoRecordResponse',
+                        403 => ['description' => 'Missing uikit:manage permission'],
                     ],
                     'components' => self::demoComponents(),
                 ],
@@ -282,6 +332,69 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 ['name' => 'Camille Dupont', 'role' => 'Viewer'],
             ],
         ]);
+    }
+
+    /**
+     * Handle GET /api/uikit/demo/rows/{name} (requires uikit:view).
+     *
+     * Returns ONE static fixture record for the `dataRecord` demo. No PDO, no
+     * side effects.
+     *
+     * The payload carries `manageable` and `canEdit` ON PURPOSE. A real record
+     * endpoint answers both questions at once — what the record IS, and what
+     * THIS caller may do to it — and #895 is what happens when a page reads the
+     * second as the first. The showcase declaration names four facts and
+     * neither flag, so this fixture is also the live proof that a caller flag
+     * present in the payload is unreachable from the tree.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response One static demo record.
+     */
+    public function demoRecord(Request $request, array $params = []): Response
+    {
+        $name = $params['name'] ?? 'Anika Patel';
+
+        $records = [
+            'Anika Patel' => ['role' => 'Administrator', 'status' => 'Active', 'joined' => '2024-03-11'],
+            'Bjorn Larsen' => ['role' => 'Editor', 'status' => 'Active', 'joined' => '2024-07-02'],
+            'Camille Dupont' => ['role' => 'Viewer', 'status' => 'Invited', 'joined' => '2025-01-19'],
+        ];
+
+        $record = $records[$name] ?? $records['Anika Patel'];
+
+        return Response::json([
+            'data' => [
+                'name' => \array_key_exists($name, $records) ? $name : 'Anika Patel',
+                'role' => $record['role'],
+                'status' => $record['status'],
+                'joined' => $record['joined'],
+                // Caller decisions, not record facts. Deliberately present.
+                'manageable' => true,
+                'canEdit' => true,
+            ],
+        ]);
+    }
+
+    /**
+     * Handle PUT /api/uikit/demo/rows/{name} (requires uikit:manage).
+     *
+     * The write half of the record demo, and DB-free like every other fixture
+     * here — it echoes the record back. What matters is not what it does but
+     * that it EXISTS as a registered route with a gate of its own, because that
+     * is what an `accessGate` asks the host about: the permitted-actions
+     * resolver looks this route up in the live table and evaluates its
+     * `uikit:manage` requirement for the caller. Nothing in the block tree
+     * restates that slug, which is the whole point — re-gate this route and the
+     * page follows without an edit.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response The record, echoed.
+     */
+    public function demoRecordUpdate(Request $request, array $params = []): Response
+    {
+        return $this->demoRecord($request, $params);
     }
 
     /**
@@ -483,7 +596,14 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
      */
     public function getPermissions(): array
     {
-        return ['uikit:view'];
+        // `uikit:manage` is declared and NEVER granted, on purpose (#909). The
+        // Record tab's `accessGate` asks the host whether this caller may PUT
+        // the demo record; with nothing holding `uikit:manage` the honest answer
+        // is no, so the showcase renders a REAL read-only state rather than a
+        // screenshot of one. Grant it to a role and the same tree renders the
+        // editor. A permission with no grant is also the ordinary shape of
+        // "some parts have permissions, not always everything is allowed".
+        return ['uikit:view', 'uikit:manage'];
     }
 
     /**
@@ -606,6 +726,11 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         'label' => 'Workflow',
                         'children' => $this->workflowTab(),
                     ],
+                    [
+                        'type' => 'tab',
+                        'label' => 'Record',
+                        'children' => $this->recordTab(),
+                    ],
                 ],
             ],
         ];
@@ -707,6 +832,382 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         ],
                     ],
                 ],
+            ],
+        ];
+    }
+
+    /**
+     * The "Record" tab (#883): `dataRecord`, `recordFields`, and the `...From`
+     * twins that let a literal leaf bind to a record field.
+     *
+     * This tab is a RECORD PAGE, assembled from nothing but the block
+     * vocabulary — the shape #882 made the platform standard and which, until
+     * this release, could only be hand-written in React. Read top to bottom it
+     * is the whole answer to "can a record page be described?": a master
+     * control names the record, a `dataRecord` fetches it and publishes it, the
+     * header states facts about it, a description list shows its fields, a
+     * related collection hangs beside it, and an edit form seeded from the
+     * record sits underneath.
+     *
+     * The `selector` here stands in for the ROUTE. On a record page the record
+     * is named by the URL and the host publishes it under `record`, so the
+     * `dataRecord` would read `/api/uikit/demo/rows/{record}` instead — the
+     * same source template, the same resolver, a different publisher. A
+     * showcase has no record route to be mounted at, so it drives the same
+     * binding from a dropdown, which also demonstrates the master-detail form
+     * of the block.
+     *
+     * WHAT IS DELIBERATELY ABSENT. The endpoint returns `manageable` and
+     * `canEdit`; the declaration names neither, and could not — the validator
+     * refuses either word as a fact, and the renderer publishes only the four
+     * fields named below. That is #895 made unwriteable rather than documented.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function recordTab(): array
+    {
+        return [
+            [
+                'type' => 'heading',
+                'level' => 2,
+                'text' => 'Record — one resource, and everything that says something about it',
+            ],
+            [
+                'type' => 'text',
+                'value' => 'Every other data-bound block assumes a COLLECTION at `source`. `dataRecord` '
+                    . 'fetches ONE resource, publishes the fields it names into the master-detail '
+                    . 'context under its `id`, and owns the loading and failure states for everything '
+                    . 'beneath it. Siblings then read the record through the same `{id}.{field}` '
+                    . 'addressing a row action already publishes with — `recordFields` for a '
+                    . 'description list, and `textFrom` / `valueFrom` / `labelFrom` / `hintFrom` to '
+                    . 'bind a heading, a paragraph, a badge or a stat to the record\'s own values.',
+                'tone' => 'muted',
+            ],
+            [
+                'type' => 'alert',
+                'variant' => 'warning',
+                'title' => 'A record page states facts about the RECORD, never about the CALLER',
+                'body' => 'This demo\'s endpoint returns `manageable` and `canEdit` beside the record\'s '
+                    . 'own fields, exactly as a real one does. Neither can be named in `fields` and '
+                    . 'neither can be bound by a `...From` twin: the contract refuses those words, and '
+                    . 'the renderer publishes only the fields the declaration asked for, so a flag it '
+                    . 'never named is unreachable whatever it is called. #895 is the incident this '
+                    . 'prevents — for a tenant-0 caller `manageable` is true of every record, so a '
+                    . 'page inferring "this is yours" from it was wrong for exactly the one caller who '
+                    . 'could act on it. What the caller may do gates CONTROLS, through a form or '
+                    . 'button `requiredPermission`.',
+            ],
+            [
+                'type' => 'selector',
+                'name' => 'demo-record-pick',
+                'label' => 'Which record',
+                'source' => '/api/uikit/demo/rows',
+                'valueField' => 'name',
+                'labelField' => 'name',
+                'placeholder' => 'Pick a record...',
+            ],
+            [
+                'type' => 'dataRecord',
+                'id' => 'demo-record',
+                'source' => '/api/uikit/demo/rows/{demo-record-pick}',
+                'fields' => [
+                    ['field' => 'name', 'label' => 'Name'],
+                    ['field' => 'role', 'label' => 'Role'],
+                    ['field' => 'status', 'label' => 'Status'],
+                    ['field' => 'joined', 'label' => 'Joined'],
+                ],
+                'emptyText' => 'Pick a record above to see it here.',
+                'children' => [
+                    // The header: a title, a badge and a stat, all bound to the
+                    // record rather than to literals. Each keeps its literal as
+                    // the fallback, which is what renders before the fetch
+                    // settles.
+                    [
+                        'type' => 'heading',
+                        'level' => 3,
+                        'text' => 'This record',
+                        'textFrom' => 'demo-record.name',
+                    ],
+                    [
+                        'type' => 'row',
+                        'align' => 'start',
+                        'children' => [
+                            [
+                                'type' => 'badge',
+                                'variant' => 'info',
+                                'label' => 'Role',
+                                'labelFrom' => 'demo-record.role',
+                            ],
+                            [
+                                'type' => 'badge',
+                                'variant' => 'neutral',
+                                'label' => 'Status',
+                                'labelFrom' => 'demo-record.status',
+                            ],
+                        ],
+                    ],
+                    [
+                        'type' => 'grid',
+                        'columns' => 2,
+                        'children' => [
+                            [
+                                'type' => 'stat',
+                                'label' => 'Status',
+                                'value' => 'Unknown',
+                                'valueFrom' => 'demo-record.status',
+                                'hint' => 'since joining',
+                                'hintFrom' => 'demo-record.joined',
+                            ],
+                            [
+                                'type' => 'card',
+                                'title' => 'recordFields',
+                                'description' => 'Every fact the record declared, under the labels declared beside them.',
+                                'children' => [
+                                    ['type' => 'recordFields', 'from' => 'demo-record'],
+                                ],
+                            ],
+                        ],
+                    ],
+                    [
+                        'type' => 'card',
+                        'title' => 'recordFields (a subset)',
+                        'description' => 'The same record, two of its fields, in the order asked for.',
+                        'children' => [
+                            [
+                                'type' => 'recordFields',
+                                'from' => 'demo-record',
+                                'fields' => ['status', 'role'],
+                            ],
+                        ],
+                    ],
+                    [
+                        'type' => 'text',
+                        'value' => 'No role resolved yet.',
+                        'valueFrom' => 'demo-record.role',
+                        'tone' => 'muted',
+                    ],
+                    // The edit affordance a record page carries, seeded from the
+                    // record the page is about. `defaultFrom` is PLUMBING rather
+                    // than a statement, so it is not fact-guarded — the server
+                    // re-validates whatever is submitted.
+                    [
+                        'type' => 'card',
+                        'title' => 'The edit form, seeded from the record',
+                        'description' => 'A record page is a form WITH context, which is the half a modal cannot carry.',
+                        'children' => [
+                            [
+                                'type' => 'form',
+                                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                                'requiredPermission' => 'uikit:view',
+                                'children' => [
+                                    [
+                                        'type' => 'textInput',
+                                        'name' => 'name',
+                                        'label' => 'Name',
+                                        'required' => true,
+                                        'defaultFrom' => 'demo-record.name',
+                                    ],
+                                    [
+                                        'type' => 'textInput',
+                                        'name' => 'role',
+                                        'label' => 'Role',
+                                        'defaultFrom' => 'demo-record.role',
+                                    ],
+                                    ['type' => 'submitButton', 'label' => 'Save'],
+                                ],
+                            ],
+                        ],
+                    ],
+                    // ---- #909: the READ-ONLY STATE, and the three-state shape ----
+                    // Everything above states facts about the record. This
+                    // states what the CALLER may do to it, which is the half
+                    // #883 could not express and the reason a described record
+                    // page was not allowed to replace the hand-built one.
+                    //
+                    // Read the nesting outside in and it is the three states:
+                    //
+                    //   HIDDEN     the outer gate asks whether the caller may
+                    //              GET the record at all. It declares no
+                    //              `otherwise`, so a caller who may not read it
+                    //              sees nothing here — not an error, not an
+                    //              empty panel.
+                    //   READ-ONLY  the inner gate's `otherwise`: a description
+                    //              list plus a notice naming the gate that
+                    //              refused. This is what renders on a stock
+                    //              install, because `uikit:manage` is declared
+                    //              and never granted.
+                    //   EDITABLE   the inner gate's `children`: the form. Grant
+                    //              `uikit:manage` and it appears, with nothing
+                    //              in this declaration changing.
+                    //
+                    // Nesting is also how "which gate refused" stays singular:
+                    // an outer gate that refuses never renders the inner one, so
+                    // exactly one refusal is ever on screen — #897's "first
+                    // refusal wins", structurally rather than by convention.
+                    [
+                        'type' => 'accessGate',
+                        'id' => 'demo-record-readable',
+                        // A GET check: "may I see this at all?". The endpoint is
+                        // the same templated record path the `dataRecord` above
+                        // fetches, so the gate and the fetch ask about the same
+                        // resource by construction.
+                        'check' => ['method' => 'GET', 'endpoint' => '/api/uikit/demo/rows/{demo-record-pick}'],
+                        'children' => [
+                            [
+                                'type' => 'accessGate',
+                                'id' => 'demo-record-writable',
+                                // A WRITE check. Note what is NOT here: the
+                                // permission slug. The host reads `uikit:manage`
+                                // off the ROUTE this names and evaluates it with
+                                // the same RoleChecker calls RbacMiddleware
+                                // makes, so what the page shows and what the
+                                // middleware admits are one computation.
+                                'check' => ['method' => 'PUT', 'endpoint' => '/api/uikit/demo/rows/{demo-record-pick}'],
+                                'children' => [
+                                    [
+                                        'type' => 'card',
+                                        'title' => 'Editable — the caller may write this record',
+                                        'description' => 'Rendered only when the host says PUT would be admitted.',
+                                        'children' => [
+                                            [
+                                                'type' => 'form',
+                                                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                                                'requiredPermission' => 'uikit:view',
+                                                'children' => [
+                                                    [
+                                                        'type' => 'textInput',
+                                                        'name' => 'role',
+                                                        'label' => 'Role',
+                                                        'defaultFrom' => 'demo-record.role',
+                                                    ],
+                                                    ['type' => 'submitButton', 'label' => 'Save'],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                                'otherwise' => [
+                                    [
+                                        'type' => 'card',
+                                        'title' => 'Read-only — a different rendering, not a disabled form',
+                                        'description' => 'The record\'s own values as a description list.',
+                                        'children' => [
+                                            [
+                                                'type' => 'alert',
+                                                'variant' => 'info',
+                                                'title' => 'Which gate refused',
+                                                'body' => 'Changing this record needs the `uikit:manage` permission, '
+                                                    . 'which this installation declares and never grants. The page is '
+                                                    . 'not guessing: it asked the host whether PUT '
+                                                    . '/api/uikit/demo/rows/... would be admitted for you, and the host '
+                                                    . 'answered from the route table. Grant `uikit:manage` to a role and '
+                                                    . 'the editor above appears in place of this panel, with nothing in '
+                                                    . 'the block declaration changing.',
+                                            ],
+                                            ['type' => 'recordFields', 'from' => 'demo-record'],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                            // A condition on an ORDINARY block, not on a gate's
+                            // slot. `visibleWhen` is carried by every block type
+                            // now, which is what lets a single gate declared once
+                            // decide a badge here and a column there without
+                            // wrapping each of them in a container.
+                            [
+                                'type' => 'badge',
+                                'variant' => 'warning',
+                                'label' => 'Read-only for you',
+                                'visibleWhen' => ['access' => 'demo-record-writable', 'equals' => false],
+                            ],
+                            // A CONDITIONAL NOTICE keyed on the record itself —
+                            // the third shell property #883 could not express.
+                            // `from` reads the published record through the same
+                            // `{id}.{field}` addressing every other binding uses.
+                            [
+                                'type' => 'alert',
+                                'variant' => 'warning',
+                                'title' => 'This person has not accepted their invitation',
+                                'body' => 'Shown only while the record\'s own `status` is `Invited` — a notice '
+                                    . 'conditioned on a FACT, beside a rendering conditioned on ACCESS. They are '
+                                    . 'different subjects of the same facet and neither can be mistaken for the other.',
+                                'visibleWhen' => ['from' => 'demo-record.status', 'equals' => 'Invited'],
+                            ],
+                        ],
+                    ],
+                    // A related collection, which is the other half a record
+                    // page carries and a modal has nowhere to put.
+                    [
+                        'type' => 'card',
+                        'title' => 'A related collection',
+                        'description' => 'Record pages hang related data beside the record; overlays have nowhere to put it.',
+                        'children' => [
+                            [
+                                'type' => 'dataTable',
+                                'source' => '/api/uikit/demo/rows',
+                                'columns' => [
+                                    ['key' => 'name', 'label' => 'Name'],
+                                    ['key' => 'role', 'label' => 'Role'],
+                                ],
+                                'emptyText' => 'Nobody else here.',
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'type' => 'code',
+                'language' => 'php',
+                'content' => "['type' => 'dataRecord',\n"
+                    . "    'id' => 'demo-record',\n"
+                    . "    // {token} resolves from a selector, an opened row, or {record} —\n"
+                    . "    // the name a host seeds with the record its ROUTE is about.\n"
+                    . "    'source' => '/api/uikit/demo/rows/{demo-record-pick}',\n"
+                    . "    // The facts the record STATES. Only these are published into\n"
+                    . "    // context; 'manageable' and 'canEdit' are in the payload and are\n"
+                    . "    // unreachable from the tree. Naming either here is REFUSED (#895).\n"
+                    . "    'fields' => [\n"
+                    . "        ['field' => 'name',   'label' => 'Name'],\n"
+                    . "        ['field' => 'role',   'label' => 'Role'],\n"
+                    . "        ['field' => 'status', 'label' => 'Status'],\n"
+                    . "        ['field' => 'joined', 'label' => 'Joined'],\n"
+                    . "    ],\n"
+                    . "    'children' => [\n"
+                    . "        ['type' => 'heading', 'level' => 3, 'text' => 'This record',\n"
+                    . "            'textFrom' => 'demo-record.name'],\n"
+                    . "        ['type' => 'recordFields', 'from' => 'demo-record'],\n"
+                    . "        ['type' => 'recordFields', 'from' => 'demo-record',\n"
+                    . "            'fields' => ['status', 'role']],\n"
+                    . "    ],\n"
+                    . "]",
+            ],
+            [
+                'type' => 'code',
+                'language' => 'php',
+                'content' => "// #909: hidden / read-only / editable, as two nested gates.\n"
+                    . "['type' => 'accessGate',\n"
+                    . "    'id'    => 'demo-record-readable',\n"
+                    . "    // A CONCRETE REQUEST, never a permission slug: the host reads the\n"
+                    . "    // gate off the ROUTE this names, so the page cannot disagree with\n"
+                    . "    // the middleware and there is no second slug to re-gate.\n"
+                    . "    'check' => ['method' => 'GET', 'endpoint' => '/api/uikit/demo/rows/{demo-record-pick}'],\n"
+                    . "    // No 'otherwise' => a caller who may not read it sees NOTHING.\n"
+                    . "    'children' => [\n"
+                    . "        ['type' => 'accessGate',\n"
+                    . "            'id'    => 'demo-record-writable',\n"
+                    . "            'check' => ['method' => 'PUT', 'endpoint' => '/api/uikit/demo/rows/{demo-record-pick}'],\n"
+                    . "            // The two renderings, declared TOGETHER so they cannot drift.\n"
+                    . "            'children'  => [/* the form */],\n"
+                    . "            'otherwise' => [/* a <dl> and the reason */]],\n"
+                    . "        // Every block carries the facet, so one gate decides many things.\n"
+                    . "        ['type' => 'badge', 'variant' => 'warning', 'label' => 'Read-only for you',\n"
+                    . "            'visibleWhen' => ['access' => 'demo-record-writable', 'equals' => false]],\n"
+                    . "        // ...and a notice conditioned on a FACT rather than on access.\n"
+                    . "        ['type' => 'alert', 'variant' => 'warning', 'title' => 'Not accepted yet',\n"
+                    . "            'body' => '...',\n"
+                    . "            'visibleWhen' => ['from' => 'demo-record.status', 'equals' => 'Invited']],\n"
+                    . "    ],\n"
+                    . "]",
             ],
         ];
     }
@@ -1844,6 +2345,24 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'data' => [
                         'type' => 'array',
                         'items' => ['$ref' => '#/components/schemas/UiKitDemoRow'],
+                    ],
+                ],
+            ],
+            'UiKitDemoRecordResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'object',
+                        'required' => ['name', 'role', 'status', 'joined', 'manageable', 'canEdit'],
+                        'properties' => [
+                            'name' => ['type' => 'string'],
+                            'role' => ['type' => 'string'],
+                            'status' => ['type' => 'string'],
+                            'joined' => ['type' => 'string'],
+                            'manageable' => ['type' => 'boolean'],
+                            'canEdit' => ['type' => 'boolean'],
+                        ],
                     ],
                 ],
             ],

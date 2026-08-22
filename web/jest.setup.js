@@ -50,3 +50,29 @@ if (typeof global.Response === 'undefined') {
     }
   };
 }
+
+// Polyfill the Pointer Events API surface Radix's Select uses. jsdom implements
+// no pointer capture at all, and Radix calls `hasPointerCapture` DIRECTLY (not
+// optionally), so a test that opens a Select throws before it can assert
+// anything. The user record page (#882) picks a role and an organisational unit
+// through Select, and testing "which values does Save actually send" means
+// operating those pickers rather than trusting them.
+//
+// `scrollIntoView` is the same class of gap: jsdom has no layout, and Radix
+// scrolls the highlighted item into view when the listbox opens.
+if (typeof Element !== 'undefined') {
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = function hasPointerCapture() {
+      return false;
+    };
+  }
+  if (!Element.prototype.setPointerCapture) {
+    Element.prototype.setPointerCapture = function setPointerCapture() {};
+  }
+  if (!Element.prototype.releasePointerCapture) {
+    Element.prototype.releasePointerCapture = function releasePointerCapture() {};
+  }
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = function scrollIntoView() {};
+  }
+}

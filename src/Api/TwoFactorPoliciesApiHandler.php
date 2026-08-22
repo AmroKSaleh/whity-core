@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 use Whity\Auth\TwoFactorPoliciesRepository;
 use Whity\Auth\TwoFactorPolicyResolver;
 use Whity\Core\Audit\AuditContext;
@@ -381,19 +382,16 @@ final class TwoFactorPoliciesApiHandler
         return array_keys($visited);
     }
 
-    /**
-     * Portable DB-boolean coercion: PG returns 't'/'f' strings (and (bool)'f' is
-     * TRUE), SQLite 0/1, in-process a real bool.
+        /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
      */
     private static function dbTruthy(mixed $value): bool
     {
-        if (is_bool($value)) {
-            return $value;
-        }
-        if (is_int($value)) {
-            return $value !== 0;
-        }
-
-        return !in_array(strtolower(trim((string) $value)), ['', '0', 'f', 'false', 'no'], true);
+        return DbBool::of($value);
     }
 }

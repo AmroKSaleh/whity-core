@@ -1154,6 +1154,15 @@
                         }
                     },
                     {
+                        "name": "target_id",
+                        "in": "query",
+                        "required": false,
+                        "description": "Filter by target id \u2014 the history of ONE record. Normally paired with target_type; alone it matches that id across every target type.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
                         "name": "from",
                         "in": "query",
                         "required": false,
@@ -8838,6 +8847,15 @@
                         }
                     },
                     {
+                        "name": "target_id",
+                        "in": "query",
+                        "required": false,
+                        "description": "Filter by target id \u2014 the caller's own entries about ONE record",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
                         "name": "from",
                         "in": "query",
                         "required": false,
@@ -15850,7 +15868,7 @@
             },
             "post": {
                 "operationId": "post_api_v1_roles",
-                "summary": "Create a role with optional permission grants",
+                "summary": "Create a role, owned by the caller's tenant unless a system caller names another",
                 "tags": [
                     "roles"
                 ],
@@ -15876,7 +15894,7 @@
                         }
                     },
                     "400": {
-                        "description": "Validation failed",
+                        "description": "Validation failed, or tenant_id and global both sent",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -15896,7 +15914,7 @@
                         }
                     },
                     "403": {
-                        "description": "Insufficient permissions",
+                        "description": "Only the system tenant may name a target tenant or create a global role",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -15906,7 +15924,7 @@
                         }
                     },
                     "404": {
-                        "description": "Not found",
+                        "description": "The named target tenant does not exist",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16221,6 +16239,110 @@
                     },
                     "409": {
                         "description": "Role name already exists",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/roles/{id}/assignments": {
+            "get": {
+                "operationId": "get_api_v1_roles_id_assignments",
+                "summary": "List who holds this role, newest grant first (total = headcount)",
+                "tags": [
+                    "roles"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "description": "1-indexed page (default 1)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 25, max 100)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The role's holders with pagination",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RoleAssignmentListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Role not found or not visible",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -20725,6 +20847,162 @@
                 ]
             }
         },
+        "/api/v1/uikit/demo/rows/{name}": {
+            "get": {
+                "operationId": "get_api_v1_uikit_demo_rows_name",
+                "summary": "Demo single record for the record-bound block example",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoRecordResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoRecordResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:view permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "operationId": "put_api_v1_uikit_demo_rows_name",
+                "summary": "Demo single-record write, behind a permission nothing grants",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoRecordResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoRecordResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:manage permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/uikit/demo/tasks": {
             "get": {
                 "operationId": "get_api_v1_uikit_demo_tasks",
@@ -21182,6 +21460,90 @@
                     },
                     "404": {
                         "description": "User not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "get": {
+                "operationId": "get_api_v1_users_id",
+                "summary": "Read one user",
+                "tags": [
+                    "users"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The user",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User not found in this tenant",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -23534,7 +23896,10 @@
                     "version": {
                         "type": "string"
                     },
-                    "worker_count": {
+                    "sdk_version": {
+                        "type": "string"
+                    },
+                    "workers_active": {
                         "type": "integer"
                     },
                     "uptime_seconds": {
@@ -23551,7 +23916,8 @@
                 "required": [
                     "status",
                     "version",
-                    "worker_count",
+                    "sdk_version",
+                    "workers_active",
                     "uptime_seconds",
                     "db_connected",
                     "memory_usage_mb"
@@ -25548,6 +25914,7 @@
                     "method": {
                         "type": "string",
                         "enum": [
+                            "GET",
                             "POST",
                             "PUT",
                             "PATCH",
@@ -26502,6 +26869,9 @@
                     },
                     "manageable": {
                         "type": "boolean"
+                    },
+                    "global": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
@@ -26511,7 +26881,69 @@
                     "parent_id",
                     "created_at",
                     "permissionCount",
-                    "manageable"
+                    "manageable",
+                    "global"
+                ]
+            },
+            "RoleAssignment": {
+                "type": "object",
+                "properties": {
+                    "membershipId": {
+                        "type": "integer"
+                    },
+                    "profileId": {
+                        "type": "integer"
+                    },
+                    "tenantId": {
+                        "type": "integer"
+                    },
+                    "displayName": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "ouId": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "isPrimary": {
+                        "type": "boolean"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "assignedAt": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "membershipId",
+                    "profileId",
+                    "tenantId",
+                    "displayName",
+                    "isPrimary",
+                    "status"
+                ]
+            },
+            "RoleAssignmentListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/RoleAssignment"
+                        }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
+                    }
+                },
+                "required": [
+                    "data",
+                    "pagination"
                 ]
             },
             "RoleCreateRequest": {
@@ -26535,6 +26967,12 @@
                                 }
                             ]
                         }
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "global": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
@@ -26558,6 +26996,13 @@
                             },
                             "permissionCount": {
                                 "type": "integer"
+                            },
+                            "tenantId": {
+                                "type": "integer",
+                                "nullable": true
+                            },
+                            "global": {
+                                "type": "boolean"
                             }
                         },
                         "required": [
@@ -26591,6 +27036,12 @@
                         "type": "string",
                         "nullable": true
                     },
+                    "manageable": {
+                        "type": "boolean"
+                    },
+                    "global": {
+                        "type": "boolean"
+                    },
                     "permissions": {
                         "type": "array",
                         "items": {
@@ -26604,6 +27055,8 @@
                     "description",
                     "parent_id",
                     "created_at",
+                    "manageable",
+                    "global",
                     "permissions"
                 ]
             },
@@ -28761,6 +29214,45 @@
                             },
                             "hint": {
                                 "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "UiKitDemoRecordResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "required": [
+                            "name",
+                            "role",
+                            "status",
+                            "joined",
+                            "manageable",
+                            "canEdit"
+                        ],
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "role": {
+                                "type": "string"
+                            },
+                            "status": {
+                                "type": "string"
+                            },
+                            "joined": {
+                                "type": "string"
+                            },
+                            "manageable": {
+                                "type": "boolean"
+                            },
+                            "canEdit": {
+                                "type": "boolean"
                             }
                         }
                     }

@@ -13,6 +13,7 @@ use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Http\JsonBody;
 use PDO;
+use Whity\Core\Db\DbBool;
 use PDOStatement;
 
 /**
@@ -290,10 +291,10 @@ class AuthHandler
 
         // Unverified emails must never authenticate (ADR 0005 §2).
         //
-        // Use dbTruthy(), NOT (bool)/empty(): on PostgreSQL `verified` comes back
-        // as the string "f", and (bool)"f" === true, which would SKIP this guard
-        // and let unverified emails in on production Postgres (the SQLite tests
-        // never caught it because SQLite returns 0/1).
+        // Use dbTruthy(), NOT (bool)/empty(): a BOOLEAN reaches PHP in several
+        // spellings depending on the driver and STRINGIFY_FETCHES, and a
+        // text-spelled 'false' casts to TRUE — which would SKIP this guard and
+        // let unverified emails in. {@see DbBool} records the measured set.
         //
         // Return a GENERIC 401 "Invalid credentials" (NOT a distinct 403
         // "not verified"): a verification-specific error is a user-enumeration
@@ -1097,19 +1098,6 @@ class AuthHandler
     }
 
     /**
-     * Coerce a DB boolean column to a real bool across drivers.
-     *
-     * CRITICAL: pdo_pgsql returns the STRING "f" for a false boolean, and PHP's
-     * (bool) cast — and empty() — treat the non-empty string "f" as TRUE. Using
-     * a naive `(bool)`/`!empty()` on a Postgres boolean therefore inverts the
-     * guard (e.g. an UNVERIFIED email would be treated as verified). This mirrors
-     * the coercion in migration 035 and {@see RelationRepository::toBool()}:
-     * SQLite yields 0/1 (int), Postgres yields 't'/'f' (string), and an
-     * in-process seed may hand back a native bool — all three are normalised here.
-     *
-     * @param mixed $value Raw column value from a boolean field.
-     */
-    /**
      * Normalize an email to the stored canonical form: LOWER(TRIM()).
      *
      * profile_emails stores case-folded, trimmed addresses (migration 035 +
@@ -1123,17 +1111,17 @@ class AuthHandler
         return strtolower(trim($email));
     }
 
+    /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
+     */
     private static function dbTruthy(mixed $value): bool
     {
-        if (is_bool($value)) {
-            return $value;
-        }
-        if (is_int($value)) {
-            return $value !== 0;
-        }
-        $normalised = strtolower(trim((string) $value));
-
-        return !in_array($normalised, ['', '0', 'f', 'false', 'no'], true);
+        return DbBool::of($value);
     }
 
     /**

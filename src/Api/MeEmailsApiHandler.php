@@ -6,6 +6,7 @@ namespace Whity\Api;
 
 use Whity\Auth\TokenValidator;
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Db\DbBool;
 use Whity\Core\Identity\EmailVerificationProvider;
 use Whity\Core\Identity\ProfileEmailRepository;
 use Whity\Core\RateLimit\ClientIp;
@@ -269,8 +270,8 @@ final class MeEmailsApiHandler
         return [
             'id' => (int) $row['id'],
             'email' => (string) $row['email'],
-            'verified' => (bool) $row['verified'],
-            'isPrimary' => (bool) $row['is_primary'],
+            'verified' => DbBool::of($row['verified']),
+            'isPrimary' => DbBool::of($row['is_primary']),
             'createdAt' => (string) $row['created_at'],
         ];
     }

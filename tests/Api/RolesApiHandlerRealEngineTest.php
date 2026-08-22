@@ -61,12 +61,16 @@ final class RolesApiHandlerRealEngineTest extends TestCase
             "INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (2, 'test-tenant-b', datetime('now'))"
         );
         MockRequestFactory::setTestTenant(1);
+        // Pagination is read from $_GET first and the path query second, so a
+        // stray superglobal left by another test would silently re-page these.
+        $_GET = [];
     }
 
     protected function tearDown(): void
     {
         RoleChecker::clearCache();
         TenantContext::reset();
+        $_GET = [];
     }
 
     // ==================== Defect 1: id | name resolution ====================
@@ -610,6 +614,206 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $this->assertSame(200, $ok->getStatusCode(), "Tenant 2's name must not block a rename inside tenant 1.");
     }
 
+    // ============ #882: who holds this role (GET /roles/{id}/assignments) ============
+
+    /**
+     * The record page's two questions answered by ONE request: the headcount is
+     * `pagination.total`, and page one — ordered by when the role was granted,
+     * newest first — is the recent-assignment history.
+     */
+    public function testAssignmentsCountHoldersAndOrderNewestGrantFirst(): void
+    {
+        $roleId = $this->seedTenantRole(60, 'Support', 1);
+        $this->seedHolder(701, 'Alice', 'alice@example.test', 1, $roleId, '2026-01-05 09:00:00');
+        $this->seedHolder(702, 'Bob', 'bob@example.test', 1, $roleId, '2026-03-05 09:00:00');
+        $this->seedHolder(703, 'Carol', 'carol@example.test', 1, $roleId, '2026-02-05 09:00:00');
+
+        $response = $this->handler()->assignments(
+            $this->authedRequest('GET', "/api/roles/{$roleId}/assignments"),
+            ['id' => (string) $roleId]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+
+        $this->assertSame(3, $body['pagination']['total'], 'total IS the headcount the record page shows.');
+        $this->assertSame(
+            ['Bob', 'Carol', 'Alice'],
+            array_column($body['data'], 'displayName'),
+            'Newest grant first, so the first row is "who most recently got this role".'
+        );
+        $this->assertSame('bob@example.test', $body['data'][0]['email']);
+        $this->assertSame(702, $body['data'][0]['profileId']);
+        $this->assertSame(1, $body['data'][0]['tenantId']);
+        $this->assertNotNull($body['data'][0]['assignedAt']);
+    }
+
+    /**
+     * A GLOBAL base role is visible to every tenant, so this is the case where a
+     * careless query leaks a headcount — and with it the existence and size of
+     * other tenants. Memberships are tenant-owned; a regular tenant counts only
+     * its own.
+     */
+    public function testAssignmentsNeverCountAnotherTenantsHolders(): void
+    {
+        $this->seedGlobalRole(61, 'global-base');
+        $this->seedHolder(711, 'Ours', 'ours@example.test', 1, 61, '2026-01-01 00:00:00');
+        $this->seedHolder(712, 'Theirs', 'theirs@example.test', 2, 61, '2026-01-02 00:00:00');
+
+        $response = $this->handler()->assignments(
+            $this->authedRequest('GET', '/api/roles/61/assignments'),
+            ['id' => '61']
+        );
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(1, $body['pagination']['total']);
+        $this->assertSame('Ours', $body['data'][0]['displayName']);
+        $this->assertNotContains('Theirs', array_column($body['data'], 'displayName'));
+    }
+
+    /** The SYSTEM tenant counts across tenants, and each row names its own. */
+    public function testSystemTenantSeesHoldersAcrossTenants(): void
+    {
+        $this->seedGlobalRole(62, 'global-base-2');
+        $this->seedHolder(721, 'InOne', 'inone@example.test', 1, 62, '2026-01-01 00:00:00');
+        $this->seedHolder(722, 'InTwo', 'intwo@example.test', 2, 62, '2026-01-02 00:00:00');
+
+        MockRequestFactory::setTestTenant(0);
+
+        $response = $this->handler()->assignments(
+            $this->systemRequest('GET', '/api/roles/62/assignments'),
+            ['id' => '62']
+        );
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(2, $body['pagination']['total']);
+        $this->assertEqualsCanonicalizing([1, 2], array_column($body['data'], 'tenantId'));
+    }
+
+    /**
+     * Same 404 as GET /api/roles/{id} for a role the tenant cannot see, so this
+     * endpoint cannot become a way to probe another tenant's roles by id — a
+     * headcount for a role you are told does not exist is still a disclosure.
+     */
+    public function testAssignmentsForAnInvisibleRoleIs404(): void
+    {
+        $this->seedTenantRole(63, 'OtherTenantsRole', 2);
+
+        $response = $this->handler()->assignments(
+            $this->authedRequest('GET', '/api/roles/63/assignments'),
+            ['id' => '63']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
+     * The page is a slice; the total is the whole headcount. This is the
+     * property that makes "count without fetching every user" true — a client
+     * asking for the five most recent still learns there are twelve.
+     */
+    public function testAssignmentsPaginateWhileTotalStaysTheFullHeadcount(): void
+    {
+        $roleId = $this->seedTenantRole(64, 'Wide', 1);
+        for ($i = 0; $i < 7; $i++) {
+            $this->seedHolder(
+                730 + $i,
+                'Holder' . $i,
+                "holder{$i}@example.test",
+                1,
+                $roleId,
+                sprintf('2026-01-%02d 00:00:00', $i + 1)
+            );
+        }
+
+        $response = $this->handler()->assignments(
+            $this->authedRequest('GET', "/api/roles/{$roleId}/assignments?per_page=2"),
+            ['id' => (string) $roleId]
+        );
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertCount(2, $body['data']);
+        $this->assertSame(7, $body['pagination']['total']);
+        $this->assertSame(4, $body['pagination']['totalPages']);
+    }
+
+    /**
+     * The primary-email row is LEFT JOINed on purpose: somebody with no primary
+     * email still holds the role. An INNER JOIN would drop them from the list
+     * AND from the count, which is the quiet kind of wrong.
+     */
+    public function testAssignmentsIncludeAHolderWithNoPrimaryEmail(): void
+    {
+        $roleId = $this->seedTenantRole(65, 'Emailless', 1);
+        $this->seedHolder(741, 'NoMail', null, 1, $roleId, '2026-01-01 00:00:00');
+
+        $response = $this->handler()->assignments(
+            $this->authedRequest('GET', "/api/roles/{$roleId}/assignments"),
+            ['id' => (string) $roleId]
+        );
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(1, $body['pagination']['total']);
+        $this->assertSame('NoMail', $body['data'][0]['displayName']);
+        $this->assertNull($body['data'][0]['email']);
+    }
+
+    /** A role nobody holds answers zero rather than erroring or 404ing. */
+    public function testAssignmentsForAnUnheldRoleIsAnEmptyList(): void
+    {
+        $roleId = $this->seedTenantRole(66, 'Unused', 1);
+
+        $response = $this->handler()->assignments(
+            $this->authedRequest('GET', "/api/roles/{$roleId}/assignments"),
+            ['id' => (string) $roleId]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame([], $body['data']);
+        $this->assertSame(0, $body['pagination']['total']);
+    }
+
+    // ============ #882: GET /roles/{id} carries `manageable` ============
+
+    /**
+     * A record page reached by URL has no list row to read `manageable` from, so
+     * the detail payload must carry it. A tenant-owned role is writable by its
+     * owner.
+     */
+    public function testGetReportsAnOwnedRoleAsManageable(): void
+    {
+        $roleId = $this->seedTenantRole(67, 'Owned', 1);
+
+        $response = $this->handler()->get(
+            $this->authedRequest('GET', "/api/roles/{$roleId}"),
+            ['id' => (string) $roleId]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertTrue($data['manageable']);
+    }
+
+    /**
+     * The case the flag exists for: a GLOBAL base role is VISIBLE to a tenant
+     * (200, not 404) but not writable by it (WC-110), so the record page must
+     * render read-only rather than a form whose save 404s.
+     */
+    public function testGetReportsAGlobalBaseRoleAsNotManageableByATenant(): void
+    {
+        $this->seedGlobalRole(68, 'global-base-3');
+
+        $response = $this->handler()->get(
+            $this->authedRequest('GET', '/api/roles/68'),
+            ['id' => '68']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), 'Global base roles stay VISIBLE to a tenant.');
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertFalse($data['manageable']);
+    }
+
     // ==================== Helpers ====================
 
     private function handler(): RolesApiHandler
@@ -647,6 +851,65 @@ final class RolesApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, '', NULL, datetime('now'))"
         );
         $stmt->execute([$id, $name]);
+    }
+
+    /**
+     * Seed a role OWNED by a tenant, returning its id (#882 helpers).
+     */
+    private function seedTenantRole(int $id, string $name, int $tenantId): int
+    {
+        $stmt = $this->pdo->prepare(
+            "INSERT OR IGNORE INTO roles (id, name, description, tenant_id, created_at)
+             VALUES (?, ?, '', ?, datetime('now'))"
+        );
+        $stmt->execute([$id, $name, $tenantId]);
+
+        return $id;
+    }
+
+    /**
+     * Seed a profile (optionally with a primary email) holding $roleId in
+     * $tenantId as of $assignedAt — i.e. one row of the assignment history.
+     *
+     * `created_at` is written explicitly rather than defaulted: the ordering
+     * these tests assert is the whole point of the endpoint, and rows inserted
+     * in the same second would order arbitrarily.
+     */
+    private function seedHolder(
+        int $profileId,
+        string $displayName,
+        ?string $email,
+        int $tenantId,
+        int $roleId,
+        string $assignedAt
+    ): void {
+        $profile = $this->pdo->prepare(
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, created_at)
+             VALUES (?, ?, 'x', datetime('now'))"
+        );
+        $profile->execute([$profileId, $displayName]);
+
+        if ($email !== null) {
+            $emailStmt = $this->pdo->prepare(
+                'INSERT OR IGNORE INTO profile_emails (profile_id, email, is_primary, created_at)
+                 VALUES (?, ?, true, datetime(\'now\'))'
+            );
+            $emailStmt->execute([$profileId, $email]);
+        }
+
+        $membership = $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', ?)"
+        );
+        $membership->execute([$profileId, $tenantId, $roleId, $assignedAt]);
+    }
+
+    /** Request carrying a SYSTEM-tenant (id 0) acting user. */
+    private function systemRequest(string $method, string $path): Request
+    {
+        $request = new Request($method, $path, [], '');
+        $request->user = (object) ['user_id' => 1, 'tenant_id' => 0];
+        return $request;
     }
 
     /** How many roles carry this name across every tenant and the global namespace. */

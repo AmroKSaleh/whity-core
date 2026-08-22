@@ -2926,7 +2926,49 @@ class PluginLoader
         // substitutes a concrete value there in either case. Comparing the
         // literal strings would reject a correct declaration for a naming
         // difference the dispatcher does not care about.
-        return strtoupper($method) . ' ' . (string) preg_replace('/\{[^}]*\}/', '{}', $path);
+        return strtoupper($method) . ' ' . self::normalizePathKey($path);
+    }
+
+    /**
+     * The comparison key for a PATH alone (#883): every `{param}` collapsed to
+     * `{}`.
+     *
+     * The path half of {@see normalizeRouteKey()}, split out because a
+     * `dataRecord.source` is matched against the GET-route map, which is keyed
+     * by path with no method in the key.
+     *
+     * @param string $path A route path or a block's `recordPath` template.
+     * @return string The normalized key.
+     */
+    private static function normalizePathKey(string $path): string
+    {
+        return (string) preg_replace('/\{[^}]*\}/', '{}', $path);
+    }
+
+    /**
+     * Whether a `recordPath` source names a GET route this plugin registered,
+     * comparing with route parameters normalized (#883).
+     *
+     * Falls back to the same answer an exact comparison would give for a source
+     * carrying no `{token}` at all, so a singleton record source is judged
+     * exactly as a `dataTable`'s collection source is.
+     *
+     * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission.
+     */
+    private static function matchesRegisteredGetRoute(string $source, array $registeredGetRoutes): bool
+    {
+        if (array_key_exists($source, $registeredGetRoutes)) {
+            return true;
+        }
+
+        $key = self::normalizePathKey($source);
+        foreach (array_keys($registeredGetRoutes) as $registered) {
+            if (self::normalizePathKey((string) $registered) === $key) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -3269,12 +3311,28 @@ class PluginLoader
                 $type = $node['type'] ?? null;
                 if (is_string($type)) {
                     $rule = \Whity\Sdk\Frontend\Blocks\BlockContract::rulesFor($type);
-                    $isDataBound = $rule !== null
-                        && (($rule['props']['source']['type'] ?? null) === 'apiPath');
-                    if ($isDataBound) {
-                        /** @var string $source — guaranteed a valid apiPath by BlockValidator */
+                    $sourceKind = $rule !== null ? ($rule['props']['source']['type'] ?? null) : null;
+                    if ($sourceKind === 'apiPath' || $sourceKind === 'recordPath') {
+                        /** @var string $source — guaranteed a valid apiPath/recordPath by BlockValidator */
                         $source = $node['source'];
-                        if (!array_key_exists($source, $registeredGetRoutes)) {
+                        // #883: a `recordPath` (`dataRecord.source`) may carry
+                        // `{token}` segments the renderer substitutes from the
+                        // master-detail context, so it is compared with route
+                        // parameters normalized — exactly as an inbox action's
+                        // endpoint is, and for the same reason: a declared
+                        // `{record}` and a registered `{id}` name the same
+                        // segment with different words, and the dispatcher does
+                        // not care which word was used. The gate is NOT widened
+                        // by this: the shape still has to be one THIS plugin
+                        // registered, and the concrete path the renderer builds
+                        // is dispatched and permission-checked like any other.
+                        // An `apiPath` keeps its exact-string comparison, which
+                        // is stricter — nothing that validates today starts
+                        // matching by shape.
+                        $owned = $sourceKind === 'apiPath'
+                            ? array_key_exists($source, $registeredGetRoutes)
+                            : self::matchesRegisteredGetRoute($source, $registeredGetRoutes);
+                        if (!$owned) {
                             // Ownership violation — record the offending path
                             // and signal the caller to drop the feature.
                             $dropSource = $source;
@@ -3365,6 +3423,53 @@ class PluginLoader
                         $node['actions'] = $rewrittenActions;
                     }
 
+                    // (c3-e) #909: an `accessGate`'s `check` names the one
+                    // concrete request whose permission the host resolves for the
+                    // caller. Ownership-checked and version-rewritten exactly like
+                    // an inbox action's endpoint, and for the same two reasons: a
+                    // plugin may only ask about routes it actually owns, and the
+                    // permitted-actions resolver matches the CONCRETE path against
+                    // the live route table, so an unversioned endpoint would match
+                    // no route and resolve to "not permitted" — fail-closed, but
+                    // silently, and the gated region would be refused for everyone.
+                    //
+                    // Not permission-pinned, and that is the point of the type:
+                    // the gate declares no permission of its own, so there is no
+                    // second value here to fall out of step with the route.
+                    if ($type === 'accessGate' && isset($node['check']) && is_array($node['check'])) {
+                        $checkMethod = strtoupper((string) ($node['check']['method'] ?? ''));
+                        $checkEndpoint = $node['check']['endpoint'] ?? null;
+                        if (!is_string($checkEndpoint)) {
+                            // Shape is BlockValidator's job and it already ran.
+                            $dropReason = 'accessGate check endpoint is not a string';
+                            return null;
+                        }
+
+                        // GET lives in the path-keyed map (a `check` may carry
+                        // `{token}` segments, so it is compared with route params
+                        // normalized, as a `recordPath` source is); the write verbs
+                        // live in the method+path-keyed one an inbox action uses.
+                        $owned = $checkMethod === 'GET'
+                            ? self::matchesRegisteredGetRoute($checkEndpoint, $registeredGetRoutes)
+                            : array_key_exists(
+                                self::normalizeRouteKey($checkMethod, $checkEndpoint),
+                                $registeredWriteRoutes
+                            );
+
+                        if (!$owned) {
+                            $dropReason = "accessGate check '{$checkMethod} {$checkEndpoint}' is not a route "
+                                . 'this plugin registered';
+                            return null;
+                        }
+
+                        if ($vp !== '') {
+                            $pos = strpos($checkEndpoint, '/', 1);
+                            $node['check']['endpoint'] = $pos === false
+                                ? $checkEndpoint . $vp
+                                : substr($checkEndpoint, 0, $pos) . $vp . substr($checkEndpoint, $pos);
+                        }
+                    }
+
                     if ($endpointSpec !== null) {
                         $key = strtoupper((string) $endpointSpec['method']) . ' ' . (string) $endpointSpec['endpoint'];
                         if (!array_key_exists($key, $registeredActionRoutes)) {
@@ -3390,10 +3495,29 @@ class PluginLoader
                     }
                 }
 
-                // Recurse into children (container nodes).
-                if (isset($node['children']) && is_array($node['children'])) {
+                // Recurse into EVERY child list the type declares, not just
+                // `children` (#909). `accessGate` carries a second one, and a walk
+                // that hard-codes the name would leave everything in it
+                // unchecked — which for this walk means a `source` that never got
+                // ownership-checked and never got version-rewritten. The contract
+                // states its own slots so this stays true of whatever is added
+                // next.
+                $slots = \Whity\Sdk\Frontend\Blocks\BlockContract::childSlots(is_string($type) ? $type : '');
+                if (!in_array('children', $slots, true)) {
+                    // Defence in depth. BlockValidator already refuses a
+                    // `children` list on a type that declares none, but this walk
+                    // is the OWNERSHIP gate: it must never stop descending into a
+                    // list merely because the contract says it should not be there.
+                    $slots[] = 'children';
+                }
+
+                foreach ($slots as $slot) {
+                    if (!isset($node[$slot]) || !is_array($node[$slot])) {
+                        continue;
+                    }
+
                     $rewrittenChildren = [];
-                    foreach ($node['children'] as $child) {
+                    foreach ($node[$slot] as $child) {
                         if (!is_array($child)) {
                             $rewrittenChildren[] = $child;
                             continue;
@@ -3404,7 +3528,7 @@ class PluginLoader
                         }
                         $rewrittenChildren[] = $rewritten;
                     }
-                    $node['children'] = $rewrittenChildren;
+                    $node[$slot] = $rewrittenChildren;
                 }
 
                 return $node;
