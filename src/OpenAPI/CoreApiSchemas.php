@@ -3351,7 +3351,7 @@ final class CoreApiSchemas
             // narrow the route gate's answer, never widen it.
             'PermittedActionCheck' => self::object([
                 'ref' => self::str(),
-                'method' => ['type' => 'string', 'enum' => ['POST', 'PUT', 'PATCH', 'DELETE']],
+                'method' => ['type' => 'string', 'enum' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']],
                 'path' => self::str(),
                 'resourceType' => self::str(true),
                 'resourceId' => self::int(true),

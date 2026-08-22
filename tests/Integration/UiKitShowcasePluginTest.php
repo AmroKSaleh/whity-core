@@ -505,6 +505,34 @@ final class UiKitShowcasePluginTest extends TestCase
     }
 
     /**
+     * Every child list a node carries, per the contract's declared slots (#909).
+     *
+     * The walkers below used to reach for `children` by name. `accessGate`
+     * carries a second list, `otherwise`, holding the rendering a refused caller
+     * gets — so a walk that knows only one name would report the read-only half
+     * of every gated region as absent, and the coverage tests would pass while
+     * the tree they measure contained blocks nobody checked. Derived from
+     * {@see BlockContract::childSlots()} rather than restated, for the same
+     * reason the source-bearing types are.
+     *
+     * @param array<string, mixed> $node
+     * @return list<array<mixed>>
+     */
+    private function childListsOf(array $node): array
+    {
+        $type = $node['type'] ?? null;
+        $lists = [];
+
+        foreach (BlockContract::childSlots(is_string($type) ? $type : '') as $slot) {
+            if (isset($node[$slot]) && is_array($node[$slot])) {
+                $lists[] = $node[$slot];
+            }
+        }
+
+        return $lists;
+    }
+
+    /**
      * Every node of one type anywhere in the tree.
      *
      * @param array<mixed> $blocks
@@ -521,8 +549,8 @@ final class UiKitShowcasePluginTest extends TestCase
             if (($node['type'] ?? null) === $type) {
                 $found[] = $node;
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $found = array_merge($found, $this->collectNodesOfType($node['children'], $type));
+            foreach ($this->childListsOf($node) as $childList) {
+                $found = array_merge($found, $this->collectNodesOfType($childList, $type));
             }
         }
 
@@ -677,6 +705,125 @@ final class UiKitShowcasePluginTest extends TestCase
     }
 
     /**
+     * #909: the showcase ships a LIVE read-only state, not a description of one.
+     *
+     * This is the acceptance test for the primitive. `uikit:manage` is declared
+     * and never granted, so on a stock install the inner gate refuses and what
+     * renders is the `otherwise` branch: a description list plus a notice naming
+     * the gate. If this stops holding, a described record page has gone back to
+     * showing an editable form to a caller who may not write — the greyed-out
+     * form #882 exists to make unshippable.
+     */
+    public function testTheShowcaseDescribesARecordPagesReadOnlyState(): void
+    {
+        $blocks = (new UiKitShowcasePlugin())->getFrontendFeatures()[0]['blocks'];
+        $gates = $this->collectNodesOfType($blocks, 'accessGate');
+
+        $this->assertNotEmpty($gates, 'the showcase must contain a live accessGate');
+
+        $byId = array_column($gates, null, 'id');
+        $this->assertArrayHasKey('demo-record-readable', $byId, 'the HIDDEN state gate');
+        $this->assertArrayHasKey('demo-record-writable', $byId, 'the READ-ONLY/EDITABLE gate');
+
+        // The outer gate is a READ question and declares no `otherwise`: a
+        // caller who may not read the record sees the region absent, which is
+        // the third state and the one that has no other way to be expressed.
+        $readable = $byId['demo-record-readable'];
+        $this->assertSame('GET', $readable['check']['method']);
+        $this->assertArrayNotHasKey('otherwise', $readable);
+
+        // The inner gate is a WRITE question and declares BOTH renderings.
+        $writable = $byId['demo-record-writable'];
+        $this->assertSame('PUT', $writable['check']['method']);
+        $this->assertArrayHasKey('children', $writable, 'the editable rendering');
+        $this->assertArrayHasKey('otherwise', $writable, 'the read-only rendering');
+
+        // Read-only is a DIFFERENT RENDERING, not a disabled form: a description
+        // list, and no input anywhere beneath it.
+        $refusedTypes = $this->collectTypes($writable['otherwise']);
+        $this->assertContains('recordFields', $refusedTypes);
+        foreach (['form', 'textInput', 'submitButton', 'select', 'checkbox'] as $control) {
+            $this->assertNotContains(
+                $control,
+                $refusedTypes,
+                "the read-only rendering must contain no '{$control}' — read-only is a rendering, not a disabled form"
+            );
+        }
+
+        // ...and the editable one is the form.
+        $this->assertContains('form', $this->collectTypes($writable['children']));
+    }
+
+    /**
+     * A gate states no permission of its own, on the shipped example.
+     *
+     * The host reads `uikit:manage` off the ROUTE the check names. A slug in the
+     * declaration would be a second answer to a question the route table already
+     * answers, and re-gating the route would leave the page saying the old
+     * thing — which is the drift #868 removed for `inbox` actions.
+     */
+    public function testTheShowcaseGatesRestateNoPermission(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+        $gates = $this->collectNodesOfType($plugin->getFrontendFeatures()[0]['blocks'], 'accessGate');
+        $this->assertNotEmpty($gates);
+
+        $declaredSlugs = [];
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (is_string($r['requiredPermission'] ?? null)) {
+                $declaredSlugs[] = $r['requiredPermission'];
+            }
+        }
+        $this->assertContains('uikit:manage', $declaredSlugs, 'the write route must carry the gate');
+
+        foreach ($gates as $gate) {
+            foreach (['permission', 'requiredPermission', 'scopedPermission', 'requiredRole'] as $prop) {
+                $this->assertArrayNotHasKey($prop, $gate, "accessGate '{$gate['id']}' must restate no authority");
+            }
+            $this->assertSame(
+                ['method', 'endpoint'],
+                array_keys($gate['check']),
+                'a check is a REQUEST and nothing else'
+            );
+        }
+    }
+
+    /**
+     * A gate's endpoint is ownership-checked and version-rewritten by the
+     * loader, exactly like a data-bound `source` and an inbox action's endpoint.
+     *
+     * The version half is not cosmetic: the permitted-actions resolver matches
+     * the CONCRETE path against the live route table, so an unversioned endpoint
+     * matches no route and resolves to "not permitted" — fail-closed, but
+     * silently, and every gated region would be refused for everyone.
+     */
+    public function testTheLoaderVersionsAndOwnershipChecksGateEndpoints(): void
+    {
+        $pluginDir = dirname(__DIR__, 2) . '/plugins';
+        $loader = new PluginLoader($pluginDir, new Router('/v1'), new PermissionRegistry(), new HookManager());
+        $loader->load();
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('ui-kit-reference', $byId);
+
+        $gates = $this->collectNodesOfType($byId['ui-kit-reference']['blocks'], 'accessGate');
+        $this->assertNotEmpty($gates, 'the served descriptor must still carry its gates');
+
+        foreach ($gates as $gate) {
+            $this->assertStringStartsWith(
+                '/api/v1/',
+                $gate['check']['endpoint'],
+                "gate '{$gate['id']}' must be served with a versioned endpoint"
+            );
+            // The context token survives the rewrite — a mangled one would ask
+            // about a different record than the page is about.
+            $this->assertStringContainsString('{demo-record-pick}', $gate['check']['endpoint']);
+        }
+    }
+
+    /**
      * Depth-first: the first node of the given type, or null.
      *
      * @param array<mixed> $nodes
@@ -692,8 +839,8 @@ final class UiKitShowcasePluginTest extends TestCase
                 /** @var array<string, mixed> $node */
                 return $node;
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $found = $this->findFirstNodeOfType($node['children'], $type);
+            foreach ($this->childListsOf($node) as $childList) {
+                $found = $this->findFirstNodeOfType($childList, $type);
                 if ($found !== null) {
                     return $found;
                 }
@@ -822,8 +969,8 @@ final class UiKitShowcasePluginTest extends TestCase
                 }
             }
 
-            if (isset($node['children']) && is_array($node['children'])) {
-                foreach ($this->collectInboxActions($node['children']) as $nested) {
+            foreach ($this->childListsOf($node) as $childList) {
+                foreach ($this->collectInboxActions($childList) as $nested) {
                     $actions[] = $nested;
                 }
             }
@@ -957,8 +1104,8 @@ final class UiKitShowcasePluginTest extends TestCase
                     $foundForm = true;
                 }
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $this->walkInteractive($node['children'], $postRoutes, $foundForm);
+            foreach ($this->childListsOf($node) as $childList) {
+                $this->walkInteractive($childList, $postRoutes, $foundForm);
             }
         }
     }
@@ -981,8 +1128,8 @@ final class UiKitShowcasePluginTest extends TestCase
                     $foundAction = true;
                 }
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $this->walkInteractiveAction($node['children'], $postRoutes, $foundAction);
+            foreach ($this->childListsOf($node) as $childList) {
+                $this->walkInteractiveAction($childList, $postRoutes, $foundAction);
             }
         }
     }
@@ -1010,8 +1157,8 @@ final class UiKitShowcasePluginTest extends TestCase
                     ? $node['requiredPermission']
                     : null;
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                $this->collectInteractivePerms($node['children'], $formPerms, $actionPerms);
+            foreach ($this->childListsOf($node) as $childList) {
+                $this->collectInteractivePerms($childList, $formPerms, $actionPerms);
             }
         }
     }
@@ -1047,8 +1194,8 @@ final class UiKitShowcasePluginTest extends TestCase
             ) {
                 $endpoints[] = $node['action']['endpoint'];
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                foreach ($this->collectInteractiveEndpoints($node['children']) as $ep) {
+            foreach ($this->childListsOf($node) as $childList) {
+                foreach ($this->collectInteractiveEndpoints($childList) as $ep) {
                     $endpoints[] = $ep;
                 }
             }
@@ -1096,8 +1243,8 @@ final class UiKitShowcasePluginTest extends TestCase
                 $foundBound[$node['type']] = true;
             }
 
-            if (isset($node['children']) && is_array($node['children'])) {
-                $this->walkDataBound($node['children'], $dataBoundTypes, $registeredGetPaths, $foundBound);
+            foreach ($this->childListsOf($node) as $childList) {
+                $this->walkDataBound($childList, $dataBoundTypes, $registeredGetPaths, $foundBound);
             }
         }
     }
@@ -1123,8 +1270,8 @@ final class UiKitShowcasePluginTest extends TestCase
             ) {
                 $sources[] = $node['source'];
             }
-            if (isset($node['children']) && is_array($node['children'])) {
-                foreach ($this->collectDataBoundSources($node['children']) as $s) {
+            foreach ($this->childListsOf($node) as $childList) {
+                foreach ($this->collectDataBoundSources($childList) as $s) {
                     $sources[] = $s;
                 }
             }
@@ -1148,8 +1295,8 @@ final class UiKitShowcasePluginTest extends TestCase
                 continue;
             }
             $types[] = $node['type'];
-            if (isset($node['children']) && is_array($node['children'])) {
-                foreach ($this->collectTypes($node['children']) as $childType) {
+            foreach ($this->childListsOf($node) as $childList) {
+                foreach ($this->collectTypes($childList) as $childType) {
                     $types[] = $childType;
                 }
             }

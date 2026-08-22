@@ -26,7 +26,9 @@ export const PERMITTED_ACTIONS_PATH = "/__whity/permitted-actions"
 
 export interface PermittedActionCheck {
   ref: string
-  method: "POST" | "PUT" | "PATCH" | "DELETE"
+  /** GET joined the write verbs for #909's `accessGate` — "may I SEE this
+   * region at all?" is a read. Same set as the server handler accepts. */
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
   path: string
   resourceType?: string
   resourceId?: string | number
