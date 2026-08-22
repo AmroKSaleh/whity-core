@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-22
+
 ### Fixed
 
 - **A desktop device can now be enrolled on an account that belongs to more than one tenant — which the system administrator does, so the desktop client could not be demonstrated at all (#914).** The Tauri template implemented only the single-tenant, no-2FA login: `EnrollResult` modelled all three outcomes of `POST /api/login`, and two of them were marked "follow-up" and answered with an error string. So any profile holding active memberships in several tenants hit *"the template's enrollment supports single-tenant accounts only"* and stopped. Nothing was missing server-side — token-mode login already returned `requires_tenant_selection` with the membership list and a short-lived `selection_token`, and `POST /api/auth/select-tenant` already completed it — so this is the client half that was never written, not a protocol change. No backend file is touched.
