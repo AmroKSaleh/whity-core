@@ -139,6 +139,29 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'components' => self::demoComponents(),
                 ],
             ],
+            // #883: the RECORD endpoint behind the `dataRecord` demo — one
+            // resource, not a collection. Its payload deliberately carries
+            // caller-permission flags (`manageable`, `canEdit`) alongside the
+            // record's own facts, because that is what a real endpoint returns
+            // and it is the exact shape #895 went wrong on. The block
+            // declaration names neither of them, and cannot: they are refused
+            // as facts by the validator and never published by the renderer.
+            [
+                'method' => 'GET',
+                'path' => '/api/uikit/demo/rows/{name}',
+                'handler' => [$this, 'demoRecord'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo single record for the record-bound block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoRecordResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
             [
                 'method' => 'GET',
                 'path' => '/api/uikit/demo/metric',
@@ -280,6 +303,48 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 ['name' => 'Anika Patel', 'role' => 'Administrator'],
                 ['name' => 'Bjorn Larsen', 'role' => 'Editor'],
                 ['name' => 'Camille Dupont', 'role' => 'Viewer'],
+            ],
+        ]);
+    }
+
+    /**
+     * Handle GET /api/uikit/demo/rows/{name} (requires uikit:view).
+     *
+     * Returns ONE static fixture record for the `dataRecord` demo. No PDO, no
+     * side effects.
+     *
+     * The payload carries `manageable` and `canEdit` ON PURPOSE. A real record
+     * endpoint answers both questions at once — what the record IS, and what
+     * THIS caller may do to it — and #895 is what happens when a page reads the
+     * second as the first. The showcase declaration names four facts and
+     * neither flag, so this fixture is also the live proof that a caller flag
+     * present in the payload is unreachable from the tree.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response One static demo record.
+     */
+    public function demoRecord(Request $request, array $params = []): Response
+    {
+        $name = $params['name'] ?? 'Anika Patel';
+
+        $records = [
+            'Anika Patel' => ['role' => 'Administrator', 'status' => 'Active', 'joined' => '2024-03-11'],
+            'Bjorn Larsen' => ['role' => 'Editor', 'status' => 'Active', 'joined' => '2024-07-02'],
+            'Camille Dupont' => ['role' => 'Viewer', 'status' => 'Invited', 'joined' => '2025-01-19'],
+        ];
+
+        $record = $records[$name] ?? $records['Anika Patel'];
+
+        return Response::json([
+            'data' => [
+                'name' => \array_key_exists($name, $records) ? $name : 'Anika Patel',
+                'role' => $record['role'],
+                'status' => $record['status'],
+                'joined' => $record['joined'],
+                // Caller decisions, not record facts. Deliberately present.
+                'manageable' => true,
+                'canEdit' => true,
             ],
         ]);
     }
@@ -606,6 +671,11 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         'label' => 'Workflow',
                         'children' => $this->workflowTab(),
                     ],
+                    [
+                        'type' => 'tab',
+                        'label' => 'Record',
+                        'children' => $this->recordTab(),
+                    ],
                 ],
             ],
         ];
@@ -707,6 +777,237 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         ],
                     ],
                 ],
+            ],
+        ];
+    }
+
+    /**
+     * The "Record" tab (#883): `dataRecord`, `recordFields`, and the `...From`
+     * twins that let a literal leaf bind to a record field.
+     *
+     * This tab is a RECORD PAGE, assembled from nothing but the block
+     * vocabulary — the shape #882 made the platform standard and which, until
+     * this release, could only be hand-written in React. Read top to bottom it
+     * is the whole answer to "can a record page be described?": a master
+     * control names the record, a `dataRecord` fetches it and publishes it, the
+     * header states facts about it, a description list shows its fields, a
+     * related collection hangs beside it, and an edit form seeded from the
+     * record sits underneath.
+     *
+     * The `selector` here stands in for the ROUTE. On a record page the record
+     * is named by the URL and the host publishes it under `record`, so the
+     * `dataRecord` would read `/api/uikit/demo/rows/{record}` instead — the
+     * same source template, the same resolver, a different publisher. A
+     * showcase has no record route to be mounted at, so it drives the same
+     * binding from a dropdown, which also demonstrates the master-detail form
+     * of the block.
+     *
+     * WHAT IS DELIBERATELY ABSENT. The endpoint returns `manageable` and
+     * `canEdit`; the declaration names neither, and could not — the validator
+     * refuses either word as a fact, and the renderer publishes only the four
+     * fields named below. That is #895 made unwriteable rather than documented.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function recordTab(): array
+    {
+        return [
+            [
+                'type' => 'heading',
+                'level' => 2,
+                'text' => 'Record — one resource, and everything that says something about it',
+            ],
+            [
+                'type' => 'text',
+                'value' => 'Every other data-bound block assumes a COLLECTION at `source`. `dataRecord` '
+                    . 'fetches ONE resource, publishes the fields it names into the master-detail '
+                    . 'context under its `id`, and owns the loading and failure states for everything '
+                    . 'beneath it. Siblings then read the record through the same `{id}.{field}` '
+                    . 'addressing a row action already publishes with — `recordFields` for a '
+                    . 'description list, and `textFrom` / `valueFrom` / `labelFrom` / `hintFrom` to '
+                    . 'bind a heading, a paragraph, a badge or a stat to the record\'s own values.',
+                'tone' => 'muted',
+            ],
+            [
+                'type' => 'alert',
+                'variant' => 'warning',
+                'title' => 'A record page states facts about the RECORD, never about the CALLER',
+                'body' => 'This demo\'s endpoint returns `manageable` and `canEdit` beside the record\'s '
+                    . 'own fields, exactly as a real one does. Neither can be named in `fields` and '
+                    . 'neither can be bound by a `...From` twin: the contract refuses those words, and '
+                    . 'the renderer publishes only the fields the declaration asked for, so a flag it '
+                    . 'never named is unreachable whatever it is called. #895 is the incident this '
+                    . 'prevents — for a tenant-0 caller `manageable` is true of every record, so a '
+                    . 'page inferring "this is yours" from it was wrong for exactly the one caller who '
+                    . 'could act on it. What the caller may do gates CONTROLS, through a form or '
+                    . 'button `requiredPermission`.',
+            ],
+            [
+                'type' => 'selector',
+                'name' => 'demo-record-pick',
+                'label' => 'Which record',
+                'source' => '/api/uikit/demo/rows',
+                'valueField' => 'name',
+                'labelField' => 'name',
+                'placeholder' => 'Pick a record...',
+            ],
+            [
+                'type' => 'dataRecord',
+                'id' => 'demo-record',
+                'source' => '/api/uikit/demo/rows/{demo-record-pick}',
+                'fields' => [
+                    ['field' => 'name', 'label' => 'Name'],
+                    ['field' => 'role', 'label' => 'Role'],
+                    ['field' => 'status', 'label' => 'Status'],
+                    ['field' => 'joined', 'label' => 'Joined'],
+                ],
+                'emptyText' => 'Pick a record above to see it here.',
+                'children' => [
+                    // The header: a title, a badge and a stat, all bound to the
+                    // record rather than to literals. Each keeps its literal as
+                    // the fallback, which is what renders before the fetch
+                    // settles.
+                    [
+                        'type' => 'heading',
+                        'level' => 3,
+                        'text' => 'This record',
+                        'textFrom' => 'demo-record.name',
+                    ],
+                    [
+                        'type' => 'row',
+                        'align' => 'start',
+                        'children' => [
+                            [
+                                'type' => 'badge',
+                                'variant' => 'info',
+                                'label' => 'Role',
+                                'labelFrom' => 'demo-record.role',
+                            ],
+                            [
+                                'type' => 'badge',
+                                'variant' => 'neutral',
+                                'label' => 'Status',
+                                'labelFrom' => 'demo-record.status',
+                            ],
+                        ],
+                    ],
+                    [
+                        'type' => 'grid',
+                        'columns' => 2,
+                        'children' => [
+                            [
+                                'type' => 'stat',
+                                'label' => 'Status',
+                                'value' => 'Unknown',
+                                'valueFrom' => 'demo-record.status',
+                                'hint' => 'since joining',
+                                'hintFrom' => 'demo-record.joined',
+                            ],
+                            [
+                                'type' => 'card',
+                                'title' => 'recordFields',
+                                'description' => 'Every fact the record declared, under the labels declared beside them.',
+                                'children' => [
+                                    ['type' => 'recordFields', 'from' => 'demo-record'],
+                                ],
+                            ],
+                        ],
+                    ],
+                    [
+                        'type' => 'card',
+                        'title' => 'recordFields (a subset)',
+                        'description' => 'The same record, two of its fields, in the order asked for.',
+                        'children' => [
+                            [
+                                'type' => 'recordFields',
+                                'from' => 'demo-record',
+                                'fields' => ['status', 'role'],
+                            ],
+                        ],
+                    ],
+                    [
+                        'type' => 'text',
+                        'value' => 'No role resolved yet.',
+                        'valueFrom' => 'demo-record.role',
+                        'tone' => 'muted',
+                    ],
+                    // The edit affordance a record page carries, seeded from the
+                    // record the page is about. `defaultFrom` is PLUMBING rather
+                    // than a statement, so it is not fact-guarded — the server
+                    // re-validates whatever is submitted.
+                    [
+                        'type' => 'card',
+                        'title' => 'The edit form, seeded from the record',
+                        'description' => 'A record page is a form WITH context, which is the half a modal cannot carry.',
+                        'children' => [
+                            [
+                                'type' => 'form',
+                                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                                'requiredPermission' => 'uikit:view',
+                                'children' => [
+                                    [
+                                        'type' => 'textInput',
+                                        'name' => 'name',
+                                        'label' => 'Name',
+                                        'required' => true,
+                                        'defaultFrom' => 'demo-record.name',
+                                    ],
+                                    [
+                                        'type' => 'textInput',
+                                        'name' => 'role',
+                                        'label' => 'Role',
+                                        'defaultFrom' => 'demo-record.role',
+                                    ],
+                                    ['type' => 'submitButton', 'label' => 'Save'],
+                                ],
+                            ],
+                        ],
+                    ],
+                    // A related collection, which is the other half a record
+                    // page carries and a modal has nowhere to put.
+                    [
+                        'type' => 'card',
+                        'title' => 'A related collection',
+                        'description' => 'Record pages hang related data beside the record; overlays have nowhere to put it.',
+                        'children' => [
+                            [
+                                'type' => 'dataTable',
+                                'source' => '/api/uikit/demo/rows',
+                                'columns' => [
+                                    ['key' => 'name', 'label' => 'Name'],
+                                    ['key' => 'role', 'label' => 'Role'],
+                                ],
+                                'emptyText' => 'Nobody else here.',
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'type' => 'code',
+                'language' => 'php',
+                'content' => "['type' => 'dataRecord',\n"
+                    . "    'id' => 'demo-record',\n"
+                    . "    // {token} resolves from a selector, an opened row, or {record} —\n"
+                    . "    // the name a host seeds with the record its ROUTE is about.\n"
+                    . "    'source' => '/api/uikit/demo/rows/{demo-record-pick}',\n"
+                    . "    // The facts the record STATES. Only these are published into\n"
+                    . "    // context; 'manageable' and 'canEdit' are in the payload and are\n"
+                    . "    // unreachable from the tree. Naming either here is REFUSED (#895).\n"
+                    . "    'fields' => [\n"
+                    . "        ['field' => 'name',   'label' => 'Name'],\n"
+                    . "        ['field' => 'role',   'label' => 'Role'],\n"
+                    . "        ['field' => 'status', 'label' => 'Status'],\n"
+                    . "        ['field' => 'joined', 'label' => 'Joined'],\n"
+                    . "    ],\n"
+                    . "    'children' => [\n"
+                    . "        ['type' => 'heading', 'level' => 3, 'text' => 'This record',\n"
+                    . "            'textFrom' => 'demo-record.name'],\n"
+                    . "        ['type' => 'recordFields', 'from' => 'demo-record'],\n"
+                    . "        ['type' => 'recordFields', 'from' => 'demo-record',\n"
+                    . "            'fields' => ['status', 'role']],\n"
+                    . "    ],\n"
+                    . "]",
             ],
         ];
     }
@@ -1844,6 +2145,24 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'data' => [
                         'type' => 'array',
                         'items' => ['$ref' => '#/components/schemas/UiKitDemoRow'],
+                    ],
+                ],
+            ],
+            'UiKitDemoRecordResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'object',
+                        'required' => ['name', 'role', 'status', 'joined', 'manageable', 'canEdit'],
+                        'properties' => [
+                            'name' => ['type' => 'string'],
+                            'role' => ['type' => 'string'],
+                            'status' => ['type' => 'string'],
+                            'joined' => ['type' => 'string'],
+                            'manageable' => ['type' => 'boolean'],
+                            'canEdit' => ['type' => 'boolean'],
+                        ],
                     ],
                 ],
             ],

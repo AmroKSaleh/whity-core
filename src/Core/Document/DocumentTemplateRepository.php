@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Document;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access for `document_templates` (WC-docdesigner) — saved designer
@@ -200,7 +201,7 @@ final class DocumentTemplateRepository
             );
             $stmt->execute([':tenant_id' => $tenantId, ':block_id' => (string) $blockId]);
 
-            return (bool) $stmt->fetchColumn();
+            return DbBool::of($stmt->fetchColumn());
         }
 
         $stmt = $this->db->prepare(

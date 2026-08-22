@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Plan;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access layer for the subscription-plan catalog (WC-plans, ADR 0010).
@@ -233,18 +234,16 @@ final class PlanRepository
         ];
     }
 
-    /**
-     * Portable DB-boolean coercion (PG 't'/'f', SQLite 0/1, in-process bool).
+        /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
      */
     private static function toBool(mixed $value): bool
     {
-        if (is_bool($value)) {
-            return $value;
-        }
-        if (is_int($value)) {
-            return $value !== 0;
-        }
-
-        return !in_array(strtolower(trim((string) $value)), ['', '0', 'f', 'false', 'no'], true);
+        return DbBool::of($value);
     }
 }

@@ -221,7 +221,8 @@ Both the role-hierarchy walk and the OU parent-chain walk are protected by visit
 - A non-NULL `tenant_id` is a **tenant-owned** custom role, isolated to its owner.
 - **Read** (list/get/permissions): a tenant sees `WHERE (r.tenant_id = ? OR r.tenant_id IS NULL)`; the system tenant (id 0) sees every role.
 - **Write** (update/delete): a tenant may modify only its *own* roles; global base roles return `404` for a tenant and are manageable only by the system tenant.
-- **Create** stamps the new role with the current tenant id.
+- **Create** stamps the new role with the current tenant id — unless a **system-tenant (0)** caller sends `tenant_id: <n>` (create for that tenant) or `global: true` (create a shared NULL-tenant base role). Both are refused with `403` for any other caller, both are absent by default, and `tenant_id` is integer-only: `null` is a `400` rather than a third meaning, so an unset optional field can never decide which tenant a role lands in. See [PERMISSION_SYSTEM](PERMISSION_SYSTEM.md#creating-a-role-for-another-tenant-or-for-everyone-888).
+- List and detail rows carry `manageable` (may this caller write it) **and** `global` (is it the NULL-tenant row every tenant shares). The second is not derivable from the first — for the system tenant every role is manageable — which is why the admin list marks global rows separately from gating their actions.
 
 The permission-assignment contract accepts **either** numeric `permissions.id` values (the web UI sends these from `GET /api/permissions`) **or** `resource:action` name strings, in the same `permissions` array (mixed allowed). Unknown ids/names are dropped, never fabricated, before being linked through the `role_permissions` junction table.
 

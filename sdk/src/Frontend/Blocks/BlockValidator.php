@@ -38,6 +38,84 @@ final class BlockValidator
     public const OU_SCOPES = ['unit', 'subtree', 'children'];
 
     /**
+     * The reserved master-detail binding a host seeds with the record its ROUTE
+     * is about (#883 gap 2).
+     *
+     * A record page is `/admin/<resource>/[id]`, and nothing in a block tree
+     * could name that id: `defaultFrom` and `params.from` resolve only against a
+     * `selector` choice or a `dataTable` row action, and both of those are
+     * list-anchored. So the host publishes the route's record id under this one
+     * reserved name, and a `dataRecord` reads it the ordinary way —
+     * `source => '/api/x/rows/{record}'`.
+     *
+     * Public because it is the vocabulary a host implements and a plugin author
+     * types, not an implementation detail. A `selector` may not claim the name:
+     * a selection published under it would shadow the page's own record for
+     * every block on the screen, and the failure — a record page quietly showing
+     * a different record — is invisible in exactly the deployments where the
+     * selector happens to be empty.
+     */
+    public const PAGE_RECORD_BINDING = 'record';
+
+    /**
+     * Field names that state a decision about the CALLER rather than a property
+     * of the RECORD (#895), refused wherever a declaration states a FACT.
+     *
+     * This list is #897's `CallerDecisionKey` verbatim — the same eleven names,
+     * in the same order — and that is deliberate rather than incidental. #897
+     * made the mistake unwriteable in TypeScript for hand-built record pages;
+     * this file has to make the same mistake unwriteable in a tree that is
+     * validated at runtime. Two lists that were "kept in sync" would be one list
+     * and one stale copy, so the pairing is stated here, pinned by a test on
+     * both sides, and any addition is made to both in the same change.
+     *
+     * WHAT WENT WRONG, since a list of words does not carry it: the roles record
+     * page derived "is this a global base role" from `manageable`, the server's
+     * answer to "may YOU write this?". For a tenant-0 caller `manageable` is
+     * true of every role, so the system tenant — the one caller whose edit
+     * reaches every tenant — saw a deployment-wide base role labelled "Your
+     * tenant's role". The inference reads as correct in the common case and is
+     * wrong precisely for the caller who can act on it.
+     *
+     * Note what this list is NOT. It is not the guard; it is the guard's error
+     * message. The guard is that a `dataRecord` publishes ONLY the fields its
+     * declaration names as facts, so a payload's caller flag is unreachable from
+     * the tree whatever it is called. This list catches the author who names one
+     * ANYWAY, and names it back to them.
+     *
+     * @var list<string>
+     */
+    public const CALLER_DECISION_FIELDS = [
+        'manageable',
+        'editable',
+        'writable',
+        'deletable',
+        'canEdit',
+        'canDelete',
+        'canManage',
+        'canWrite',
+        'allowed',
+        'permitted',
+        'readOnly',
+    ];
+
+    /**
+     * The props whose value is a FACT the page states about a record, and which
+     * therefore may not name a caller decision.
+     *
+     * `defaultFrom` and `params.from` are deliberately absent. They are
+     * PLUMBING, not statements: one seeds a form control whose value the server
+     * re-validates and is authoritative over, the other narrows a fetch. #897
+     * draws the line in the same place — its `RecordAccess` half is read freely
+     * to decide which controls exist, and only the FACTS projection is checked.
+     * A guard that also refused the plumbing would be refusing a correct
+     * program, and a guard that refuses correct programs gets removed.
+     *
+     * @var list<string>
+     */
+    private const FACT_BINDING_PROPS = ['textFrom', 'valueFrom', 'labelFrom', 'hintFrom'];
+
+    /**
      * Longest organizational-unit type key accepted (#822's `ou_types.type_key`
      * column width). Restated rather than imported for the same reason the key
      * grammar is: the SDK may not reference a core symbol.
@@ -222,6 +300,18 @@ final class BlockValidator
             self::validateOuScopePicker($node, $path, $errors);
         }
 
+        // #883: `record` is the host's binding for the record a ROUTE is about
+        // (see self::PAGE_RECORD_BINDING). A selector publishing under that name
+        // would shadow it for every block on the screen, and the symptom — a
+        // record page showing a different record — appears only once the
+        // selector has a value, so it is invisible on first paint and in every
+        // test that never touches the dropdown.
+        if ($type === 'selector' && ($node['name'] ?? null) === self::PAGE_RECORD_BINDING) {
+            $errors[] = "{$path}.name: 'selector.name' may not be '" . self::PAGE_RECORD_BINDING
+                . "' — that name is reserved for the record a record-page route is about, "
+                . 'and a selection published under it would shadow the page\'s own record';
+        }
+
         $isContainer = $rule['container'];
         $hasChildren = \array_key_exists('children', $node);
 
@@ -265,7 +355,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -294,7 +384,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -491,8 +581,232 @@ final class BlockValidator
                 // against the tree.
                 self::validateContextPath($value, $type, $prop, $path, $errors);
 
+                // #883/#895: a FACT binding may not name a caller decision. The
+                // shape check above ran first, so a malformed reference is
+                // reported as malformed rather than as a permission mistake.
+                if (\in_array($prop, self::FACT_BINDING_PROPS, true) && \is_string($value)) {
+                    self::rejectCallerDecisionField(
+                        self::fieldOfContextPath($value),
+                        "'{$type}.{$prop}'",
+                        $path,
+                        $errors,
+                    );
+                }
+
+                break;
+
+            case 'recordPath':
+                // #883: `dataRecord.source` — an owned apiPath that may carry
+                // `{token}` segments in the master-detail addressing.
+                self::validateRecordPath($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'recordFactList':
+                // #883: `dataRecord.fields` — the record's FACTS, named and
+                // labelled, and the only fields published into context.
+                self::validateRecordFactList($value, $type, $prop, $path, $errors);
+
                 break;
         }
+    }
+
+    /**
+     * `dataRecord.source` (#883): an owned API path that may carry `{token}`
+     * segments, each one a master-detail reference in the SAME addressing as
+     * `params.from` / `defaultFrom` / `submit.endpoint` — a bare name (a
+     * `selector`'s value, or the host-seeded {@see self::PAGE_RECORD_BINDING})
+     * or a dotted `{targetId}.{field}`.
+     *
+     * The path around the tokens is the ordinary `apiPath` predicate, unchanged:
+     * this widens what a source may SAY, never where it may point. The loader
+     * still ownership-checks it against the routes the declaring plugin actually
+     * registered, comparing with route parameters normalized, so a templated
+     * source can only ever name a route the plugin already owns.
+     *
+     * A brace that never closes is refused rather than treated as a literal.
+     * `/api/x/{id` is a path that requests a resource named `{id`, which no
+     * route serves — so the block would 404 forever with nothing saying why, and
+     * the author's intent is not in doubt.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateRecordPath(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (
+            !\is_string($value)
+            || !str_starts_with($value, '/api/')
+            || str_contains($value, '//')
+            || str_contains($value, '..')
+            || str_contains($value, '\\')
+            || preg_match('/[\s\x00-\x1f\x7f]/', $value) === 1
+        ) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a relative API path starting with '/api/' "
+                . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($value);
+
+            return;
+        }
+
+        // Balanced, non-nested braces. `preg_match_all` finds the well-formed
+        // tokens; comparing the counts catches a stray brace on either side.
+        $tokenCount = preg_match_all('/\{([^{}]*)\}/', $value, $matches);
+        if ($tokenCount === false
+            || $tokenCount !== substr_count($value, '{')
+            || $tokenCount !== substr_count($value, '}')
+        ) {
+            $errors[] = "{$path}: '{$type}.{$prop}' has unbalanced '{'/'}' — every context token must be "
+                . "a complete '{reference}', got " . self::describeScalar($value);
+
+            return;
+        }
+
+        foreach ($matches[1] as $i => $reference) {
+            if (self::isMalformedContextPath($reference)) {
+                $errors[] = "{$path}: '{$type}.{$prop}' token #{$i} must be a selector name or a dotted "
+                    . "'{targetId}.{field}' reference, got " . self::describeScalar('{' . $reference . '}');
+            }
+        }
+    }
+
+    /**
+     * `dataRecord.fields` (#883): the record's FACTS — a non-empty, duplicate-
+     * free list of `{field: non-empty string, label: string}`.
+     *
+     * This list is a WHITELIST with two jobs at once. It names the labels a
+     * `recordFields` renders, and it is the complete set of the fetched
+     * payload's keys the renderer publishes into the master-detail context —
+     * everything else the endpoint returned is dropped before any binding can
+     * see it. That is the structural half of the #895 guard
+     * ({@see self::CALLER_DECISION_FIELDS} explains the incident): a caller flag
+     * riding along in the payload is unreachable from the tree because it was
+     * never published, whatever the plugin chose to call it.
+     *
+     * A `field` carries no dot, for the same reason a `blockId` carries none —
+     * `{id}.{field}` addressing has to stay unambiguous about where the split
+     * falls. Duplicates are refused rather than collapsed: two entries for one
+     * field are two labels for one value, and whichever the renderer picked
+     * would be arbitrary.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateRecordFactList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value) || $value === []) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty list of {field, label} objects";
+
+            return;
+        }
+
+        $seen = [];
+
+        foreach ($value as $i => $item) {
+            $at = "{$path}[{$i}]";
+
+            if (
+                !\is_array($item)
+                || !isset($item['field']) || !\is_string($item['field']) || $item['field'] === ''
+                || str_contains($item['field'], '.')
+                || preg_match('/\s/', $item['field']) === 1
+                || !isset($item['label']) || !\is_string($item['label'])
+            ) {
+                $errors[] = "{$at}: each '{$type}.{$prop}' entry must be a "
+                    . '{field: non-empty string with no "." or whitespace, label: string} object';
+
+                continue;
+            }
+
+            /** @var string $field */
+            $field = $item['field'];
+
+            if (isset($seen[$field])) {
+                $errors[] = "{$at}.field: duplicate '{$type}.{$prop}' field '{$field}'";
+
+                continue;
+            }
+            $seen[$field] = true;
+
+            self::rejectCallerDecisionField($field, "'{$type}.{$prop}'", "{$at}.field", $errors);
+        }
+    }
+
+    /**
+     * The FIELD half of a context reference: everything after the dot in a
+     * dotted `{targetId}.{field}`, or the whole thing when it is a bare name.
+     *
+     * A bare name addresses a `selector`'s current value rather than a record's
+     * field, and it is checked too. A selector named `manageable` publishing
+     * into a heading is the same sentence about the same subject, reached by a
+     * different route.
+     */
+    private static function fieldOfContextPath(string $reference): string
+    {
+        $dot = strpos($reference, '.');
+
+        return $dot === false ? $reference : substr($reference, $dot + 1);
+    }
+
+    /**
+     * Refuse a field name that states what the CALLER may do where the
+     * declaration states what the RECORD is (#895).
+     *
+     * Matching is on a NORMALIZED form — case-folded with `_`/`-` removed, and
+     * again with a leading `is`/`has` removed — because the same flag arrives as
+     * `canEdit` from one serializer and `can_edit` or `is_editable` from
+     * another, and a guard that only knows one spelling is a guard that fails on
+     * the payload shape it was not written against. The `is`/`has` form is
+     * checked as a SECOND candidate rather than by stripping the prefix
+     * unconditionally, so an honest field like `issued` is never mistaken for
+     * `sued`.
+     *
+     * @param list<string> $errors by reference
+     */
+    private static function rejectCallerDecisionField(
+        string $field,
+        string $what,
+        string $path,
+        array &$errors,
+    ): void {
+        if ($field === '') {
+            return;
+        }
+
+        $normalized = self::normalizeFieldName($field);
+        $withoutPrefix = preg_replace('/^(?:is|has)(?=.)/', '', $normalized) ?? $normalized;
+
+        foreach (self::CALLER_DECISION_FIELDS as $reserved) {
+            $target = self::normalizeFieldName($reserved);
+            if ($normalized !== $target && $withoutPrefix !== $target) {
+                continue;
+            }
+
+            $errors[] = "{$path}: {$what} may not bind '{$field}' — it says what the CALLER may do, "
+                . 'not what the record IS, and a record page states facts about the record (#895). '
+                . 'A caller-permission flag belongs to the controls the page offers '
+                . "(a form/button 'requiredPermission'), never to a field, heading, badge, or stat";
+
+            return;
+        }
+    }
+
+    /**
+     * Case-fold a field name and drop the separators serializers disagree about,
+     * so `canEdit`, `can_edit` and `Can-Edit` are one name.
+     */
+    private static function normalizeFieldName(string $field): string
+    {
+        return str_replace(['_', '-'], '', strtolower($field));
     }
 
     /**

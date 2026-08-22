@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Storage;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access layer for `tenant_storage_config` — a tenant's own object-storage
@@ -125,8 +126,8 @@ final class TenantStorageConfigRepository
 
     /**
      * Cast DB columns to proper PHP types and swap the secret for a `has_secret`
-     * flag. PostgreSQL's PDO returns everything as strings; booleans come back as
-     * 't'/'f' (the (bool)'f' === true trap), so path_style is normalised safely.
+     * flag. `path_style` goes through {@see DbBool} so it reads the same way
+     * whatever spelling the driver returns it in.
      *
      * @param array<string, mixed> $row
      * @return array<string, mixed>
@@ -149,19 +150,16 @@ final class TenantStorageConfigRepository
         ];
     }
 
-    /**
-     * Portable DB-boolean coercion: PG returns 't'/'f' strings (and (bool)'f' is
-     * TRUE), SQLite 0/1, in-process a real bool.
+        /**
+     * Coerce a DB boolean column to a real bool.
+     *
+     * Delegates to the canonical coercion (#891). {@see DbBool} records which
+     * spellings each driver actually returns — measured on the PHP this
+     * platform ships, not assumed — and why a bare `(bool)` cast is not an
+     * equivalent substitute for it.
      */
     private static function toBool(mixed $value): bool
     {
-        if (is_bool($value)) {
-            return $value;
-        }
-        if (is_int($value)) {
-            return $value !== 0;
-        }
-
-        return !in_array(strtolower(trim((string) $value)), ['', '0', 'f', 'false', 'no'], true);
+        return DbBool::of($value);
     }
 }

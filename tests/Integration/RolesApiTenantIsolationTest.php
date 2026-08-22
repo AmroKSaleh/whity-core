@@ -107,6 +107,9 @@ class RolesApiTenantIsolationTest extends TestCase
             'parent_id' => null,
             'created_at' => 'now',
             'permission_count' => 4,
+            // Selected by list() and read for the `global` flag (#886); a row
+            // without it is a mock that does not match the query.
+            'tenant_id' => 1,
         ];
 
         $pdo = $this->tenantScopedListPdo(1, [$customAdmin]);

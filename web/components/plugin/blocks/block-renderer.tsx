@@ -29,6 +29,7 @@ import type {
   CodeBlock,
   ColorInputBlock,
   DataListBlock,
+  DataRecordBlock,
   DataStatBlock,
   DataTableBlock,
   DateInputBlock,
@@ -51,6 +52,8 @@ import type {
   OuScopeKind,
   OuScopePickerBlock,
   OuScopeValue,
+  RecordFact,
+  RecordFieldsBlock,
   ReferenceSelectBlock,
   RichTextInputBlock,
   RowAction,
@@ -294,6 +297,21 @@ function isChartSeriesList(
  * entry costs the whole block rather than silently rendering an action whose
  * endpoint the host never shape-checked.
  */
+/** #883: `dataRecord.fields` — a non-empty list of `{field, label}` facts. */
+function isRecordFactList(value: unknown): value is RecordFact[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (item) =>
+        typeof item === 'object' &&
+        item !== null &&
+        isNonEmptyString((item as { field?: unknown }).field) &&
+        typeof (item as { label?: unknown }).label === 'string'
+    )
+  );
+}
+
 function isItemActionList(value: unknown): value is ItemAction[] {
   if (!Array.isArray(value) || value.length === 0) return false;
   return value.every(
@@ -440,7 +458,25 @@ function TabsRenderer({ block }: { block: TabsBlock }) {
 
 // ---- leaf renderers ----
 
+/**
+ * #883: the value a literal leaf actually shows — the record field named by its
+ * `…From` twin when that resolves, otherwise the declared literal.
+ *
+ * The literal is the FALLBACK rather than the alternative, which is why the
+ * contract keeps it required. A record page titles itself with its record's
+ * name, and it still needs a title in the two moments the reference does not
+ * resolve: before the record has arrived, and on a screen where nothing
+ * publishes it at all.
+ */
+function useBoundText(literal: string, ref: string | undefined): string {
+  const md = useMasterDetail();
+  if (ref === undefined || ref === '') return literal;
+  const resolved = resolveContextRef(md, ref);
+  return resolved !== undefined && resolved !== '' ? resolved : literal;
+}
+
 function HeadingRenderer({ block }: { block: HeadingBlock }) {
+  const text = useBoundText(block.text, block.textFrom);
   const className = cn(
     'font-heading font-semibold',
     block.level === 1 && 'text-xl',
@@ -450,17 +486,18 @@ function HeadingRenderer({ block }: { block: HeadingBlock }) {
   );
   switch (block.level) {
     case 1:
-      return <h1 className={className}>{block.text}</h1>;
+      return <h1 className={className}>{text}</h1>;
     case 2:
-      return <h2 className={className}>{block.text}</h2>;
+      return <h2 className={className}>{text}</h2>;
     case 3:
-      return <h3 className={className}>{block.text}</h3>;
+      return <h3 className={className}>{text}</h3>;
     case 4:
-      return <h4 className={className}>{block.text}</h4>;
+      return <h4 className={className}>{text}</h4>;
   }
 }
 
 function TextRenderer({ block }: { block: TextBlock }) {
+  const value = useBoundText(block.value, block.valueFrom);
   return (
     <p
       className={cn(
@@ -468,7 +505,7 @@ function TextRenderer({ block }: { block: TextBlock }) {
         block.tone === 'muted' ? 'text-muted-foreground' : 'text-foreground'
       )}
     >
-      {block.value}
+      {value}
     </p>
   );
 }
@@ -498,12 +535,13 @@ const BADGE_TONE_CLASS: Record<BadgeBlock['variant'], string> = {
 };
 
 function BadgeRenderer({ block }: { block: BadgeBlock }) {
+  const label = useBoundText(block.label, block.labelFrom);
   return (
     <Badge
       variant={block.variant === 'neutral' ? 'secondary' : 'outline'}
       className={BADGE_TONE_CLASS[block.variant]}
     >
-      {block.label}
+      {label}
     </Badge>
   );
 }
@@ -522,17 +560,19 @@ const TREND_TONE: Record<NonNullable<StatBlock['trend']>, string> = {
 
 function StatRenderer({ block }: { block: StatBlock }) {
   const TrendIcon = block.trend ? TREND_ICON[block.trend] : null;
+  const value = useBoundText(block.value, block.valueFrom);
+  const hint = useBoundText(block.hint ?? '', block.hintFrom);
   return (
     <div className="rounded-lg bg-card p-4 ring-1 ring-foreground/10">
       <div className="text-xs text-muted-foreground">{block.label}</div>
       <div className="mt-1 flex items-center gap-1.5">
-        <span className="font-heading text-xl font-semibold">{block.value}</span>
+        <span className="font-heading text-xl font-semibold">{value}</span>
         {TrendIcon !== null && block.trend && (
           <TrendIcon className={cn('size-4', TREND_TONE[block.trend])} aria-hidden />
         )}
       </div>
-      {isNonEmptyString(block.hint) && (
-        <div className="mt-1 text-xs text-muted-foreground">{block.hint}</div>
+      {isNonEmptyString(hint) && (
+        <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
       )}
     </div>
   );
@@ -686,6 +726,20 @@ interface MasterDetail {
   rows: Record<string, Record<string, unknown>>;
   openTargets: Record<string, boolean>;
   openTarget: (id: string, row?: Record<string, unknown>) => void;
+  // #883: a `dataRecord` publishes its fetched record under its own id, into
+  // the SAME `rows` map an `open` row action writes — so `{id}.{field}` means
+  // one thing whether the record came from a route, a selector, or a clicked
+  // row. Separate from `openTarget` only because publishing a record must not
+  // also mark an overlay open; the addressing is deliberately identical.
+  publishRecord: (id: string, fields: Record<string, unknown>, facts: RecordFact[]) => void;
+  // The DECLARATION behind each published record: which fields it names and
+  // under which labels. Held beside `rows` rather than inside it because
+  // `rows` is the addressing surface every `{id}.{field}` reference resolves
+  // against, and a parallel label map in there would make `{rec.label}` mean
+  // something. Provider-level rather than a context around the `dataRecord`'s
+  // subtree, so a `recordFields` that is its SIBLING resolves too — `from` names
+  // a record, not a position in the tree.
+  recordFacts: Record<string, RecordFact[]>;
   // `options.refresh` bumps `refreshSignal` (passed ONLY from a form's
   // submit-success path) so a plain dismiss/cancel never triggers a refetch.
   closeTarget: (id: string, options?: { refresh?: boolean }) => void;
@@ -732,9 +786,32 @@ export function resolveContextRef(md: MasterDetail | null, ref: string): string 
  * write and data-bound blocks' `params` / form `defaultFrom` read. Rendered once
  * at the BlockRenderer root, so state is visible to every block on the screen.
  */
-function MasterDetailProvider({ children }: { children: React.ReactNode }) {
-  const [selections, setSelections] = React.useState<Record<string, string>>({});
+/**
+ * The reserved binding a host seeds with the record its ROUTE is about (#883).
+ * Kept in step with the SDK's `BlockValidator::PAGE_RECORD_BINDING`, which
+ * refuses a `selector` that would shadow it.
+ */
+export const PAGE_RECORD_BINDING = 'record';
+
+function MasterDetailProvider({
+  children,
+  record,
+}: {
+  children: React.ReactNode;
+  /**
+   * #883 gap 2: the record a record-page route is about, published under
+   * {@link PAGE_RECORD_BINDING} so a `dataRecord` can name it in its `source`
+   * (`/api/v1/things/{record}`). Undefined for an ordinary feature screen, in
+   * which case nothing binds it and a tree that names it simply never resolves
+   * — the contract's standing no-op stance for an unresolvable reference.
+   */
+  record?: string;
+}) {
+  const [selections, setSelections] = React.useState<Record<string, string>>(
+    record !== undefined && record !== '' ? { [PAGE_RECORD_BINDING]: record } : {}
+  );
   const [rows, setRows] = React.useState<Record<string, Record<string, unknown>>>({});
+  const [recordFacts, setRecordFacts] = React.useState<Record<string, RecordFact[]>>({});
   const [openTargets, setOpenTargets] = React.useState<Record<string, boolean>>({});
   const [refreshSignal, setRefreshSignal] = React.useState(0);
 
@@ -750,12 +827,130 @@ function MasterDetailProvider({ children }: { children: React.ReactNode }) {
     setOpenTargets((prev) => ({ ...prev, [id]: false }));
     if (options?.refresh === true) setRefreshSignal((s) => s + 1);
   }, []);
+  // Bails out when nothing changed. `dataRecord` publishes from a render-phase
+  // effect on every settled fetch, and an unconditional setState there would
+  // re-render the whole feature tree forever.
+  const publishRecord = React.useCallback(
+    (id: string, fields: Record<string, unknown>, facts: RecordFact[]) => {
+      setRows((prev) => {
+        const current = prev[id];
+        if (current !== undefined && shallowEqualRecords(current, fields)) return prev;
+        return { ...prev, [id]: fields };
+      });
+      setRecordFacts((prev) => (prev[id] === facts ? prev : { ...prev, [id]: facts }));
+    },
+    []
+  );
+
+  // The route's record is a PROP, so it has to survive a re-render that changes
+  // it (one record page navigating to another) without discarding selections
+  // the user has made on the screen.
+  const seededRecord = React.useRef(record);
+  React.useEffect(() => {
+    if (seededRecord.current === record) return;
+    seededRecord.current = record;
+    setSelections((prev) => ({ ...prev, [PAGE_RECORD_BINDING]: record ?? '' }));
+  }, [record]);
 
   const value = React.useMemo<MasterDetail>(
-    () => ({ selections, setSelection, rows, openTargets, openTarget, closeTarget, refreshSignal }),
-    [selections, setSelection, rows, openTargets, openTarget, closeTarget, refreshSignal]
+    () => ({ selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, publishRecord, refreshSignal }),
+    [selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, publishRecord, refreshSignal]
   );
   return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>;
+}
+
+/**
+ * Whether two published records hold the same values, compared one level deep.
+ *
+ * `dataRecord` republishes on every settled fetch, and the projection builds a
+ * fresh object each time, so identity comparison would loop forever. One level
+ * is enough because the projection's values are whatever the payload held for
+ * the declared fields — and a nested object that changed identity but not
+ * content costs one extra render, not a loop, since the next comparison sees
+ * the same reference again.
+ */
+function shallowEqualRecords(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>
+): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((key) => Object.is(a[key], b[key]));
+}
+
+/**
+ * Compute a `dataRecord`'s EFFECTIVE source by substituting its `{token}`
+ * segments from the master-detail context, or `null` when any token is still
+ * unresolved.
+ *
+ * `null` MATTERS, and it is the one place this differs from how a form's
+ * `submit.endpoint` is interpolated. That one substitutes `''` for an
+ * unresolved token, which is right for a submit the user explicitly triggered.
+ * Here it would be a silent bug of the worst kind: `/api/v1/things/{record}`
+ * with nothing bound becomes `/api/v1/things/`, which is very often the
+ * COLLECTION endpoint — so the block would fetch every record the caller can
+ * see, take whatever the envelope held, and render it as "the record this page
+ * is about". Not fetching is the only honest answer to "which record?" when
+ * nothing has said.
+ */
+function useResolvedRecordSource(
+  baseSource: string,
+  params?: SourceParam[]
+): string | null {
+  const md = useMasterDetail();
+  // Split on the tokens rather than replacing through a callback: a callback
+  // that recorded "something did not resolve" in a closure variable is a
+  // reassignment during render, which the React compiler refuses (and is right
+  // to — the same expression would read differently on a re-render). Splitting
+  // on a CAPTURING pattern puts every token at an odd index, so the whole thing
+  // becomes a map and a join with nothing mutable in it.
+  const parts = baseSource.split(/(\{[^{}]*\})/);
+  const resolvedParts = parts.map((part, index) => {
+    if (index % 2 === 0) return part;
+    const value = resolveContextRef(md, part.slice(1, -1));
+    return value === undefined || value === '' ? null : encodeURIComponent(value);
+  });
+  if (resolvedParts.some((part) => part === null)) return null;
+  const substituted = resolvedParts.join('');
+  if (!params || params.length === 0 || md === null) return substituted;
+  const qs = params
+    .map((p) => {
+      const v = resolveContextRef(md, p.from);
+      return v !== undefined && v !== '' ? `${encodeURIComponent(p.param)}=${encodeURIComponent(v)}` : null;
+    })
+    .filter((x): x is string => x !== null)
+    .join('&');
+  if (qs === '') return substituted;
+  return substituted + (substituted.includes('?') ? '&' : '?') + qs;
+}
+
+/**
+ * Project a fetched payload down to the facts the declaration NAMED (#883).
+ *
+ * This is the structural half of the #895 guard, and it is deliberately the
+ * only path by which a record reaches the master-detail context. A payload's
+ * `manageable`, `canEdit` or `mayModify` is not filtered out here so much as
+ * never picked up: the projection reads the declared field names and nothing
+ * else, so a caller-permission flag is unreachable from the tree whatever it is
+ * called and whether or not the author thought about it. The SDK validator
+ * refuses the eleven names #897 knows by name; this refuses everything that was
+ * not asked for.
+ *
+ * A declared field the payload does not carry is published as `undefined`, so
+ * `resolveContextRef` reports it unresolved and every binding falls back — the
+ * same no-op an unresolvable `params.from` already is.
+ */
+function projectRecordFacts(
+  payload: Record<string, unknown>,
+  fields: RecordFact[]
+): Record<string, unknown> {
+  const facts: Record<string, unknown> = {};
+  for (const fact of fields) {
+    if (typeof fact?.field === 'string' && fact.field !== '') {
+      facts[fact.field] = payload[fact.field];
+    }
+  }
+  return facts;
 }
 
 /**
@@ -1194,6 +1389,207 @@ function DataStatRenderer({ block }: { block: DataStatBlock }) {
       />
     </div>
   );
+}
+
+/**
+ * DataRecordRenderer (#883) — the record-bound primitive.
+ *
+ * Fetches ONE resource, publishes the fields its declaration NAMES into the
+ * master-detail context under `block.id`, and renders its children beneath. It
+ * owns loading and failure for the whole subtree, which is the reason it is a
+ * container: a record page assembled from a dozen leaves that each own their
+ * own skeleton shows a dozen skeletons resolving in an arbitrary order, and a
+ * record that failed to load renders as a page of empty fields rather than as a
+ * page that could not be loaded.
+ */
+function DataRecordRenderer({ block }: { block: DataRecordBlock }) {
+  const t = useTranslation('plugin');
+  const md = useMasterDetail();
+  const source = useResolvedRecordSource(block.source, block.params);
+  // `usePluginData` is a hook, so it cannot be skipped when the source has not
+  // resolved. An empty source string is never fetched (the effect bails), which
+  // keeps the hook order stable without issuing a request for a record nobody
+  // has named yet.
+  const state = usePluginData<Record<string, unknown>>(source ?? '', (body) =>
+    typeof body === 'object' && body !== null && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : null
+  );
+
+  useRefetchOnSignal(
+    state.status === 'ready' || state.status === 'empty' ? state.refresh
+      : state.status === 'error' ? state.retry : undefined
+  );
+
+  const publishRecord = md?.publishRecord;
+  // Keyed on the fetched payload rather than on `state`, which is a fresh object
+  // every render — memoizing on it would rebuild the projection each time and
+  // re-fire the publish effect on every render. It would still settle (the
+  // publisher bails when nothing changed), but "settles" is a weaker property
+  // than "does not fire", and this block sits at the root of a whole page.
+  //
+  // `source === null` forces it back to null: a record whose token stopped
+  // resolving (a selection cleared) must stop being published, or a sibling
+  // `recordFields` keeps rendering the record the page is no longer about.
+  const fetched = state.status === 'ready' && source !== null ? state.data : null;
+  const facts = React.useMemo(
+    () => (fetched === null ? null : projectRecordFacts(fetched, block.fields)),
+    [fetched, block.fields]
+  );
+
+  React.useEffect(() => {
+    if (facts === null || publishRecord === undefined) return;
+    publishRecord(block.id, facts, block.fields);
+  }, [facts, publishRecord, block.id, block.fields]);
+
+  if (source === null) {
+    // Nothing has named a record yet — a record page before its route resolves,
+    // or a detail pane before the user has picked a master row. Deliberately the
+    // same shape as `empty` rather than an error: no record chosen is a state,
+    // not a failure.
+    return (
+      <div
+        className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-record-unbound"
+      >
+        {block.emptyText ?? t('blocks.record.unbound', 'No record selected.')}
+      </div>
+    );
+  }
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" data-slot="block-record-loading">
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-record-error"
+      >
+        <span>{t('blocks.record.loadError', 'Failed to load this record.')}</span>
+        <Button type="button" variant="outline" size="sm" onClick={state.retry}>
+          {t('blocks.retry', 'Retry')}
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.status === 'empty') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-record-empty"
+      >
+        <span>{block.emptyText ?? t('blocks.record.empty', 'This record is not available.')}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+    );
+  }
+
+  // The record is fetched but not yet IN CONTEXT. `publishRecord` runs from an
+  // effect, which commits after this render — so rendering the children now
+  // mounts them against an empty context, and everything that reads the record
+  // AT MOUNT rather than on every render silently gets nothing. A form's
+  // `defaultFrom` is exactly that: seeded once, when the input mounts. Holding
+  // the loading state for the one extra frame is what makes "a record page is a
+  // form WITH its record" true instead of nearly true.
+  if (md?.rows[block.id] === undefined) {
+    return (
+      <div className="space-y-2" data-slot="block-record-loading">
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4" data-slot="block-record">
+      <BlockList blocks={block.children} />
+    </div>
+  );
+}
+
+/**
+ * RecordFieldsRenderer (#883) — the data-bound `keyValue`.
+ *
+ * Reads the record published under `block.from` and renders its declared facts
+ * as a description list, reusing `KeyValueRenderer` so a literal key/value list
+ * and a record's own fields are the same thing on screen. `fields` picks a
+ * subset in the order given; omitted, every declared fact is shown.
+ */
+function RecordFieldsRenderer({ block }: { block: RecordFieldsBlock }) {
+  const t = useTranslation('plugin');
+  const md = useMasterDetail();
+  const row = md?.rows[block.from];
+  const declared = md?.recordFacts[block.from];
+
+  if (row === undefined || declared === undefined) {
+    // The named record has not published yet (or nothing in this tree declares
+    // it). An unresolvable reference is a no-op everywhere else in this
+    // contract, and it is a no-op here.
+    return null;
+  }
+
+  const wanted =
+    Array.isArray(block.fields) && block.fields.length > 0
+      ? block.fields
+          .map((name) => declared.find((fact) => fact.field === name))
+          .filter((fact): fact is RecordFact => fact !== undefined)
+      : declared;
+
+  if (wanted.length === 0) {
+    return (
+      <div
+        className="rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-record-fields-empty"
+      >
+        {block.emptyText ?? t('blocks.record.noFields', 'No fields to show.')}
+      </div>
+    );
+  }
+
+  return (
+    <div data-slot="block-record-fields">
+      <KeyValueRenderer
+        block={{
+          type: 'keyValue',
+          items: wanted.map((fact) => ({
+            label: fact.label,
+            value: formatFactValue(row[fact.field]),
+          })),
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * A published fact as display text.
+ *
+ * `null`/`undefined` become an EM DASH rather than an empty cell or the string
+ * "null" — the record-page shell's answer for a value the server has not
+ * stated, kept identical here so a described record page and a hand-built one
+ * do not disagree about what "no value" looks like. Booleans render as words,
+ * because a record's own boolean facts read as sentences on a record page
+ * ("Archived: Yes") and "true" reads as a serialization leaking through.
+ */
+function formatFactValue(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
 }
 
 /**
@@ -3135,6 +3531,21 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return isNonEmptyString(block.label) ? <SubmitButtonRenderer block={block} /> : <UnsupportedBlock type="submitButton" />;
     case 'actionButton':
       return isNonEmptyString(block.label) && isValidSubmitSpec(block.action) ? <ActionButtonRenderer block={block} /> : <UnsupportedBlock type="actionButton" />;
+    case 'dataRecord':
+      return isNonEmptyString(block.id) &&
+        isNonEmptyString(block.source) &&
+        isRecordFactList(block.fields) &&
+        Array.isArray(block.children) ? (
+        <DataRecordRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="dataRecord" />
+      );
+    case 'recordFields':
+      return isNonEmptyString(block.from) ? (
+        <RecordFieldsRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="recordFields" />
+      );
     case 'modal':
       return isNonEmptyString(block.id) && isNonEmptyString(block.title) && Array.isArray(block.children) ? <ModalRenderer block={block} /> : <UnsupportedBlock type="modal" />;
     case 'drawer':
@@ -3170,9 +3581,9 @@ function BlockList({ blocks }: { blocks: Block[] }) {
  * placeholder rather than throwing, and no plugin string is ever interpreted
  * as HTML.
  */
-export function BlockRenderer({ blocks }: { blocks: Block[] }) {
+export function BlockRenderer({ blocks, record }: { blocks: Block[]; record?: string }) {
   return (
-    <MasterDetailProvider>
+    <MasterDetailProvider record={record}>
       <div className="space-y-4" data-slot="block-renderer">
         <BlockList blocks={blocks} />
       </div>

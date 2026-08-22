@@ -475,6 +475,18 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Email already exists in the tenant'),
                 ] + self::authErrors(),
             ]),
+            // #882: the single-record read a record page is built on. Tenant
+            // scoped exactly like the list — a non-system caller reads only a
+            // membership in its OWN tenant, and a profile without one here is a
+            // 404 rather than a leak that the profile exists somewhere.
+            self::adminRoute('GET', '/api/users/{id:\d+}', [
+                'summary' => 'Read one user',
+                'tags' => ['users'],
+                'responses' => [
+                    200 => self::jsonResponse('The user', 'UserResponse'),
+                    404 => self::errorResponse('User not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
             self::adminRoute('PATCH', '/api/users/{id:\d+}', [
                 'summary' => 'Update a user',
                 'tags' => ['users'],
@@ -551,12 +563,14 @@ final class CoreApiSchemas
                 ] + self::authErrors(),
             ]),
             self::adminRoute('POST', '/api/roles', [
-                'summary' => 'Create a role with optional permission grants',
+                'summary' => 'Create a role, owned by the caller\'s tenant unless a system caller names another',
                 'tags' => ['roles'],
                 'request' => 'RoleCreateRequest',
                 'responses' => [
                     201 => self::jsonResponse('The created role', 'RoleCreateResponse'),
-                    400 => self::errorResponse('Validation failed'),
+                    400 => self::errorResponse('Validation failed, or tenant_id and global both sent'),
+                    403 => self::errorResponse('Only the system tenant may name a target tenant or create a global role'),
+                    404 => self::errorResponse('The named target tenant does not exist'),
                     409 => self::errorResponse('Role name already exists'),
                 ] + self::authErrors(),
             ]),
@@ -585,6 +599,23 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('Deletion confirmation', 'MutationResponse'),
                     404 => self::errorResponse('Role not found or not manageable by the tenant'),
                     409 => self::errorResponse('Role has active user assignments'),
+                ] + self::authErrors(),
+            ]),
+            // #882: the record page's "12 users hold this role, most recently
+            // user3". Ordered by grant time (memberships.created_at) newest
+            // first, so page one is the recent-assignment history and
+            // `pagination.total` is the headcount — one request for both, and no
+            // client-side count over every user in the tenant.
+            self::adminRoute('GET', '/api/roles/{id:\d+}/assignments', [
+                'summary' => 'List who holds this role, newest grant first (total = headcount)',
+                'tags' => ['roles'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The role\'s holders with pagination', 'RoleAssignmentListResponse'),
+                    404 => self::errorResponse('Role not found or not visible'),
                 ] + self::authErrors(),
             ]),
             self::adminRoute('GET', '/api/roles/{id:\d+}/permissions', [
@@ -922,6 +953,7 @@ final class CoreApiSchemas
                     self::queryParam('action', 'string', 'Exact action match (e.g. users:create)'),
                     self::queryParam('actor', 'integer', 'Filter by actor user id'),
                     self::queryParam('target_type', 'string', 'Filter by target type'),
+                    self::queryParam('target_id', 'integer', 'Filter by target id — the history of ONE record. Normally paired with target_type; alone it matches that id across every target type.'),
                     self::queryParam('from', 'string', 'Inclusive ISO-8601 lower bound'),
                     self::queryParam('to', 'string', 'Inclusive ISO-8601 upper bound'),
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
@@ -1037,6 +1069,7 @@ final class CoreApiSchemas
                     'parameters' => [
                         self::queryParam('action', 'string', 'Exact action match (e.g. users:create)'),
                         self::queryParam('target_type', 'string', 'Filter by target type'),
+                        self::queryParam('target_id', 'integer', 'Filter by target id — the caller\'s own entries about ONE record'),
                         self::queryParam('from', 'string', 'Inclusive ISO-8601 lower bound'),
                         self::queryParam('to', 'string', 'Inclusive ISO-8601 upper bound'),
                         self::queryParam('page', 'integer', '1-indexed page (default 1)'),
@@ -2040,7 +2073,16 @@ final class CoreApiSchemas
             // tenant (only the SYSTEM tenant may manage it); the admin UI gates
             // its Edit/Delete actions on this flag (WC-222).
             'manageable' => self::bool(),
-        ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissionCount', 'manageable']);
+            // True when this is a GLOBAL (NULL-tenant) base role — one row shared
+            // by every tenant, so an edit to it applies deployment-wide (#886).
+            // Distinct from `manageable`, which says what the CALLER may do: for
+            // the system tenant everything is manageable, so without this flag
+            // the one caller whose edit reaches every tenant is also the one who
+            // cannot tell which roles those are. The owning tenant id itself is
+            // never returned — a tenant learns that a role is shared, not who
+            // else has one.
+            'global' => self::bool(),
+        ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissionCount', 'manageable', 'global']);
 
         $tenant = self::object([
             'id' => self::int(),
@@ -2975,30 +3017,79 @@ final class CoreApiSchemas
             'PermissionCatalogueResponse' => self::listEnvelope('PermissionCatalogueEntry'),
             'Role' => $role,
             'RoleListResponse' => self::paginatedListEnvelope('Role'),
+            // `manageable` mirrors the LIST row's flag (WC-222): whether THIS
+            // tenant may write this role. #882 added it here because a record
+            // page reached by URL has no list row to read it from, and a page
+            // that guesses renders an editable form that 404s on save.
             'RoleDetail' => self::object([
                 'id' => self::int(),
                 'name' => self::str(),
                 'description' => self::str(true),
                 'parent_id' => self::int(true),
                 'created_at' => self::str(true),
+                'manageable' => self::bool(),
+                // #886 — the same "is this shared by every tenant" fact the list
+                // rows carry. The record page previously inferred it from
+                // `!manageable`, which reads correctly for a tenant and inverts
+                // for the system tenant.
+                'global' => self::bool(),
                 'permissions' => ['type' => 'array', 'items' => SchemaBuilder::ref('Permission')],
-            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissions']),
+            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'manageable', 'global', 'permissions']),
             'RoleDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('RoleDetail')),
+            // #882 — one holder of a role. `assignedAt` is the membership's
+            // created_at: when this person was given this role in this tenant,
+            // which is what makes the list an assignment history rather than a
+            // roster in arbitrary order. `email` is nullable because the primary
+            // email row is LEFT JOINed — someone without one still holds the
+            // role. `tenantId` is a constant for a tenant caller and the only
+            // thing distinguishing rows for a tenant-0 one.
+            'RoleAssignment' => self::object([
+                'membershipId' => self::int(),
+                'profileId' => self::int(),
+                'tenantId' => self::int(),
+                'displayName' => self::str(),
+                'email' => self::str(true),
+                'ouId' => self::int(true),
+                'isPrimary' => self::bool(),
+                'status' => self::str(),
+                'assignedAt' => self::str(true),
+            ], ['membershipId', 'profileId', 'tenantId', 'displayName', 'isPrimary', 'status']),
+            'RoleAssignmentListResponse' => self::paginatedListEnvelope('RoleAssignment'),
+            // #888 — `tenant_id` names the tenant the role is created FOR and
+            // `global: true` asks for a shared NULL-tenant base role. Both are
+            // honoured ONLY for a tenant-0 caller (403 otherwise, never a silent
+            // ignore) and both are optional, so an unqualified create still
+            // stamps the caller's own tenant exactly as before.
+            //
+            // Two fields rather than one nullable one, and `tenant_id` is
+            // INTEGER, not nullable-integer, on purpose: ownership has three
+            // states and `tenant_id: null` for the third would make the meaning
+            // on the wire depend on whether a client serialises an unset
+            // optional as `null` or drops it. Sending both is a 400.
             'RoleCreateRequest' => self::object([
                 'name' => self::str(),
                 'description' => self::str(),
                 'permissions' => ['type' => 'array', 'items' => $permissionRef],
+                'tenant_id' => self::int(),
+                'global' => self::bool(),
             ], ['name']),
             'RoleUpdateRequest' => self::object([
                 'name' => self::str(),
                 'description' => self::str(),
                 'permissions' => ['type' => 'array', 'items' => $permissionRef],
             ], []),
+            // `tenantId`/`global` echo the RESOLVED owner (#888). The request's
+            // ownership fields are optional, so a caller that omitted them
+            // otherwise cannot tell what it got. In a RESPONSE the field is
+            // always present, so `tenantId: null` is unambiguously global — the
+            // omitted-vs-explicit-null problem exists only on the request side.
             'RoleCreateResponse' => self::dataEnvelope(self::object([
                 'id' => self::int(),
                 'name' => self::str(),
                 'description' => self::str(),
                 'permissionCount' => self::int(),
+                'tenantId' => self::int(true),
+                'global' => self::bool(),
             ], ['id', 'name'])),
             // #712 — the delta body shared by POST and DELETE
             // /api/roles/{id}/permissions. Same mixed id-or-`resource:action`
@@ -3368,14 +3459,26 @@ final class CoreApiSchemas
             // ---- Platform-ops schemas (WC-62133b3f) ----
 
             // GET /api/health — top-level (not data-enveloped)
+            //
+            // `version` is the CORE version and keeps that name: it is a
+            // published field on a public probe, so renaming it to
+            // `core_version` would break somebody's alerting for cosmetics.
+            // `sdk_version` is the plugin-SDK contract version, unauthenticated
+            // here on purpose — the reasoning is on HealthApiHandler's docblock.
+            //
+            // `workers_active` was documented here as `worker_count` — a name
+            // the handler has never returned. Corrected rather than left beside
+            // the new field: a spec that names a key the server does not send is
+            // worse than one that omits it, because a generated client compiles.
             'HealthResponse' => self::object([
                 'status' => ['type' => 'string', 'enum' => ['ok', 'degraded']],
                 'version' => self::str(),
-                'worker_count' => self::int(),
+                'sdk_version' => self::str(),
+                'workers_active' => self::int(),
                 'uptime_seconds' => self::int(),
                 'db_connected' => self::bool(),
                 'memory_usage_mb' => ['type' => 'number', 'format' => 'float'],
-            ], ['status', 'version', 'worker_count', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
+            ], ['status', 'version', 'sdk_version', 'workers_active', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
 
             // GET /api/platform/version (WHIT-587)
             'PlatformVersionResponse' => self::object([
