@@ -375,22 +375,29 @@ jobs:
           key: phpstan-${{ github.sha }}
           restore-keys: phpstan-
 
+      # The paths and the memory limit live in ONE place — the `phpstan` script
+      # in composer.json — and this step, scripts/ci-local.sh and any hand-run
+      # all go through it (#934). They used to disagree three ways: 1G here,
+      # 512M in ci-local.sh, and PHP's 128M default in a plain dev container.
+      #
       # 1G, not 512M. PHPStan runs parallel workers and each holds its own
       # analysis state, so the ceiling is per-worker rather than total — 512M
       # was enough until the suite grew past it, at which point a worker
       # crashes and the whole job fails with "Result is incomplete because of
       # severe errors" rather than with a real finding. That reads exactly like
       # a code defect and is not one, which is the expensive part: the failure
-      # names a memory limit only if you open the log.
+      # names a memory limit only if you open the log. At 128M it is worse
+      # still — the summary line reads "Found 7 errors", and every one of them
+      # is a crashed worker rather than a finding.
       #
-      # The runner has ~7GB, so this is not near anything. It is also what the
-      # documented local invocation already uses, so a clean local run no
-      # longer disagrees with CI.
+      # The runner has ~7GB, so this is not near anything.
+      #
+      # `ops` is in the path list (see the composer script) because
+      # ops/health-watch-healthcheck.php is a container HEALTHCHECK: a probe
+      # that fatals is a probe that reports nothing, and nothing was analysing
+      # it (WC-766).
       - name: Run PHPStan
-        # `ops` is in the list because ops/health-watch-healthcheck.php is a
-        # container HEALTHCHECK: a probe that fatals is a probe that reports
-        # nothing, and nothing was analysing it (WC-766).
-        run: vendor/bin/phpstan analyse src tests plugins sdk ops --memory-limit=1G
+        run: composer phpstan
 
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
