@@ -3,7 +3,7 @@
 ## Requirements
 
 - PHP 8.4 (the platform target — see `Dockerfile`, pinned to `dunglas/frankenphp:1-php8.4`)
-- Composer
+- Composer (run on the **host** before `docker compose up` — see step 2)
 - FrankenPHP (persistent worker mode)
 - PostgreSQL 15 (the only supported database; `Whity\Database\Database` builds a `pgsql:` DSN)
 - Docker + Docker Compose (recommended local setup)
@@ -22,7 +22,46 @@ Copy `.env.example` to `.env` (if present) and set the database and secret value
 - Optional pooling: `DB_CONNECT_TIMEOUT`, `DB_MAX_LIFETIME`, `DB_PING_INTERVAL`
 - Worker tuning: `FRANKENPHP_WORKERS`, `FRANKENPHP_TIMEOUT`, `MAX_REQUESTS`
 
-### 2. Start the stack
+### 2. Install PHP dependencies on the host — before starting the stack
+
+```bash
+composer install
+```
+
+**Do this first.** The dev image (the `base` target in `Dockerfile`) deliberately
+ships **no `vendor/`**, and `docker-compose.yml` bind-mounts your checkout over
+`/app`. So the container runs against whatever `vendor/` your working copy has —
+and if that is nothing, `db-init` exits `255` with `vendor/autoload.php not
+found` and the stack never comes up. The error names the missing file rather
+than the missing step, which is why this is easy to lose time on.
+
+Only the `release` image target runs `composer install` for you; local
+development does not.
+
+#### On Windows: mirror the `sdk` path repository instead of symlinking it
+
+```bash
+COMPOSER_MIRROR_PATH_REPOS=1 composer install
+```
+
+The SDK is consumed through a Composer **path repository** (`{"type": "path",
+"url": "sdk"}` in `composer.json`), which Composer satisfies by symlinking
+`vendor/whity/plugin-sdk` to `../../sdk/`. A symlink created on a Windows host
+does not survive the bind mount into a Linux container, so every
+`Whity\Sdk\*` class fails to autoload inside the stack.
+
+Setting `COMPOSER_MIRROR_PATH_REPOS=1` makes Composer **copy** the SDK into
+`vendor/` instead. The trade-off is that SDK edits no longer appear in `vendor/`
+automatically — re-run `composer install` after changing anything under `sdk/`.
+
+You can confirm which you have:
+
+```bash
+ls -la vendor/whity/          # symlink → plugin-sdk -> ../../sdk/
+                              # mirrored → plugin-sdk/ as a real directory
+```
+
+### 3. Start the stack
 
 ```bash
 docker compose up --build
@@ -30,7 +69,7 @@ docker compose up --build
 
 The app is served on `http://localhost:8000` (mapped from container port 80).
 
-### 3. Run database migrations
+### 4. Run database migrations
 
 Migrations are run via the CLI entry point in `public/index.php`:
 
@@ -47,11 +86,11 @@ see the [Go-Live Checklist](Go-Live-Checklist.md).
 
 Other CLI commands: `seed`, `generate:openapi`, `revoked-tokens:cleanup`.
 
-### 4. Web UI (optional)
+### 5. Web UI (optional)
 
 The Next.js UI lives in `web/` and proxies `/api/*` to the backend. See `web/README.md`.
 
-### 5. Add plugins
+### 6. Add plugins
 
 Create a plugin directory under `plugins/` containing a class that implements
 `Whity\Sdk\PluginInterface`. See [Plugin Development](Plugin-Development.md).

@@ -215,7 +215,7 @@ The full reference file (with PHPDoc on every method) is
 | Key            | Type      | Notes                                                                     |
 | -------------- | --------- | ------------------------------------------------------------------------- |
 | `method`       | `string`  | HTTP method, e.g. `GET`, `POST`.                                          |
-| `path`         | `string`  | Request path, e.g. `/api/hello`.                                          |
+| `path`         | `string`  | Request path **without** the API version segment, e.g. `/api/hello` — served at `/api/v1/hello`. See below. |
 | `handler`      | `callable`| `function(Request $request): Response`. A `[$this, 'method']` pair works. |
 | `requiredRole` | `?string` | Optional. `null` = public; `'admin'` = only the `admin` role.             |
 
@@ -225,6 +225,39 @@ and `Response::error($message, $status)` for errors. A handler that throws, or
 returns something other than a `Response`, is caught by the loader's per-plugin
 error boundary and turned into a safe `500` — it cannot crash the host or other
 plugins.
+
+#### Declared paths are auto-versioned
+
+**The path you declare is not the path your route is served at.** Every plugin
+route is registered through the host's versioned router
+([`Router::register()`](../../src/Core/Router.php)), which inserts the API
+version immediately after the first path segment:
+
+| Declared in `getRoutes()` | Actually served at        |
+| ------------------------- | ------------------------- |
+| `/api/hello`              | `/api/v1/hello`           |
+| `/api/acme/health`        | `/api/v1/acme/health`     |
+| `/api/acme/items/{id}`    | `/api/v1/acme/items/{id}` |
+
+So declare paths **without** `/v1`. Writing `/api/v1/acme/health` yourself gets
+you `/api/v1/v1/acme/health`, which is not the path you wanted and not a path
+anything will call.
+
+The segment is `/v1` by default and comes from the `Router` constructor rather
+than from your plugin, which is the point of the indirection: your routes move
+with the platform's API version instead of pinning it.
+
+**The symptom when this bites you.** You `curl` the path you declared, get a
+`404`, and conclude your plugin failed to load. Check `GET /api/v1/plugins` (or
+the admin Plugins screen) before you go debugging discovery — if your plugin is
+listed there, it loaded fine and you are simply calling the unversioned path.
+The reference plugin behaves identically: `HelloWorld` declares `/api/hello` and
+answers on `/api/v1/hello`.
+
+Core has a handful of deliberately unversioned endpoints — `/api/health`,
+`/api/version`, `/api/openapi.json` — registered through a separate
+`registerUnversioned()` method. That method is not part of the plugin contract:
+**every** plugin route is versioned, and there is no opt-out.
 
 ### Permissions (`resource:action` colon notation)
 
