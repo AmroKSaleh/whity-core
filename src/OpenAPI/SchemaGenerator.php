@@ -20,6 +20,24 @@ use Whity\Core\Router;
  *
  * Without a Router (legacy mode), plugin routes are introspected directly
  * from the PluginLoader as before.
+ *
+ * CORE FALLBACK. The offline `generate:openapi` command builds its Router by
+ * registering {@see CoreApiSchemas} FIRST, so every core route it sees already
+ * carries its typed declaration. The LIVE router does not: public/index.php
+ * registers the real handlers, and none of those 250+ `Router::register()`
+ * calls passes a `$schema`. That made the two documents describe different
+ * APIs — the committed public/openapi.json carried the full core contract
+ * while `GET /api/openapi.json`, the only spec a running instance can hand a
+ * client, described every core write endpoint as `Create Api/v1/users` with NO
+ * requestBody at all. A generated client could see POST /api/v1/users existed
+ * and had no way to learn it needs `email` and `password`.
+ *
+ * So a router route that carries NO declaration of its own falls back to the
+ * core catalogue entry for the same method+path. That makes the dynamic and
+ * the offline documents converge BY CONSTRUCTION rather than by remembering to
+ * thread a schema through every registration, and it is a no-op for the
+ * offline command (whose routes already carry their declarations) and for
+ * plugin routes (which are never in the core catalogue).
  */
 class SchemaGenerator
 {
@@ -49,19 +67,43 @@ class SchemaGenerator
     private array $conflicts = [];
 
     /**
+     * @var bool Whether an undeclared router route may borrow the core catalogue's declaration.
+     */
+    private bool $coreFallback;
+
+    /**
+     * Lazily built index of core declarations, keyed by "METHOD /versioned/path"
+     * with routing constraints stripped.
+     *
+     * @var array<string, array<string, mixed>>|null
+     */
+    private ?array $coreFallbackIndex = null;
+
+    /**
      * Constructor
      *
      * @param string $title API title
      * @param string $version API version
      * @param PluginLoader $pluginLoader Plugin loader instance
      * @param Router|null $router Router with the registered routes (preferred).
+     * @param bool $coreFallback Whether a router route with no declaration of its
+     *        own falls back to the {@see CoreApiSchemas} entry for the same
+     *        method+path (see the class docblock). Defaults to ON so a consumer
+     *        cannot silently publish an untyped core contract by forgetting to
+     *        supply the catalogue; pass false to generate from the router alone.
      */
-    public function __construct(string $title, string $version, PluginLoader $pluginLoader, ?Router $router = null)
-    {
+    public function __construct(
+        string $title,
+        string $version,
+        PluginLoader $pluginLoader,
+        ?Router $router = null,
+        bool $coreFallback = true
+    ) {
         $this->title = $title;
         $this->version = $version;
         $this->pluginLoader = $pluginLoader;
         $this->router = $router;
+        $this->coreFallback = $coreFallback;
     }
 
     /**
@@ -144,12 +186,19 @@ class SchemaGenerator
 
         if ($this->router !== null) {
             foreach ($this->router->getRoutes() as $route) {
+                $schema = $route['schema'] ?? null;
+                if (!is_array($schema) || $schema === []) {
+                    // The live router's core routes carry no declaration of
+                    // their own; borrow the catalogue's (see class docblock).
+                    $schema = $this->coreDeclarationFor($route['method'], $route['path']);
+                }
+
                 $declarations[] = [
                     'method' => $route['method'],
                     'path' => $route['path'],
                     'requiredRole' => $route['requiredRole'] ?? null,
                     'requiredPermission' => $route['requiredPermission'] ?? null,
-                    'schema' => $route['schema'] ?? null,
+                    'schema' => $schema,
                 ];
             }
 
@@ -171,6 +220,86 @@ class SchemaGenerator
         }
 
         return $declarations;
+    }
+
+    /**
+     * The core catalogue's declaration for a live router route, if any.
+     *
+     * @param string $method HTTP method as the Router stored it.
+     * @param string $versionedPath Route path as the Router stored it (already
+     *        carrying the version prefix, and possibly routing constraints).
+     * @return array<string, mixed>|null The declaration, or null when the route
+     *         is not a core one (every plugin route lands here).
+     */
+    private function coreDeclarationFor(string $method, string $versionedPath): ?array
+    {
+        if (!$this->coreFallback) {
+            return null;
+        }
+
+        $this->coreFallbackIndex ??= $this->buildCoreFallbackIndex();
+
+        return $this->coreFallbackIndex[
+            strtoupper($method) . ' ' . self::stripRouteConstraints($versionedPath)
+        ] ?? null;
+    }
+
+    /**
+     * Index every core declaration by the key {@see coreDeclarationFor} looks up.
+     *
+     * Paths are matched with routing constraints stripped: the catalogue writes
+     * `/api/users/{id:\d+}` where a live registration may write `/api/users/{id}`,
+     * and both describe the same operation. The contributed `components` are
+     * attached exactly as {@see CoreApiSchemas::registerRoutes()} attaches them,
+     * so the borrowed declaration's `$ref`s resolve.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function buildCoreFallbackIndex(): array
+    {
+        $prefix = $this->router?->getVersionPrefix() ?? '';
+        // One shared array rather than a per-route rebuild: components() is a
+        // ~2000-line literal and this runs on an unauthenticated endpoint.
+        $components = ['components' => CoreApiSchemas::components()];
+
+        $index = [];
+        foreach (CoreApiSchemas::routes() as $route) {
+            $path = ($route['unversioned'] ?? false)
+                ? $route['path']
+                : self::applyVersionPrefix($route['path'], $prefix);
+
+            $index[strtoupper($route['method']) . ' ' . self::stripRouteConstraints($path)] =
+                $route['schema'] + $components;
+        }
+
+        return $index;
+    }
+
+    /**
+     * `/api/things/{id:\d+}` → `/api/things/{id}`.
+     */
+    private static function stripRouteConstraints(string $path): string
+    {
+        return (string) preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)[^{}]*\}#', '{$1}', $path);
+    }
+
+    /**
+     * Insert the version prefix after the first path segment.
+     *
+     * Mirrors Router::versionPrefix(): `/api/users` + `/v1` → `/api/v1/users`.
+     */
+    private static function applyVersionPrefix(string $path, string $versionPrefix): string
+    {
+        if ($versionPrefix === '') {
+            return $path;
+        }
+
+        $pos = strpos($path, '/', 1);
+        if ($pos === false) {
+            return $path . $versionPrefix;
+        }
+
+        return substr($path, 0, $pos) . $versionPrefix . substr($path, $pos);
     }
 
     /**

@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Whity\OpenAPI;
 
+use Whity\Core\Ou\OuTypeRegistry;
+use Whity\Core\PasswordPolicy;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Http\InputLimits;
 
 /**
  * Typed OpenAPI declarations for the core admin resources (WC-167).
@@ -473,6 +476,7 @@ final class CoreApiSchemas
                     400 => self::errorResponse('Validation failed'),
                     404 => self::errorResponse('Declared role not found or not visible'),
                     409 => self::errorResponse('Email already exists in the tenant'),
+                    422 => self::errorResponse('Email longer than 255 characters'),
                 ] + self::authErrors(),
             ]),
             // #882: the single-record read a record page is built on. Tenant
@@ -496,6 +500,7 @@ final class CoreApiSchemas
                     400 => self::errorResponse('Validation failed'),
                     404 => self::errorResponse('User or role not found'),
                     409 => self::errorResponse('Email already exists in the tenant'),
+                    422 => self::errorResponse('Email longer than 255 characters'),
                 ] + self::authErrors(),
             ]),
             self::adminRoute('DELETE', '/api/users/{id:\d+}', [
@@ -572,6 +577,7 @@ final class CoreApiSchemas
                     403 => self::errorResponse('Only the system tenant may name a target tenant or create a global role'),
                     404 => self::errorResponse('The named target tenant does not exist'),
                     409 => self::errorResponse('Role name already exists'),
+                    422 => self::errorResponse('name over 255 or description over 10000 characters'),
                 ] + self::authErrors(),
             ]),
             self::adminRoute('GET', '/api/roles/{id:\d+}', [
@@ -590,6 +596,7 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('Update confirmation', 'MutationResponse'),
                     404 => self::errorResponse('Role not found or not manageable by the tenant'),
                     409 => self::errorResponse('Role name already exists'),
+                    422 => self::errorResponse('name over 255 or description over 10000 characters'),
                 ] + self::authErrors(),
             ]),
             self::adminRoute('DELETE', '/api/roles/{id:\d+}', [
@@ -2664,14 +2671,23 @@ final class CoreApiSchemas
             ], ['id', 'tenant_id', 'key', 'display_name', 'created_at', 'updated_at']),
             'TagGroupListResponse' => self::listEnvelope('TagGroup'),
             'TagGroupDataResponse' => self::dataEnvelope(SchemaBuilder::ref('TagGroup')),
+            // `key` is trimmed before validation and matched against
+            // TagGroupsApiHandler::KEY_PATTERN; `RequestSchemaContractTest`
+            // pins these bounds to that constant so the two cannot drift.
+            // Only the `ar` and `en` locales are stored — any other key in
+            // `display_name` is accepted and then silently dropped.
             'TagGroupCreateRequest' => self::object([
-                'key' => self::str(),
-                'display_name' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+                'key' => self::tagGroupKey(),
+                'display_name' => self::localizedText(),
             ], ['key']),
+            // Both fields are optional individually, but a body that supplies
+            // NEITHER is a 422 ('No updatable fields supplied'). A supplied
+            // `display_name` REPLACES the stored label wholesale rather than
+            // merging into it, so `{}` clears every locale.
             'TagGroupUpdateRequest' => self::object([
-                'key' => self::str(),
-                'display_name' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
-            ], []),
+                'key' => self::tagGroupKey(),
+                'display_name' => self::localizedText(),
+            ], []) + ['minProperties' => 1],
             // A tag inside a group.
             'Tag' => self::object([
                 'id' => self::int(),
@@ -2684,11 +2700,13 @@ final class CoreApiSchemas
             'TagListResponse' => self::listEnvelope('Tag'),
             'TagDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Tag')),
             'TagCreateRequest' => self::object([
-                'group_id' => self::int(),
-                'name' => self::str(),
+                'group_id' => self::reference('/api/tag-groups', 'key') + ['minimum' => 1],
+                'name' => self::tagName(),
             ], ['group_id', 'name']),
+            // A tag cannot be moved between groups here: `group_id` is not read
+            // by the rename handler, so it is deliberately not declared.
             'TagUpdateRequest' => self::object([
-                'name' => self::str(),
+                'name' => self::tagName(),
             ], ['name']),
             // A polymorphic tag<->entity association.
             'EntityTagAssociation' => self::object([
@@ -2696,10 +2714,14 @@ final class CoreApiSchemas
                 'entity_id' => self::int(),
                 'tag_id' => self::int(),
             ], ['entity_type', 'entity_id', 'tag_id']),
+            // The body of POST and DELETE /api/entity-tags alike — the DELETE
+            // genuinely reads a body (RequestBodyValidator parses DELETE too),
+            // which is why it declares a `request` where the other taxonomy
+            // DELETEs declare query parameters.
             'EntityTagAssociationRequest' => self::object([
-                'entity_type' => self::str(),
-                'entity_id' => self::int(),
-                'tag_id' => self::int(),
+                'entity_type' => self::entityType(),
+                'entity_id' => self::int() + ['minimum' => 1],
+                'tag_id' => self::reference('/api/tags', 'name') + ['minimum' => 1],
             ], ['entity_type', 'entity_id', 'tag_id']),
             'EntityTagDataResponse' => self::dataEnvelope(SchemaBuilder::ref('EntityTagAssociation')),
             // The GET /api/entity-tags shape is polymorphic: with entity_id it
@@ -2970,35 +2992,68 @@ final class CoreApiSchemas
                 'isPrimary' => ['type' => 'boolean'],
                 'created' => ['type' => 'boolean'],
             ], ['id', 'tenantId', 'roleId', 'isPrimary', 'created'])),
-            // No required list: the caller supplies role_id OR role (a name),
-            // which OpenAPI cannot express as "exactly one of these two" without
-            // a oneOf the generator does not emit. The handler enforces it and
-            // answers 400 when neither is present.
+            // The role is REQUIRED here (unlike create, which defaults to `user`):
+            // `$body['role_id'] ?? $body['role']` and a 400 "role_id is required"
+            // when neither is present. The catalogue used to declare no required
+            // field at all, which told a generated client an empty body was legal
+            // — the one shape this endpoint always refuses.
+            //
+            // Two interchangeable spellings cannot both go in `required`, and
+            // the `anyOf` spelling of "at least one" is NOT usable here:
+            // openapi-typescript renders `anyOf: [{required:[a]},{required:[b]}]`
+            // as `{...} | unknown | unknown`, which collapses to `unknown` and
+            // strips every field from the generated client — strictly worse than
+            // the untyped body this change exists to fix.
+            //
+            // So `role_id` is declared required and `role` documented as the
+            // accepted alias. That UNDER-permits (a client sending only `role`
+            // is legal but the schema does not say so) rather than
+            // OVER-permitting, which is the safe direction: a client following
+            // this schema always sends a request the API accepts, whereas the
+            // previous `required: []` told it an empty body was legal — the one
+            // shape this endpoint always refuses with `400 role_id is required`.
             //
             // `tenant_id` (#797 §2) names the tenant to grant IN and is honoured
             // ONLY for a tenant-0 caller — anyone else sending it gets a 403
             // rather than a silent ignore. Omitted, the tenant is the caller's
             // and the endpoint behaves exactly as it did.
             'MembershipCreateRequest' => self::object([
-                'role_id' => self::int(),
-                'role' => self::str(),
-                'ou_id' => self::int(true),
+                'role_id' => self::reference('/api/roles', 'name') + [
+                    'description' => 'The role to grant. Interchangeable with `role`, which the handler '
+                        . 'reads when `role_id` is absent; supplying neither is a 400.',
+                ],
+                'role' => $permissionRef + [
+                    'description' => 'The same grant addressed by role NAME (or by a numeric id). An '
+                        . 'accepted alternative to `role_id`, not an addition to it.',
+                ],
+                'ou_id' => self::reference('/api/ous', 'name', nullable: true),
                 'tenant_id' => self::int(),
-            ], []),
+            ], ['role_id']),
             'UserCreateRequest' => self::object([
-                'email' => self::str(),
-                'password' => ['type' => 'string', 'minLength' => 6],
+                'email' => self::email(),
+                'password' => self::password(),
+                // Accepted as a role NAME or a numeric role id, under either
+                // spelling: the handler reads `$body['role'] ?? $body['role_id']`.
+                // `role_id` was missing from this declaration entirely, so a
+                // generated client had no way to send the id form.
+                //
+                // OPTIONAL, and an absent role DEFAULTS to the global `user`
+                // role (a 500 if that role is missing from the instance). A
+                // supplied-but-invisible role is a 404, not a fallback.
                 'role' => $permissionRef,
+                'role_id' => self::reference('/api/roles', 'name'),
                 // Optional OU placement, so provisioning is one atomic call. The
                 // OU must belong to the caller's tenant (403 otherwise); omitted
                 // or null leaves the membership unassigned.
-                'ou_id' => self::int(true),
+                'ou_id' => self::reference('/api/ous', 'name', nullable: true),
             ], ['email', 'password']),
             'UserUpdateRequest' => self::object([
-                'email' => self::str(),
-                'password' => ['type' => 'string', 'minLength' => 6],
+                'email' => self::email(),
+                'password' => self::password(),
                 'role' => $permissionRef,
-                'ou_id' => self::int(true),
+                'role_id' => self::reference('/api/roles', 'name'),
+                // array_key_exists, not isset: an explicit null CLEARS the OU.
+                'ou_id' => self::reference('/api/ous', 'name', nullable: true),
                 // WC-user-status: the admin deactivate/reactivate control.
                 'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
             ], []),
@@ -3065,17 +3120,32 @@ final class CoreApiSchemas
             // INTEGER, not nullable-integer, on purpose: ownership has three
             // states and `tenant_id: null` for the third would make the meaning
             // on the wire depend on whether a client serialises an unset
-            // optional as `null` or drops it. Sending both is a 400.
+            // optional as `null` or drops it.
+            //
+            // The conflict is VALUE-dependent, so it is stated here rather than
+            // as a `not: {required: [tenant_id, global]}` clause: the handler
+            // refuses `global: true` ALONGSIDE `tenant_id` (400) but accepts
+            // `global: false` alongside it. A presence-based exclusion would
+            // forbid `{tenant_id: 1, global: false}`, which the API accepts, and
+            // a client validating against it would refuse to send a legal
+            // request. RequestSchemaValidationParityTest pins both halves.
             'RoleCreateRequest' => self::object([
-                'name' => self::str(),
-                'description' => self::str(),
+                // `empty()` rejects it, so "" is a 400 as surely as an omission.
+                'name' => self::name(nonEmpty: true),
+                'description' => self::text(),
+                // Mixed id-or-`resource:action` notation. A DIGIT-STRING is read
+                // as an id, never as a name, and a reference that resolves to
+                // nothing is dropped silently rather than refused.
                 'permissions' => ['type' => 'array', 'items' => $permissionRef],
                 'tenant_id' => self::int(),
                 'global' => self::bool(),
             ], ['name']),
             'RoleUpdateRequest' => self::object([
-                'name' => self::str(),
-                'description' => self::str(),
+                'name' => self::name(nonEmpty: true),
+                'description' => self::text(),
+                // A full REPLACE of the role's grants, so `[]` revokes every one
+                // of them. Omitting the key leaves the grants untouched — the
+                // two are emphatically not the same request.
                 'permissions' => ['type' => 'array', 'items' => $permissionRef],
             ], []),
             // `tenantId`/`global` echo the RESOLVED owner (#888). The request's
@@ -3178,22 +3248,31 @@ final class CoreApiSchemas
             ]),
             'OuDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('OuDetail')),
             'OuCreateRequest' => self::object([
-                'name' => self::str(),
-                'description' => self::str(),
-                'parent_id' => self::int(true),
+                'name' => self::name(nonEmpty: true),
+                'description' => self::text(),
+                // Omitted or null makes the unit a root. A parent outside the
+                // caller's tenant is a 403, not a 404.
+                'parent_id' => self::reference('/api/ous', 'name', nullable: true),
                 // #822: the unit's kind, addressed by id OR by stable key.
-                // Supplying both is a 422 rather than a silent preference.
-                'ou_type_id' => self::int(true),
-                'type' => self::str(true),
-            ], ['name']),
+                // Supplying both is a 422 rather than a silent preference — the
+                // `not` clause below is what says so in the published contract.
+                'ou_type_id' => self::reference('/api/ou-types', 'label', nullable: true),
+                'type' => self::ouTypeKey(),
+            ], ['name']) + self::mutuallyExclusive('ou_type_id', 'type'),
             'OuUpdateRequest' => self::object([
-                'name' => self::str(),
-                'description' => self::str(),
-                'parent_id' => self::int(true),
-                'ou_type_id' => self::int(true),
-                'type' => self::str(true),
-            ], []),
-            'OuRoleAssignRequest' => self::object(['role_id' => self::int()], ['role_id']),
+                'name' => self::name(nonEmpty: true),
+                'description' => self::text(),
+                // array_key_exists, not isset: an explicit null moves the unit
+                // to the root, and an explicit null `ou_type_id`/`type` untypes
+                // it. (`name` and `description` are read with isset, so an
+                // explicit null there is a silent no-op, not a clear.)
+                'parent_id' => self::reference('/api/ous', 'name', nullable: true),
+                'ou_type_id' => self::reference('/api/ou-types', 'label', nullable: true),
+                'type' => self::ouTypeKey(),
+            ], []) + self::mutuallyExclusive('ou_type_id', 'type'),
+            'OuRoleAssignRequest' => self::object([
+                'role_id' => self::reference('/api/roles', 'name') + ['minimum' => 1],
+            ], ['role_id']),
             'OuRoleAssignment' => self::object([
                 'id' => self::int(),
                 'ou_id' => self::int(),
@@ -3235,15 +3314,29 @@ final class CoreApiSchemas
                 'type' => 'array',
                 'items' => SchemaBuilder::ref('OuTypeCatalogEntry'),
             ]),
+            // The key is immutable: PATCH does not merely ignore a `key`, it
+            // REFUSES the whole request with a 422, so the field is deliberately
+            // absent from OuTypeUpdateRequest rather than declared-and-ignored.
             'OuTypeCreateRequest' => self::object([
-                'key' => self::str(),
-                'label' => self::str(),
+                // Trimmed before validation, so surrounding whitespace is
+                // stripped rather than rejected. A NAMESPACED key must already be
+                // declared by a plugin, and the reserved key `none` is always a
+                // 422 — neither is expressible as a pattern.
+                'key' => self::ouTypeKey(nullable: false) + ['minLength' => 1],
+                // Empty, whitespace-only and null all mean "absent": the label
+                // falls back to the plugin-declared one, then to the key itself.
+                'label' => self::name(),
+                // Absent means the server appends it after the current maximum.
                 'sort_order' => self::int(),
             ], ['key']),
+            // Every field is individually optional, but a body that changes
+            // NOTHING is a 422 ('No updatable fields supplied'), so at least one
+            // must be present — which `minProperties` is exactly for. The
+            // declaration used to accept `{}`, the one body this route refuses.
             'OuTypeUpdateRequest' => self::object([
-                'label' => self::str(),
+                'label' => self::name(nonEmpty: true),
                 'sort_order' => self::int(),
-            ], []),
+            ], []) + ['minProperties' => 1],
 
             'Delegation' => $delegation,
             'DelegationListResponse' => self::paginatedListEnvelope('Delegation'),
@@ -5162,8 +5255,12 @@ final class CoreApiSchemas
                     . 'successful no-op.',
                 'tags' => ['taxonomy'],
                 'parameters' => [
-                    self::queryParam('entity_type', 'string', 'The opaque plugin-supplied entity type (required)'),
-                    self::queryParam('entity_id', 'integer', 'The entity whose associations are removed (required)'),
+                    // Both are genuinely mandatory (422 without them). They used
+                    // to say so only in the prose while the emitted parameter
+                    // carried `required: false`, so a generated client had no
+                    // machine-readable reason to send either.
+                    self::queryParam('entity_type', 'string', 'The opaque plugin-supplied entity type', required: true),
+                    self::queryParam('entity_id', 'integer', 'The entity whose associations are removed', required: true),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The associations removed', 'EntityTagDetachAllResponse'),
@@ -5682,5 +5779,208 @@ final class CoreApiSchemas
     private static function bool(bool $nullable = false): array
     {
         return $nullable ? ['type' => 'boolean', 'nullable' => true] : ['type' => 'boolean'];
+    }
+
+    /**
+     * A plaintext password field, bounded by the ACTUAL site policy.
+     *
+     * Read from {@see PasswordPolicy} rather than written as a literal: the
+     * schema and the handler that rejects the value must not be able to drift.
+     * They had — the declaration said `minLength: 6` while the policy has
+     * required 8 since it was centralised, so a generated client could build a
+     * request the schema calls valid and the API answers 400 to.
+     *
+     * @return array<string, mixed>
+     */
+    private static function password(): array
+    {
+        return [
+            'type' => 'string',
+            'format' => 'password',
+            'minLength' => PasswordPolicy::MIN_LENGTH,
+            'maxLength' => PasswordPolicy::MAX_LENGTH,
+        ];
+    }
+
+    /**
+     * An email address field bounded by the VARCHAR(255) column cap the write
+     * handlers enforce through {@see InputLimits::NAME_MAX} (422 past it).
+     *
+     * @return array<string, mixed>
+     */
+    private static function email(): array
+    {
+        return ['type' => 'string', 'format' => 'email', 'maxLength' => InputLimits::NAME_MAX];
+    }
+
+    /**
+     * A VARCHAR(255)-backed identifier (name, slug, key) as the write handlers
+     * bound it through {@see InputLimits::NAME_MAX} — past it they answer 422.
+     *
+     * @param bool $nonEmpty Whether the handler also refuses an empty string.
+     * @return array<string, mixed>
+     */
+    private static function name(bool $nonEmpty = false): array
+    {
+        $schema = ['type' => 'string', 'maxLength' => InputLimits::NAME_MAX];
+        if ($nonEmpty) {
+            $schema['minLength'] = 1;
+        }
+
+        return $schema;
+    }
+
+    /**
+     * A long-form TEXT field as the write handlers bound it through
+     * {@see InputLimits::TEXT_MAX} — past it they answer 422.
+     *
+     * @return array<string, mixed>
+     */
+    private static function text(): array
+    {
+        return ['type' => 'string', 'maxLength' => InputLimits::TEXT_MAX];
+    }
+
+    /**
+     * An organizational-unit TYPE KEY, as {@see OuTypeRegistry::isValidKey()}
+     * accepts it: a lowercase slug, optionally namespaced with one colon.
+     *
+     * @param bool $nullable Whether an explicit null is accepted. True on the OU
+     *        routes, where null (and an empty string) means "untyped"; false for
+     *        `OuTypeCreateRequest.key`, which is the mandatory identity of the
+     *        row being created.
+     * @return array<string, mixed>
+     */
+    private static function ouTypeKey(bool $nullable = true): array
+    {
+        $schema = ['type' => 'string'];
+        if ($nullable) {
+            $schema['nullable'] = true;
+        }
+
+        return $schema + [
+            'maxLength' => OuTypeRegistry::KEY_MAX_LENGTH,
+            'pattern' => '^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$',
+        ];
+    }
+
+    /**
+     * The bilingual `{ar?, en?}` label object (WC-532), marked for the
+     * schema-driven CRUD screen's LocalizedText renderer.
+     *
+     * @return array<string, mixed>
+     */
+    private static function localizedText(): array
+    {
+        return [
+            'type' => 'object',
+            'x-whity-localized-text' => true,
+            'properties' => ['ar' => self::str(), 'en' => self::str()],
+        ];
+    }
+
+    /**
+     * A tag-group key, as `TagGroupsApiHandler::KEY_PATTERN` accepts it.
+     *
+     * The handler's constant is private, so the bounds are written here and
+     * pinned to it by `RequestSchemaContractTest`, which reads the constant
+     * reflectively and fails when the two disagree.
+     *
+     * @return array<string, mixed>
+     */
+    private static function tagGroupKey(): array
+    {
+        return [
+            'type' => 'string',
+            'minLength' => 1,
+            'maxLength' => 64,
+            'pattern' => '^[A-Za-z0-9_.:-]{1,64}$',
+        ];
+    }
+
+    /**
+     * A tag name: trimmed, non-empty, and bounded by
+     * `TagsApiHandler::MAX_NAME_LENGTH` (pinned by the same contract test).
+     *
+     * @return array<string, mixed>
+     */
+    private static function tagName(): array
+    {
+        return ['type' => 'string', 'minLength' => 1, 'maxLength' => 128];
+    }
+
+    /**
+     * The opaque, plugin-supplied entity type of a tag association, bounded by
+     * `EntityTagsApiHandler::MAX_ENTITY_TYPE_LENGTH` (pinned by the same test).
+     *
+     * Deliberately carries no enum: the column has no foreign key and the set of
+     * taggable types is open by design.
+     *
+     * @return array<string, mixed>
+     */
+    private static function entityType(): array
+    {
+        return ['type' => 'string', 'minLength' => 1, 'maxLength' => 128];
+    }
+
+    /**
+     * A schema fragment forbidding two properties from appearing TOGETHER.
+     *
+     * `not: {required: [a, b]}` is the JSON-Schema spelling of "not both", and
+     * it is what several handlers enforce with a 422 when a caller addresses one
+     * thing two ways. Deliberately not `oneOf`, which would additionally demand
+     * that one of them be present — every such pair here is optional.
+     *
+     * @return array{not: array{required: list<string>}}
+     */
+    private static function mutuallyExclusive(string $first, string $second): array
+    {
+        return ['not' => ['required' => [$first, $second]]];
+    }
+
+    /**
+     * An integer FK marked with the `x-whity-reference` vendor extension, so the
+     * schema-driven CRUD screen renders a dropdown fed from the referenced
+     * collection instead of a bare number box.
+     *
+     * `$labelField` must name a STRING property of the collection's row: the
+     * renderer stringifies it, so pointing at an object-valued field (a
+     * `x-whity-localized-text` label, say) would render "[object Object]".
+     *
+     * @param string $collectionPath Unversioned collection path (e.g. `/api/roles`).
+     * @param string $labelField Row property shown as the option label.
+     * @param bool $nullable Whether an explicit null clears the reference.
+     * @return array<string, mixed>
+     */
+    private static function reference(string $collectionPath, string $labelField, bool $nullable = false): array
+    {
+        return self::int($nullable) + [
+            'x-whity-reference' => [
+                'resource' => self::apiPath($collectionPath),
+                'valueField' => 'id',
+                'labelField' => $labelField,
+            ],
+        ];
+    }
+
+    /**
+     * The versioned, client-callable form of an unversioned catalogue path.
+     *
+     * Route declarations here are written unversioned ({@see registerRoutes()}
+     * lets the Router prefix them), but a `x-whity-reference` resource is a URL
+     * the BROWSER fetches, so it has to carry the prefix already. Derived from
+     * the Router's own default rather than written as a literal — and
+     * `RequestSchemaContractTest` asserts every resource produced here resolves
+     * to a path the generated spec actually serves, so a version bump cannot leave a
+     * dangling dropdown behind.
+     */
+    private static function apiPath(string $unversionedPath): string
+    {
+        $prefix = (new Router())->getVersionPrefix();
+        $pos = strpos($unversionedPath, '/', 1);
+
+        return $pos === false
+            ? $unversionedPath . $prefix
+            : substr($unversionedPath, 0, $pos) . $prefix . substr($unversionedPath, $pos);
     }
 }

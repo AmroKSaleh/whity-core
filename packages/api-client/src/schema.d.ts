@@ -3692,8 +3692,10 @@ export interface components {
             status: "active" | "invited" | "suspended";
         };
         MembershipCreateRequest: {
-            role_id?: number;
-            role?: string;
+            /** @description The role to grant. Interchangeable with `role`, which the handler reads when `role_id` is absent; supplying neither is a 400. */
+            role_id: number;
+            /** @description The same grant addressed by role NAME (or by a numeric id). An accepted alternative to `role_id`, not an addition to it. */
+            role?: number | string;
             ou_id?: number | null;
             tenant_id?: number;
         };
@@ -4837,9 +4839,12 @@ export interface components {
             accountStatus?: "active" | "inactive";
         };
         UserCreateRequest: {
+            /** Format: email */
             email: string;
+            /** Format: password */
             password: string;
             role?: number | string;
+            role_id?: number;
             ou_id?: number | null;
         };
         UserListResponse: {
@@ -4850,9 +4855,12 @@ export interface components {
             data: components["schemas"]["User"];
         };
         UserUpdateRequest: {
+            /** Format: email */
             email?: string;
+            /** Format: password */
             password?: string;
             role?: number | string;
+            role_id?: number;
             ou_id?: number | null;
             /** @enum {string} */
             accountStatus?: "active" | "inactive";
@@ -9982,11 +9990,11 @@ export interface operations {
     };
     delete_api_v1_entity_tags_all: {
         parameters: {
-            query?: {
-                /** @description The opaque plugin-supplied entity type (required) */
-                entity_type?: string;
-                /** @description The entity whose associations are removed (required) */
-                entity_id?: number;
+            query: {
+                /** @description The opaque plugin-supplied entity type */
+                entity_type: string;
+                /** @description The entity whose associations are removed */
+                entity_id: number;
             };
             header?: never;
             path?: never;
@@ -17927,6 +17935,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description name over 255 or description over 10000 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Internal server error */
             500: {
                 headers: {
@@ -18152,6 +18169,15 @@ export interface operations {
             };
             /** @description Role name already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description name over 255 or description over 10000 characters */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -22350,6 +22376,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Email longer than 255 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Internal server error */
             500: {
                 headers: {
@@ -22566,6 +22601,15 @@ export interface operations {
             };
             /** @description Email already exists in the tenant */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Email longer than 255 characters */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
