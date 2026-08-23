@@ -91,7 +91,7 @@ final class HostWiredRegistryConventionTest extends TestCase
             // #713 item 1. The settings pair is the worst case for the silent-
             // empty failure, which is why it is pinned rather than left to the
             // scan above: SettingsCatalog is `final` with a single OPTIONAL
-            // constructor argument, so \Whitypp() would happily improvise a
+            // constructor argument, so \Whity\app() would happily improvise a
             // core-only one — and a core-only catalogue does not throw. It
             // answers "unknown setting" for every key a plugin declared, which
             // reads as a typo in the plugin rather than a missing registration.
