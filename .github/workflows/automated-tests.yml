@@ -402,6 +402,14 @@ jobs:
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
 
+      # Plugin frontend-feature registration guard (#969): the smoke step above
+      # proves a plugin LOADS, which is not the same as its screens surviving
+      # descriptor validation — three in-tree plugins contributed no screens at
+      # all while that step stayed green. Fail CI when a declared frontend
+      # feature does not register and is not a reviewed, reasoned dormancy.
+      - name: Plugin frontend-feature registration guard
+        run: php scripts/ci-plugin-frontend-features.php
+
       # Tenant-isolation static guard (WC-192): fail CI if any SELECT/UPDATE/
       # DELETE touches a tenant-owned table without a tenant_id predicate and
       # without a reasoned `@tenant-guard-ignore:` annotation. Turns the #1

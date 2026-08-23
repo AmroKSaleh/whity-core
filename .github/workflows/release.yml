@@ -161,6 +161,12 @@ jobs:
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
 
+      # A release must not ship an in-tree plugin whose screens silently do not
+      # register (#969) — loading successfully is not the same as contributing
+      # the UI the plugin declares.
+      - name: Plugin frontend-feature registration guard
+        run: php scripts/ci-plugin-frontend-features.php
+
       # A core release ships templates/tauri-desktop/ as the source an operator
       # builds their desktop app from, so a release cutting with a stale
       # vendored SDK hands every device a plugin contract older than the one

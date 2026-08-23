@@ -36,6 +36,14 @@ use Whity\Sdk\Sql\SequenceAllocator;
  * `tags:read`/`tags:manage` permissions collide with core Taxonomy on the SERVER
  * (core owns them) — so the plugin is inert there until the R3 cutover; it is the
  * sole provider on the OFFLINE host, where no core Taxonomy exists.
+ *
+ * That inertness reaches the frontend too (#969): the block screen below is
+ * refused by whity-core's loader, and — measured, not assumed — the rule that
+ * refuses it is the core-permission OWNERSHIP rule, which fires before (and
+ * independently of) the route collisions. The device host applies neither rule,
+ * which is why the screen renders there.
+ * `scripts/ci-plugin-frontend-features.php` records that expectation and fails if
+ * the reason ever changes.
  */
 final class TaxonomyPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface
 {
