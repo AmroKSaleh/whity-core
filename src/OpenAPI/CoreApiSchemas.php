@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\OpenAPI;
 
 use Whity\Core\Ou\OuTypeRegistry;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\Response;
 use Whity\Core\Router;
@@ -591,7 +592,7 @@ final class CoreApiSchemas
             // for page 2 without lying about the contract. Declaring them changes
             // no behaviour; it stops the published spec understating what the
             // endpoint does.
-            self::adminRoute('GET', '/api/roles', [
+            self::permissionRoute('GET', '/api/roles', CorePermissions::ROLES_READ, [
                 'summary' => 'List the roles visible to the tenant (own + global)',
                 'tags' => ['roles'],
                 'parameters' => [
@@ -602,7 +603,7 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('Visible roles with permission counts', 'RoleListResponse'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('POST', '/api/roles', [
+            self::permissionRoute('POST', '/api/roles', CorePermissions::ROLES_WRITE, [
                 'summary' => 'Create a role, owned by the caller\'s tenant unless a system caller names another',
                 'tags' => ['roles'],
                 'request' => 'RoleCreateRequest',
@@ -615,7 +616,7 @@ final class CoreApiSchemas
                     422 => self::errorResponse('name over 255 or description over 10000 characters'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/roles/{id:\d+}', [
+            self::permissionRoute('GET', '/api/roles/{id:\d+}', CorePermissions::ROLES_READ, [
                 'summary' => 'Get a role with its permissions',
                 'tags' => ['roles'],
                 'responses' => [
@@ -623,7 +624,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not visible'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('PATCH', '/api/roles/{id:\d+}', [
+            self::permissionRoute('PATCH', '/api/roles/{id:\d+}', CorePermissions::ROLES_WRITE, [
                 'summary' => 'Update a role (permissions are replaced when supplied)',
                 'tags' => ['roles'],
                 'request' => 'RoleUpdateRequest',
@@ -634,7 +635,7 @@ final class CoreApiSchemas
                     422 => self::errorResponse('name over 255 or description over 10000 characters'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('DELETE', '/api/roles/{id:\d+}', [
+            self::permissionRoute('DELETE', '/api/roles/{id:\d+}', CorePermissions::ROLES_DELETE, [
                 'summary' => 'Delete a role',
                 'tags' => ['roles'],
                 'responses' => [
@@ -648,7 +649,7 @@ final class CoreApiSchemas
             // first, so page one is the recent-assignment history and
             // `pagination.total` is the headcount — one request for both, and no
             // client-side count over every user in the tenant.
-            self::adminRoute('GET', '/api/roles/{id:\d+}/assignments', [
+            self::permissionRoute('GET', '/api/roles/{id:\d+}/assignments', CorePermissions::ROLES_READ, [
                 'summary' => 'List who holds this role, newest grant first (total = headcount)',
                 'tags' => ['roles'],
                 'parameters' => [
@@ -660,7 +661,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not visible'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/roles/{id:\d+}/permissions', [
+            self::permissionRoute('GET', '/api/roles/{id:\d+}/permissions', CorePermissions::PERMISSIONS_READ, [
                 'summary' => 'List a role\'s permissions',
                 'tags' => ['roles'],
                 'responses' => [
@@ -672,7 +673,7 @@ final class CoreApiSchemas
             // so adding one permission means reading the set and writing it back
             // — and two admins doing that at once silently lose one edit. These
             // send only the delta, and are idempotent in both directions.
-            self::adminRoute('POST', '/api/roles/{id:\d+}/permissions', [
+            self::permissionRoute('POST', '/api/roles/{id:\d+}/permissions', CorePermissions::ROLES_MANAGE, [
                 'summary' => 'Grant permissions to a role (additive, idempotent)',
                 'tags' => ['roles'],
                 'request' => 'RolePermissionsChangeRequest',
@@ -682,7 +683,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not manageable by the tenant'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('DELETE', '/api/roles/{id:\d+}/permissions', [
+            self::permissionRoute('DELETE', '/api/roles/{id:\d+}/permissions', CorePermissions::ROLES_MANAGE, [
                 'summary' => 'Revoke permissions from a role (subtractive, idempotent)',
                 'tags' => ['roles'],
                 'request' => 'RolePermissionsChangeRequest',

@@ -1285,21 +1285,37 @@ $rolesHandler = new RolesApiHandler(
     null,
     new \Whity\Core\RBAC\RecordSectionResolver($roleChecker)
 );
-$router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
-$router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');
-$router->register('GET', '/api/roles/{id:\d+}', [$rolesHandler, 'get'], 'admin');
-$router->register('PATCH', '/api/roles/{id:\d+}', [$rolesHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/roles/{id:\d+}', [$rolesHandler, 'delete'], 'admin');
-$router->register('GET', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
+// Roles are gated on PERMISSION SLUGS, not on the `admin` role name (#977).
+//
+// A role name couples every deployment to one seeded vocabulary — the argument
+// `PermissionResolver` already makes to plugin authors, and it binds core routes
+// harder than it binds a plugin: a tenant that renames or restructures `admin`
+// loses its own roles screen.
+//
+// The split mirrors what #975 resolves per REGION on the record page, so the API
+// and the page draw the same line rather than the page being the more granular
+// of the two: seeing a role is `roles:read`, renaming it is `roles:write`,
+// seeing what it grants is `permissions:read`, and changing what it grants is
+// `roles:manage`. Deletion keeps its own `roles:delete`, which already existed.
+//
+// `roles:read` was in the catalogue and held by NOBODY until migration 111,
+// which grants it to every role holding `roles:write`. Without that migration
+// this block locks the seeded admin out of the roles list.
+$router->register('GET', '/api/roles', [$rolesHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_READ);
+$router->register('POST', '/api/roles', [$rolesHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_WRITE);
+$router->register('GET', '/api/roles/{id:\d+}', [$rolesHandler, 'get'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_READ);
+$router->register('PATCH', '/api/roles/{id:\d+}', [$rolesHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_WRITE);
+$router->register('DELETE', '/api/roles/{id:\d+}', [$rolesHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_DELETE);
+$router->register('GET', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'getPermissions'], null, null, \Whity\Core\RBAC\CorePermissions::PERMISSIONS_READ);
 // #712: additive/subtractive grants, so concurrent admins editing one role stop
 // clobbering each other through the read-modify-write PATCH forces on them.
-$router->register('POST', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'grantPermissions'], 'admin');
-$router->register('DELETE', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'revokePermissions'], 'admin');
+$router->register('POST', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'grantPermissions'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_MANAGE);
+$router->register('DELETE', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'revokePermissions'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_MANAGE);
 // #882: who holds this role, newest grant first — the record page's headcount
 // and its recent-assignment list in one request (the count is the pagination
 // total). Same 'admin' gate as its siblings: a new permission slug would ship a
 // grant migration reaching only the seeded admin role (#834).
-$router->register('GET', '/api/roles/{id:\d+}/assignments', [$rolesHandler, 'assignments'], 'admin');
+$router->register('GET', '/api/roles/{id:\d+}/assignments', [$rolesHandler, 'assignments'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_READ);
 
 $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
