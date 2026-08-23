@@ -30413,6 +30413,7 @@
                             "role",
                             "status",
                             "joined",
+                            "documentId",
                             "manageable",
                             "canEdit"
                         ],
@@ -30428,6 +30429,10 @@
                             },
                             "joined": {
                                 "type": "string"
+                            },
+                            "documentId": {
+                                "type": "integer",
+                                "nullable": true
                             },
                             "manageable": {
                                 "type": "boolean"

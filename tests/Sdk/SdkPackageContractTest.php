@@ -242,9 +242,34 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.35.0',
+            '1.36.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.35 adds the GRAPH BLOCK `flow`, with a declared node ceiling '
+            'SDK 1.36 adds the DOCUMENT VIEWER `documentViewer`, which declares no source and no '
+            . 'new prop-rule kind. #947 item 1 gave core an issued document — a record with an '
+            . 'identity and one immutable artifact per render — and nothing in the contract could '
+            . 'show one. COMPOSING WAS NOT AVAILABLE, and not for want of pieces: every source and '
+            . 'recordPath here is ownership-checked against the routes the DECLARING plugin '
+            . 'registered, so the core route /api/v1/documents/{id} cannot be named by any plugin, and the '
+            . 'only composition that would work is a plugin republishing the core document reads '
+            . 'through a route of its own, gated however that plugin chose — the trade '
+            . 'ouScopePicker already refused for the OU tree, worth more here because the thing '
+            . 'being republished is an audit record. So the host fetches the core endpoints under '
+            . 'the caller session and the documents:read gate they already carry, and there is no '
+            . 'prop with which to point the viewer anywhere else. WHICH DOCUMENT is a contextPath '
+            . '(documentIdFrom) with deliberately NO literal twin: the heading/text/badge/stat rule '
+            . 'keeps a literal because an unresolved binding should still render A title, a duller '
+            . 'version of the right answer, and inverted here the fallback is not duller but A '
+            . 'DIFFERENT DOCUMENT rendered with full confidence. WHICH ARTIFACT is the question a '
+            . 're-render creates: artifactIdFrom PINS one, which is what an append-only trail needs '
+            . 'so an event saying "this is what circulated on the 4th" shows what circulated on the '
+            . '4th; absent, the viewer shows the CURRENT artifact and SAYS so with the count of the '
+            . 'others, because showing the newest silently lets a corrected document read as though '
+            . 'it had always said that. The renderer never falls back between the two — a pinned '
+            . 'artifact that is not on the record is an explicit failure state, since substituting '
+            . 'the current one answers a question about the past with a fact about the present. '
+            . 'Not offered, deliberately: a prop to hide the version history, a prop to suppress the '
+            . 'download, and any height or zoom prop; '
+            . 'SDK 1.35 adds the GRAPH BLOCK `flow`, with a declared node ceiling '
             . '(BlockContract::FLOW_MAX_NODES) and no new prop-rule kind. The whitelist covered '
             . 'tables, lists, timelines, inboxes, charts, forms, overlays and master-detail, and not '
             . 'one of its types could render a set of nodes and the edges between them — so anything '

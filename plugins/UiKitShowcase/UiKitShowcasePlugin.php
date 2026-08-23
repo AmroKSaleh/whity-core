@@ -388,6 +388,16 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 'role' => $record['role'],
                 'status' => $record['status'],
                 'joined' => $record['joined'],
+                // #947 item 4: the field the `documentViewer` demo binds to.
+                // NULL, and null on purpose. A showcase cannot mint an issued
+                // document — persisting a render needs the render container,
+                // which `documents.render_enabled` leaves off by default — and
+                // pointing the viewer at a made-up id would put a broken-looking
+                // 404 on the page and teach nothing. Null is the honest fixture
+                // and it demonstrates the state that actually matters: an
+                // unresolved binding renders the author's `emptyText`, never a
+                // blank frame and never some other document.
+                'documentId' => null,
                 // Caller decisions, not record facts. Deliberately present.
                 'manageable' => true,
                 'canEdit' => true,
@@ -992,6 +1002,7 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     ['field' => 'role', 'label' => 'Role'],
                     ['field' => 'status', 'label' => 'Status'],
                     ['field' => 'joined', 'label' => 'Joined'],
+                    ['field' => 'documentId', 'label' => 'Issued document'],
                 ],
                 'emptyText' => 'Pick a record above to see it here.',
                 'children' => [
@@ -1062,6 +1073,41 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         'value' => 'No role resolved yet.',
                         'valueFrom' => 'demo-record.role',
                         'tone' => 'muted',
+                    ],
+                    // ---- #947 item 4: the ISSUED DOCUMENT on a record page ----
+                    // The one block in this tree that fetches something CORE
+                    // owns. Every other data-bound block here names a
+                    // `/api/uikit/...` route this plugin registered, because the
+                    // loader ownership-checks each `source` against exactly
+                    // that. `documentViewer` declares NO source for the same
+                    // reason `ouScopePicker` does not: core's
+                    // `/api/v1/documents/{id}` is unnameable by a plugin, and
+                    // the alternative — this plugin republishing core's document
+                    // reads through a route of its own — would be a second read
+                    // path onto an audit record, gated however this plugin felt
+                    // like gating it.
+                    //
+                    // The binding is to the record's own `documentId`, which the
+                    // fixture returns as NULL (see `demoRecord()`), so what
+                    // renders here is the unresolved state: the author's
+                    // `emptyText`, never a blank frame. That is not a gap in the
+                    // demo, it is the state a plugin author most needs to see —
+                    // the other states (a superseded version banner, a version
+                    // picker, a refusal that names its reason) need an issued
+                    // document, and issuing one needs the render container that
+                    // `documents.render_enabled` leaves off by default.
+                    [
+                        'type' => 'card',
+                        'title' => 'documentViewer — an issued document, mounted in a record',
+                        'description' => 'Core fetches, core gates, core decides which artifact is on screen. '
+                            . 'The plugin says which document, and nothing else.',
+                        'children' => [
+                            [
+                                'type' => 'documentViewer',
+                                'documentIdFrom' => 'demo-record.documentId',
+                                'emptyText' => 'This record has no issued document yet.',
+                            ],
+                        ],
                     ],
                     // The edit affordance a record page carries, seeded from the
                     // record the page is about. `defaultFrom` is PLUMBING rather
@@ -2539,12 +2585,13 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 'properties' => [
                     'data' => [
                         'type' => 'object',
-                        'required' => ['name', 'role', 'status', 'joined', 'manageable', 'canEdit'],
+                        'required' => ['name', 'role', 'status', 'joined', 'documentId', 'manageable', 'canEdit'],
                         'properties' => [
                             'name' => ['type' => 'string'],
                             'role' => ['type' => 'string'],
                             'status' => ['type' => 'string'],
                             'joined' => ['type' => 'string'],
+                            'documentId' => ['type' => 'integer', 'nullable' => true],
                             'manageable' => ['type' => 'boolean'],
                             'canEdit' => ['type' => 'boolean'],
                         ],

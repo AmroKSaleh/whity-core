@@ -843,6 +843,38 @@ export interface AccessGateBlock {
   otherwise?: Block[];
 }
 
+/**
+ * Leaf (standalone): an ISSUED DOCUMENT (#947 item 4).
+ *
+ * Deliberately carries no `source`, for the same reason {@link OuScopePickerBlock}
+ * does and with more at stake. Every `source`/`recordPath` in the contract is
+ * ownership-checked by the host loader against the declaring plugin's own
+ * routes, so core's `/api/v1/documents/{id}` cannot be named by any plugin. The
+ * only composition that would work is a plugin republishing core's document
+ * reads through a route of its own — a second read path onto an auditable
+ * record, gated however that plugin chose. So the host does the fetching, on
+ * core's endpoints, under the caller's session and the `documents:read` gate
+ * those routes already carry.
+ */
+export interface DocumentViewerBlock {
+  type: 'documentViewer';
+  /**
+   * Where the document id comes from: a bare selector name or a dotted
+   * `{blockId}.{field}` into the master-detail context. There is no literal
+   * twin — an unresolved binding renders `emptyText`, never some other
+   * document. See the SDK contract for why that inverts the `heading.text` rule.
+   */
+  documentIdFrom: string;
+  /**
+   * PINS one artifact, addressed the same way. Declared, the viewer shows that
+   * artifact and refuses to substitute another; absent, it shows the current
+   * one and says so.
+   */
+  artifactIdFrom?: string;
+  /** What to say while nothing has named a document. */
+  emptyText?: string;
+}
+
 /** Container (→ Sheet): a slide-out panel; same open model as {@link ModalBlock}. */
 export interface DrawerBlock {
   type: 'drawer';
@@ -897,6 +929,7 @@ export type Block = BlockFacets &
   | BilingualTextInputBlock
   | ReferenceSelectBlock
   | OuScopePickerBlock
+  | DocumentViewerBlock
   | SubmitButtonBlock
   | ActionButtonBlock
   | ChartBlock

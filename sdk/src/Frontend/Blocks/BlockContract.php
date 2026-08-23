@@ -708,6 +708,98 @@ final class BlockContract
                 'check' => ['type' => 'accessCheck', 'required' => true],
             ]],
 
+            // ---- document blocks (#947 item 4) ----
+            // AN ISSUED DOCUMENT, SHOWN WHERE THE WORK HAPPENS.
+            //
+            // #947 item 1 gave core `documents` and `document_artifacts`: a
+            // record with an identity, and one immutable file per render hanging
+            // off it. Nothing could SHOW one. A plugin whose record has an issued
+            // work order could link to it at best, and a link out of the record
+            // is where the reader stops reading the record.
+            //
+            // WHY THIS IS A TYPE AND NOT A COMPOSITION. Composing existing types
+            // is cheaper and is the house preference, and it is not available
+            // here — not because the pieces are missing but because the gate that
+            // makes them safe forbids it. Every `source`/`recordPath` prop in
+            // this contract is ownership-checked by the host loader against the
+            // routes the DECLARING plugin registered, so `/api/v1/documents/{id}`
+            // — core's — cannot be named by any plugin. A `dataRecord` aimed
+            // there drops the whole feature. The only composition that would
+            // work is a plugin republishing core's documents through a route of
+            // its own, which is a second copy of an auditable record's read path,
+            // gated by whatever that plugin decided. That is the exact trade
+            // `ouScopePicker` already refused for the OU tree, and the refusal is
+            // worth more here: the thing being republished is the audit trail.
+            //
+            // So, like `ouScopePicker`, this type declares NO `source`. The host
+            // reads `GET /api/v1/documents/{id}` and the artifact content routes
+            // under the CALLER'S OWN session and the `documents:read` gate those
+            // routes already carry, and a plugin has no prop with which to point
+            // the viewer anywhere else. A caller who may not read the document is
+            // refused by core, in core, exactly as they would be anywhere else.
+            //
+            // WHICH DOCUMENT. `documentIdFrom` is a `contextPath` — the same
+            // `{selector}` / `{blockId}.{field}` addressing every other binding
+            // uses — so the id comes from the record on screen (`dataRecord`
+            // publishing a `document_id` fact, a row an `open` action published,
+            // or `record` on a record route). It is PLUMBING in #895's sense,
+            // not a statement about the record, which is why it is deliberately
+            // NOT in the validator's fact-binding guard: it selects which
+            // resource is fetched, exactly as `params.from` and a source token
+            // do, and the server stays authoritative over the answer.
+            //
+            // THERE IS NO LITERAL `documentId` TWIN, and that is a considered
+            // departure from the `heading`/`text`/`badge`/`stat` rule that a
+            // literal stays required with the `...From` twin additive. That rule
+            // exists because an unresolved title should still render A title:
+            // a generic heading is worse than a bound one and better than none.
+            // Invert it here and the fallback is not a duller version of the
+            // right answer, it is A DIFFERENT DOCUMENT — the wrong record,
+            // rendered with full confidence, which is the single worst thing
+            // this subsystem can do. Nothing renders until something has said
+            // which document, and `emptyText` is what an author says in the
+            // meantime.
+            //
+            // WHICH ARTIFACT — the question a re-render creates. A document with
+            // three renders has three sets of bytes, all still fetchable, all
+            // still true of the moment they were issued. Two answers, and the
+            // block picks between them:
+            //
+            //  - `artifactIdFrom` DECLARED — the viewer shows exactly that
+            //    artifact and nothing else. This is the binding an audit trail
+            //    needs: an event that says "this is what circulated on the 4th"
+            //    must be able to show what circulated on the 4th, not what the
+            //    document says today.
+            //  - `artifactIdFrom` ABSENT — the viewer shows the CURRENT artifact,
+            //    the newest, and SAYS SO on screen along with how many others
+            //    exist and how to reach them. Showing the newest silently was the
+            //    alternative and is the one thing a viewer of an auditable record
+            //    must not do: a corrected document then reads as though it had
+            //    always said that, and the reader has no way to learn otherwise.
+            //
+            // The renderer never falls back BETWEEN those two. A pinned artifact
+            // that is not on the record is an explicit failure state, because
+            // quietly showing the current one instead would answer a question
+            // about the past with a fact about the present.
+            //
+            // WHAT THIS TYPE DELIBERATELY DOES NOT OFFER:
+            //  - No prop to hide the version history. A plugin that could
+            //    suppress "this document was corrected twice" would be deciding
+            //    what a reader of an audit record may know, which is not a
+            //    presentation choice.
+            //  - No prop to suppress the download. The caller has already been
+            //    served the bytes by the time anything renders; a switch there
+            //    would remove an affordance, not an access.
+            //  - No height, width or zoom. Props are semantic here, never
+            //    presentational, and a page's aspect ratio is a fact about the
+            //    document the renderer can read rather than one a declaration
+            //    should assert on every platform this tree may render on.
+            'documentViewer' => ['container' => false, 'props' => [
+                'documentIdFrom' => ['type' => 'contextPath', 'required' => true],
+                'artifactIdFrom' => ['type' => 'contextPath', 'required' => false],
+                'emptyText'      => ['type' => 'string',      'required' => false],
+            ]],
+
             // ---- interactive blocks (SP3, WC-233) ----
             'form' => ['container' => true, 'props' => [
                 'submit'             => ['type' => 'submitSpec', 'required' => true],

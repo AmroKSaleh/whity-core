@@ -5033,6 +5033,7 @@ export interface components {
                 role: string;
                 status: string;
                 joined: string;
+                documentId: number | null;
                 manageable: boolean;
                 canEdit: boolean;
             };
