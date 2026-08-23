@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api/client';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
@@ -43,6 +44,7 @@ const SYSTEM_TENANT_ID = 0;
 
 export default function LanguagesPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
   const t = useTranslation('admin');
@@ -105,41 +107,13 @@ export default function LanguagesPage() {
     }
   };
 
-  /**
-   * Direction is a property of the LANGUAGE, so it is edited here alongside the
-   * name — never as a per-user toggle. Changing it re-mirrors the interface for
-   * everyone who has selected that language; nothing infers it from the code.
-   */
-  const handleDirectionChange = async (language: Language, direction: 'ltr' | 'rtl') => {
-    setTogglingId(language.id);
-    try {
-      const { error } = await api.PATCH('/api/v1/languages/{id}', {
-        params: { path: { id: language.id } },
-        body: { direction },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, t('languages.error.update', 'Failed to update language')));
-      }
-      addToast(
-        direction === 'rtl'
-          ? t('languages.direction.rtlToast', '{name} now reads right to left.', {
-              name: language.name,
-            })
-          : t('languages.direction.ltrToast', '{name} now reads left to right.', {
-              name: language.name,
-            }),
-        'success'
-      );
-      fetchLanguages();
-    } catch (err) {
-      addToast(
-        err instanceof Error ? err.message : t('languages.error.update', 'Failed to update language'),
-        'error'
-      );
-    } finally {
-      setTogglingId(null);
-    }
-  };
+  /** #882: open the language's RECORD PAGE. */
+  const openRecord = useCallback(
+    (language: Language) => {
+      router.push(`/admin/languages/${language.id}`);
+    },
+    [router]
+  );
 
   const columns: DataTableColumn<Language>[] = [
     {
@@ -153,29 +127,41 @@ export default function LanguagesPage() {
       header: t('languages.table.name', 'Name'),
       enableSorting: true,
       enableColumnFilter: true,
-    },
-    {
-      id: 'direction',
-      header: t('languages.table.direction', 'Direction'),
-      enableSorting: true,
+      // #882/#884: the row's own name opens the record. Until this existed there
+      // was NO WAY to rename a language anywhere in the product, even though the
+      // API has always accepted it — the gap #884 called the clearest in the set.
       cell: (language) => (
-        <select
-          value={language.direction}
-          disabled={togglingId === language.id}
-          onChange={(e) =>
-            void handleDirectionChange(language, e.target.value as 'ltr' | 'rtl')
-          }
-          aria-label={t('languages.table.directionLabel', 'Writing direction for {name}', {
-            name: language.name,
-          })}
-          className="h-8 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        <button
+          type="button"
+          onClick={() => openRecord(language)}
+          className="text-start font-medium text-primary underline-offset-4 hover:underline"
         >
-          <option value="ltr">{t('languages.direction.ltr', 'Left to right')}</option>
-          <option value="rtl">{t('languages.direction.rtl', 'Right to left')}</option>
-        </select>
+          {language.name}
+        </button>
       ),
     },
     {
+      // Direction is STATED here and edited on the record page. It used to be a
+      // hand-styled native <select> in this cell — not because a table cell is
+      // where a language's writing direction belongs, but because there was
+      // nowhere else to put it. Now there is, and a control that re-mirrors the
+      // whole interface for every speaker of the language is a poor fit for a
+      // one-click cell with no confirmation and no context around it.
+      id: 'direction',
+      header: t('languages.table.direction', 'Direction'),
+      enableSorting: true,
+      cell: (language) =>
+        language.direction === 'rtl'
+          ? t('languages.direction.rtl', 'Right to left')
+          : t('languages.direction.ltr', 'Left to right'),
+    },
+    {
+      // The enable/disable switch STAYS on the list, unlike the direction
+      // control above. Turning several languages on before an instance goes
+      // live is a job about the whole catalogue rather than about one language,
+      // and the record page's own switch writes the identical field — so this
+      // is the same edit offered where it is actually performed, not a second
+      // place the value lives.
       id: 'enabled',
       header: t('languages.table.enabled', 'Enabled'),
       enableSorting: true,
