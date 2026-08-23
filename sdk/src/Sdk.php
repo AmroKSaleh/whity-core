@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.34).
+ * SDK identity (v1.35).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -447,13 +447,58 @@ namespace Whity\Sdk;
  * rather than assumed, because several things walk a block tree and a walker
  * that hard-codes `children` silently skips a slot — for the host loader that
  * is a `source` that never got ownership-checked. Additive: every tree that
- * validated under 1.33 still validates)
+ * validated under 1.33 still validates) ->
+ * 1.35 (THE GRAPH BLOCK: `flow` joins
+ * {@see \Whity\Sdk\Frontend\Blocks\BlockContract}, with a declared node ceiling
+ * ({@see \Whity\Sdk\Frontend\Blocks\BlockContract::FLOW_MAX_NODES}) and no new
+ * prop-rule kind.
+ * The whitelist covered tables, lists, timelines, inboxes, charts, forms,
+ * overlays and master-detail, and not one of its types could render a set of
+ * nodes and the edges between them. So anything modelling an ordered or
+ * branching process — a chain of steps, a state machine, a dependency graph —
+ * could be EDITED natively (`form`, `fieldArray`) and LISTED natively (`table`),
+ * while the DIAGRAM, which for that class of feature is usually the thing that
+ * makes it legible to a non-technical reader, was the one part every product had
+ * to ship as bespoke React. This is not a new renderer: core already runs
+ * `@xyflow/react` behind two screens, and both are the same composition the
+ * block reuses.
+ * ONE FETCH, AND ROWS THAT ARE NODES. `source` is an ordinary ownership-checked
+ * apiPath returning a collection, exactly as `dataTable`'s is, and a row IS a
+ * node. Edges are references off the node rows to OTHER nodes' ids —
+ * `edgeFromField` a predecessor pointer, `edgeToField` a successor pointer,
+ * either optionally holding a LIST so a step can branch — and with neither
+ * declared the nodes are a linear sequence in payload order, which costs an
+ * ordered process no edge modelling at all. A second source for edges was the
+ * obvious alternative and is deliberately not offered: it doubles the ownership
+ * checks and the loading states, and puts a join in the renderer that the
+ * plugin already made when it wrote the rows. A reference to an id no row
+ * declared is dropped rather than materialised, since a box the plugin never
+ * described, labelled with a raw id, is not information.
+ * READ-ONLY BY CONSTRUCTION, like `timeline`: no endpoint, no verb, nothing to
+ * submit. Editing is a form opened FROM a node, and the affordance is
+ * `nodeActions` of the SAME `rowActionList` kind `dataTable.rowActions` already
+ * uses — same validator, same renderer path — because a node's actions are a
+ * row's actions and a second spelling of one shape is two shapes that drift.
+ * Clicking a node runs its first `open` action; a diagram whose only affordance
+ * is a dropdown is one nobody clicks.
+ * THE NODE CEILING IS THE POINT OF DECLARING IT. #192 is open against the two
+ * existing graph screens because a canvas of several hundred boxes, most with no
+ * edges, has stopped conveying anything — and any block on the same renderer
+ * inherits that the moment a tenant's data grows. Carrying it silently would
+ * mean finding it in a plugin's production deployment, so the limit is in the
+ * contract and the behaviour above it is defined: draw the first `maxNodes` in
+ * payload order with the edges among them, and SAY on screen that the graph was
+ * truncated, because a partial graph that looks complete is worse than a tangle.
+ * `maxNodes` may LOWER the ceiling and not raise it: a plugin knows its labels
+ * are long or its target is a phone, which is knowledge worth applying, but it
+ * cannot know that 400 nodes are legible on every platform this tree may render
+ * on. Additive; every tree that validated under 1.34 still validates)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.34.0';
+    public const VERSION = '1.35.0';
 
     /**
      * Static identity only — never instantiated.

@@ -25,6 +25,8 @@
         "blocks.fieldArray.moveDown": "Move {item} {index} down",
         "blocks.fieldArray.moveUp": "Move {item} {index} up",
         "blocks.fieldArray.remove": "Remove {item} {index}",
+        "blocks.flow.empty": "Nothing to diagram yet.",
+        "blocks.flow.truncated": "Showing the first {shown} of {total} nodes — the rest are not drawn.",
         "blocks.inbox.actionsUnavailable": "Actions unavailable — permissions could not be resolved.",
         "blocks.inbox.empty": "Nothing awaiting you.",
         "blocks.list.filter": "Filter items",

@@ -321,6 +321,12 @@ final class BlockValidator
             self::validateOuScopePicker($node, $path, $errors);
         }
 
+        // #950: the graph block's two cross-prop rules — a node ceiling that may
+        // only be lowered, and edge fields that must name different fields.
+        if ($type === 'flow') {
+            self::validateFlow($node, $path, $errors);
+        }
+
         // #883: `record` is the host's binding for the record a ROUTE is about
         // (see self::PAGE_RECORD_BINDING). A selector publishing under that name
         // would shadow it for every block on the screen, and the symptom — a
@@ -1617,6 +1623,49 @@ final class BlockValidator
         $errors[] = "{$path}: 'ouScopePicker.memberType' cannot apply when 'scopes' is exactly ['unit'] "
             . '— a kind filter over a scope that resolves to the single unit the user picked can only '
             . 'ever remove it';
+    }
+
+    /**
+     * `flow` (#950): the two rules that read more than one prop at a time.
+     *
+     * 1. `maxNodes` may only LOWER {@see BlockContract::FLOW_MAX_NODES}. The
+     *    ceiling is a readability limit the contract owns (see that constant for
+     *    why it exists and why the direction is one-way), so a declaration above
+     *    it is refused here rather than clamped at render time. Clamping would
+     *    leave the author believing a number the renderer is quietly ignoring —
+     *    and believing it on every platform at once, since each renderer would
+     *    have to remember to clamp identically.
+     *
+     * 2. `edgeFromField` and `edgeToField` must name DIFFERENT fields. One field
+     *    read as both the predecessor and the successor draws, for every row, an
+     *    edge in each direction between the same two nodes: a mutual pair, never
+     *    a sequence. There is no graph that spelling describes, so it is an
+     *    author error with a plausible-looking result, which is the kind worth
+     *    refusing rather than rendering.
+     *
+     * Both are cross-prop, so neither can live in the per-prop rules.
+     *
+     * @param array<mixed> $node
+     * @param list<string> $errors by reference
+     */
+    private static function validateFlow(array $node, string $path, array &$errors): void
+    {
+        $maxNodes = $node['maxNodes'] ?? null;
+        if (\is_int($maxNodes) && ($maxNodes < 1 || $maxNodes > BlockContract::FLOW_MAX_NODES)) {
+            $errors[] = "{$path}.maxNodes: 'flow.maxNodes' must be between 1 and "
+                . BlockContract::FLOW_MAX_NODES . ' — a block may lower the readability ceiling for its '
+                . 'own graph but not raise it, and a dataset larger than the ceiling wants a dataTable '
+                . 'beside the diagram rather than a bigger diagram, got ' . self::describeScalar($maxNodes);
+        }
+
+        $from = $node['edgeFromField'] ?? null;
+        $to = $node['edgeToField'] ?? null;
+        if (\is_string($from) && $from !== '' && $from === $to) {
+            $errors[] = "{$path}: 'flow.edgeFromField' and 'flow.edgeToField' name the same field "
+                . "('{$from}') — read as both predecessor and successor it draws an edge in each "
+                . 'direction between the same two nodes for every row, which is a mutual pair rather '
+                . 'than a sequence';
+        }
     }
 
     /**

@@ -43,6 +43,7 @@ import type {
   DataTableBlock,
   DrawerBlock,
   FieldArrayBlock,
+  FlowBlock,
   FormBlock,
   InboxBlock,
   ItemAction,
@@ -59,7 +60,7 @@ import type {
   TimelineBlock,
   VisibleWhen,
 } from "./types"
-import { OU_SCOPE_KINDS } from "./types"
+import { FLOW_MAX_NODES, OU_SCOPE_KINDS } from "./types"
 import { usePluginData, type PluginDataState } from "./use-plugin-data"
 import { usePermittedActions, type PermittedActionCheck } from "./use-permitted-actions"
 
@@ -836,6 +837,8 @@ function BlockNode({ block }: { block: Block }) {
       return <TimelineRenderer block={block} />
     case "inbox":
       return <InboxRenderer block={block} />
+    case "flow":
+      return <FlowRenderer block={block} />
     case "dataRecord":
       return <DataRecordRenderer block={block} />
     case "recordFields":
@@ -1362,6 +1365,131 @@ function InboxRenderer({ block }: { block: InboxBlock }) {
       {paginate && items.length > 0 && (
         <Pagination page={page} perPage={pageSize} total={items.length} onPageChange={setPage} />
       )}
+    </div>
+  )
+}
+
+/**
+ * FlowRenderer — the desktop rendering of the `flow` graph block (#950).
+ *
+ * IT IS NOT A CANVAS, and that is a decision rather than a gap. The web
+ * renderer draws the graph with `@xyflow/react`, which core already ships for
+ * two admin screens; this template does not carry that dependency, and adding a
+ * graph library to an offline desktop bundle to draw what is, in the
+ * overwhelmingly common case, a straight line of steps is a poor trade.
+ *
+ * The block contract is platform-NEUTRAL: it says what the data means, and each
+ * renderer maps that to its own platform. So the desktop maps it to the same
+ * information without the picture — an ordered list of nodes, each naming the
+ * nodes it leads to. Nothing is dropped: a reader can still follow the route,
+ * see the branch, and open a node. Falling through to `UnsupportedBlock`
+ * instead would have shown them none of it.
+ *
+ * The derivation below mirrors `web/components/plugin/blocks/flow-model.ts`
+ * exactly — the ceiling applied to nodes in payload order before any edge is
+ * derived, references to unknown or truncated ids dropped rather than
+ * materialised, list-valued edge fields expanded, and the truncation announced.
+ * Those are contract behaviour, not rendering, so the two must agree; #847 is
+ * what a silent divergence between these two files costs.
+ */
+function FlowRenderer({ block }: { block: FlowBlock }) {
+  const { openTarget } = React.useContext(MasterDetailContext)
+  const source = useEffectiveSource(block.source, block.params)
+  const state = usePluginData<Record<string, unknown>[]>(source, (data) =>
+    Array.isArray(data) && data.length > 0 ? data : null,
+  )
+  useRefetchOnSignal(state)
+
+  if (state.status === "loading") return <Skeleton className="h-24 w-full" />
+  if (state.status === "error")
+    return <ErrorState title="Couldn't load this diagram" action={<Button onClick={state.retry}>Retry</Button>} />
+  if (state.status === "empty") return <EmptyState title={block.emptyText ?? "Nothing to diagram yet"} />
+
+  const refresh = state.refresh
+  const declared = block.maxNodes !== undefined && block.maxNodes > 0 ? block.maxNodes : FLOW_MAX_NODES
+  const ceiling = Math.min(declared, FLOW_MAX_NODES)
+
+  const seen = new Set<string>()
+  const kept: { id: string; row: Record<string, unknown> }[] = []
+  let total = 0
+  for (const row of state.data) {
+    const id = String(row[block.nodeIdField] ?? "")
+    if (id === "" || seen.has(id)) continue
+    seen.add(id)
+    total++
+    if (kept.length < ceiling) kept.push({ id, row })
+  }
+
+  if (kept.length === 0) return <EmptyState title={block.emptyText ?? "Nothing to diagram yet"} />
+
+  const keptIds = new Set(kept.map((n) => n.id))
+  const labelOf = new Map(kept.map((n) => [n.id, String(n.row[block.nodeLabelField] ?? "")]))
+  const successors = new Map<string, string[]>(kept.map((n) => [n.id, []]))
+  const link = (from: string, to: string) => {
+    if (from === to || !keptIds.has(from) || !keptIds.has(to)) return
+    const list = successors.get(from)!
+    if (!list.includes(to)) list.push(to)
+  }
+  // A LIST is how one step branches to several; anything else is one id.
+  const refs = (value: unknown): string[] =>
+    (Array.isArray(value) ? value : [value])
+      .filter((v) => v !== undefined && v !== null)
+      .map(String)
+      .filter((v) => v !== "")
+
+  if (block.edgeFromField === undefined && block.edgeToField === undefined) {
+    for (let i = 1; i < kept.length; i++) link(kept[i - 1].id, kept[i].id)
+  } else {
+    for (const node of kept) {
+      if (block.edgeFromField !== undefined) for (const other of refs(node.row[block.edgeFromField])) link(other, node.id)
+      if (block.edgeToField !== undefined) for (const other of refs(node.row[block.edgeToField])) link(node.id, other)
+    }
+  }
+
+  // The node's own affordance is its FIRST `open` action, matching the web
+  // renderer: on a canvas that is clicking the box, here it is the row's title.
+  const primaryOpen = block.nodeActions?.find((a): a is Extract<RowAction, { open: string }> => "open" in a)
+
+  return (
+    <div className="space-y-2">
+      {total > kept.length && (
+        // Announced, never silent: a partial graph that looks complete is worse
+        // than a crowded one, because a reader cannot see an absence.
+        <p className="text-xs text-muted-foreground">
+          Showing the first {kept.length} of {total} nodes — the rest are not drawn.
+        </p>
+      )}
+      <ol className="space-y-2">
+        {kept.map((node) => {
+          const next = successors.get(node.id) ?? []
+          const title = labelOf.get(node.id) ?? ""
+          return (
+            <li key={node.id} className="rounded-lg border border-border bg-card p-3">
+              {primaryOpen !== undefined ? (
+                <button type="button" className="text-sm font-medium" onClick={() => openTarget(primaryOpen.open, node.row)}>
+                  {title}
+                </button>
+              ) : (
+                <p className="text-sm font-medium">{title}</p>
+              )}
+              {block.nodeSubtitleField !== undefined && (
+                <p className="text-xs text-muted-foreground">{String(node.row[block.nodeSubtitleField] ?? "")}</p>
+              )}
+              {next.length > 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <span aria-hidden>&rarr; </span>
+                  {next.map((id) => labelOf.get(id) ?? id).join(", ")}
+                </p>
+              )}
+              {block.nodeActions && block.nodeActions.length > 0 && (
+                <div className="mt-2">
+                  <RowActions actions={block.nodeActions} row={node.row} onDone={refresh} />
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ol>
     </div>
   )
 }

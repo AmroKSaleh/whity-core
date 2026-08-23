@@ -267,6 +267,43 @@ export interface InboxBlock {
 }
 
 /**
+ * The most nodes a `flow` will render, mirroring
+ * `BlockContract::FLOW_MAX_NODES` (#950, inheriting #192).
+ *
+ * A readability ceiling rather than a payload one. The host validator already
+ * refuses a `maxNodes` above it, so this copy is what decides how many nodes
+ * reach the screen when a payload arrives larger than anyone declared — which
+ * no amount of contract validation can prevent.
+ */
+export const FLOW_MAX_NODES = 150
+
+/**
+ * The graph block (#950). Mirrors the SDK contract exactly — see
+ * `sdk/src/Frontend/Blocks/BlockContract.php` and `web/lib/plugin-features.ts`.
+ *
+ * A row IS a node; the edges are references off the node rows to other nodes'
+ * ids, either field optionally holding a LIST so a step can branch. With neither
+ * edge field declared the nodes are a linear sequence in payload order.
+ *
+ * Read-only by construction — no endpoint, no verb. `nodeActions` is the same
+ * `RowAction` list a `dataTable` row carries.
+ */
+export interface FlowBlock {
+  type: "flow"
+  source: string
+  nodeIdField: string
+  nodeLabelField: string
+  nodeSubtitleField?: string
+  edgeFromField?: string
+  edgeToField?: string
+  orientation?: "horizontal" | "vertical"
+  nodeActions?: RowAction[]
+  maxNodes?: number
+  emptyText?: string
+  params?: SourceParam[]
+}
+
+/**
  * `submit.endpoint` may carry `{targetId.field}`/`{selector}` context tokens —
  * the same addressing as `params.from`/`defaultFrom` — interpolated from the
  * master-detail context at submit time (e.g. an edit modal PATCHing
@@ -662,6 +699,7 @@ export type Block = BlockFacets &
   | SelectorBlock
   | TimelineBlock
   | InboxBlock
+  | FlowBlock
   | ModalBlock
   | DrawerBlock
   | DataRecordBlock

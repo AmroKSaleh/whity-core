@@ -345,6 +345,50 @@ export interface ItemAction {
 }
 
 /**
+ * The most nodes a `flow` may draw, mirroring
+ * `BlockContract::FLOW_MAX_NODES` (#950, inheriting #192).
+ *
+ * A readability ceiling, not a payload one: a canvas of several hundred boxes
+ * has stopped being a diagram, and every renderer on this library inherits that
+ * as soon as a tenant's data grows. The host validator already refuses a
+ * `maxNodes` above it, so this copy is the RENDERER's own floor — it is what
+ * decides how many nodes reach the canvas when a payload arrives larger than
+ * anyone declared, which no amount of contract validation can prevent.
+ */
+export const FLOW_MAX_NODES = 150;
+
+/**
+ * A GRAPH: a set of nodes and the edges between them — the shape no other block
+ * can express.
+ *
+ * Data-bound like `dataTable`: ONE ownership-checked `source` returning a
+ * collection, and a row IS a node. Edges are references off the node rows to
+ * other nodes' ids — `edgeFromField` a predecessor pointer, `edgeToField` a
+ * successor pointer, either optionally holding a LIST so a step can branch. With
+ * neither declared the nodes are a linear sequence in payload order, which is
+ * the common case (an ordered list of steps) and costs the plugin nothing.
+ *
+ * Read-only by construction: no endpoint, no verb. Editing is a form opened from
+ * a node, declared through `nodeActions` — the same `RowAction` shape
+ * `dataTable.rowActions` uses, rendered by the same code path.
+ */
+export interface FlowBlock {
+  type: 'flow';
+  source: string;
+  nodeIdField: string;
+  nodeLabelField: string;
+  nodeSubtitleField?: string;
+  edgeFromField?: string;
+  edgeToField?: string;
+  orientation?: 'horizontal' | 'vertical';
+  nodeActions?: RowAction[];
+  /** Lowers {@link FLOW_MAX_NODES} for this graph; the contract refuses a higher value. */
+  maxNodes?: number;
+  emptyText?: string;
+  params?: SourceParam[];
+}
+
+/**
  * A TASK LIST: the items awaiting the current user, each carrying the actions
  * that user may actually take on it.
  *
@@ -859,6 +903,7 @@ export type Block = BlockFacets &
   | SelectorBlock
   | TimelineBlock
   | InboxBlock
+  | FlowBlock
   | ModalBlock
   | DrawerBlock
   | DataRecordBlock
