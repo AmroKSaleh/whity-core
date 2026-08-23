@@ -157,7 +157,7 @@ final class DocumentTemplateRepository
      * DOCUMENTS ISSUED FROM IT ARE DETACHED, NOT DELETED (#947 item 1). The
      * whole point of storing a rendered document is that it survives the
      * template it came from — `documents.document_template_id` is therefore
-     * `ON DELETE SET NULL` (migration 106) and `documents.template_name` holds
+     * `ON DELETE SET NULL` (migration 108) and `documents.template_name` holds
      * the snapshot that keeps the record legible afterwards.
      *
      * The detach is done EXPLICITLY here rather than left to the constraint,

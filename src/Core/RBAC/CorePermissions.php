@@ -167,7 +167,7 @@ final class CorePermissions
     public const DOCUMENTS_RENDER = 'documents:render';
 
     // Issued DOCUMENTS, as opposed to the templates above (#947 item 1,
-    // migration 107). The four permissions above are the designer's; a document
+    // migration 109). The four permissions above are the designer's; a document
     // that has been rendered and stored is an ordinary business record, and the
     // baseline rule for one is "you see what you raised". `documents:read:all`
     // is the tenant-wide override — the auditor/administrator grant — evaluated

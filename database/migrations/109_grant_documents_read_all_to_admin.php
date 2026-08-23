@@ -15,7 +15,7 @@ use Whity\Database\Database;
  * -----------------------------------------------------
  * `documents:read` (migration 060) is the designer's capability: it means "may
  * see templates and blocks", and every tenant member who opens the designer
- * holds it. Migration 106 introduces something that permission was never
+ * holds it. Migration 108 introduces something that permission was never
  * scoped for — ISSUED DOCUMENTS, which are ordinary business records and are
  * not all everyone's business. Reusing `documents:read` for them would hand
  * every template author the tenant's entire issued output the moment this

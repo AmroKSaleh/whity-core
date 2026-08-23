@@ -21,7 +21,7 @@ use PDO;
  * where someone eventually calls it, at which point the guarantee is a comment.
  *
  * Removal happens only through the parent: `ON DELETE CASCADE` from `documents`
- * and from `tenants` (migration 106). Note what that does NOT reclaim — the
+ * and from `tenants` (migration 108). Note what that does NOT reclaim — the
  * OBJECT in storage outlives the row, which is why `storage_key` is recorded
  * here at all: an operator sweep needs to read the keys before the rows go.
  *
@@ -76,7 +76,7 @@ final class DocumentArtifactRepository
      *
      * Ordered by `id` rather than `rendered_at`: the surrogate key is
      * monotonic, a timestamp is not unique, and two corrections issued in the
-     * same second must still have a defined order. Migration 106 explains why
+     * same second must still have a defined order. Migration 108 explains why
      * there is no `revision` column to order by instead.
      *
      * @return list<array<string, mixed>>

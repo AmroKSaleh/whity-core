@@ -48,7 +48,7 @@ use Whity\Storage\StorageException;
  * they read exist, and item 5 would inherit a half-shaped surface it has to
  * unpick. So this list is deliberately the plain one: the tenant's documents,
  * newest first, paginated, filtered to what the caller may see. The columns
- * item 5 needs are indexed (migration 106) and the filter it will add is one
+ * item 5 needs are indexed (migration 108) and the filter it will add is one
  * predicate in {@see DocumentRepository}.
  *
  * What IS here beyond reading is the re-render, because it is the observable

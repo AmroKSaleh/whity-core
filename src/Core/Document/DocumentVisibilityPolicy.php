@@ -27,7 +27,7 @@ use Whity\Core\RBAC\CorePermissions;
  * `documents:read` (the route gate) is NOT sufficient on its own, on purpose.
  * That permission means "may use the designer" and is held broadly; letting it
  * also mean "may read everything the tenant has ever issued" would have widened
- * an existing grant silently the day this shipped. See migration 107.
+ * an existing grant silently the day this shipped. See migration 109.
  *
  * WHERE ITEM 3 PLUGS IN
  * ---------------------

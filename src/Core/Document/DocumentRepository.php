@@ -11,7 +11,7 @@ use PDO;
  * document: its identity, the template it came from, who raised it, from which
  * unit, and when. The bytes live one table over, in `document_artifacts`
  * ({@see DocumentArtifactRepository}), because a record survives a correction
- * and a set of bytes must not be rewritten by one — see migration 106.
+ * and a set of bytes must not be rewritten by one — see migration 108.
  *
  * TENANT-OWNED. Every statement binds an explicit `tenant_id` predicate, spelled
  * out in literal SQL so scripts/ci-tenant-predicate-guard.php can verify it by
@@ -43,7 +43,7 @@ final class DocumentRepository
      *
      * `template_name` is a SNAPSHOT taken at issue time, not a join: the
      * template may be renamed or deleted (the foreign key is ON DELETE SET
-     * NULL, deliberately — see migration 106), and a browser listing a document
+     * NULL, deliberately — see migration 108), and a browser listing a document
      * whose origin was retired should still be able to say what it was.
      *
      * @param array{document_template_id?: ?int, template_name: string, title: string,

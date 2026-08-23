@@ -60,7 +60,7 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
     private const TENANT = 1;
     private const OTHER_TENANT = 2;
 
-    private const OWNER = 10;   // admin in tenant 1 -> documents:* incl. read:all (migrations 060/107)
+    private const OWNER = 10;   // admin in tenant 1 -> documents:* incl. read:all (migrations 060/109)
     private const VIEWER = 11;  // documents:read + documents:render, NOT read:all
     private const AUDITOR = 12; // documents:read + documents:read:all
     private const OTHER_TENANT_ADMIN = 20;
@@ -528,7 +528,7 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
         $pdo->exec("INSERT INTO organizational_units (id, tenant_id, name, slug, created_at)
                     VALUES (7, 1, 'Registry', 'registry', datetime('now'))");
 
-        // admin role (1) is seeded and granted documents:* by migrations 060/107.
+        // admin role (1) is seeded and granted documents:* by migrations 060/109.
         $pdo->exec("INSERT OR IGNORE INTO roles (id, name, description, tenant_id, created_at) VALUES (1, 'admin', '', NULL, datetime('now'))");
         $pdo->exec("INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES
             (101, 'viewer', '', 1, datetime('now')),
