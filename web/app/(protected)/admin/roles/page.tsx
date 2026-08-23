@@ -62,10 +62,10 @@ export default function Page() {
     [tAdmin, tCommon]
   );
 
-  // #882: web routes Edit (and the row's own name) to the RECORD PAGE. Supplying
-  // this prop is the entire opt-in — a host that omits it keeps the edit modal,
-  // which is still in the package and still wired, so this is revertible by
-  // deleting these three lines.
+  // #882/#910: web routes Edit, Open and the row's own name to the RECORD PAGE.
+  // No longer an opt-in — the edit modal it used to fall back to is gone, and
+  // `onOpenRecord` is a required prop, because a role's regions are gated
+  // separately and a dialog has nowhere to put the difference.
   const openRecord = useCallback(
     (role: Role) => {
       router.push(`/admin/roles/${role.id}`);

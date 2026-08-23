@@ -4318,6 +4318,17 @@ export interface components {
                 relations: components["schemas"]["RelationSummary"][];
             };
         };
+        RecordSectionDenial: {
+            /** @enum {string} */
+            code: "permission" | "record";
+            reason: string;
+            detail: string | null;
+        };
+        RecordSectionVerdict: {
+            /** @enum {string} */
+            state: "read-only" | "editable";
+            denial: components["schemas"]["RecordSectionDenial"];
+        };
         RefreshResponse: {
             status: string;
         };
@@ -4456,7 +4467,10 @@ export interface components {
             created_at: string | null;
             manageable: boolean;
             global: boolean;
-            permissions: components["schemas"]["Permission"][];
+            permissions?: components["schemas"]["Permission"][];
+            sections?: {
+                [key: string]: components["schemas"]["RecordSectionVerdict"];
+            };
         };
         RoleDetailResponse: {
             data: components["schemas"]["RoleDetail"];

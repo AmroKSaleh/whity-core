@@ -38,7 +38,8 @@
  *   roles.record.notManageable = This role can't be modified by your tenant — global base roles are managed by the system tenant.
  *   roles.record.permissions.subtitle = Grouped by the resource each permission acts on.
  *   roles.record.permissions.title = Permissions
- *   roles.record.readOnly.noPermission = You don't have permission to edit roles, so this record is read-only.
+ *   roles.record.details.readOnly.permission = You don't have permission to change roles, so these details are read-only.
+ *   roles.record.permissions.readOnly.permission = You may see what this role grants, but not change it.
  *   roles.record.readOnly.systemRole = This is a global base role. Only the system tenant can change it.
  *   roles.record.save = Save changes
  *   roles.record.saving = Saving…
@@ -55,10 +56,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import type { FormEvent } from 'react';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Input } from '@amroksaleh/ui/input';
 import { IconAlertTriangle, IconShieldLock } from '@tabler/icons-react';
 
@@ -73,12 +73,11 @@ import {
   RecordTimelineItem,
   formatRecordDate,
   formatRecordDateTime,
-  resolveAccess,
+  sectionAccessFrom,
   useRecordResource,
 } from '../record';
-import type { RecordFactsFn, RecordResource } from '../record';
+import type { RecordFactsFn, RecordResource, RecordSectionSpec } from '../record';
 import { identityTranslate } from '../nav/types';
-import { ROLES_WRITE } from './capabilities';
 import { PermissionsGrid } from './permissions-grid';
 import type {
   Permission,
@@ -122,6 +121,52 @@ interface RoleRecordFields {
    * it is simply not part of the role's own payload.
    */
   holderCount: number | null;
+}
+
+/**
+ * This screen's copy for a denial CODE, or null to fall back to the server's.
+ *
+ * The server ships the code, an audience-safe English sentence, and — for a
+ * caller it decided may read it — the exact permission the write would need.
+ * This is the localization half of that seam and nothing more: it never decides
+ * whether a region is refused, only how this screen says so in this caller's
+ * language. Returning null hands the sentence back to the server's own, which is
+ * what makes a code this build has never heard of render as a vague explanation
+ * rather than a blank space (#968's rule, and #951's point: a refusal with no
+ * reason reads as a bug).
+ *
+ * PER REGION for `permission`, SHARED for `record`. `roles:write` governs the
+ * details and `roles:manage` governs what the role grants, so a permission
+ * refusal names a different slug in each region and a shared sentence would be
+ * wrong in one of them. A record refusal is about the record, so both regions
+ * say the same thing — and because they say the SAME thing, the shell hoists it
+ * and prints it once above the page instead of paraphrasing one fact twice.
+ */
+function localizeDenial(
+  t: RolesTranslate,
+  section: 'details' | 'permissions'
+): (code: string) => string | null {
+  return (code) => {
+    if (code === 'permission') {
+      return section === 'details'
+        ? t(
+            'roles.record.details.readOnly.permission',
+            "You don't have permission to change roles, so these details are read-only."
+          )
+        : t(
+            'roles.record.permissions.readOnly.permission',
+            'You may see what this role grants, but not change it.'
+          );
+    }
+    if (code === 'record') {
+      return t(
+        'roles.record.readOnly.systemRole',
+        'This is a global base role. Only the system tenant can change it.'
+      );
+    }
+    // Unrecognised: the server's own sentence is better than none.
+    return null;
+  };
 }
 
 /**
@@ -186,23 +231,28 @@ const roleFacts: RecordFactsFn<RoleRecordFields> = (role, t) => ({
  *    scrolled through a porthole.
  *
  * Presentational and data-source-agnostic like its siblings: no fetching, no
- * router, no capability source of its own. Data goes through `adapter`,
- * capability checks through `can`, copy through `t`, navigation through
- * `onBack`, so the same component mounts under Next, a Tauri shell, or the Vite
- * harness.
+ * router, no capability source of its own. Data goes through `adapter`, copy
+ * through `t`, navigation through `onBack`, so the same component mounts under
+ * Next, a Tauri shell, or the Vite harness.
  *
- * READ-ONLY IS A FIRST-CLASS STATE, not a disabled form. Two independent gates
- * decide it — the caller's `roles:write` capability and the role's own
- * server-computed `manageable` flag (WC-110/WC-222: a global NULL-tenant base
- * role is visible to a tenant but writable only by the system tenant). The shell
- * takes both renderings and picks one; it renders the first refusal's reason,
- * so the page says WHICH gate refused rather than offering a form whose save
- * would 404.
+ * READ-ONLY IS A FIRST-CLASS STATE, AND IT IS PER REGION (#910). The page has
+ * two regions — the role's details and the permission set it grants — and each
+ * is independently hidden, read-only or editable, because "some parts have
+ * permissions, not always everything is allowed".
+ *
+ * THE SERVER DECIDES ALL OF IT. This screen takes no `can` prop, and that
+ * absence is the design rather than an omission: it resolves nothing, combines
+ * nothing, and infers nothing. `GET /roles/{id}` returns a verdict per region,
+ * resolved against the same `RoleChecker` the middleware enforces with and
+ * against the per-record ownership rule (WC-110/WC-222: a global NULL-tenant
+ * base role is visible to a tenant but writable only by the system tenant), and
+ * OMITS both the verdict and the data for a region the caller may not see. The
+ * shell takes both renderings of each region and picks; a hidden region renders
+ * neither, and its rows were never in the payload to render from.
  */
 export function RoleRecordScreen({
   adapter,
   roleId,
-  can,
   t: injectedT,
   onNotify,
   onBack,
@@ -210,16 +260,30 @@ export function RoleRecordScreen({
 }: RoleRecordScreenProps) {
   const t: RolesTranslate = injectedT ?? identityTranslate;
 
-  // The RECORD itself, plus the picker source it is edited against. Their
-  // failure is the page's failure, which is why they are one resource: a page
-  // that rendered the role but not the catalogue would offer an edit form with
-  // no permissions in it.
-  const loaded = useRecordResource<{ role: RoleWithPermissions; catalogue: Permission[] }>(
+  // The RECORD, and then the picker source it is edited against — SEQUENTIALLY,
+  // which is a change #910 forced and an improvement it happens to bring.
+  //
+  // The catalogue is the whole installation's permission list: every core slug
+  // plus every plugin-declared one, fetched only so the grid has boxes to tick.
+  // A caller whose `permissions` region is read-only or hidden has nothing to
+  // tick, and fetching it for them was always waste — but it was also, since
+  // #910, a leak: the catalogue is most of what the permissions region shows,
+  // and a page that withheld the region while still pulling the catalogue would
+  // have handed over the interesting half anyway.
+  //
+  // So the record decides. `sections.permissions === 'editable'` is the only
+  // state that needs the catalogue; the read-only rendering reads the role's OWN
+  // permissions, which arrive with the record, and the hidden state has neither.
+  // Their failure is still the page's failure — a page that rendered the role
+  // but not the catalogue would offer an edit form with no permissions in it.
+  const loaded = useRecordResource<{
+    role: RoleWithPermissions;
+    catalogue: Permission[];
+  }>(
     async () => {
-      const [role, catalogue] = await Promise.all([
-        adapter.getRole(roleId),
-        adapter.listPermissions(),
-      ]);
+      const role = await adapter.getRole(roleId);
+      const catalogue =
+        role.sections?.permissions?.state === 'editable' ? await adapter.listPermissions() : [];
       return { role, catalogue };
     },
     [roleId],
@@ -247,9 +311,7 @@ export function RoleRecordScreen({
   // two ways — counting `assignments.length` is the mistake the endpoint's
   // `total` exists to prevent.
   const holderList: RecordResource<readonly RoleAssignment[]> =
-    holders.status === 'ready'
-      ? { status: 'ready', value: holders.value.assignments }
-      : holders;
+    holders.status === 'ready' ? { status: 'ready', value: holders.value.assignments } : holders;
   const holderCount = holders.status === 'ready' ? holders.value.total : null;
   const holderOverflow =
     holders.status === 'ready' ? holders.value.total - holders.value.assignments.length : 0;
@@ -296,62 +358,84 @@ export function RoleRecordScreen({
   const current = saved !== null && role !== null && saved.id === role.id ? saved : role;
   const form = draft !== null && current !== null && draft.id === current.id ? draft : null;
 
-  const hasWrite = can(ROLES_WRITE);
-  // `manageable` is a decision about the CALLER, so it belongs to the gates and
-  // never to `roleFacts` — the shell's `RecordFields` constraint enforces that.
-  const access = resolveAccess([
-    {
-      allowed: hasWrite,
-      reason: t(
-        'roles.record.readOnly.noPermission',
-        "You don't have permission to edit roles, so this record is read-only."
-      ),
-    },
-    {
-      allowed: current?.manageable === true,
-      reason: t(
-        'roles.record.readOnly.systemRole',
-        'This is a global base role. Only the system tenant can change it.'
-      ),
-    },
-  ]);
+  // ---- WHO DECIDES (#910) ----
+  //
+  // Nothing here. `current.sections` is the SERVER's per-region ruling, resolved
+  // against the same `RoleChecker` its middleware enforces with and against the
+  // per-record ownership rule (`roleManageableByTenant`) that no route table can
+  // express. This screen reads the verdict and renders it.
+  //
+  // What used to be here was an ordered list of two gates the browser folded
+  // together: `can('roles:write')` from `/me/capabilities` AND the record's
+  // `manageable` flag. Both were server answers, so the fold was defensible —
+  // but it was one page-level answer for a page whose parts have different
+  // ones, and extending it granularly would have meant the client inventing the
+  // conjunctions. The moment a browser ANDs two grants into a third, the
+  // deployment holds two different answers to one authorization question, and
+  // the one that renders is whichever the client edited last.
+  //
+  // `manageable` is still on the record and still a decision about the CALLER,
+  // so it stays out of `roleFacts` — the shell's `RecordFields` constraint
+  // enforces that, and #895 is why.
+  const detailsAccess = sectionAccessFrom(
+    current?.sections,
+    'details',
+    localizeDenial(t, 'details')
+  );
+  const permissionsAccess = sectionAccessFrom(
+    current?.sections,
+    'permissions',
+    localizeDenial(t, 'permissions')
+  );
+  const canEditDetails = detailsAccess.state === 'editable';
+  const canEditPermissions = permissionsAccess.state === 'editable';
 
+  // Dirty means "there is something to SAVE", so it counts only the regions this
+  // caller may change. A page whose permissions region is read-only must not
+  // light up its Save button because the grid re-derived a set — and, more to the
+  // point, must never send a `permissions` key the server would refuse: the
+  // submit below builds its body from the same two flags.
   const isDirty = useMemo(() => {
     if (!current || !form) return false;
     const original = (current.permissions ?? []).map((p) => p.id);
     const sameSet =
       original.length === form.permissionIds.length &&
-      new Set(form.permissionIds).size ===
-        new Set([...form.permissionIds, ...original]).size;
-    return (
-      form.name !== (current.name ?? '') ||
-      form.description !== (current.description ?? '') ||
-      !sameSet
-    );
-  }, [current, form]);
+      new Set(form.permissionIds).size === new Set([...form.permissionIds, ...original]).size;
+    const detailsChanged =
+      form.name !== (current.name ?? '') || form.description !== (current.description ?? '');
+    return (canEditDetails && detailsChanged) || (canEditPermissions && !sameSet);
+  }, [current, form, canEditDetails, canEditPermissions]);
 
   const back = { label: t('roles.record.back', 'Back to roles'), onBack };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!current || !form || !access.editable) return;
+    if (!current || !form || !(canEditDetails || canEditPermissions)) return;
 
-    if (form.name.trim() === '') {
-      setFieldError(t('roles.record.validation.nameRequired', 'Name is required'));
-      return;
-    }
-    if (form.description.trim() === '') {
-      setFieldError(t('roles.record.validation.descriptionRequired', 'Description is required'));
-      return;
+    if (canEditDetails) {
+      if (form.name.trim() === '') {
+        setFieldError(t('roles.record.validation.nameRequired', 'Name is required'));
+        return;
+      }
+      if (form.description.trim() === '') {
+        setFieldError(t('roles.record.validation.descriptionRequired', 'Description is required'));
+        return;
+      }
     }
     setFieldError(null);
 
     try {
       setIsSaving(true);
+      // The body carries ONLY the regions this caller may write. The server
+      // refuses a `permissions` key from a caller whose permissions region is
+      // read-only — deliberately a 403 rather than a silent drop, because a save
+      // that returns 200 without doing what it said is the failure mode that
+      // sends an operator looking for a bug in the wrong place — so a page that
+      // sent every field regardless would turn a read-only REGION into a failed
+      // PAGE.
       const result = await adapter.updateRole(current.id, {
-        name: form.name,
-        description: form.description,
-        permissions: form.permissionIds,
+        ...(canEditDetails ? { name: form.name, description: form.description } : {}),
+        ...(canEditPermissions ? { permissions: form.permissionIds } : {}),
       });
       // SAFETY NET (WC-222): the page is already gated on `manageable`, but a
       // role can become global-only between load and save. Surface the friendly
@@ -369,9 +453,12 @@ export function RoleRecordScreen({
       onNotify?.(t('roles.record.success', 'Role updated successfully'), 'success');
       const next: RoleWithPermissions = {
         ...current,
-        name: form.name,
-        description: form.description,
-        permissions: catalogue.filter((p) => form.permissionIds.includes(p.id)),
+        ...(canEditDetails ? { name: form.name, description: form.description } : {}),
+        ...(canEditPermissions
+          ? {
+              permissions: catalogue.filter((p) => form.permissionIds.includes(p.id)),
+            }
+          : {}),
       };
       setSaved(next);
       resetDraft(next);
@@ -424,234 +511,262 @@ export function RoleRecordScreen({
     holderCount,
   };
 
-  const detailsCard = (children: ReactNode) => (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t('roles.record.details.title', 'Details')}</CardTitle>
-        <CardDescription>
-          {t(
-            'roles.record.details.subtitle',
-            "The role's name and description, as they appear everywhere it is used."
-          )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">{children}</CardContent>
-    </Card>
-  );
+  // ---- THE REGIONS (#910) ----
+  //
+  // Two, and they are gated separately because they answer to different
+  // authorities: renaming a role and changing what it AUTHORISES are different
+  // acts with different blast radii, and #910 names this pair as the example.
+  // Each declares both renderings — the shell picks, so a greyed-out form cannot
+  // ship by omission — and the shell renders NEITHER when the region is hidden.
+  //
+  // The `key` is the same string the server keyed its verdict by. One name, so a
+  // region and the ruling that governs it cannot drift apart.
+  const detailsSection: RecordSectionSpec = {
+    key: 'details',
+    title: t('roles.record.details.title', 'Details'),
+    description: t(
+      'roles.record.details.subtitle',
+      "The role's name and description, as they appear everywhere it is used."
+    ),
+    access: detailsAccess,
+    editor: (
+      <>
+        <div className="space-y-1.5">
+          <label htmlFor="role-record-name" className="block text-sm font-medium text-foreground">
+            {t('roles.record.name.label', 'Role name')}
+          </label>
+          <Input
+            id="role-record-name"
+            form="role-record-form"
+            value={form.name}
+            onChange={(e) => setDraft({ ...form, name: e.target.value })}
+            placeholder={t('roles.record.name.placeholder', 'e.g., Editor')}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label
+            htmlFor="role-record-description"
+            className="block text-sm font-medium text-foreground"
+          >
+            {t('roles.record.description.label', 'Description')}
+          </label>
+          <Input
+            id="role-record-description"
+            form="role-record-form"
+            value={form.description}
+            onChange={(e) => setDraft({ ...form, description: e.target.value })}
+            placeholder={t('roles.record.description.placeholder', 'Role description')}
+          />
+        </div>
+        {fieldError !== null && (
+          <p className="text-sm text-destructive" role="alert">
+            {fieldError}
+          </p>
+        )}
+      </>
+    ),
+    // A description LIST, not labels pointing at paragraphs: `htmlFor` only
+    // means anything against a labelable control, and a `<label>` with nothing
+    // to label announces a form field that is not there.
+    readOnly: (
+      <dl className="space-y-4">
+        <div className="space-y-1.5">
+          <dt className="text-sm font-medium text-foreground">
+            {t('roles.record.name.label', 'Role name')}
+          </dt>
+          <dd className="text-sm text-foreground">{current.name}</dd>
+        </div>
+        <div className="space-y-1.5">
+          <dt className="text-sm font-medium text-foreground">
+            {t('roles.record.description.label', 'Description')}
+          </dt>
+          <dd className="text-sm text-foreground">{current.description}</dd>
+        </div>
+      </dl>
+    ),
+  };
 
-  const permissionsCard = (children: ReactNode) => (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t('roles.record.permissions.title', 'Permissions')}</CardTitle>
-        <CardDescription>
-          {t('roles.record.permissions.subtitle', 'Grouped by the resource each permission acts on.')}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
-  );
+  const permissionsSection: RecordSectionSpec = {
+    key: 'permissions',
+    title: t('roles.record.permissions.title', 'Permissions'),
+    description: t(
+      'roles.record.permissions.subtitle',
+      'Grouped by the resource each permission acts on.'
+    ),
+    access: permissionsAccess,
+    // THE ACUTE CASE, in its final form. This grid used to be 53+ checkboxes in
+    // a `max-h-80` scroll region nested inside a `max-h-[90vh]` dialog — a
+    // scroll inside a scroll, which is what produced #882. It is now a
+    // full-width region on an addressable page, and since #910 a region with its
+    // own gate: who may READ what a role grants and who may CHANGE it are
+    // different questions, and the modal had nowhere to put the difference.
+    editor: (
+      <PermissionsGrid
+        permissions={catalogue}
+        selectedIds={form.permissionIds}
+        onChange={(permissionIds) => setDraft({ ...form, permissionIds })}
+        t={t}
+      />
+    ),
+    // The ROLE'S OWN permissions, never the installation's whole catalogue —
+    // feeding the catalogue to a read-only view renders every permission on the
+    // deployment as though the role had it. It is also all this branch HAS: the
+    // catalogue is not fetched unless the region is editable.
+    readOnly: (
+      <PermissionsGrid
+        permissions={current.permissions ?? []}
+        selectedIds={form.permissionIds}
+        onChange={() => undefined}
+        t={t}
+        readOnly
+      />
+    ),
+  };
 
-  const editor = (
-    <form id="role-record-form" onSubmit={handleSubmit} className="space-y-6">
-      {detailsCard(
-        <>
-          <div className="space-y-1.5">
-            <label htmlFor="role-record-name" className="block text-sm font-medium text-foreground">
-              {t('roles.record.name.label', 'Role name')}
-            </label>
-            <Input
-              id="role-record-name"
-              value={form.name}
-              onChange={(e) => setDraft({ ...form, name: e.target.value })}
-              placeholder={t('roles.record.name.placeholder', 'e.g., Editor')}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label
-              htmlFor="role-record-description"
-              className="block text-sm font-medium text-foreground"
-            >
-              {t('roles.record.description.label', 'Description')}
-            </label>
-            <Input
-              id="role-record-description"
-              value={form.description}
-              onChange={(e) => setDraft({ ...form, description: e.target.value })}
-              placeholder={t('roles.record.description.placeholder', 'Role description')}
-            />
-          </div>
-          {fieldError !== null && (
-            <p className="text-sm text-destructive" role="alert">
-              {fieldError}
-            </p>
-          )}
-        </>
-      )}
-      {permissionsCard(
-        <PermissionsGrid
-          permissions={catalogue}
-          selectedIds={form.permissionIds}
-          onChange={(permissionIds) => setDraft({ ...form, permissionIds })}
-          t={t}
-        />
-      )}
-    </form>
-  );
-
-  const readOnly = (
-    <div className="space-y-6">
-      {/* A description LIST, not labels pointing at paragraphs: `htmlFor` only
-          means anything against a labelable control, and a `<label>` with
-          nothing to label announces a form field that is not there. */}
-      {detailsCard(
-        <dl className="space-y-4">
-          <div className="space-y-1.5">
-            <dt className="text-sm font-medium text-foreground">
-              {t('roles.record.name.label', 'Role name')}
-            </dt>
-            <dd className="text-sm text-foreground">{current.name}</dd>
-          </div>
-          <div className="space-y-1.5">
-            <dt className="text-sm font-medium text-foreground">
-              {t('roles.record.description.label', 'Description')}
-            </dt>
-            <dd className="text-sm text-foreground">{current.description}</dd>
-          </div>
-        </dl>
-      )}
-      {/* The ROLE'S OWN permissions, never the installation's whole catalogue —
-          feeding the catalogue to a read-only view renders every permission on
-          the deployment as though the role had it. */}
-      {permissionsCard(
-        <PermissionsGrid
-          permissions={current.permissions ?? []}
-          selectedIds={form.permissionIds}
-          onChange={() => undefined}
-          t={t}
-          readOnly
-        />
-      )}
-    </div>
-  );
+  const sections = [detailsSection, permissionsSection];
+  const anyEditable = canEditDetails || canEditPermissions;
 
   return (
-    <RecordPageShell
-      testId="role-record"
-      fields={fields}
-      facts={roleFacts}
-      t={t}
-      access={access}
-      back={back}
-      icon={<IconShieldLock />}
-      className={className}
-      actions={
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!isDirty || isSaving}
-            onClick={() => resetDraft(current)}
-          >
-            {t('roles.record.cancel', 'Discard changes')}
-          </Button>
-          <Button type="submit" form="role-record-form" disabled={isSaving || !isDirty}>
-            {isSaving ? t('roles.record.saving', 'Saving…') : t('roles.record.save', 'Save changes')}
-          </Button>
-        </div>
-      }
-      notices={
-        // #886 — the blast radius, stated before the edit rather than after it.
-        // Shown only when the record is BOTH global and actually editable here,
-        // which is only ever a system-tenant operator: for anyone else the shell's
-        // read-only notice already explains why the form is absent, and two
-        // notices saying overlapping things is one notice too many.
-        fields.global && access.editable ? (
-          <Alert variant="warning" data-testid="role-record-global-warning">
-            <IconAlertTriangle className="h-4 w-4" />
-            <AlertDescription>
-              {t(
-                'roles.record.globalWarning',
-                'This is a global base role: one role shared by every tenant on this deployment. Saving changes it for all of them, including their existing users.'
+    <>
+      {/* THE FORM OWNER, and nothing else.
+          The shell renders the regions, so no element of this screen's wraps the
+          inputs — and with regions gated independently there may not even BE a
+          details region to hang a form on. HTML already solves this: a control
+          carrying `form="role-record-form"` is owned by this form wherever it
+          sits in the document, which is what makes Enter-to-submit work from the
+          name field and the header's Save button work from outside the body
+          entirely. An empty `<form>` is the honest expression of that ownership
+          rather than a way around the shell. */}
+      <form id="role-record-form" onSubmit={handleSubmit} hidden />
+      <RecordPageShell
+        testId="role-record"
+        fields={fields}
+        facts={roleFacts}
+        t={t}
+        back={back}
+        icon={<IconShieldLock />}
+        className={className}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!isDirty || isSaving}
+              onClick={() => resetDraft(current)}
+            >
+              {t('roles.record.cancel', 'Discard changes')}
+            </Button>
+            <Button type="submit" form="role-record-form" disabled={isSaving || !isDirty}>
+              {isSaving
+                ? t('roles.record.saving', 'Saving…')
+                : t('roles.record.save', 'Save changes')}
+            </Button>
+          </div>
+        }
+        notices={
+          // #886 — the blast radius, stated before the edit rather than after it.
+          // Shown only when the record is BOTH global and actually editable here,
+          // which is only ever a system-tenant operator: for anyone else the
+          // region's own read-only line already explains why its inputs are
+          // absent, and two notices saying overlapping things is one notice too
+          // many.
+          fields.global && anyEditable ? (
+            <Alert variant="warning" data-testid="role-record-global-warning">
+              <IconAlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                {t(
+                  'roles.record.globalWarning',
+                  'This is a global base role: one role shared by every tenant on this deployment. Saving changes it for all of them, including their existing users.'
+                )}
+              </AlertDescription>
+            </Alert>
+          ) : undefined
+        }
+        // The regions, each with its own three-state access. No page-level
+        // `access` prop: with regions there is no page-level answer left to give
+        // that would not be a second opinion about the same question, so the shell
+        // DERIVES the one thing it still needs (does the action bar render?) from
+        // the regions themselves. The two therefore cannot disagree.
+        sections={sections}
+        side={
+          <>
+            <RecordCollectionPanel
+              testId="role-record-holders"
+              title={t('roles.record.holders.title', 'Who holds this role')}
+              subtitle={t('roles.record.holders.subtitle', 'Most recently assigned first.')}
+              resource={holderList}
+              emptyLabel={t('roles.record.holders.empty', 'Nobody holds this role yet.')}
+              footer={
+                holderOverflow > 0 ? (
+                  <p className="pt-2 text-xs text-muted-foreground">
+                    {t('roles.record.holders.more', 'and {count} more', {
+                      count: holderOverflow,
+                    })}
+                  </p>
+                ) : undefined
+              }
+            >
+              {(items) => (
+                <RecordList>
+                  {items.map((holder) => {
+                    const when = formatRecordDate(holder.assignedAt);
+                    return (
+                      <RecordListItem
+                        key={holder.membershipId}
+                        primary={holder.displayName || holder.email || `#${holder.profileId}`}
+                        secondary={
+                          when !== null
+                            ? t('roles.record.holders.assignedOn', 'assigned {date}', {
+                                date: when,
+                              })
+                            : t('roles.record.holders.assignedUnknown', 'assignment date unknown')
+                        }
+                      />
+                    );
+                  })}
+                </RecordList>
               )}
-            </AlertDescription>
-          </Alert>
-        ) : undefined
-      }
-      main={{ editor, readOnly }}
-      side={
-        <>
-          <RecordCollectionPanel
-            testId="role-record-holders"
-            title={t('roles.record.holders.title', 'Who holds this role')}
-            subtitle={t('roles.record.holders.subtitle', 'Most recently assigned first.')}
-            resource={holderList}
-            emptyLabel={t('roles.record.holders.empty', 'Nobody holds this role yet.')}
-            footer={
-              holderOverflow > 0 ? (
-                <p className="pt-2 text-xs text-muted-foreground">
-                  {t('roles.record.holders.more', 'and {count} more', { count: holderOverflow })}
-                </p>
-              ) : undefined
-            }
-          >
-            {(items) => (
-              <RecordList>
-                {items.map((holder) => {
-                  const when = formatRecordDate(holder.assignedAt);
-                  return (
-                    <RecordListItem
-                      key={holder.membershipId}
-                      primary={holder.displayName || holder.email || `#${holder.profileId}`}
-                      secondary={
-                        when !== null
-                          ? t('roles.record.holders.assignedOn', 'assigned {date}', { date: when })
-                          : t('roles.record.holders.assignedUnknown', 'assignment date unknown')
+            </RecordCollectionPanel>
+
+            <RecordCollectionPanel
+              testId="role-record-activity"
+              title={t('roles.record.activity.title', 'History')}
+              subtitle={t('roles.record.activity.subtitle', 'Changes recorded against this role.')}
+              resource={activity}
+              emptyLabel={t(
+                'roles.record.activity.empty',
+                'Nothing has been recorded for this role yet.'
+              )}
+            >
+              {(entries) => (
+                <RecordTimeline>
+                  {entries.map((entry) => (
+                    <RecordTimelineItem
+                      key={entry.id}
+                      // The action key is a stable machine identifier
+                      // (`role.updated`), not a source string, so it renders
+                      // verbatim and never enters the catalogue — the same rule
+                      // permission slugs follow.
+                      title={entry.action}
+                      meta={
+                        <>
+                          {formatRecordDateTime(entry.createdAt) ?? '—'}
+                          {' · '}
+                          {entry.actorUserId !== null
+                            ? t('roles.record.activity.actor', 'by user {id}', {
+                                id: entry.actorUserId,
+                              })
+                            : t('roles.record.activity.unknownActor', 'by the system')}
+                        </>
                       }
                     />
-                  );
-                })}
-              </RecordList>
-            )}
-          </RecordCollectionPanel>
-
-          <RecordCollectionPanel
-            testId="role-record-activity"
-            title={t('roles.record.activity.title', 'History')}
-            subtitle={t('roles.record.activity.subtitle', 'Changes recorded against this role.')}
-            resource={activity}
-            emptyLabel={t(
-              'roles.record.activity.empty',
-              'Nothing has been recorded for this role yet.'
-            )}
-          >
-            {(entries) => (
-              <RecordTimeline>
-                {entries.map((entry) => (
-                  <RecordTimelineItem
-                    key={entry.id}
-                    // The action key is a stable machine identifier
-                    // (`role.updated`), not a source string, so it renders
-                    // verbatim and never enters the catalogue — the same rule
-                    // permission slugs follow.
-                    title={entry.action}
-                    meta={
-                      <>
-                        {formatRecordDateTime(entry.createdAt) ?? '—'}
-                        {' · '}
-                        {entry.actorUserId !== null
-                          ? t('roles.record.activity.actor', 'by user {id}', {
-                              id: entry.actorUserId,
-                            })
-                          : t('roles.record.activity.unknownActor', 'by the system')}
-                      </>
-                    }
-                  />
-                ))}
-              </RecordTimeline>
-            )}
-          </RecordCollectionPanel>
-        </>
-      }
-    />
+                  ))}
+                </RecordTimeline>
+              )}
+            </RecordCollectionPanel>
+          </>
+        }
+      />
+    </>
   );
 }

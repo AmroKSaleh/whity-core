@@ -3244,8 +3244,44 @@ final class CoreApiSchemas
                 // `!manageable`, which reads correctly for a tenant and inverts
                 // for the system tenant.
                 'global' => self::bool(),
+                // #910 — OPTIONAL, and its absence is what says "hidden".
+                //
+                // `permissions` is no longer required, because a caller without
+                // `permissions:read` does not receive the region's data at all:
+                // the record page gates its REGIONS, and a hidden region is
+                // withheld rather than suppressed on the client. A response that
+                // shipped the rows and asked the browser not to draw them would
+                // be a rendering instruction, not a control.
                 'permissions' => ['type' => 'array', 'items' => SchemaBuilder::ref('Permission')],
-            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'manageable', 'global', 'permissions']),
+                // The per-region verdicts. Keyed by region (`details`,
+                // `permissions`); a region the caller may not see is ABSENT,
+                // which is the only way this contract has of saying so — a
+                // `{"state": "hidden"}` entry would disclose the region it was
+                // withholding, and shipping a viewer the labels of things they
+                // may not see is a different bug wearing authorization's clothes.
+                'sections' => [
+                    'type' => 'object',
+                    'additionalProperties' => SchemaBuilder::ref('RecordSectionVerdict'),
+                ],
+            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'manageable', 'global']),
+            // The same `{code, reason, detail}` shape #951/#968 settled for a
+            // denied crud control, because a region is the same idea one level
+            // up: present, inert, and able to say why.
+            'RecordSectionDenial' => self::object([
+                // `permission` — the caller lacks what the write needs;
+                // `record` — the record itself refuses (a global base role).
+                'code' => ['type' => 'string', 'enum' => ['permission', 'record']],
+                // Audience-safe prose, and the client's i18n fallback.
+                'reason' => self::str(),
+                // Operator-grade, naming the permission the write would need.
+                // Non-null only for a caller holding `permissions:read` — the
+                // permission that governs seeing permission slugs at all.
+                'detail' => self::str(true),
+            ], ['code', 'reason', 'detail']),
+            'RecordSectionVerdict' => self::object([
+                'state' => ['type' => 'string', 'enum' => ['read-only', 'editable']],
+                'denial' => SchemaBuilder::ref('RecordSectionDenial'),
+            ], ['state', 'denial']),
             'RoleDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('RoleDetail')),
             // #882 — one holder of a role. `assignedAt` is the membership's
             // created_at: when this person was given this role in this tenant,

@@ -14,7 +14,7 @@
  *   roles.action.delete.disabled = Global base roles can only be deleted by the system tenant.
  *   roles.action.edit = Edit
  *   roles.action.edit.disabled = Global base roles can only be edited by the system tenant.
- *   roles.action.viewPermissions = View Permissions
+ *   roles.action.open = Open record
  *   roles.clone.error = Failed to clone role
  *   roles.clone.name = {name} (copy)
  *   roles.description = Manage roles and their permissions
@@ -54,9 +54,7 @@ import { IconMenu2, IconPlus } from '@tabler/icons-react';
 import { identityTranslate } from '../nav/types';
 import { ROLES_WRITE, ROLES_DELETE } from './capabilities';
 import { CreateRoleModal } from './create-modal';
-import { EditRoleModal } from './edit-modal';
 import { DeleteRoleModal } from './delete-modal';
-import { PermissionsPanel } from './permissions-panel';
 import type { Role, RolesScreenProps, RolesTranslate } from './types';
 
 /**
@@ -86,9 +84,7 @@ export function RolesScreen({
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [isPermissionsPanelOpen, setIsPermissionsPanelOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [cloneInitial, setCloneInitial] = useState<
     { name: string; description: string; permissionIds: number[] } | undefined
@@ -124,24 +120,6 @@ export function RolesScreen({
 
   const fetchRoles = () => setRefreshKey((k) => k + 1);
 
-  const handleViewPermissions = (role: Role) => {
-    setSelectedRole(role);
-    setIsPermissionsPanelOpen(true);
-  };
-
-  // #882: with a record-page seam wired the host navigates; without one the
-  // edit MODAL opens exactly as before. Both paths are live on purpose — the
-  // record page is additive, and reverting it is deleting one prop at one call
-  // site rather than restoring a deleted component.
-  const handleEditClick = (role: Role) => {
-    if (onOpenRecord) {
-      onOpenRecord(role);
-      return;
-    }
-    setSelectedRole(role);
-    setIsEditModalOpen(true);
-  };
-
   const handleDeleteClick = (role: Role) => {
     setSelectedRole(role);
     setIsDeleteModalOpen(true);
@@ -150,10 +128,17 @@ export function RolesScreen({
   // Clone: open the Create modal prefilled with the source role's permissions
   // (works even for non-manageable global base roles — the clone is a new
   // tenant role). Uses the existing create API; no new endpoint.
+  //
+  // #910: `permissions` is optional on the wire now, because a caller without
+  // `permissions:read` is not sent the role's permission set at all. Cloning
+  // for such a caller therefore produces a role with NO permissions rather than
+  // a copy — which is the only honest outcome, since the source's grants were
+  // never in their hands to copy, and is strictly safer than the alternative of
+  // asking the server to duplicate a set the caller may not see.
   const handleCloneClick = async (role: Role) => {
     try {
       const detail = await adapter.getRole(role.id);
-      const permissionIds: number[] = detail.permissions.map((p) => p.id);
+      const permissionIds: number[] = (detail.permissions ?? []).map((p) => p.id);
       setCloneInitial({
         name: t('roles.clone.name', '{name} (copy)', { name: role.name }),
         description: role.description,
@@ -177,8 +162,9 @@ export function RolesScreen({
       // Two things live in this cell.
       //
       // #882: the row's own name opens the record — the affordance a list gets
-      // once its records have addresses. Only when the host supplied the seam;
-      // otherwise the name stays the plain accessor value it was.
+      // once its records have addresses. Unconditional since #910, when the seam
+      // stopped being optional: editing a role happens on its record page, so a
+      // host that cannot navigate to one cannot mount this screen.
       //
       // #886: a GLOBAL base role is marked HERE, next to the name, because the
       // list is where the action starts. The record page has carried a badge
@@ -190,17 +176,13 @@ export function RolesScreen({
       // can actually perform that edit.
       cell: (role) => (
         <span className="flex items-center gap-2">
-          {onOpenRecord ? (
-            <button
-              type="button"
-              onClick={() => onOpenRecord(role)}
-              className="text-start font-medium text-primary underline-offset-4 hover:underline"
-            >
-              {role.name}
-            </button>
-          ) : (
-            <span className="font-medium">{role.name}</span>
-          )}
+          <button
+            type="button"
+            onClick={() => onOpenRecord(role)}
+            className="text-start font-medium text-primary underline-offset-4 hover:underline"
+          >
+            {role.name}
+          </button>
           {role.global && (
             <Badge
               variant="warning"
@@ -251,8 +233,15 @@ export function RolesScreen({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => handleViewPermissions(role)}>
-            {t('roles.action.viewPermissions', 'View Permissions')}
+          {/* "View Permissions" used to open a dialog showing this role's
+              permission list. #910 retired it: the record page shows the same
+              list, under a gate the dialog never had — a role's permission set
+              is a description of what its holders can do to the whole install,
+              and `permissions:read` is the slug that governs seeing it. A second
+              surface that showed the same rows without asking would have been
+              the gate's own bypass. */}
+          <DropdownMenuItem onClick={() => onOpenRecord(role)}>
+            {t('roles.action.open', 'Open record')}
           </DropdownMenuItem>
           {canCreate && (
             <DropdownMenuItem onClick={() => void handleCloneClick(role)}>
@@ -270,9 +259,13 @@ export function RolesScreen({
                     )
                   : undefined
               }
-              onClick={
-                editDisabled ? undefined : () => handleEditClick(role)
-              }
+              // #910: Edit goes to the RECORD PAGE, always. The edit modal it
+              // used to fall back to is gone — a `max-w-3xl` dialog wrapping a
+              // `max-h-80` scroll region holding 53+ permission checkboxes was
+              // the acute case behind #882, and it has no way to express a
+              // record whose parts are governed separately: one gate, one set of
+              // inputs, nowhere to say why half of them are missing.
+              onClick={editDisabled ? undefined : () => onOpenRecord(role)}
             >
               {t('roles.action.edit', 'Edit')}
             </DropdownMenuItem>
@@ -364,20 +357,6 @@ export function RolesScreen({
 
       {selectedRole && (
         <>
-          <EditRoleModal
-            isOpen={isEditModalOpen}
-            onOpenChange={setIsEditModalOpen}
-            role={selectedRole}
-            adapter={adapter}
-            t={t}
-            onNotify={onNotify}
-            onSuccess={() => {
-              setIsEditModalOpen(false);
-              setSelectedRole(null);
-              fetchRoles();
-            }}
-          />
-
           <DeleteRoleModal
             isOpen={isDeleteModalOpen}
             onOpenChange={setIsDeleteModalOpen}
@@ -390,15 +369,6 @@ export function RolesScreen({
               setSelectedRole(null);
               fetchRoles();
             }}
-          />
-
-          <PermissionsPanel
-            isOpen={isPermissionsPanelOpen}
-            onOpenChange={setIsPermissionsPanelOpen}
-            role={selectedRole}
-            adapter={adapter}
-            t={t}
-            onNotify={onNotify}
           />
         </>
       )}

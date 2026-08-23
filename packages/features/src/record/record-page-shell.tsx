@@ -13,6 +13,14 @@
  *   5. a main-plus-side split — the record's own fields beside its related
  *      collections.
  *
+ * THE BODY IS EITHER ONE THING OR SEVERAL (#910). `main` is #897's page-level
+ * binary: one gate, two renderings, the shell picks. `sections` is the granular
+ * form the operator asked for — "some parts have permissions, not always
+ * everything is allowed" — where each region carries its own three-state access
+ * and the page-level answer is DERIVED from them rather than stated a second
+ * time. The two are mutually exclusive in the type, because a page that stated
+ * both would have two answers to one question.
+ *
  * THE #895 SPLIT, WHICH IS THE POINT OF THE PROP SHAPE. `fields` is what the
  * SERVER says the record is; `access` is what THIS CALLER may do to it. The
  * `facts` projection receives only the former, and the former's type cannot
@@ -38,11 +46,14 @@ import { PageHeader } from '@amroksaleh/ui/page-header';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { IconArrowLeft } from '@tabler/icons-react';
 
+import { RecordSection } from './record-section';
 import type {
+  RecordAccess,
   RecordBack,
   RecordFact,
   RecordPageShellProps,
   RecordProjection,
+  RecordSectionSpec,
   RecordTone,
   RecordTranslate,
 } from './types';
@@ -55,14 +66,16 @@ import type {
 const identityRecordTranslate: RecordTranslate = (key, fallback) => fallback ?? key;
 
 /** The shell's tone vocabulary, mapped onto the UI kit's `Badge` variants. */
-const BADGE_VARIANT: Record<RecordTone, 'outline' | 'info' | 'success' | 'warning' | 'destructive'> =
-  {
-    neutral: 'outline',
-    info: 'info',
-    success: 'success',
-    warning: 'warning',
-    danger: 'destructive',
-  };
+const BADGE_VARIANT: Record<
+  RecordTone,
+  'outline' | 'info' | 'success' | 'warning' | 'destructive'
+> = {
+  neutral: 'outline',
+  info: 'info',
+  success: 'success',
+  warning: 'warning',
+  danger: 'destructive',
+};
 
 /**
  * The em dash a stat shows when the server has not answered yet.
@@ -171,17 +184,69 @@ export function RecordPageError({
   );
 }
 
+/**
+ * The page-level access a list of REGIONS implies (#910).
+ *
+ * Derived rather than stated, so the header's action bar cannot disagree with
+ * the regions under it:
+ *
+ *  - **editable** when at least one visible region is editable. A save bar over
+ *    a page where one section is editable and another is not is correct — the
+ *    save is real, it just reaches less than the page — and hiding it because
+ *    something else on the page is locked would refuse an edit the server allows.
+ *  - **read-only, with the reason HOISTED**, when every visible region is
+ *    read-only for the IDENTICAL reason. One cause, said once. This is the
+ *    shape a RECORD-level refusal takes — a global base role, a lock, a closed
+ *    period is a fact about the record rather than about any one region, so
+ *    every region gives the same sentence and printing it under each heading is
+ *    that sentence three times.
+ *  - **read-only with no page-level reason** when the regions were refused for
+ *    DIFFERENT reasons — each then says its own, because a page-level summary of
+ *    two different refusals is either wrong about one of them or vague about
+ *    both.
+ *
+ * A page whose every region is hidden is read-only with nothing to say, which
+ * is the honest rendering of "there is nothing here for you": header, stats and
+ * side panels, and no body. Saying more would describe what was withheld.
+ */
+function accessFromSections(sections: readonly RecordSectionSpec[]): {
+  access: RecordAccess;
+  hoistReason: boolean;
+} {
+  const visible = sections.filter((section) => section.access.state !== 'hidden');
+  if (visible.some((section) => section.access.state === 'editable')) {
+    return {
+      access: { editable: true, readOnlyReason: null },
+      hoistReason: false,
+    };
+  }
+
+  // One distinct sentence, and every visible region actually carrying it. The
+  // second half matters: a region that is read-only for a reason the screen
+  // could not name would otherwise be silently covered by its neighbour's.
+  const reasons = new Set(visible.map((section) => section.access.readOnlyReason));
+  const shared = reasons.size === 1 && !reasons.has(null) && visible.length > 0;
+  return {
+    access: {
+      editable: false,
+      readOnlyReason: shared ? [...reasons][0] : null,
+    },
+    hoistReason: shared,
+  };
+}
+
 export function RecordPageShell<TFields extends object>({
   testId,
   fields,
   facts,
   t,
-  access,
+  access: pageAccess,
   back,
   icon,
   actions,
   notices,
   main,
+  sections,
   side,
   className,
 }: RecordPageShellProps<TFields>) {
@@ -198,6 +263,13 @@ export function RecordPageShell<TFields extends object>({
   const statement = project(fields, t ?? identityRecordTranslate);
   const badges = statement.badges ?? [];
   const stats = statement.stats ?? [];
+
+  // The two body shapes meet here and nowhere else: a `main` page states its
+  // access, a `sections` page has it derived from the regions. Everything below
+  // this line reads one `access`, so the header, the notice and the body cannot
+  // be looking at different answers.
+  const derived = sections !== undefined ? accessFromSections(sections) : null;
+  const access = derived?.access ?? (pageAccess as RecordAccess);
 
   return (
     <div className={className ?? 'space-y-6'} data-testid={testId}>
@@ -250,8 +322,21 @@ export function RecordPageShell<TFields extends object>({
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
           {/* Two DISTINCT renderings, never one form wearing `disabled`. The
-              shell picks; the screen cannot accidentally ship the other. */}
-          {access.editable ? main.editor : main.readOnly}
+              shell picks; the screen cannot accidentally ship the other — at
+              page scope for `main`, and per region for `sections`, where a
+              third state (absent entirely) joins them. */}
+          {sections !== undefined
+            ? sections.map((section) => (
+                <RecordSection
+                  key={section.key}
+                  section={section}
+                  testId={testId}
+                  reasonHoisted={derived?.hoistReason}
+                />
+              ))
+            : access.editable
+            ? main!.editor
+            : main!.readOnly}
         </div>
         {side !== undefined && <div className="space-y-6">{side}</div>}
       </div>

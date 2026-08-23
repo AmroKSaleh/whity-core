@@ -174,10 +174,7 @@ export type RecordFactsFn<TFields> = CallerFlagsIn<TFields> extends never
  * fields type is proven clean, and what the shell casts back to in order to call
  * it. Screens should always write `RecordFactsFn`, which is the checked one.
  */
-export type RecordProjection<TFields> = (
-  fields: TFields,
-  t: RecordTranslate
-) => RecordStatement;
+export type RecordProjection<TFields> = (fields: TFields, t: RecordTranslate) => RecordStatement;
 
 /**
  * One reason a caller may or may not edit this record, in the order the screen
@@ -205,6 +202,156 @@ export interface RecordAccess {
   editable: boolean;
   /** The first refusing gate's reason, or null when the record is editable. */
   readOnlyReason: string | null;
+}
+
+/**
+ * The THREE states a region of a record page can be in (#910).
+ *
+ * The operator's requirement is "some parts have permissions, not always
+ * everything is allowed", and the page-level {@link RecordAccess} above models
+ * two states for the whole page. Two is one short, and the missing one is not a
+ * styling variant: the difference between HIDDEN and READ-ONLY is an
+ * authorization decision.
+ *
+ *  - `hidden`    — the caller may not see this region. It is ABSENT: not
+ *                  collapsed, not `display:none`, not an empty card. Its data
+ *                  never reached the browser either (see
+ *                  {@link RecordSectionVerdicts}).
+ *  - `read-only` — the caller may see it and may not change it, and is TOLD SO.
+ *                  #951's principle: an unavailable affordance is refused with a
+ *                  reason, not silently missing, because "you may not" and "this
+ *                  is broken" are otherwise the same pixels.
+ *  - `editable`  — the caller may change it.
+ */
+export type RecordSectionState = 'hidden' | 'read-only' | 'editable';
+
+/**
+ * One reason a region is in the state it is in.
+ *
+ * A DISCRIMINATED UNION rather than a `reason` beside an `effect` string,
+ * because the two effects differ in exactly one way that matters: a `hide`
+ * refusal has no user-facing copy AT ALL, and must not be able to acquire any.
+ * A sentence explaining why a region is missing is a statement about a region
+ * the caller was not to know exists — the disclosure the `hidden` state is for
+ * avoiding. Making the field structurally unavailable means a screen cannot
+ * "helpfully" add one later.
+ *
+ * `read-only` refusals carry already-translated copy, for the same reason
+ * {@link RecordGate} does: only the screen knows which of its own sentences fits.
+ */
+export type RecordSectionGate =
+  | { allowed: boolean; effect: 'hide' }
+  | { allowed: boolean; effect: 'read-only'; reason: string };
+
+/**
+ * What THIS CALLER may do to ONE REGION of the record — {@link RecordAccess}
+ * with the third state.
+ *
+ * `readOnlyReason` is non-null only in the `read-only` state. `hidden` carries
+ * none by construction (above), and `editable` has nothing to explain.
+ */
+export interface RecordSectionAccess {
+  state: RecordSectionState;
+  readOnlyReason: string | null;
+}
+
+/**
+ * Why a region is read-only — the same three-field shape #951/#968 established
+ * for a denied crud control, because it is the same idea one level up.
+ *
+ * That PR's finding was that a control which is merely ABSENT collapses three
+ * unrelated causes into one symptom, so a correct screen the viewer has no
+ * rights on is pixel-identical to a broken one. A region is a bigger control,
+ * and the fix is the same fix: present, inert, and able to say why. The fields
+ * carry the same meanings, deliberately, so nobody has to learn a second
+ * vocabulary for the same question.
+ */
+export interface RecordSectionDenial {
+  /**
+   * The stable machine discriminant, used to key a localized string:
+   *   - `permission` the caller does not hold what changing this region needs;
+   *   - `record`     the RECORD refuses the write whatever the caller holds
+   *                  (a global base role, a lock, a closed period).
+   *
+   * The two are worth separating because the remedies differ: one is fixed by a
+   * grant and the other cannot be fixed by one at all, and an operator told
+   * "you lack a permission" about the second goes looking for a grant that
+   * would not have helped.
+   */
+  code: string;
+  /**
+   * The audience-safe explanation, for whoever is looking at the screen. Names
+   * no internal identifier, and doubles as the i18n fallback — a host with no
+   * catalogue (the desktop renderer, the Vite harness) shows this verbatim.
+   */
+  reason: string;
+  /**
+   * The operator-grade half: the exact permission the write would need.
+   * Non-null ONLY for a caller the server decided may read it. The server
+   * decides the audience; the client renders what it got, exactly as #968 has
+   * it — a client that gated this itself would be holding an opinion about a
+   * disclosure rule the server already owns.
+   */
+  detail: string | null;
+}
+
+/**
+ * The SERVER'S verdict for one region, as it arrives on the wire.
+ *
+ * Note what this type cannot express: `hidden`. There is no wire value for it,
+ * on purpose. A server states that a region is hidden by OMITTING its key from
+ * {@link RecordSectionVerdicts} and omitting the region's data from the payload
+ * — so a response can never carry a line telling a caller about a region they
+ * may not see. "Absent" is the representation, not a flag meaning absent.
+ *
+ * A viewer must never be shipped the LABELS of things they may not see, which
+ * is what a `{state: 'hidden'}` entry would be: authorization's clothes on a
+ * disclosure bug.
+ */
+export interface RecordSectionVerdict {
+  state: 'read-only' | 'editable';
+  /** Null when `editable` — there is nothing to explain about a permitted write. */
+  denial: RecordSectionDenial | null;
+}
+
+/**
+ * The server's verdicts for a record's regions, keyed by region.
+ *
+ * A KEY THAT IS NOT HERE IS HIDDEN. That is the whole contract, and it is what
+ * makes the absent-not-suppressed rule checkable: the same server decision that
+ * leaves a key out of this map is the one that leaves the region's data out of
+ * the record payload, so a hidden region has nothing to render FROM even if a
+ * screen tried.
+ *
+ * A payload with NO verdicts at all resolves every region to hidden — fail
+ * closed, matching the way `can()` answers while capabilities are in flight. A
+ * screen asking for server-resolved regions and getting no answer has not been
+ * told it may show them.
+ */
+export type RecordSectionVerdicts = Readonly<Record<string, RecordSectionVerdict>>;
+
+/**
+ * One region of a record page, and what this caller may do to it.
+ *
+ * `editor` and `readOnly` are BOTH required, for the reason {@link RecordMain}
+ * gives at page scope: a read-only rendering is a different rendering, not the
+ * editable one wearing `disabled`, and demanding both makes the greyed-out form
+ * impossible to ship by omission. A `hidden` region renders neither.
+ *
+ * `key` is the region's stable identifier AND the key the server keys its
+ * verdict by. One string, named once — a screen whose region key and server
+ * verdict key can drift is a screen with a gate that quietly stops gating.
+ */
+export interface RecordSectionSpec {
+  key: string;
+  title: string;
+  description?: string;
+  /** The resolved three-state access — see {@link RecordSectionAccess}. */
+  access: RecordSectionAccess;
+  /** Shown when `editable`. Typically a fragment of a `<form>`. */
+  editor: ReactNode;
+  /** Shown when `read-only`. Typically a `<dl>`. */
+  readOnly: ReactNode;
 }
 
 /**
@@ -255,7 +402,13 @@ export interface RecordMain {
   readOnly: ReactNode;
 }
 
-export interface RecordPageShellProps<TFields extends object> {
+/**
+ * The props every record page passes, whichever body shape it uses.
+ *
+ * The body itself — one page-level `main` or a list of independently gated
+ * `sections` — is the discriminated half, {@link RecordPageBody}.
+ */
+export interface RecordPageShellBaseProps<TFields extends object> {
   /**
    * Prefix for every `data-testid` the shell emits (`user-record` yields
    * `user-record`, `user-record-stat-tenant`, `user-record-readonly-notice`, …).
@@ -271,8 +424,6 @@ export interface RecordPageShellProps<TFields extends object> {
    * (the Vite harness) already gets everywhere else in this package.
    */
   t?: RecordTranslate;
-  /** What this caller may do to it — see {@link RecordAccess}. */
-  access: RecordAccess;
   back: RecordBack;
   /** Icon shown beside the title. */
   icon?: ReactNode;
@@ -288,12 +439,45 @@ export interface RecordPageShellProps<TFields extends object> {
    * edit rather than after it.
    */
   notices?: ReactNode;
-  /** The record's own fields, in both renderings. */
-  main: RecordMain;
   /** Related collections, in the side column. */
   side?: ReactNode;
   className?: string;
 }
+
+/**
+ * The two ways a record page can express its body, as an EITHER/OR.
+ *
+ *  - `{access, main}` — the page-level binary #897 shipped. One gate for the
+ *    whole record, two renderings, the shell picks. Still correct for a record
+ *    whose fields are governed as one thing, and every screen written before
+ *    #910 keeps compiling unchanged.
+ *  - `{sections}` — regions, each with its own three-state access, each
+ *    resolved by the SERVER. No page-level `access`: with regions there is no
+ *    page-level answer to give that would not be a second opinion about the same
+ *    question. Whether the header's actions render is DERIVED (at least one
+ *    section is editable) rather than stated, so the action bar and the regions
+ *    beneath it cannot disagree.
+ *
+ * A union rather than two optional props, so "neither" and "both" — the states
+ * whose meaning nobody could name — do not typecheck.
+ */
+export type RecordPageBody =
+  | {
+      /** What this caller may do to the record — see {@link RecordAccess}. */
+      access: RecordAccess;
+      /** The record's own fields, in both renderings. */
+      main: RecordMain;
+      sections?: never;
+    }
+  | {
+      /** The record's regions, in the order they should read. */
+      sections: readonly RecordSectionSpec[];
+      access?: never;
+      main?: never;
+    };
+
+export type RecordPageShellProps<TFields extends object> = RecordPageShellBaseProps<TFields> &
+  RecordPageBody;
 
 /**
  * COMPILE-TIME REGRESSION TEST for the #895 guard.
@@ -319,7 +503,10 @@ type _CleanFieldsStayProjectable = Assert<
 >;
 
 type _CallerFlagIsRejected = Assert<
-  RecordFactsFn<{ name: string; manageable: boolean }> extends CallerFlagInRecordFields<'manageable'>
+  RecordFactsFn<{
+    name: string;
+    manageable: boolean;
+  }> extends CallerFlagInRecordFields<'manageable'>
     ? true
     : false
 >;

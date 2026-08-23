@@ -27564,6 +27564,49 @@
                     "data"
                 ]
             },
+            "RecordSectionDenial": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "enum": [
+                            "permission",
+                            "record"
+                        ]
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "code",
+                    "reason",
+                    "detail"
+                ]
+            },
+            "RecordSectionVerdict": {
+                "type": "object",
+                "properties": {
+                    "state": {
+                        "type": "string",
+                        "enum": [
+                            "read-only",
+                            "editable"
+                        ]
+                    },
+                    "denial": {
+                        "$ref": "#/components/schemas/RecordSectionDenial"
+                    }
+                },
+                "required": [
+                    "state",
+                    "denial"
+                ]
+            },
             "RefreshResponse": {
                 "type": "object",
                 "properties": {
@@ -28120,6 +28163,12 @@
                         "items": {
                             "$ref": "#/components/schemas/Permission"
                         }
+                    },
+                    "sections": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/RecordSectionVerdict"
+                        }
                     }
                 },
                 "required": [
@@ -28129,8 +28178,7 @@
                     "parent_id",
                     "created_at",
                     "manageable",
-                    "global",
-                    "permissions"
+                    "global"
                 ]
             },
             "RoleDetailResponse": {

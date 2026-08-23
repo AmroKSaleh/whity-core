@@ -1,7 +1,8 @@
 import * as React from "react"
 
 import { Alert, AlertDescription } from "@amroksaleh/ui/alert"
-import { RolesScreen } from "@amroksaleh/features/roles"
+import { RolesScreen, RoleRecordScreen } from "@amroksaleh/features/roles"
+import type { Role } from "@amroksaleh/features/roles"
 
 import { rolesAdapter } from "./roles-tauri-adapter"
 import { rolesT } from "./sync-i18n"
@@ -24,9 +25,22 @@ import { rolesT } from "./sync-i18n"
  *
  * `RolesScreen` renders its OWN `PageHeader`, so App.tsx mounts this without the
  * wrapping header the other routes add.
+ *
+ * #910: editing a role happens on its RECORD PAGE, and the edit modal that used
+ * to be the fallback for a host with no record route is gone — a dialog cannot
+ * express a record whose regions are gated separately. `onOpenRecord` is
+ * therefore required, and this wrapper satisfies it with LOCAL state rather than
+ * a route.
+ *
+ * Local state, not a route, on purpose: the desktop App already owns its routing
+ * table, and giving roles a `/roles/:id` there would put a URL scheme decision
+ * in a template whose whole job is to demonstrate the mount. `RoleRecordScreen`
+ * takes an id and a way back, which is exactly the seam that lets the same
+ * component serve a URL on web and a piece of component state here.
  */
 export function RolesPage() {
   const [capabilities, setCapabilities] = React.useState<Set<string> | null>(null)
+  const [recordId, setRecordId] = React.useState<number | null>(null)
   const [notice, setNotice] = React.useState<{ message: string; type: "success" | "error" } | null>(null)
 
   React.useEffect(() => {
@@ -60,6 +74,8 @@ export function RolesPage() {
     (message: string, type: "success" | "error") => setNotice({ message, type }),
     [],
   )
+  const openRecord = React.useCallback((role: Role) => setRecordId(role.id), [])
+  const closeRecord = React.useCallback(() => setRecordId(null), [])
 
   return (
     <>
@@ -70,7 +86,23 @@ export function RolesPage() {
           </Alert>
         </div>
       )}
-      <RolesScreen adapter={rolesAdapter} can={can} t={rolesT} onNotify={onNotify} />
+      {recordId === null ? (
+        <RolesScreen
+          adapter={rolesAdapter}
+          can={can}
+          t={rolesT}
+          onNotify={onNotify}
+          onOpenRecord={openRecord}
+        />
+      ) : (
+        <RoleRecordScreen
+          adapter={rolesAdapter}
+          roleId={recordId}
+          t={rolesT}
+          onNotify={onNotify}
+          onBack={closeRecord}
+        />
+      )}
     </>
   )
 }

@@ -82,23 +82,30 @@ test.describe('Roles CRUD (admin)', () => {
     createdRoleName = null; // already deleted; skip afterEach cleanup
   });
 
-  test('view permissions opens the permissions panel with colon-notation perms', async ({
+  // #910 retired the "View Permissions" DIALOG. It showed a role's permission
+  // list in a 320px scroll region and asked nobody's permission to do it — while
+  // the record page's equivalent region is gated on `permissions:read`, since a
+  // role's permission set describes what its holders can do to the whole
+  // install. A second surface serving the same rows ungated would have been the
+  // gate's own bypass, so the row action now opens the record.
+  test('the row action opens the RECORD, whose permissions region lists the role grants', async ({
     adminPage,
     page,
   }) => {
     await adminPage.shell.clickNav('Roles');
     await page.waitForURL('**/admin/roles');
 
-    // Open the row-actions menu on the seeded `admin` role and view perms.
     const adminRow = page.getByRole('row', { name: /^admin/ });
     await adminRow.getByRole('button', { name: 'Actions' }).click();
-    await page.getByRole('menuitem', { name: 'View Permissions' }).click();
+    await page.getByRole('menuitem', { name: 'Open record' }).click();
 
-    // The permissions panel header names the role, and the seeded admin role
-    // carries colon-notation permissions (ous:* in this seed).
-    const panel = page.getByRole('dialog');
-    await expect(panel.getByText('admin - Permissions')).toBeVisible();
-    await expect(panel.getByText(/ous:read/)).toBeVisible();
+    // An address, not an overlay.
+    await page.waitForURL(/\/admin\/roles\/\d+$/);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    const region = page.getByTestId('role-record-section-permissions');
+    await expect(region).toBeVisible();
+    await expect(region.getByText(/ous:read/)).toBeVisible();
   });
 
   test('clone a role prefills the create dialog with its permissions', async ({ adminPage, page }) => {
@@ -189,11 +196,10 @@ test.describe('Roles CRUD (admin)', () => {
   // interaction (WC-99) from the editing side, complementing the create-side
   // guard above.
   //
-  // #882 moved where this happens: web's roles list now routes Edit to
-  // `/admin/roles/{id}` instead of opening a dialog. The MODAL is still in the
-  // package and still opens for any host that does not supply the
-  // `onOpenRecord` seam (the desktop shell), so what changed here is which
-  // surface web drives — not whether the modal works.
+  // #882 moved where this happens: the roles list routes Edit to
+  // `/admin/roles/{id}` instead of opening a dialog. #910 finished the move —
+  // the edit modal is gone from the package entirely, because a dialog has one
+  // gate and this record has one per region.
   test('edit a role to add a permission; the count persists', async ({
     adminPage,
     page,

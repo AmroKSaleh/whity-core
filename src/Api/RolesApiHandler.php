@@ -9,6 +9,9 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\RBAC\CorePermissions;
+use Whity\Core\RBAC\RecordSectionRequirement;
+use Whity\Core\RBAC\RecordSectionResolver;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
@@ -139,17 +142,232 @@ class RolesApiHandler
     private ?LoggerInterface $logger;
 
     /**
+     * Per-region authorization for the role RECORD page (#910), or null.
+     *
+     * OPTIONAL, and its absence is a configuration rather than a hole. Without
+     * it this handler is exactly what it was before #910: `GET` carries no
+     * `sections` map and the write path is gated by the route and
+     * {@see self::roleManageableByTenant()} alone. Nothing is failing open,
+     * because with no verdicts there is no finer-grained claim being made — and
+     * the CLIENT fails closed on the same input, resolving an absent `sections`
+     * map to "every region hidden" rather than to "everything editable".
+     *
+     * It is optional because it needs a {@see RoleChecker}, which needs the
+     * `Database` wrapper this handler does not take; the alternative was
+     * threading one through thirty-odd construction sites whose tests do not ask
+     * an authorization question at all. `public/index.php` wires it.
+     */
+    private ?RecordSectionResolver $sectionResolver;
+
+    /**
      * Constructor.
      *
-     * @param PDO                  $db          Database connection.
-     * @param HookManager          $hookManager Hook dispatcher for role lifecycle events.
-     * @param LoggerInterface|null $logger      Optional PSR-3 logger for structured logs.
+     * @param PDO                        $db              Database connection.
+     * @param HookManager                $hookManager     Hook dispatcher for role lifecycle events.
+     * @param LoggerInterface|null       $logger          Optional PSR-3 logger for structured logs.
+     * @param RecordSectionResolver|null $sectionResolver Optional per-region authorization (#910).
      */
-    public function __construct(PDO $db, HookManager $hookManager, ?LoggerInterface $logger = null)
-    {
+    public function __construct(
+        PDO $db,
+        HookManager $hookManager,
+        ?LoggerInterface $logger = null,
+        ?RecordSectionResolver $sectionResolver = null
+    ) {
         $this->db = $db;
         $this->hookManager = $hookManager;
         $this->logger = $logger;
+        $this->sectionResolver = $sectionResolver;
+    }
+
+    /**
+     * The REGIONS of a role record, and what each of them needs (#910).
+     *
+     * Declared here, once, rather than inferred from the branches that render
+     * them. Two regions, and the two questions #910 is about are visible as two
+     * different pairs of slugs:
+     *
+     *  - **details** — the role's name and description. No read gate of its own:
+     *    the route that served the record is the gate, and inventing a slug for
+     *    "may see the name of the role you just fetched" would be a permission
+     *    nobody could sensibly grant or withhold. Writing them is `roles:write`,
+     *    the same slug the roles UI has gated Edit on since the Path-B
+     *    extraction.
+     *  - **permissions** — the role's permission SET. Its own read gate,
+     *    `permissions:read`, because a role's permission list is a description of
+     *    what its holders can do to the whole install, which is not the same
+     *    disclosure as the role's name. Writing it is `roles:manage`, not
+     *    `roles:write`: renaming a role and changing what it authorises are
+     *    different acts with different blast radii, and #910's example of the
+     *    distinction ("who may see a role's permissions and who may change them
+     *    are different questions") is exactly this pair.
+     *
+     * Both are `recordScoped`, so the per-record predicate applies to both: a
+     * global base role is read-only for a tenant in every region, not only in
+     * the one whose permission they happen to lack.
+     *
+     * @return list<RecordSectionRequirement>
+     */
+    private static function recordSections(): array
+    {
+        return [
+            new RecordSectionRequirement(
+                key: 'details',
+                readPermission: null,
+                writePermission: CorePermissions::ROLES_WRITE,
+                deniedReason: 'You do not have permission to change roles, '
+                    . 'so these details are read-only.',
+            ),
+            new RecordSectionRequirement(
+                key: 'permissions',
+                readPermission: CorePermissions::PERMISSIONS_READ,
+                writePermission: CorePermissions::ROLES_MANAGE,
+                deniedReason: 'You may see what this role grants, but not change it.',
+            ),
+        ];
+    }
+
+    /**
+     * Audience-safe prose for a RECORD refusal on a role (#910).
+     *
+     * The record's own rule, said in the record's own terms. `roleManageableByTenant()`
+     * refuses for exactly one reason on this endpoint — the role is a global
+     * NULL-tenant base role and only the system tenant may write it (WC-110) —
+     * so the sentence can be specific rather than the resolver's generic
+     * fallback, which would be true and useless.
+     */
+    private const RECORD_DENIED_REASON =
+        'This is a global base role. Only the system tenant can change it.';
+
+    /**
+     * Whether this caller may be shown the operator-grade half of a denial —
+     * the one that names a permission SLUG (#910, following #968).
+     *
+     * `permissions:read` is the gate, and it is the same gate for the same
+     * reason #968 chose `plugins:read` for its own `detail`: the permission that
+     * already governs the audience who can act on the answer. Here that is
+     * literal rather than analogous — `permissions:read` is precisely the
+     * permission that governs SEEING permission slugs, so a caller without it
+     * being told "this needs 'roles:manage'" would be reading the catalogue
+     * through a denial message.
+     *
+     * Uniform across codes rather than per code, exactly as #968 argued: only
+     * the permission denial actually names anything, so a per-code exemption
+     * would be defensible today and would still be a rule that whoever adds the
+     * next code has to remember.
+     */
+    private function mayReadDenialDetail(Request $request): bool
+    {
+        return $this->mayReadSection($request, 'permissions');
+    }
+
+    /**
+     * The CALLER's profile id, or null when the request carries no usable one.
+     *
+     * Read off the authenticated request and never from the body, so a granular
+     * gate can never be asked about somebody else. Null fails closed at every
+     * call site: no verdicts, and no section write permitted.
+     */
+    private static function callerProfileId(Request $request): ?int
+    {
+        $actor = $request->user;
+        return is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+            ? $actor->profile_id
+            : null;
+    }
+
+    /**
+     * The per-region verdicts for this caller, or null when this host does not
+     * resolve regions at all (#910).
+     *
+     * The two absences are different and both are meaningful. `null` means the
+     * handler was built without a {@see RecordSectionResolver}, so the response
+     * carries no `sections` key and the record behaves exactly as it did before
+     * #910. An empty ARRAY means regions were resolved and the caller was granted
+     * none — a `sections: {}` the client renders as a record with no body.
+     *
+     * @return array<string, array{state: string, denial: array{code: string, reason: string,
+     *         detail: string|null}|null}>|null
+     */
+    private function resolveRecordSections(Request $request, bool $manageable): ?array
+    {
+        if ($this->sectionResolver === null) {
+            return null;
+        }
+
+        $profileId = self::callerProfileId($request);
+        $tenantId = TenantContext::getTenantId();
+        if ($profileId === null || $tenantId === null) {
+            // Fail closed: an empty map, not a null one. Null means "this host
+            // does not resolve regions"; an empty map means "it does, and you
+            // were granted none of them" — the caller sees the record's header
+            // and nothing else, which is the honest rendering of an
+            // unauthenticated or tenant-less read that got this far.
+            return [];
+        }
+
+        return $this->sectionResolver->resolve(
+            self::recordSections(),
+            $profileId,
+            $tenantId,
+            $manageable,
+            self::RECORD_DENIED_REASON,
+            $this->mayReadDenialDetail($request)
+        );
+    }
+
+    /**
+     * Whether this caller may SEE one region of a role (#910).
+     *
+     * Applied by the route that serves a region's data directly. True when no
+     * resolver is wired, for the same reason {@see self::mayWriteSection()} is:
+     * that host makes no region claims, so there is no region gate to enforce.
+     */
+    private function mayReadSection(Request $request, string $key): bool
+    {
+        if ($this->sectionResolver === null) {
+            return true;
+        }
+
+        $profileId = self::callerProfileId($request);
+        $tenantId = TenantContext::getTenantId();
+        if ($profileId === null || $tenantId === null) {
+            return false;
+        }
+
+        return $this->sectionResolver->mayRead(self::recordSections(), $key, $profileId, $tenantId);
+    }
+
+    /**
+     * Whether this caller may write one region of a role — the ENFORCEMENT half
+     * of #910.
+     *
+     * Called by the write paths on the body they actually received, because a
+     * rendered gate is not a control: the browser is not where the request comes
+     * from, and a caller who never loaded the page can PATCH whatever the route
+     * admits. Returns true when no resolver is wired — see
+     * {@see self::$sectionResolver}: that configuration makes no section claims,
+     * so there is no section gate to enforce, and the route gate plus
+     * `roleManageableByTenant()` still stand behind it exactly as before.
+     */
+    private function mayWriteSection(Request $request, string $key, bool $manageable): bool
+    {
+        if ($this->sectionResolver === null) {
+            return true;
+        }
+
+        $profileId = self::callerProfileId($request);
+        $tenantId = TenantContext::getTenantId();
+        if ($profileId === null || $tenantId === null) {
+            return false;
+        }
+
+        return $this->sectionResolver->mayWrite(
+            self::recordSections(),
+            $key,
+            $profileId,
+            $tenantId,
+            $manageable
+        );
     }
 
     /**
@@ -325,11 +543,31 @@ class RolesApiHandler
             $role['global'] = self::roleRowIsGlobal($role);
             unset($role['tenant_id']);
 
-            $role['permissions'] = $this->fetchRolePermissions((int)$id);
             // Resolved through the SAME helper the write guards call rather than
             // re-derived from a tenant_id added to the SELECT: two copies of an
             // authorization rule are two rules, and the second one drifts.
-            $role['manageable'] = $this->roleManageableByTenant((int)$id, $tenantId);
+            $manageable = $this->roleManageableByTenant((int)$id, $tenantId);
+            $role['manageable'] = $manageable;
+
+            // ---- the per-region verdicts, and what they leave out (#910) ----
+            //
+            // A record page is composed of regions and "some parts have
+            // permissions, not always everything is allowed". The server decides
+            // which; the page renders what it is told.
+            //
+            // A region the caller may not SEE is absent TWICE: no verdict, and no
+            // data. That second absence is the one that matters. A `sections` map
+            // alone would be a rendering instruction — the permission list would
+            // still be sitting in the response for anyone who opened the network
+            // tab — so the same decision that withholds the verdict withholds the
+            // payload, and the two cannot drift because they are one branch.
+            $verdicts = $this->resolveRecordSections($request, $manageable);
+            if ($verdicts !== null) {
+                $role['sections'] = $verdicts;
+            }
+            if ($verdicts === null || array_key_exists('permissions', $verdicts)) {
+                $role['permissions'] = $this->fetchRolePermissions((int)$id);
+            }
 
             return Response::json(['data' => $role], 200);
         } catch (\Exception $e) {
@@ -544,6 +782,46 @@ class RolesApiHandler
             }
 
             $body = JsonBody::parsed($request);
+
+            // ---- the per-region write gates (#910) ----
+            //
+            // The rendering half of this decision lives in `get()`; this is the
+            // half that is a control. #910 puts it plainly: "if a section is
+            // read-only for a caller, the server has to enforce it on write, or
+            // the gate is decoration". The record saves through ONE `PATCH`, so
+            // the route's own permission cannot express it — the route reports
+            // that the caller may write the record, and it is right; what it
+            // cannot say is which parts.
+            //
+            // REFUSED, NOT IGNORED, and the issue asks for this to be stated
+            // rather than merely chosen. Dropping a field the caller may not
+            // change returns 200 to a request that did not do what it said, and
+            // the operator's next move is to wonder whether the save worked. A
+            // 403 naming the field is a worse outcome for the caller and a much
+            // better one for the person debugging it. The refusal happens BEFORE
+            // any write, so a body that mixes a permitted field with a forbidden
+            // one applies neither — a partial save is the silent-drop failure
+            // wearing a different status code.
+            // The record predicate is `true` here by construction: this line is
+            // unreachable unless roleManageableByTenant() already passed above,
+            // so the only question left is the caller's per-region permission.
+            $recordWritable = true;
+            if ((isset($body['name']) || isset($body['description']))
+                && !$this->mayWriteSection($request, 'details', $recordWritable)
+            ) {
+                return Response::error(
+                    "You may not change this role's name or description",
+                    403
+                );
+            }
+            if (array_key_exists('permissions', $body)
+                && !$this->mayWriteSection($request, 'permissions', $recordWritable)
+            ) {
+                return Response::error(
+                    "You may not change this role's permissions",
+                    403
+                );
+            }
 
             // @tenant-guard-ignore: role manageability already enforced by roleManageableByTenant($id,$tenantId) guard above
             $stmt = $this->db->prepare('SELECT * FROM roles WHERE id = ?');
@@ -780,6 +1058,18 @@ class RolesApiHandler
             $tenantId = TenantContext::getTenantId();
 
             if (!$this->roleVisibleToTenant((int)$id, $tenantId)) {
+                return Response::error('Role not found', 404);
+            }
+
+            // The same read gate the `permissions` REGION carries on the record
+            // (#910). Withholding the region from `GET /roles/{id}` while this
+            // route served the identical rows would be a gate with its own
+            // bypass one path segment away — the region's data would still be
+            // one request from anyone who noticed. 404, not 403, and for the
+            // reason WC-110 chose it for an unmanageable role: a distinct 403
+            // here says "this role has permissions you may not see", which is
+            // most of what the refusal was withholding.
+            if (!$this->mayReadSection($request, 'permissions')) {
                 return Response::error('Role not found', 404);
             }
 
@@ -1024,6 +1314,15 @@ class RolesApiHandler
             // the SYSTEM tenant may manage global roles (WC-110).
             if (!$this->roleManageableByTenant((int)$id, $tenantId)) {
                 return Response::error('Role not found', 404);
+            }
+
+            // The same region gate `update()` applies to a `permissions` key in a
+            // PATCH body (#910). These two routes exist precisely so a caller can
+            // change one grant without sending the whole set, so a gate that
+            // covered only the full replace would be a gate with a documented way
+            // around it.
+            if (!$this->mayWriteSection($request, 'permissions', true)) {
+                return Response::error("You may not change this role's permissions", 403);
             }
 
             $body = JsonBody::parsed($request);
