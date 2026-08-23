@@ -23,11 +23,12 @@ use Closure;
  *
  * WHY THE LABEL IS SERVER-SIDE
  * ----------------------------
- * The set of views is open — #947 item 3 adds three, and a plugin may add its
- * own — so a client cannot hold a complete map of key to label. It ships English
- * here and the client translates the keys it knows, falling back to this string
- * for the ones it does not. A client-only map would render a registered view as
- * a blank chip the first time anything registered one.
+ * The set of views is open — the routing folders arrived a release after the
+ * registry did, and a plugin may add its own — so a client cannot hold a
+ * complete map of key to label. It ships English here and the client translates
+ * the keys it knows, falling back to this string for the ones it does not. A
+ * client-only map would render a registered view as a blank chip the first time
+ * anything registered one.
  *
  * WHY THE RESOLVER IS A CLOSURE RATHER THAN AN INTERFACE
  * ------------------------------------------------------

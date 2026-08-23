@@ -20,25 +20,29 @@ use Whity\Core\Container\HostWiredService;
  * That rule is the whole point, and it is worth being precise about the failure
  * it prevents. #947 item 5 specifies six folders; three of them — "awaiting
  * me", "acted on by me", "passed through my unit" — are computed from routing
- * facts. Item 3 shipped those facts, so their substrates now resolve, and the
- * three folders are STILL absent: each needs a predicate on
- * {@see DocumentCriteria} and a registration of its own. Rendering them on the
- * strength of a resolvable substrate alone would produce an empty "Awaiting
- * me", which states *"nothing awaits you"*. That claim is false, it is
- * unfalsifiable from the outside, and the person it misleads is the one who
- * would have acted. An empty inbox and an unbuilt inbox look identical, which
- * is why the answer is not to render one carefully but not to render one at
- * all.
+ * facts. Rendering one on an installation that does not record those facts
+ * produces an empty "Awaiting me", which states *"nothing awaits you"*. That
+ * claim is false, it is unfalsifiable from the outside, and the person it
+ * misleads is the one who would have acted. An empty inbox and an unbuilt inbox
+ * look identical, which is why the answer is not to render one carefully but not
+ * to render one at all.
  *
- * WHAT MAKES THIS A SEAM RATHER THAN A CONDITIONAL
- * ------------------------------------------------
- * When item 3 lands it registers its tables' substrates and its three views,
- * and nothing here changes: not this class, not the API handler, not the
- * response shape, not the client. The views appear because their substrate
- * resolves, in the same request cycle the migration completes in. The
- * alternative — `if (tableExists('recipients')) { … }` scattered through a
+ * WHAT MAKES THIS A SEAM RATHER THAN A CONDITIONAL — NOW DEMONSTRATED
+ * -------------------------------------------------------------------
+ * The three routing folders arrived after this class, in a change that touched
+ * {@see DocumentCriteria}, {@see \Whity\Core\Document\DocumentRepository} and
+ * {@see CoreDocumentViews} and NOTHING here: not this class, not the API
+ * handler, not the response shape, not the client. They appear on an
+ * installation that has run migration 112 and are absent on one that has not, in
+ * the request cycle the migration completes in. The alternative —
+ * `if (tableExists('document_route_recipients')) { … }` scattered through a
  * handler — works exactly once and has to be found and edited by every feature
  * after it.
+ *
+ * Note which half of the seam did the work. Item 3 landing made the substrates
+ * RESOLVE, and that alone produced no folders for a whole release, because a
+ * fact source is not a view. What produced them was somebody writing three
+ * predicates. Availability gates a view; it never supplies one.
  *
  * Concretely, adding a view is: register a substrate saying which tables back
  * it, register a view naming that substrate and returning a
@@ -52,10 +56,12 @@ use Whity\Core\Container\HostWiredService;
  *
  * CORE REGISTERS NO VIEW IT CANNOT COMPUTE
  * ----------------------------------------
- * Not even one guarded by an absent substrate. A registered-but-filtered view
- * is a stub, and a stub is what somebody flips on. {@see CoreDocumentSubstrates}
- * does declare the routing fact source as ABSENT, because naming a missing
- * dependency in a diagnostic is honest; turning it into a folder is not.
+ * Not even one guarded by a substrate that is absent everywhere. A
+ * registered-but-permanently-filtered view is a stub, and a stub is what
+ * somebody flips on. Declaring a fact source this installation lacks is
+ * different and is fine: {@see CoreDocumentSubstrates} does it, and
+ * {@see DocumentSubstrateRegistry::unavailable()} reports it, because naming a
+ * missing dependency in a diagnostic is honest. Turning it into a folder is not.
  *
  * HOST-WIRED, FOR THE REASON THIS CLASS ALREADY ARGUES
  * ----------------------------------------------------
