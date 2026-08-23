@@ -155,9 +155,17 @@ final class FrontendFeaturesBlocksTest extends TestCase
         $this->assertContains('good-screen', $ids, 'A valid blocks feature alongside it is still served');
         $this->assertContains('demo-widgets', $ids, 'A crud feature is unaffected by block validation');
 
-        // No raw validator/error text leaks to the client.
-        $this->assertStringNotContainsString('wormhole', $body, 'Raw validator errors must not leak to the client');
+        // No raw validator/error text leaks to THIS client: the caller holds
+        // demo:read and not plugins:read, so the `dropped` array (#953) is not
+        // sent to them at all. The administrator's view of the same refusal is
+        // asserted in testDroppedBlocksFeatureIsReportedToAPluginAdministrator.
+        $this->assertStringNotContainsString('wormhole', $body, 'Raw validator errors must not leak to an ordinary caller');
         $this->assertStringNotContainsString('unknown block type', $body);
+        $this->assertArrayNotHasKey(
+            'dropped',
+            json_decode($body, true),
+            "The key's ABSENCE is what says 'not yours to read' — an empty array would mean 'nothing was refused'"
+        );
 
         // The omit reason is logged, structured and secret-free: it names the
         // offending feature id and carries the validator errors for operators.
@@ -224,6 +232,57 @@ final class FrontendFeaturesBlocksTest extends TestCase
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(['data' => []], json_decode($response->getBody(), true));
+    }
+
+    // ============ refusals reach an administrator (#953) ============
+
+    public function testDroppedBlocksFeatureIsReportedToAPluginAdministrator(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $handler = $this->handlerFor(
+            [
+                $this->blocksFeature('bad-screen', 'demo:read', [['type' => 'wormhole', 'warp' => 9]]),
+                $this->blocksFeature('good-screen', 'demo:read', [['type' => 'text', 'value' => 'Fine.']]),
+            ],
+            ['demo:read', 'plugins:read']
+        );
+
+        $response = $handler->list($this->authedRequest(42));
+        $body = json_decode($response->getBody(), true);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            ['good-screen'],
+            array_column($body['data'], 'id'),
+            'Reporting the refusal must not un-refuse it — the rule is right and stays fail-closed'
+        );
+
+        $this->assertArrayHasKey('dropped', $body, 'A plugin administrator is told what was refused');
+        $this->assertCount(1, $body['dropped']);
+        $this->assertSame('bad-screen', $body['dropped'][0]['featureId']);
+        $this->assertSame('Demo', $body['dropped'][0]['plugin']);
+        $this->assertStringContainsString(
+            'wormhole',
+            $body['dropped'][0]['reason'],
+            'The reason names the offending block, which is the whole point of surfacing it'
+        );
+    }
+
+    public function testAnAdministratorWithNothingRefusedGetsAnEmptyList(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $handler = $this->handlerFor(
+            [$this->blocksFeature('good-screen', 'demo:read', [['type' => 'text', 'value' => 'Fine.']])],
+            ['demo:read', 'plugins:read']
+        );
+
+        $body = json_decode($handler->list($this->authedRequest(42))->getBody(), true);
+
+        // Present-and-empty, not absent: "nothing was refused" is an answer,
+        // and it must not read as "you may not ask".
+        $this->assertSame([], $body['dropped']);
     }
 
     // ==================== other screens unaffected ====================

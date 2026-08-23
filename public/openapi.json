@@ -22571,6 +22571,31 @@
                     "data"
                 ]
             },
+            "CapabilityDenial": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "enum": [
+                            "no-resource",
+                            "no-route",
+                            "forbidden"
+                        ]
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "code",
+                    "reason",
+                    "detail"
+                ]
+            },
             "DataType": {
                 "type": "object",
                 "properties": {
@@ -23671,6 +23696,26 @@
                     "record_value"
                 ]
             },
+            "DroppedFrontendFeature": {
+                "type": "object",
+                "properties": {
+                    "plugin": {
+                        "type": "string"
+                    },
+                    "featureId": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "reason": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "plugin",
+                    "featureId",
+                    "reason"
+                ]
+            },
             "EmailOnlyRequest": {
                 "type": "object",
                 "properties": {
@@ -24000,6 +24045,20 @@
                             "canDelete"
                         ]
                     },
+                    "capabilityReasons": {
+                        "type": "object",
+                        "properties": {
+                            "canCreate": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            },
+                            "canEdit": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            },
+                            "canDelete": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            }
+                        }
+                    },
                     "blocks": {
                         "type": "array",
                         "items": {
@@ -24020,7 +24079,8 @@
                     "action",
                     "embed",
                     "requiredPermission",
-                    "capabilities"
+                    "capabilities",
+                    "capabilityReasons"
                 ]
             },
             "FrontendFeatureListResponse": {
@@ -24030,6 +24090,12 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/FrontendFeature"
+                        }
+                    },
+                    "dropped": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DroppedFrontendFeature"
                         }
                     }
                 },

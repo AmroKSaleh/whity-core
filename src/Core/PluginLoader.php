@@ -217,7 +217,13 @@ class PluginLoader
      * disabled via the admin API. The plugin instance is retained so a disabled
      * plugin can be re-registered (re-enabled) without re-reading it from disk.
      *
-     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}>
+     * `droppedFrontendFeatures` records the descriptors this plugin declared
+     * and did NOT get (#953). It is kept beside the ones that survived for the
+     * same reason the survivors are kept at all: an administrator asking "why
+     * is that screen not in my navigation?" has no other place to look, and
+     * until now the answer existed only in a container log.
+     *
+     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, droppedFrontendFeatures: list<array{plugin: string, featureId: string|null, reason: string}>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}>
      */
     private array $registeredPlugins = [];
 
@@ -1647,6 +1653,7 @@ class PluginLoader
             'namespacePrefix' => $candidate['namespacePrefix'],
             'hooks' => [],
             'frontendFeatures' => [],
+            'droppedFrontendFeatures' => [],
             'themeOverrideRoute' => null,
         ];
         // Mark administratively disabled so reEnablePlugin() re-registers its
@@ -1807,6 +1814,7 @@ class PluginLoader
             );
             $this->registeredPlugins[$pluginKey]['hooks'] = $registered['hooks'];
             $this->registeredPlugins[$pluginKey]['frontendFeatures'] = $registered['frontendFeatures'];
+            $this->registeredPlugins[$pluginKey]['droppedFrontendFeatures'] = $registered['droppedFrontendFeatures'];
             $this->registeredPlugins[$pluginKey]['themeOverrideRoute'] = $registered['themeOverrideRoute'];
             unset($this->administrativelyDisabled[$pluginKey]);
         }
@@ -2761,6 +2769,7 @@ class PluginLoader
             'namespacePrefix' => $namespacePrefix,
             'hooks' => $registered['hooks'],
             'frontendFeatures' => $registered['frontendFeatures'],
+            'droppedFrontendFeatures' => $registered['droppedFrontendFeatures'],
             'themeOverrideRoute' => $registered['themeOverrideRoute'],
         ];
 
@@ -2781,7 +2790,7 @@ class PluginLoader
      * @param PluginInterface $plugin The plugin instance to register.
      * @param string $namespacePrefix The plugin namespace prefix.
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
-     * @return array{hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}
+     * @return array{hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, droppedFrontendFeatures: list<array{plugin: string, featureId: string|null, reason: string}>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}
      */
     private function registerCapabilities(
         PluginInterface $plugin,
@@ -3122,7 +3131,7 @@ class PluginLoader
         //    (WC-169). Inside the same per-plugin error boundary philosophy:
         //    invalid descriptors are dropped with a warning, a throwing
         //    declaration contributes nothing, and the plugin keeps loading.
-        $frontendFeatures = $this->collectFrontendFeatures(
+        $collected = $this->collectFrontendFeatures(
             $plugin,
             $pluginKey,
             $registeredGetRoutes,
@@ -3141,7 +3150,8 @@ class PluginLoader
 
         return [
             'hooks' => $registeredHooks,
-            'frontendFeatures' => $frontendFeatures,
+            'frontendFeatures' => $collected['features'],
+            'droppedFrontendFeatures' => $collected['dropped'],
             'themeOverrideRoute' => $themeOverrideRoute,
         ];
     }
@@ -3245,7 +3255,10 @@ class PluginLoader
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
      * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
      * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
-     * @return list<array<string, mixed>> The validated, normalized descriptors.
+     * @return array{
+     *     features: list<array<string, mixed>>,
+     *     dropped: list<array{plugin: string, featureId: string|null, reason: string}>
+     * } The validated, normalized descriptors, and the ones that were refused (#953).
      */
     private function collectFrontendFeatures(
         PluginInterface $plugin,
@@ -3255,7 +3268,7 @@ class PluginLoader
         array $registeredWriteRoutes = []
     ): array {
         if (!$plugin instanceof PluginFrontendInterface) {
-            return [];
+            return ['features' => [], 'dropped' => []];
         }
 
         // A throwing declaration must not break the plugin (or its peers):
@@ -3267,10 +3280,11 @@ class PluginLoader
             $ownPermissions = $plugin->getPermissions();
         } catch (Throwable $e) {
             $this->handlePluginThrowable($pluginKey, $e, 'frontend feature declaration');
-            return [];
+            return ['features' => [], 'dropped' => []];
         }
 
         $validated = [];
+        $dropped = [];
         foreach ($declared as $descriptor) {
             $normalized = $this->validateFrontendFeature(
                 $descriptor,
@@ -3279,14 +3293,15 @@ class PluginLoader
                 $ownPermissions,
                 $registeredGetRoutes,
                 $registeredActionRoutes,
-                $registeredWriteRoutes
+                $registeredWriteRoutes,
+                $dropped
             );
             if ($normalized !== null) {
                 $validated[] = $normalized;
             }
         }
 
-        return $validated;
+        return ['features' => $validated, 'dropped' => $dropped];
     }
 
     /**
@@ -3364,6 +3379,11 @@ class PluginLoader
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
      * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
      * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
+     * @param list<array{plugin: string, featureId: string|null, reason: string}> $dropped
+     *        Collects every refusal, by reference (#953). Every rule in this
+     *        method reports through the one `$drop` closure, so recording there
+     *        captures the whole catalogue at once — and a rule added later
+     *        cannot forget to surface itself.
      * @return array<string, mixed>|null The normalized descriptor, or null when dropped.
      */
     private function validateFrontendFeature(
@@ -3373,13 +3393,21 @@ class PluginLoader
         array $ownPermissions,
         array $registeredGetRoutes,
         array $registeredActionRoutes = [],
-        array $registeredWriteRoutes = []
+        array $registeredWriteRoutes = [],
+        array &$dropped = []
     ): ?array {
-        $drop = function (string $reason, ?string $id) use ($pluginKey): null {
+        $drop = function (string $reason, ?string $id) use ($pluginKey, $pluginName, &$dropped): null {
             $idLabel = $id !== null ? "'{$id}'" : '(no id)';
             $this->logWarning(
                 "Plugin {$pluginKey} frontend feature {$idLabel} dropped: {$reason}"
             );
+            // The log line stays exactly as it was — operators grep for it —
+            // and the same fact is also kept where an administrator can be
+            // shown it without opening a container log (#953). The plugin's
+            // declared NAME is recorded rather than its FQCN key, so this
+            // matches the `plugin` field every served feature already carries.
+            $dropped[] = ['plugin' => $pluginName, 'featureId' => $id, 'reason' => $reason];
+
             return null;
         };
 
@@ -4010,6 +4038,44 @@ class PluginLoader
         }
 
         return $features;
+    }
+
+    /**
+     * Every frontend feature descriptor that was REFUSED, and why (#953).
+     *
+     * The mirror image of {@see getFrontendFeatures()}, and gated identically:
+     * a plugin that is administratively disabled or not in the active lifecycle
+     * state contributes nothing, so this never reports screens the operator
+     * already knows are switched off.
+     *
+     * A dropped descriptor is a defect in the plugin's declaration, not a
+     * per-caller decision, so the list is the same for everyone. Deciding WHO
+     * may read it is the caller's business — {@see \Whity\Api\FrontendFeaturesApiHandler}
+     * serves it only to a plugin administrator — because the reasons quote
+     * route paths and permission names, which are diagnostics for whoever can
+     * fix the plugin and noise to everybody else.
+     *
+     * @return list<array{plugin: string, featureId: string|null, reason: string}>
+     */
+    public function getDroppedFrontendFeatures(): array
+    {
+        $dropped = [];
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            foreach ($info['droppedFrontendFeatures'] as $entry) {
+                $dropped[] = $entry;
+            }
+        }
+
+        return $dropped;
     }
 
     /**

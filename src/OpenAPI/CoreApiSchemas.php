@@ -3514,6 +3514,23 @@ final class CoreApiSchemas
                     'canEdit' => self::bool(),
                     'canDelete' => self::bool(),
                 ], ['canCreate', 'canEdit', 'canDelete']),
+                // #951: why a capability came back FALSE, so the renderer can
+                // disable the control and say what happened instead of omitting
+                // it (three unrelated causes used to render as one missing
+                // button). One entry per false capability — a true one has no
+                // entry — so every property here is optional and the object is
+                // empty when all three are granted. `detail` is the
+                // operator-grade half and is non-null only for a caller holding
+                // plugins:read; see FrontendFeaturesApiHandler for the audience
+                // split.
+                'capabilityReasons' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'canCreate' => SchemaBuilder::ref('CapabilityDenial'),
+                        'canEdit' => SchemaBuilder::ref('CapabilityDenial'),
+                        'canDelete' => SchemaBuilder::ref('CapabilityDenial'),
+                    ],
+                ],
                 // WC-226: present (and host-validated) ONLY for screen='blocks' —
                 // the platform-neutral block tree a renderer translates to native
                 // widgets. A coarse array of objects here; the SDK BlockValidator
@@ -3523,8 +3540,40 @@ final class CoreApiSchemas
                     'type' => 'array',
                     'items' => ['type' => 'object', 'additionalProperties' => true],
                 ],
-            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'embed', 'requiredPermission', 'capabilities']),
-            'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
+            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'embed', 'requiredPermission', 'capabilities', 'capabilityReasons']),
+            // #951: one denied capability, explained for both audiences at once.
+            // `code` is the stable machine discriminant the renderer keys its
+            // localized string off; `reason` is the already-localizable English
+            // fallback, safe for any caller; `detail` names the route or the
+            // RBAC the platform actually looked at and is null unless the caller
+            // holds plugins:read.
+            'CapabilityDenial' => self::object([
+                'code' => ['type' => 'string', 'enum' => ['no-resource', 'no-route', 'forbidden']],
+                'reason' => self::str(),
+                'detail' => self::str(true),
+            ], ['code', 'reason', 'detail']),
+            // #953: a feature descriptor the host REFUSED, and why. Refused at
+            // plugin load (an ownership or shape rule) or while serving the
+            // request (an invalid block tree) — one question to an
+            // administrator, so one list.
+            'DroppedFrontendFeature' => self::object([
+                'plugin' => self::str(),
+                'featureId' => self::str(true),
+                'reason' => self::str(),
+            ], ['plugin', 'featureId', 'reason']),
+            // `dropped` is NOT required: it is present only for a caller holding
+            // plugins:read, and its absence is what says "not yours to read" as
+            // distinct from an empty array's "nothing was refused".
+            'FrontendFeatureListResponse' => self::object(
+                [
+                    'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('FrontendFeature')],
+                    'dropped' => [
+                        'type' => 'array',
+                        'items' => SchemaBuilder::ref('DroppedFrontendFeature'),
+                    ],
+                ],
+                ['data']
+            ),
 
             // WC-176 (#205): the caller's effective permission slugs. Mirrors
             // MeCapabilitiesApiHandler's ACTUAL output: a data envelope wrapping

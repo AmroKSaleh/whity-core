@@ -4,12 +4,21 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import {
   fetchPluginFeatures,
+  type DroppedPluginFeature,
   type PluginFeature,
 } from '@/lib/plugin-features';
 
 interface PluginFeaturesContextType {
   /** Server-side permission-filtered features for the current user. */
   features: PluginFeature[];
+  /**
+   * Feature descriptors the host REFUSED, and why (issue #953). Empty unless
+   * the caller holds `plugins:read` — the server sends the key to nobody else.
+   * Carried here rather than fetched again by the plugin console: this
+   * provider already holds the one response that knows, and a second request
+   * for the same body could disagree with the navigation built from the first.
+   */
+  dropped: DroppedPluginFeature[];
   /** True until auth has settled and the fetch for the current user resolved. */
   isLoading: boolean;
 }
@@ -38,6 +47,7 @@ export function PluginFeaturesProvider({
 }) {
   const { user, isLoading: isAuthLoading } = useAuth();
   const [features, setFeatures] = useState<PluginFeature[]>([]);
+  const [dropped, setDropped] = useState<DroppedPluginFeature[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // The stable identity driving refetches: a login, logout, or user switch
@@ -59,10 +69,11 @@ export function PluginFeaturesProvider({
     // already maps every failure to [], so no error branch is needed here.
     const load = async (): Promise<void> => {
       const fetched = await (userId === null
-        ? Promise.resolve<PluginFeature[]>([])
+        ? Promise.resolve({ features: [], dropped: [] })
         : fetchPluginFeatures());
       if (!cancelled) {
-        setFeatures(fetched);
+        setFeatures(fetched.features);
+        setDropped(fetched.dropped);
         setIsLoading(false);
       }
     };
@@ -75,7 +86,7 @@ export function PluginFeaturesProvider({
   }, [userId, isAuthLoading]);
 
   return (
-    <PluginFeaturesContext.Provider value={{ features, isLoading }}>
+    <PluginFeaturesContext.Provider value={{ features, dropped, isLoading }}>
       {children}
     </PluginFeaturesContext.Provider>
   );

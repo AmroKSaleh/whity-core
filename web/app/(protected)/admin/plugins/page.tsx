@@ -41,6 +41,7 @@ import {
   IconPlayerPlay,
   IconPlayerPause,
   IconAlertCircle,
+  IconAlertTriangle,
   IconChevronRight,
   IconUpload,
 } from '@tabler/icons-react';
@@ -93,7 +94,15 @@ export default function PluginsPage() {
   // disabled/uninstalled plugin's contributed nav links and then reconcile
   // with the server, all without a full page reload (WC-221).
   const { refresh: refreshNavigation, removeItemsByHref } = useNavigation();
-  const { features } = usePluginFeatures();
+  // `dropped` is the answer to "why is that screen not in my navigation?"
+  // (#953). It arrives on the SAME response the navigation is built from, and
+  // the server sends it only to a plugins:read caller — which this page has
+  // already gated on above, so nothing further is needed here.
+  const { features, dropped } = usePluginFeatures();
+
+  /** The refused descriptors belonging to one plugin, by its declared name. */
+  const droppedFor = (pluginName: string) =>
+    dropped.filter((entry) => entry.plugin === pluginName);
 
   // Fetch actual backend plugins using useFetch to avoid set-state-in-effect issues
   const { data, loading: loadingPlugins, error, refetch: fetchPlugins } = useFetch(async () => {
@@ -568,6 +577,20 @@ export default function PluginsPage() {
                 <CardDescription className="text-xs font-mono text-muted-foreground/80 truncate">
                   {plugin.id}
                 </CardDescription>
+                {/*
+                  #953: the detail panel holds the reasons, but an administrator
+                  arrives here knowing only that SOME screen is missing — not
+                  which plugin owns it. Without a marker on the card the fix
+                  would still be a hunt, one modal at a time.
+                */}
+                {droppedFor(plugin.name).length > 0 && (
+                  <Badge variant="destructive" className="mt-2 w-fit gap-1 font-medium">
+                    <IconAlertTriangle size={12} />
+                    {t('plugins.card.droppedCount', '{count} rejected screen(s)', {
+                      count: droppedFor(plugin.name).length,
+                    })}
+                  </Badge>
+                )}
               </CardHeader>
 
               <CardContent className="flex-1 pb-4 text-xs space-y-4">
@@ -836,6 +859,46 @@ export default function PluginsPage() {
                       count: detailPlugin.permissions_count,
                     })}
                   </Badge>
+                </div>
+              )}
+
+              {/*
+                Screens this plugin declared and did NOT get (#953). Rendered
+                only when there are some, so a healthy plugin's panel is
+                unchanged — but when a screen is missing from the navigation,
+                this is the first place an administrator looks and the reason
+                is now waiting there instead of in a container log.
+
+                Matched on the plugin's declared NAME, which is what both the
+                admin list and the drop record carry.
+              */}
+              {droppedFor(detailPlugin.name).length > 0 && (
+                <div>
+                  <h4 className="font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                    <IconAlertTriangle size={14} className="text-destructive" />
+                    {t('plugins.detail.droppedTitle', 'Rejected screens')}
+                  </h4>
+                  <p className="text-muted-foreground mb-2">
+                    {t(
+                      'plugins.detail.droppedDescription',
+                      'These screens were declared by the plugin and refused by the host, so they do not appear in the navigation.'
+                    )}
+                  </p>
+                  <ul className="space-y-2">
+                    {droppedFor(detailPlugin.name).map((entry, index) => (
+                      <li
+                        key={`${entry.featureId ?? 'unnamed'}-${index}`}
+                        className="rounded-md border border-destructive/40 bg-destructive/5 p-2"
+                      >
+                        <p className="font-mono font-semibold">
+                          {entry.featureId ??
+                            t('plugins.detail.droppedNoId', '(no usable id)')}
+                        </p>
+                        {/* The reason is host diagnostics, rendered verbatim. */}
+                        <p className="mt-0.5 text-muted-foreground">{entry.reason}</p>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>

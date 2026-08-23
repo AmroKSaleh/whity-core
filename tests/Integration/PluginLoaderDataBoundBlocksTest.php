@@ -269,6 +269,47 @@ PHP);
     }
 
     /**
+     * #953: dropping the feature is right; dropping the REASON is not.
+     *
+     * From the operator's side a refused screen is simply absent from the
+     * navigation, which looks the same as a permission problem, a caching
+     * problem, or a typo in the screen id — and until the loader kept this,
+     * the only way to tell was to read container logs.
+     */
+    public function testAForeignSourceDropIsRecordedWithItsReason(): void
+    {
+        [$loader] = $this->loadDir(self::$foreignSourceDir, new Router('/v1'));
+
+        $byId = array_column($loader->getDroppedFrontendFeatures(), null, 'featureId');
+
+        $this->assertArrayHasKey(
+            'y-foreign-data',
+            $byId,
+            'A refused feature must be reportable, not merely absent'
+        );
+        $this->assertSame('DbbForeign', $byId['y-foreign-data']['plugin']);
+        $this->assertStringContainsString(
+            'is not a GET route this plugin registered',
+            $byId['y-foreign-data']['reason'],
+            'The recorded reason is the same exact one the log carries'
+        );
+    }
+
+    /**
+     * The mirror of {@see testForeignSourceDropDoesNotKillSiblingFeatures()}:
+     * a feature that was SERVED must never be reported as refused.
+     */
+    public function testASurvivingFeatureIsNotReportedAsDropped(): void
+    {
+        [$loader] = $this->loadDir(self::$foreignSourceDir, new Router('/v1'));
+
+        $this->assertNotContains(
+            'y-static',
+            array_column($loader->getDroppedFrontendFeatures(), 'featureId')
+        );
+    }
+
+    /**
      * When the foreign-source feature is dropped, the sibling static feature
      * (`y-static`) is still served — the drop is per-feature, not per-plugin.
      */

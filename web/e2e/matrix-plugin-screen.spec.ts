@@ -215,17 +215,33 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     const seededRow = page.getByRole('row').filter({ hasText: message });
     await expect(seededRow).toBeVisible();
 
-    // FIXED BEHAVIOR (WC-175 #199): the schema-driven CRUD screen now derives
-    // its write capabilities from the server-provided feature.capabilities, not
-    // the OpenAPI spec. The delegate holds hello:view but NOT hello:manage, so
-    // the screen is read-only — the Create button is gone, and the seeded row
-    // exposes no "Row actions" menu (Edit/Delete are not rendered for a
-    // read-only caller, even though a real row is present).
-    await expect(
-      page.getByRole('button', { name: 'Create', exact: true })
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole('button', { name: 'Row actions' })
-    ).toHaveCount(0);
+    // The screen derives its write capabilities from the server-provided
+    // feature.capabilities, not the OpenAPI spec (WC-175 #199). The delegate
+    // holds hello:view but NOT hello:manage, so every write control is denied.
+    //
+    // DENIED IS DISABLED, NOT ABSENT (#951). This assertion used to require a
+    // count of ZERO for both controls, and that was the defect: an omitted
+    // control made "you lack the permission" indistinguishable from "the route
+    // does not exist" and from "the plugin author declared it wrong" — a
+    // correct read-only screen and a broken one rendered identically. So the
+    // check is now stronger than the absence it replaced: the control must be
+    // PRESENT, DISABLED, and carrying its reason.
+    const createButton = page.getByRole('button', { name: 'Create', exact: true });
+    await expect(createButton).toBeVisible();
+    await expect(createButton).toBeDisabled();
+
+    // The row-actions menu likewise stays put when both item actions are
+    // denied; it used to vanish wholesale, which is the same erasure one level
+    // up — a row with no menu at all reads as a row that never had one.
+    const rowActions = seededRow.getByRole('button', { name: 'Row actions' });
+    await expect(rowActions).toBeVisible();
+    await rowActions.click();
+    for (const label of ['Edit', 'Delete']) {
+      await expect(
+        page.getByRole('menuitem', { name: label }),
+        `${label} must be offered and disabled, not hidden`
+      ).toBeDisabled();
+    }
+    await page.keyboard.press('Escape');
   });
 });

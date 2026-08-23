@@ -3104,6 +3104,12 @@ export interface components {
         BrandingResponse: {
             data: components["schemas"]["Branding"];
         };
+        CapabilityDenial: {
+            /** @enum {string} */
+            code: "no-resource" | "no-route" | "forbidden";
+            reason: string;
+            detail: string | null;
+        };
         DataType: {
             key: string;
             source: string;
@@ -3382,6 +3388,11 @@ export interface components {
             record_type: string;
             record_value: string;
         };
+        DroppedFrontendFeature: {
+            plugin: string;
+            featureId: string | null;
+            reason: string;
+        };
         EmailOnlyRequest: {
             email: string;
         };
@@ -3466,12 +3477,18 @@ export interface components {
                 canEdit: boolean;
                 canDelete: boolean;
             };
+            capabilityReasons: {
+                canCreate?: components["schemas"]["CapabilityDenial"];
+                canEdit?: components["schemas"]["CapabilityDenial"];
+                canDelete?: components["schemas"]["CapabilityDenial"];
+            };
             blocks?: {
                 [key: string]: unknown;
             }[];
         };
         FrontendFeatureListResponse: {
             data: components["schemas"]["FrontendFeature"][];
+            dropped?: components["schemas"]["DroppedFrontendFeature"][];
         };
         GenericMessageDataResponse: {
             data: {

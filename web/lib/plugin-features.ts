@@ -910,6 +910,36 @@ export type Block = BlockFacets &
   | RecordFieldsBlock
   | AccessGateBlock );
 
+/**
+ * Why one write capability came back false (issue #951).
+ *
+ * A capability is false for three unrelated reasons — nothing is registered to
+ * satisfy the action, the plugin registered the wrong method, or the caller
+ * lacks the RBAC — and the renderer used to answer all three by omitting the
+ * control, so a correct screen the viewer has no rights on looked exactly like
+ * a broken one. The control is now disabled and carries this instead.
+ */
+export interface CapabilityDenial {
+  /**
+   * The stable machine discriminant, used to key a localized string:
+   *   - `no-resource` the feature declares no resource at all;
+   *   - `no-route`    a resource exists but no route satisfies this action;
+   *   - `forbidden`   the route exists and the caller's RBAC denies it.
+   */
+  code: 'no-resource' | 'no-route' | 'forbidden';
+  /**
+   * The audience-safe explanation, shown to whoever is looking at the screen.
+   * Never names an internal identifier; doubles as the i18n fallback.
+   */
+  reason: string;
+  /**
+   * The operator-grade half: the exact route the platform looked for, or the
+   * exact RBAC the matched route demands. Non-null ONLY for a caller holding
+   * `plugins:read` — the server decides, the client just renders what it got.
+   */
+  detail: string | null;
+}
+
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {
   /** Unique kebab-case slug, also used in the /admin/x/[featureId] route. */
@@ -981,6 +1011,45 @@ export interface PluginFeature {
    * the renderer hides controls the caller cannot use.
    */
   capabilities: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
+  /**
+   * Why each FALSE capability is false (issue #951). One entry per denied
+   * capability — a granted one has none — so the object is empty when all
+   * three are held. Optional because a pre-#951 backend does not send it.
+   */
+  capabilityReasons?: Partial<
+    Record<'canCreate' | 'canEdit' | 'canDelete', CapabilityDenial>
+  >;
+}
+
+/**
+ * A feature descriptor the host REFUSED, and why (issue #953).
+ *
+ * A rejected feature used to just not be in the navigation — indistinguishable
+ * from a permission problem, a caching problem, or a typo in the screen id, and
+ * findable only by reading container logs. The rules that reject are correct;
+ * the answer was in the wrong place.
+ *
+ * Served only to a caller holding `plugins:read`, because the reasons quote
+ * route paths and permission names.
+ */
+export interface DroppedPluginFeature {
+  /** The declaring plugin's name, matching {@link PluginFeature.plugin}. */
+  plugin: string;
+  /** The declared feature id, or null when the descriptor had no usable one. */
+  featureId: string | null;
+  /** The host's exact reason for refusing it. */
+  reason: string;
+}
+
+/** What {@link fetchPluginFeatures} resolves to. */
+export interface PluginFeatureList {
+  features: PluginFeature[];
+  /**
+   * Refused descriptors. Empty for a caller who may not read them, which is
+   * indistinguishable here from "nothing was refused" — deliberately: only the
+   * plugin console renders this, and it is gated on the same permission.
+   */
+  dropped: DroppedPluginFeature[];
 }
 
 /** Narrow an unknown payload to the `{ data: PluginFeature[] }` envelope. */
@@ -992,12 +1061,50 @@ function isFeatureListResponse(body: unknown): body is { data: PluginFeature[] }
 }
 
 /**
- * Fetch the permission-filtered feature list for the current user.
+ * Read the optional `dropped` array off the envelope (issue #953).
+ *
+ * Defensive per entry rather than all-or-nothing: this is diagnostic data, and
+ * one malformed row must not cost the administrator the other reasons.
+ */
+function readDropped(body: unknown): DroppedPluginFeature[] {
+  if (typeof body !== 'object' || body === null || !('dropped' in body)) {
+    return [];
+  }
+  const raw = (body as { dropped: unknown }).dropped;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const dropped: DroppedPluginFeature[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.plugin !== 'string' || typeof record.reason !== 'string') {
+      continue;
+    }
+    dropped.push({
+      plugin: record.plugin,
+      featureId: typeof record.featureId === 'string' ? record.featureId : null,
+      reason: record.reason,
+    });
+  }
+  return dropped;
+}
+
+/** The all-failures fallback, so every failure branch returns the same shape. */
+const EMPTY_FEATURE_LIST: PluginFeatureList = { features: [], dropped: [] };
+
+/**
+ * Fetch the permission-filtered feature list for the current user, plus the
+ * descriptors the host refused (issue #953, empty unless the caller holds
+ * `plugins:read`).
  *
  * Resolves to an empty list on any failure (non-ok status, malformed body,
  * network error) — callers render "no plugin features" rather than crash.
  */
-export async function fetchPluginFeatures(): Promise<PluginFeature[]> {
+export async function fetchPluginFeatures(): Promise<PluginFeatureList> {
   // Bounded for the same reason as NavigationProvider's fetch (see
   // navigation-context.tsx): this provider also wraps the whole
   // authenticated app, so an unbounded hang here blocks every admin page. A
@@ -1010,15 +1117,15 @@ export async function fetchPluginFeatures(): Promise<PluginFeature[]> {
       signal: controller.signal,
     });
     if (!response.ok) {
-      return [];
+      return EMPTY_FEATURE_LIST;
     }
     const body: unknown = await response.json();
     if (!isFeatureListResponse(body)) {
-      return [];
+      return EMPTY_FEATURE_LIST;
     }
-    return body.data;
+    return { features: body.data, dropped: readDropped(body) };
   } catch {
-    return [];
+    return EMPTY_FEATURE_LIST;
   } finally {
     clearTimeout(hangGuard);
   }

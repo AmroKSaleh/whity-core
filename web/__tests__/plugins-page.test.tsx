@@ -127,7 +127,7 @@ beforeEach(() => {
     refresh,
     removeItemsByHref,
   });
-  mockUsePluginFeatures.mockReturnValue({ features: [], isLoading: false });
+  mockUsePluginFeatures.mockReturnValue({ features: [], dropped: [], isLoading: false });
   mockApiPost.mockResolvedValue({ data: {}, error: undefined });
 });
 
@@ -339,6 +339,7 @@ describe('PluginsPage optimistic sidenav on disable', () => {
           capabilities: { canCreate: true, canEdit: true, canDelete: true },
         },
       ],
+      dropped: [],
       isLoading: false,
     });
     mockApiPost.mockResolvedValue({ data: {}, error: undefined });
@@ -357,5 +358,66 @@ describe('PluginsPage optimistic sidenav on disable', () => {
     );
     // ...and a refresh reconciles with the server.
     await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+});
+
+/**
+ * #953 — a frontend feature the host REFUSED must be visible to the
+ * administrator, not merely absent from the navigation.
+ *
+ * The refusal rules are right and are not relaxed; what changes is that the
+ * reason, which the server already had, now reaches a screen. The console is
+ * already gated on `plugins:read` — the same permission the server applies
+ * before it will send `dropped` at all — so no extra gate is needed here.
+ */
+describe('PluginsPage rejected screens (#953)', () => {
+  const DROPPED = {
+    plugin: 'HelloWorld',
+    featureId: 'hello-blocks',
+    reason:
+      "data-bound block source '/api/v1/hello/things?status=open' is not a GET route this plugin registered",
+  };
+
+  function withDropped(dropped: (typeof DROPPED)[]): void {
+    mockUsePluginFeatures.mockReturnValue({ features: [], dropped, isLoading: false });
+  }
+
+  it('marks the owning plugin in the list, so the hunt does not start at zero', async () => {
+    setCapabilities(['plugins:read']);
+    mockPluginList([ACTIVE_PLUGIN]);
+    withDropped([DROPPED]);
+
+    render(<PluginsPage />);
+    await screen.findByText('HelloWorld');
+
+    expect(screen.getByText('1 rejected screen(s)')).toBeInTheDocument();
+  });
+
+  it('names the screen and the exact reason in the detail panel', async () => {
+    const user = userEvent.setup();
+    setCapabilities(['plugins:read']);
+    mockPluginList([ACTIVE_PLUGIN]);
+    withDropped([DROPPED]);
+
+    render(<PluginsPage />);
+    await screen.findByText('HelloWorld');
+    await user.click(screen.getByRole('button', { name: /Details/i }));
+
+    expect(await screen.findByText('Rejected screens')).toBeInTheDocument();
+    expect(screen.getByText('hello-blocks')).toBeInTheDocument();
+    // Verbatim: this is the string that used to exist only in a container log.
+    expect(screen.getByText(DROPPED.reason)).toBeInTheDocument();
+  });
+
+  it('says nothing at all when the plugin had nothing refused', async () => {
+    setCapabilities(['plugins:read']);
+    mockPluginList([ACTIVE_PLUGIN]);
+    // A refusal belonging to a DIFFERENT plugin must not be attributed here.
+    withDropped([{ ...DROPPED, plugin: 'SomeOtherPlugin' }]);
+
+    render(<PluginsPage />);
+    await screen.findByText('HelloWorld');
+
+    expect(screen.queryByText(/rejected screen/i)).toBeNull();
   });
 });
