@@ -188,6 +188,40 @@ class ResourceRoleAssignmentRepository
     }
 
     /**
+     * Whether ONE PROFILE holds any grant addressed at one resource (#947 item 3).
+     *
+     * The cheap existence question, for a caller that only needs to know whether
+     * a person has authority here — {@see \Whity\Core\Document\DocumentVisibilityPolicy}
+     * asks it to decide whether somebody may read a document. Distinct from
+     * {@see listFor()}, which returns every grant at the resource including the
+     * everyone-grants; fetching that list to answer a yes/no is a wider read for
+     * a narrower question.
+     *
+     * EVERYONE-GRANTS (`profile_id IS NULL`) ARE DELIBERATELY EXCLUDED. Migration
+     * 088 defines that row as "everyone WITH ACCESS TO this resource gets role R
+     * here" — it modifies what people who can already reach the record may do,
+     * and is not itself a grant of access. Counting it here would inverted its
+     * meaning: a document carrying one everyone-grant would become readable by
+     * every profile in the tenant, which is precisely the widening the row is
+     * not.
+     */
+    public function hasProfileGrantAt(
+        int $tenantId,
+        string $resourceType,
+        int $resourceId,
+        int $profileId,
+    ): bool {
+        $statement = $this->db->prepare(
+            'SELECT 1 FROM resource_role_assignments
+             WHERE tenant_id = ? AND resource_type = ? AND resource_id = ? AND profile_id = ?
+             LIMIT 1'
+        );
+        $statement->execute([$tenantId, $resourceType, $resourceId, $profileId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
      * Every grant at one resource, tenant scoped.
      *
      * @return list<array{id: int, role_id: int, profile_id: int|null}>

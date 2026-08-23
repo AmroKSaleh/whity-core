@@ -31,6 +31,68 @@ use PDO;
  */
 final class DocumentRepository
 {
+    /**
+     * The row-visibility predicate for a caller WITHOUT the tenant-wide grant
+     * (#947 item 3), as literal SQL.
+     *
+     *   I raised it, OR a route reached me, OR a role was granted to me on it.
+     *
+     * The three disjuncts of {@see DocumentVisibilityPolicy::canView()}, pushed
+     * into the WHERE clause. The policy stays the single statement of the RULE;
+     * this is the same rule expressed for a question whose shape a return value
+     * cannot carry — these two are joins, not values.
+     *
+     * WHY A CONSTANT AND NOT TWO SPELLINGS. The list and the count MUST apply an
+     * identical predicate or the pagination total is a number the caller cannot
+     * reach — the exact defect this class's docblock already records having paid
+     * for. Two hand-written copies is how they drift, so there is one, and both
+     * statements interpolate it.
+     *
+     * That interpolation is the one concession to
+     * scripts/ci-tenant-predicate-guard.php, which reads this source: the
+     * `tenant_id = :tenant_id` predicate every statement needs is still written
+     * LITERALLY at each call site, and only this caller-scoped clause is shared.
+     * Every subquery re-binds `:tenant_id` itself, so a document, a recipient row
+     * and a grant row all have to belong to the same tenant for the row to be
+     * visible — a cross-tenant recipient row cannot make another tenant's
+     * document appear.
+     *
+     * EVERYONE-GRANTS ARE EXCLUDED from the third clause (`profile_id = :created_by`
+     * only, never `IS NULL`) for the reason
+     * {@see \Whity\Core\RBAC\ResourceRoleAssignmentRepository::hasProfileGrantAt()}
+     * records: migration 088 defines that row as modifying what already-reachable
+     * people may do, not as granting reach. Reading it as access would make one
+     * such row publish a document to the whole tenant.
+     *
+     * `EXISTS` rather than `IN (subquery)` or a `LEFT JOIN … DISTINCT`: both
+     * alternatives can multiply the row before collapsing it again, and a
+     * `COUNT(*)` over a multiplied row is wrong rather than slow.
+     *
+     * `resource_type = 'document'` is spelled as a LITERAL rather than
+     * interpolating {@see \Whity\Core\RBAC\ResourceTypeRegistry::TYPE_DOCUMENT},
+     * because a nowdoc cannot interpolate a class constant and concatenating
+     * around it would break exactly the literal-SQL readability the predicate
+     * guard depends on. The duplication is pinned instead: DocumentRepository's
+     * real-engine test asserts this clause and the registry constant agree, so a
+     * rename fails a build rather than silently emptying every restricted list.
+     */
+    private const VISIBLE_TO_CALLER = <<<'SQL'
+        created_by = :created_by
+        OR EXISTS (
+            SELECT 1 FROM document_route_recipients r
+             WHERE r.tenant_id = :tenant_id
+               AND r.document_id = documents.id
+               AND r.profile_id = :created_by
+        )
+        OR EXISTS (
+            SELECT 1 FROM resource_role_assignments rra
+             WHERE rra.tenant_id = :tenant_id
+               AND rra.resource_type = 'document'
+               AND rra.resource_id = documents.id
+               AND rra.profile_id = :created_by
+        )
+        SQL;
+
     private PDO $db;
 
     public function __construct(PDO $db)
@@ -110,7 +172,7 @@ final class DocumentRepository
         } else {
             $stmt = $this->db->prepare(
                 'SELECT id, tenant_id, document_template_id, template_name, title, origin_ou_id, created_by, created_at
-                 FROM documents WHERE tenant_id = :tenant_id AND created_by = :created_by
+                 FROM documents WHERE tenant_id = :tenant_id AND (' . self::VISIBLE_TO_CALLER . ')
                  ORDER BY id DESC LIMIT :limit OFFSET :offset'
             );
             $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
@@ -142,7 +204,8 @@ final class DocumentRepository
             $stmt->execute([':tenant_id' => $tenantId]);
         } else {
             $stmt = $this->db->prepare(
-                'SELECT COUNT(*) FROM documents WHERE tenant_id = :tenant_id AND created_by = :created_by'
+                'SELECT COUNT(*) FROM documents
+                 WHERE tenant_id = :tenant_id AND (' . self::VISIBLE_TO_CALLER . ')'
             );
             $stmt->execute([':tenant_id' => $tenantId, ':created_by' => $onlyCreatedBy]);
         }

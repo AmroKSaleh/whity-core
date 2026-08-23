@@ -42,6 +42,8 @@ final class SettingsRegistryTest extends TestCase
              // the storage cost, not the render container, so unlike the master
              // switch above it is tenant-overridable.
              'documents.persist_enabled',
+             // #947 item 3 - routing ceilings, tenant-overridable like the render ones.
+             'documents.routing_max_steps', 'documents.routing_max_recipients_per_step',
              // WC-746: the bulk data-type lifecycle batch ceiling.
              'data_types.bulk_max_ids',
              // WC-error-tracking. The DSN is deliberately absent: it is a
@@ -99,7 +101,15 @@ final class SettingsRegistryTest extends TestCase
         self::assertContains('documents.persist_enabled', SettingsRegistry::tenantTextKeys());
         self::assertFalse(SettingsRegistry::isGlobalOnly('documents.persist_enabled'));
         self::assertTrue(SettingsRegistry::isGlobalOnly('documents.render_enabled'));
-        self::assertCount(12, SettingsRegistry::tenantTextKeys());
+        // 14 since #947 item 3: the two routing ceilings are per-tenant
+        // overridable for the same reason the render ceilings are - one tenant
+        // circulating institution-wide notices and another routing three-person
+        // approvals want genuinely different numbers.
+        self::assertContains('documents.routing_max_steps', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_max_steps'));
+        self::assertContains('documents.routing_max_recipients_per_step', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_max_recipients_per_step'));
+        self::assertCount(14, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -222,7 +232,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(54, $describe);
+        self::assertCount(56, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

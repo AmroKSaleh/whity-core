@@ -242,9 +242,27 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.36.0',
+            '1.37.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.36 adds the DOCUMENT VIEWER `documentViewer`, which declares no source and no '
+            'SDK 1.37 adds DOCUMENT ROUTING RULES: PluginRoutingRulesInterface joins the optional '
+            . 'capability interfaces, with RoutingRuleResolverInterface, RoutingRuleContext and '
+            . 'ResolvedRecipient as its contract. #947 item 3 puts a document routing engine in core, '
+            . 'and the load-bearing decision is that a route STEP NAMES A RULE, NEVER A PERSON: the '
+            . 'rule is resolved at send time against the organisation as it stands then, so a unit '
+            . 'created last week is included because it exists rather than because somebody '
+            . 'remembered to add it. A stored recipient list omits it, the document still renders, '
+            . 'every step still completes and the run reports SUCCESS. Core owns `role` and '
+            . '`role_below_actor`, both generic in the strong sense (every deployment has roles, '
+            . 'every deployment has a unit tree); anything narrower is what one organisation happens '
+            . 'to mean by "the next people" and arrives through the interface instead. A RESOLVER '
+            . 'RETURNS SUGGESTIONS AND WRITES NOTHING — the host filters every profile against the '
+            . 'ACTIVE MEMBERSHIPS of the tenant owning the route before an inbox row exists, so a '
+            . 'resolver cannot reach another tenant and that check is not a rule every plugin author '
+            . 'has to remember. BARE SLUGS ONLY: declare `committee`, get `acme:committee`, and no '
+            . 'plugin can mint a bare kind — so a step already stored naming `role` cannot be '
+            . 're-pointed by installing a plugin. Additive; every tree that validated under 1.36 '
+            . 'still validates. '
+            . 'SDK 1.36 adds the DOCUMENT VIEWER `documentViewer`, which declares no source and no '
             . 'new prop-rule kind. #947 item 1 gave core an issued document — a record with an '
             . 'identity and one immutable artifact per render — and nothing in the contract could '
             . 'show one. COMPOSING WAS NOT AVAILABLE, and not for want of pieces: every source and '

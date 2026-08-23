@@ -42,9 +42,15 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
      * A plugin-declared type, deliberately NOT the built-in 'ou'.
      *
      * The CANONICAL (namespaced) key: the plugin declares the bare slug
-     * `document` and the registry stores it under the plugin's namespace.
+     * `dossier` and the registry stores it under the plugin's namespace.
+     *
+     * The example slug is deliberately one CORE DOES NOT OWN. It used to be
+     * `document`, which #947 item 3 turned into a real core resource type - at
+     * which point "granting on the bare slug must fail" stopped being true for a
+     * reason that had nothing to do with namespacing. The property under test is
+     * unchanged; only the example moved out of core's way.
      */
-    private const TYPE_DOCUMENT = 'testplugin:document';
+    private const TYPE_DOSSIER = 'testplugin:dossier';
     private const DOC_ID = 4242;
 
     private PDO $pdo;
@@ -72,7 +78,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -83,7 +89,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                 $profileId,
                 'posts:write',
                 self::TENANT_A,
-                self::TYPE_DOCUMENT,
+                self::TYPE_DOSSIER,
                 self::DOC_ID
             ),
             'A grant on a plugin-declared resource type must resolve at that resource.'
@@ -97,7 +103,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -108,7 +114,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                 $profileId,
                 'posts:write',
                 self::TENANT_A,
-                self::TYPE_DOCUMENT,
+                self::TYPE_DOSSIER,
                 self::DOC_ID + 1
             ),
             'A grant addressed at one record must not answer for a different record.'
@@ -123,7 +129,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         // profile_id NULL — "everyone with access to this resource holds R here".
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             null
@@ -134,7 +140,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                 $profileId,
                 'posts:write',
                 self::TENANT_A,
-                self::TYPE_DOCUMENT,
+                self::TYPE_DOSSIER,
                 self::DOC_ID
             ),
             'A NULL profile_id grant must apply to any member of the tenant at that resource.'
@@ -166,7 +172,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $foreignRoleId,
             null
@@ -180,14 +186,14 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $foreignMessage = null;
         try {
-            $this->repository()->grant(self::TENANT_A, self::TYPE_DOCUMENT, self::DOC_ID, $foreignRoleId);
+            $this->repository()->grant(self::TENANT_A, self::TYPE_DOSSIER, self::DOC_ID, $foreignRoleId);
         } catch (RoleNotVisibleException $e) {
             $foreignMessage = $e->getMessage();
         }
 
         $missingMessage = null;
         try {
-            $this->repository()->grant(self::TENANT_A, self::TYPE_DOCUMENT, self::DOC_ID, $missingRoleId);
+            $this->repository()->grant(self::TENANT_A, self::TYPE_DOSSIER, self::DOC_ID, $missingRoleId);
         } catch (RoleNotVisibleException $e) {
             $missingMessage = $e->getMessage();
         }
@@ -212,7 +218,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         // CALLER's, the row belongs to A and B's resolution must not see it.
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             null
@@ -223,7 +229,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                 $profileInB,
                 'posts:write',
                 self::TENANT_B,
-                self::TYPE_DOCUMENT,
+                self::TYPE_DOSSIER,
                 self::DOC_ID
             ),
             'A grant written by tenant A must never resolve for tenant B at the same resource id.'
@@ -238,7 +244,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $outsiderId
@@ -249,7 +255,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                 $outsiderId,
                 'posts:write',
                 self::TENANT_A,
-                self::TYPE_DOCUMENT,
+                self::TYPE_DOSSIER,
                 self::DOC_ID
             ),
             'A resource grant must not become a back door into a tenant the profile does not belong to.'
@@ -263,7 +269,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                 $outsiderId,
                 self::TENANT_A,
                 'editor',
-                self::TYPE_DOCUMENT,
+                self::TYPE_DOSSIER,
                 self::DOC_ID
             ),
             'A resource ROLE grant must not admit a profile with no membership in the tenant.'
@@ -273,7 +279,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
             $this->checker()->getEffectiveRolesForProfile(
                 $outsiderId,
                 self::TENANT_A,
-                self::TYPE_DOCUMENT,
+                self::TYPE_DOSSIER,
                 self::DOC_ID
             ),
             'A profile with no active membership resolves to no roles at all, whatever is granted at the resource.'
@@ -296,7 +302,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -305,7 +311,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         $resolver = $this->resolver();
 
         self::assertTrue(
-            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, self::DOC_ID),
+            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOSSIER, self::DOC_ID),
             'A role granted at the resource must be visible to the scoped question.'
         );
         self::assertFalse(
@@ -313,7 +319,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
             'It must NOT be visible tenant-wide — that would turn a per-record grant into blanket authority.'
         );
         self::assertFalse(
-            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, self::DOC_ID + 1),
+            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOSSIER, self::DOC_ID + 1),
             'It must not answer for a DIFFERENT record of the same type.'
         );
     }
@@ -331,14 +337,14 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
         );
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             $otherDocId,
             $this->roleId('approver'),
             $profileId
@@ -346,11 +352,11 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $resolver = $this->resolver();
 
-        self::assertTrue($resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, self::DOC_ID));
-        self::assertFalse($resolver->hasRole($profileId, self::TENANT_A, 'approver', self::TYPE_DOCUMENT, self::DOC_ID));
+        self::assertTrue($resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOSSIER, self::DOC_ID));
+        self::assertFalse($resolver->hasRole($profileId, self::TENANT_A, 'approver', self::TYPE_DOSSIER, self::DOC_ID));
 
-        self::assertTrue($resolver->hasRole($profileId, self::TENANT_A, 'approver', self::TYPE_DOCUMENT, $otherDocId));
-        self::assertFalse($resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, $otherDocId));
+        self::assertTrue($resolver->hasRole($profileId, self::TENANT_A, 'approver', self::TYPE_DOSSIER, $otherDocId));
+        self::assertFalse($resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOSSIER, $otherDocId));
 
         // The one membership row is untouched and still the tenant-wide answer.
         self::assertTrue($resolver->hasRole($profileId, self::TENANT_A, 'viewer'));
@@ -362,7 +368,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -373,7 +379,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         $scoped = $checker->getEffectiveRolesForProfile(
             $profileId,
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID
         );
 
@@ -394,7 +400,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -407,7 +413,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         // WRONG resource, so a half-specified scope is no scope at all.
         self::assertSame(
             $unscopedAnswer,
-            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, null),
+            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOSSIER, null),
             'A resource type without an id must collapse to the unscoped answer.'
         );
         self::assertSame(
@@ -430,7 +436,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -460,7 +466,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -480,7 +486,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
             $scopedSet = $resolver->effectivePermissions(
                 $profileId,
                 self::TENANT_A,
-                self::TYPE_DOCUMENT,
+                self::TYPE_DOSSIER,
                 self::DOC_ID
             );
             self::assertSame(
@@ -489,7 +495,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                     $profileId,
                     self::TENANT_A,
                     $permission,
-                    self::TYPE_DOCUMENT,
+                    self::TYPE_DOSSIER,
                     self::DOC_ID
                 ),
                 "Scoped parity must hold for {$permission}."
@@ -514,12 +520,12 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                     $checker->getEffectiveRolesForProfile(
                         $profileId,
                         self::TENANT_A,
-                        self::TYPE_DOCUMENT,
+                        self::TYPE_DOSSIER,
                         self::DOC_ID
                     ),
                     true
                 ),
-                $resolver->hasRole($profileId, self::TENANT_A, $role, self::TYPE_DOCUMENT, self::DOC_ID),
+                $resolver->hasRole($profileId, self::TENANT_A, $role, self::TYPE_DOSSIER, self::DOC_ID),
                 "Scoped role parity must hold for '{$role}'."
             );
         }
@@ -533,7 +539,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -544,7 +550,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         $scoped = $resolver->effectivePermissions(
             $profileId,
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID
         );
 
@@ -564,7 +570,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -575,7 +581,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         // A type with no id does not identify a record; matching on one column and
         // ignoring the other would return grants from the WRONG resource.
         self::assertFalse(
-            $resolver->hasPermission($profileId, self::TENANT_A, 'posts:write', self::TYPE_DOCUMENT, null),
+            $resolver->hasPermission($profileId, self::TENANT_A, 'posts:write', self::TYPE_DOSSIER, null),
             'A resource type without an id must collapse to the unscoped answer.'
         );
         self::assertFalse(
@@ -591,7 +597,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
         $this->repository()->grant(
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID,
             $this->roleId('editor'),
             $profileId
@@ -605,7 +611,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
             $profileId,
             'posts:write',
             self::TENANT_A,
-            self::TYPE_DOCUMENT,
+            self::TYPE_DOSSIER,
             self::DOC_ID
         ));
         self::assertFalse(
@@ -668,10 +674,15 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         $types->register('Impostor', [ResourceTypeRegistry::TYPE_OU]);
 
         self::assertTrue($types->exists('impostor:ou'));
+        // Core's own bare types, pinned: `ou` since WC-712 and `document` since
+        // #947 item 3, which needed a registered type before a grant could name
+        // an issued document at all. The pin is on the WHOLE list rather than on
+        // `ou` alone, so a plugin that somehow minted a bare key would show up
+        // here as an extra entry rather than hiding behind a narrower assertion.
         self::assertSame(
-            [ResourceTypeRegistry::TYPE_OU],
+            [ResourceTypeRegistry::TYPE_OU, ResourceTypeRegistry::TYPE_DOCUMENT],
             $types->getBySource(ResourceTypeRegistry::CORE_SOURCE),
-            "Core's 'ou' must remain exactly one bare entry owned by core."
+            "Core's bare types must remain exactly the ones core declares."
         );
     }
 
@@ -699,11 +710,16 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
     public function testGrantOnAnUnnamespacedPluginSlugIsRejected(): void
     {
-        // The plugin declared 'document'; granting on the BARE slug must fail,
+        // The plugin declared 'dossier'; granting on the BARE slug must fail,
         // because the registered type is the namespaced one.
+        //
+        // The slug must be one CORE does not own, or this asserts nothing: core's
+        // own bare types (`ou`, and `document` since #947 item 3) are registered
+        // and therefore grantable, so picking one would make the test fail for
+        // the opposite reason to the one it is checking.
         $this->expectException(InvalidResourceTypeException::class);
 
-        $this->repository()->grant(self::TENANT_A, 'document', self::DOC_ID, $this->roleId('editor'), null);
+        $this->repository()->grant(self::TENANT_A, 'dossier', self::DOC_ID, $this->roleId('editor'), null);
     }
 
     // ==================== Helpers ====================
@@ -734,12 +750,12 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
     /**
      * A registry with one plugin-declared type. Note the plugin declares the
      * BARE slug and the registry namespaces it, so the canonical type is
-     * `testplugin:document` — which is what {@see self::TYPE_DOCUMENT} holds.
+     * `testplugin:document` — which is what {@see self::TYPE_DOSSIER} holds.
      */
     private function resourceTypes(): ResourceTypeRegistry
     {
         $types = new ResourceTypeRegistry();
-        $types->register('TestPlugin', ['document']);
+        $types->register('TestPlugin', ['dossier']);
 
         return $types;
     }

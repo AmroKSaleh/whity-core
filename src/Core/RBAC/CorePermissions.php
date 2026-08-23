@@ -177,6 +177,22 @@ final class CorePermissions
     // already held.
     public const DOCUMENTS_READ_ALL = 'documents:read:all';
 
+    // Putting an issued document into CIRCULATION (#947 item 3, migration 113).
+    //
+    // One permission, and only for the act that STARTS a routing: choosing the
+    // steps a document follows and sending it. Acting on an item that reached
+    // you is deliberately NOT gated by a permission — being a recipient is the
+    // authorization, because the route named a rule, the rule resolved to you,
+    // and the engine wrote the row. A second permission on top would let a route
+    // resolve to somebody who then cannot answer it: the item sits open forever
+    // and the person holding it has no way to discover why.
+    //
+    // Reading a document's routes and trail stays on DOCUMENTS_READ plus the
+    // row filter. A separate `documents:trail:read` would be a second answer to
+    // the question DOCUMENTS_READ_ALL already answers, with no case that
+    // distinguishes them.
+    public const DOCUMENTS_ROUTE = 'documents:route';
+
     // Admin-enforced 2FA policy (WC-525): tenant/OU/user-scoped rows an admin
     // sets to require 2FA enrollment. Tenant-scoped.
     public const SECURITY_MANAGE = 'security:manage';
@@ -292,6 +308,7 @@ final class CorePermissions
             self::DOCUMENTS_PUBLISH,
             self::DOCUMENTS_RENDER,
             self::DOCUMENTS_READ_ALL,
+            self::DOCUMENTS_ROUTE,
             self::SECURITY_MANAGE,
             self::TAGS_READ,
             self::TAGS_MANAGE,

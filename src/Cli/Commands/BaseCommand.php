@@ -140,6 +140,39 @@ abstract class BaseCommand
         $ouTypeRegistry->registerCoreOuTypes();
         \Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry);
 
+        // Document ROUTING RULE catalogue (#947 item 3), registered as a service
+        // for exactly the same reason. A command that issues or advances a route
+        // — a scheduled escalation, an import that circulates what it created —
+        // resolves its steps through this registry, and a CLI-only EMPTY
+        // catalogue would answer that core's own `role` kind does not exist. The
+        // route would then fail to resolve at send time rather than at
+        // authoring, which is the worst place for it: the document is already
+        // issued.
+        //
+        // Divergence between the two entry points here is the recurring bug class
+        // this repo has already paid for twice (#717, #724), which is why the
+        // core resolvers are registered identically in both.
+        $routingRuleRegistry = new \Whity\Core\Document\Routing\RoutingRuleRegistry($hookManager);
+        $routingRuleRegistry->registerCoreRoutingRules(
+            new \Whity\Core\Document\Routing\RoleRuleResolver($db->getPdo()),
+            new \Whity\Core\Document\Routing\RoleBelowActorRuleResolver($db->getPdo())
+        );
+        \Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry);
+
+        // INBOX SOURCE catalogue (#881). Registered with core's routing source
+        // already attached, so a command asking "what is awaiting this person"
+        // gets the same answer the HTTP surface gives. An empty registry here
+        // would report every inbox as EMPTY — which is the most ordinary answer
+        // an inbox has, so nothing would look wrong.
+        $inboxSourceRegistry = new \Whity\Core\Inbox\InboxSourceRegistry();
+        $inboxSourceRegistry->registerCoreSource(
+            \Whity\Core\Inbox\InboxSourceRegistry::CORE_DOCUMENT_ROUTING,
+            new \Whity\Core\Document\Routing\DocumentRoutingInboxSource(
+                new \Whity\Core\Document\Routing\RouteRecipientRepository($db->getPdo())
+            )
+        );
+        \Whity\register_service(\Whity\Core\Inbox\InboxSourceRegistry::class, $inboxSourceRegistry);
+
         // Status-page probe catalogue (WC-status-probes), registered as a service
         // exactly as public/index.php does. A divergence between the two entry
         // points here is the recurring bug class this repo has already paid for
@@ -274,7 +307,12 @@ abstract class BaseCommand
             $dataTypeRegistry,
             $pluginSettingsRegistry,
             $auditLogger,
-            $ouTypeRegistry
+            $ouTypeRegistry,
+            // Plugin-contributed document routing rules (#947 item 3, SDK 1.36).
+            // Handed to the loader in BOTH entry points, so a route authored over
+            // HTTP against a plugin's kind still resolves when a command advances
+            // it.
+            $routingRuleRegistry
         );
         $pluginLoader->load();
 
