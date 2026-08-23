@@ -418,8 +418,12 @@ class RolesApiHandlerTest extends TestCase
         // `array{1: 1}` ignore pattern the neighbouring statements sit on.
         $manageable = $this->statement(['owned' => 1]);
 
+        // #910 reordered these two: manageability is resolved BEFORE the
+        // permissions are fetched, because it is an input to the per-region
+        // verdicts that decide whether the permissions are fetched AT ALL. A
+        // consecutive-return mock encodes call ORDER, so this is the order.
         $pdo = $this->createMock(PDO::class);
-        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $perms, $manageable);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $manageable, $perms);
 
         $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
         $response = $handler->get(new Request('GET', '/api/roles/5'), ['id' => '5']);

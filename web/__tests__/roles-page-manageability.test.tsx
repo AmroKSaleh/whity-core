@@ -70,17 +70,28 @@ async function openRowMenu(roleName: string): Promise<HTMLElement> {
   const user = userEvent.setup();
   const row = screen.getByText(roleName).closest('tr');
   expect(row).not.toBeNull();
-  const trigger = within(row as HTMLElement).getByRole('button');
+  // The row holds TWO buttons since #910: the role's NAME (which opens the
+  // record) and the actions trigger. Named explicitly rather than "the button".
+  const trigger = within(row as HTMLElement).getByRole('button', { name: 'Actions' });
   await user.click(trigger);
   return await screen.findByRole('menu');
 }
 
 describe('RolesScreen per-row manageability gating (WC-222)', () => {
-  it('renders Edit/Delete ENABLED for a manageable role and opens the edit modal on click', async () => {
+  it('renders Edit/Delete ENABLED for a manageable role and opens the RECORD on click', async () => {
     const adapter = fakeAdapter({ listRoles: jest.fn().mockResolvedValue([MANAGEABLE_ROLE]) });
     const user = userEvent.setup();
+    const onOpenRecord = jest.fn();
 
-    render(<RolesScreen adapter={adapter} can={can} t={t} onNotify={jest.fn()} />);
+    render(
+      <RolesScreen
+        adapter={adapter}
+        can={can}
+        t={t}
+        onNotify={jest.fn()}
+        onOpenRecord={onOpenRecord}
+      />
+    );
     await screen.findByText('TenantCustom');
 
     const menu = await openRowMenu('TenantCustom');
@@ -92,14 +103,24 @@ describe('RolesScreen per-row manageability gating (WC-222)', () => {
     expect(deleteItem).not.toHaveAttribute('data-disabled');
 
     await user.click(editItem);
-    // The real (package) EditRoleModal mounts; its title renders immediately.
-    expect(await screen.findByText('Edit Role')).toBeInTheDocument();
+    // #910: Edit navigates to the record page. There is no edit modal left to
+    // open — a dialog cannot express a record whose regions are gated
+    // separately, which is the whole reason the modal was retired.
+    expect(onOpenRecord).toHaveBeenCalledWith(MANAGEABLE_ROLE);
   });
 
   it('renders Edit/Delete DISABLED with an explanatory tooltip for a non-manageable global role', async () => {
     const adapter = fakeAdapter({ listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE]) });
 
-    render(<RolesScreen adapter={adapter} can={can} t={t} onNotify={jest.fn()} />);
+    render(
+      <RolesScreen
+        adapter={adapter}
+        can={can}
+        t={t}
+        onNotify={jest.fn()}
+        onOpenRecord={jest.fn()}
+      />
+    );
     await screen.findByText('admin');
 
     const menu = await openRowMenu('admin');
@@ -116,11 +137,20 @@ describe('RolesScreen per-row manageability gating (WC-222)', () => {
     expect(deleteItem).toHaveAttribute('title', DELETE_TOOLTIP);
   });
 
-  it('does NOT open the edit modal when a disabled action is clicked', async () => {
+  it('does NOT navigate to the record when a disabled action is clicked', async () => {
     const adapter = fakeAdapter({ listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE]) });
     const user = userEvent.setup();
+    const onOpenRecord = jest.fn();
 
-    render(<RolesScreen adapter={adapter} can={can} t={t} onNotify={jest.fn()} />);
+    render(
+      <RolesScreen
+        adapter={adapter}
+        can={can}
+        t={t}
+        onNotify={jest.fn()}
+        onOpenRecord={onOpenRecord}
+      />
+    );
     await screen.findByText('admin');
 
     const menu = await openRowMenu('admin');
@@ -128,9 +158,10 @@ describe('RolesScreen per-row manageability gating (WC-222)', () => {
 
     await user.click(editItem);
 
-    // A disabled item must never open its modal.
+    // A disabled item must never fire its action. The action is now navigation
+    // rather than a modal, and the assertion moved with it.
     await waitFor(() => {
-      expect(screen.queryByText('Edit Role')).not.toBeInTheDocument();
+      expect(onOpenRecord).not.toHaveBeenCalled();
     });
     expect(adapter.getRole).not.toHaveBeenCalled();
   });

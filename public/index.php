@@ -1273,7 +1273,18 @@ $router->register('GET',    '/api/users/{id:\d+}/memberships',                  
 $router->register('POST',   '/api/users/{id:\d+}/memberships',                      [$usersHandler, 'addMembership'],    null, null, CorePermissions::USERS_WRITE);
 $router->register('DELETE', '/api/users/{id:\d+}/memberships/{membershipId:\d+}',   [$usersHandler, 'removeMembership'], null, null, CorePermissions::USERS_WRITE);
 
-$rolesHandler = new RolesApiHandler($db->getPdo(), $hookManager);
+// #910: the role record page gates its REGIONS separately — who may see a
+// role's permissions and who may change them are different questions — and the
+// server answers both. The resolver is what makes `GET /api/roles/{id}` carry a
+// per-region verdict and withhold the data behind a region the caller may not
+// see; without it this handler is its pre-#910 self, and the client fails closed
+// on the missing map rather than assuming everything is editable.
+$rolesHandler = new RolesApiHandler(
+    $db->getPdo(),
+    $hookManager,
+    null,
+    new \Whity\Core\RBAC\RecordSectionResolver($roleChecker)
+);
 $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
 $router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');
 $router->register('GET', '/api/roles/{id:\d+}', [$rolesHandler, 'get'], 'admin');

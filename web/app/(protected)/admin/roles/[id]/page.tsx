@@ -24,9 +24,7 @@
 import { useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { RoleRecordScreen } from '@amroksaleh/features/roles';
-import { RecordPageSkeleton } from '@amroksaleh/features/record';
 import { webRolesAdapter } from '@/lib/roles-adapter';
-import { useCapabilities } from '@/hooks/useCapabilities';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { useToast } from '@/lib/toast-context';
 
@@ -42,7 +40,6 @@ const I18N_MISS = '__ROLE_RECORD_I18N_MISS__';
 export default function Page() {
   const params = useParams<{ id: string | string[] }>();
   const router = useRouter();
-  const { hasPermission, loading: capabilitiesLoading } = useCapabilities();
   const { addToast } = useToast();
 
   // Client pages read dynamic segments via useParams (Next 16 app router). The
@@ -87,28 +84,20 @@ export default function Page() {
     );
   }
 
-  // `hasPermission` is FAIL-CLOSED while the capability fetch is in flight, so
-  // mounting the screen early would render "You don't have permission to edit
-  // roles" to an administrator who does — a sentence, unlike a button that shows
-  // up a moment later, that is simply false while it is on screen. The
-  // capabilities fetch is a single shared request the root layout already
-  // started, so this waits on something already in flight rather than adding a
-  // round trip.
+  // No capability gate here any more (#910).
   //
-  // #882: the screen's OWN skeleton, not a hand-copied lookalike. This route
-  // used to reproduce it — four `Skeleton` boxes in a four-column grid — and a
-  // copy of a skeleton is a copy that drifts the first time the record page
-  // grows a fifth stat, at which point the page visibly jumps at the moment the
-  // capabilities land.
-  if (capabilitiesLoading) {
-    return <RecordPageSkeleton />;
-  }
-
+  // This route used to hold the screen behind `useCapabilities().loading`,
+  // because `hasPermission` is FAIL-CLOSED while that fetch is in flight and
+  // mounting early would have rendered "You don't have permission to edit roles"
+  // to an administrator who does. The screen no longer takes a `can` prop at
+  // all: `GET /roles/{id}` carries a verdict per REGION, resolved server-side,
+  // so the record's own response is the whole answer and there is nothing left
+  // to wait on. The page now paints as soon as the record arrives rather than
+  // after two round trips.
   return (
     <RoleRecordScreen
       adapter={webRolesAdapter}
       roleId={roleId}
-      can={hasPermission}
       t={t}
       onNotify={addToast}
       onBack={handleBack}

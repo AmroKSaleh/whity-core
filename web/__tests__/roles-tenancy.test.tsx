@@ -123,6 +123,29 @@ const GLOBAL_ROLE_FOR_OPERATOR: Role = {
 /** The same row as an ordinary tenant sees it: global and NOT manageable. */
 const GLOBAL_ROLE_FOR_TENANT: Role = { ...GLOBAL_ROLE_FOR_OPERATOR, manageable: false };
 
+/**
+ * The server's per-region verdicts (#910), in the two shapes these cases need.
+ *
+ * `GET /roles/{id}` resolves them; the screen renders them. A region the caller
+ * may not see would be ABSENT from the map — and its data absent from the
+ * payload — which is what `role-record-sections.test.tsx` drives.
+ */
+const RECORD_DENIAL = {
+  code: 'record',
+  reason: 'This is a global base role. Only the system tenant can change it.',
+  // A record refusal is not fixable by a grant, so there is no slug that would
+  // help anyone reading it.
+  detail: null,
+};
+const EDITABLE_SECTIONS = {
+  details: { state: 'editable' as const, denial: null },
+  permissions: { state: 'editable' as const, denial: null },
+};
+const RECORD_LOCKED_SECTIONS = {
+  details: { state: 'read-only' as const, denial: RECORD_DENIAL },
+  permissions: { state: 'read-only' as const, denial: RECORD_DENIAL },
+};
+
 /** English-fallback translator: returns the caller-supplied source string. */
 const t = (key: string, fallback?: string) => fallback ?? key;
 /** The caller holds every capability, so only tenancy differs between cases. */
@@ -131,7 +154,9 @@ const can = () => true;
 function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
   return {
     listRoles: jest.fn().mockResolvedValue([]),
-    getRole: jest.fn().mockResolvedValue({ ...OWNED_ROLE, permissions: [] }),
+    getRole: jest
+      .fn()
+      .mockResolvedValue({ ...OWNED_ROLE, permissions: [], sections: EDITABLE_SECTIONS }),
     getRolePermissions: jest.fn().mockResolvedValue([]),
     getRoleAssignments: jest.fn().mockResolvedValue({ assignments: [], total: 0 }),
     getRoleActivity: jest.fn().mockResolvedValue([]),
@@ -164,7 +189,7 @@ describe('RolesScreen marks GLOBAL rows in the list (#886)', () => {
       listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_TENANT, OWNED_ROLE]),
     });
 
-    render(<RolesScreen adapter={adapter} can={can} t={t} />);
+    render(<RolesScreen adapter={adapter} can={can} t={t} onOpenRecord={jest.fn()} />);
 
     await screen.findByText(GLOBAL_ROLE_FOR_TENANT.name);
     const globalRow = screen.getByText(GLOBAL_ROLE_FOR_TENANT.name).closest('tr');
@@ -186,7 +211,7 @@ describe('RolesScreen marks GLOBAL rows in the list (#886)', () => {
       listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_OPERATOR, OWNED_ROLE]),
     });
 
-    render(<RolesScreen adapter={adapter} can={can} t={t} />);
+    render(<RolesScreen adapter={adapter} can={can} t={t} onOpenRecord={jest.fn()} />);
 
     await screen.findByText(GLOBAL_ROLE_FOR_OPERATOR.name);
     const globalRow = screen.getByText(GLOBAL_ROLE_FOR_OPERATOR.name).closest('tr');
@@ -202,7 +227,7 @@ describe('RolesScreen marks GLOBAL rows in the list (#886)', () => {
       listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_OPERATOR]),
     });
 
-    render(<RolesScreen adapter={adapter} can={can} t={t} />);
+    render(<RolesScreen adapter={adapter} can={can} t={t} onOpenRecord={jest.fn()} />);
     await screen.findByText(GLOBAL_ROLE_FOR_OPERATOR.name);
 
     const menu = await openRowMenu(user, GLOBAL_ROLE_FOR_OPERATOR.name);
@@ -220,31 +245,16 @@ describe('RolesScreen marks GLOBAL rows in the list (#886)', () => {
 // ---------------------------------------------------------------------------
 
 describe('The deployment-wide edit announces itself (#886)', () => {
-  it('warns in the edit modal when a global role is opened by a caller who may write it', async () => {
-    const user = userEvent.setup();
-    const adapter = fakeAdapter({
-      listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_OPERATOR]),
-      getRole: jest.fn().mockResolvedValue({ ...GLOBAL_ROLE_FOR_OPERATOR, permissions: [] }),
-    });
-
-    // No `onOpenRecord`: without the record-page seam, Edit opens the MODAL.
-    render(<RolesScreen adapter={adapter} can={can} t={t} />);
-    await screen.findByText(GLOBAL_ROLE_FOR_OPERATOR.name);
-
-    const menu = await openRowMenu(user, GLOBAL_ROLE_FOR_OPERATOR.name);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
-
-    const warning = await screen.findByTestId('role-edit-global-warning');
-    expect(warning).toHaveTextContent(EDIT_WARNING);
-  });
-
+  // The edit MODAL's own copy of this test went with the modal (#910). Its
+  // replacement is 'badges a global role AND warns' below: the same assertion
+  // against the record page, which is where a role is edited now.
   it('warns in the delete modal too, since that half is irreversible', async () => {
     const user = userEvent.setup();
     const adapter = fakeAdapter({
       listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_OPERATOR]),
     });
 
-    render(<RolesScreen adapter={adapter} can={can} t={t} />);
+    render(<RolesScreen adapter={adapter} can={can} t={t} onOpenRecord={jest.fn()} />);
     await screen.findByText(GLOBAL_ROLE_FOR_OPERATOR.name);
 
     const menu = await openRowMenu(user, GLOBAL_ROLE_FOR_OPERATOR.name);
@@ -254,19 +264,6 @@ describe('The deployment-wide edit announces itself (#886)', () => {
     expect(warning).toHaveTextContent(DELETE_WARNING);
   });
 
-  it('does not warn for an ordinary tenant-owned role', async () => {
-    const user = userEvent.setup();
-    const adapter = fakeAdapter({ listRoles: jest.fn().mockResolvedValue([OWNED_ROLE]) });
-
-    render(<RolesScreen adapter={adapter} can={can} t={t} />);
-    await screen.findByText(OWNED_ROLE.name);
-
-    const menu = await openRowMenu(user, OWNED_ROLE.name);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
-
-    await screen.findByRole('dialog');
-    expect(screen.queryByTestId('role-edit-global-warning')).toBeNull();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -277,13 +274,14 @@ describe('RoleRecordScreen reports scope from the server flag (#886)', () => {
   const GLOBAL_DETAIL: RoleWithPermissions = {
     ...GLOBAL_ROLE_FOR_OPERATOR,
     permissions: [],
+    sections: EDITABLE_SECTIONS,
   };
 
   it('badges a global role AND warns, even though the operator may edit it', async () => {
     const adapter = fakeAdapter({ getRole: jest.fn().mockResolvedValue(GLOBAL_DETAIL) });
 
     render(
-      <RoleRecordScreen adapter={adapter} roleId={1} can={can} t={t} onBack={() => undefined} />
+      <RoleRecordScreen adapter={adapter} roleId={1} t={t} onBack={() => undefined} />
     );
 
     expect(await screen.findByTestId('role-record-badge-global')).toBeInTheDocument();
@@ -295,11 +293,13 @@ describe('RoleRecordScreen reports scope from the server flag (#886)', () => {
 
   it('shows neither badge nor warning for a tenant-owned role', async () => {
     const adapter = fakeAdapter({
-      getRole: jest.fn().mockResolvedValue({ ...OWNED_ROLE, permissions: [] }),
+      getRole: jest
+        .fn()
+        .mockResolvedValue({ ...OWNED_ROLE, permissions: [], sections: EDITABLE_SECTIONS }),
     });
 
     render(
-      <RoleRecordScreen adapter={adapter} roleId={10} can={can} t={t} onBack={() => undefined} />
+      <RoleRecordScreen adapter={adapter} roleId={10} t={t} onBack={() => undefined} />
     );
 
     await screen.findByTestId('role-record');
@@ -315,11 +315,18 @@ describe('RoleRecordScreen reports scope from the server flag (#886)', () => {
    */
   it('badges but does not warn when the caller cannot write the global role anyway', async () => {
     const adapter = fakeAdapter({
-      getRole: jest.fn().mockResolvedValue({ ...GLOBAL_ROLE_FOR_TENANT, permissions: [] }),
+      // A global role a TENANT opened: both regions read-only for the RECORD's
+      // own reason, which is why the shell hoists the one sentence to the page
+      // instead of printing a paraphrase under each heading.
+      getRole: jest.fn().mockResolvedValue({
+        ...GLOBAL_ROLE_FOR_TENANT,
+        permissions: [],
+        sections: RECORD_LOCKED_SECTIONS,
+      }),
     });
 
     render(
-      <RoleRecordScreen adapter={adapter} roleId={1} can={can} t={t} onBack={() => undefined} />
+      <RoleRecordScreen adapter={adapter} roleId={1} t={t} onBack={() => undefined} />
     );
 
     expect(await screen.findByTestId('role-record-badge-global')).toBeInTheDocument();
@@ -344,7 +351,7 @@ describe('Create-role scope picker (#888)', () => {
   ): Promise<{ user: ReturnType<typeof userEvent.setup>; adapter: RolesAdapter }> {
     const user = userEvent.setup();
     const adapter = (props.adapter as RolesAdapter | undefined) ?? fakeAdapter();
-    render(<RolesScreen can={can} t={t} {...props} adapter={adapter} />);
+    render(<RolesScreen can={can} t={t} onOpenRecord={jest.fn()} {...props} adapter={adapter} />);
     await user.click(screen.getByRole('button', { name: /Create Role/ }));
     await screen.findByRole('dialog');
     return { user, adapter };

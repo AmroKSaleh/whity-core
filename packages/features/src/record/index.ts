@@ -64,7 +64,9 @@ export {
   RecordTimeline,
   RecordTimelineItem,
 } from './record-panel';
-export { resolveAccess } from './access';
+export { RecordSection } from './record-section';
+export type { RecordSectionProps } from './record-section';
+export { resolveAccess, resolveSectionAccess, sectionAccessFrom } from './access';
 export { formatRecordDate, formatRecordDateTime } from './format';
 export { useRecordResource } from './use-record-resource';
 export type {
@@ -78,9 +80,18 @@ export type {
   RecordFields,
   RecordGate,
   RecordMain,
+  RecordPageBody,
+  RecordPageShellBaseProps,
   RecordPageShellProps,
   RecordProjection,
   RecordResource,
+  RecordSectionAccess,
+  RecordSectionDenial,
+  RecordSectionGate,
+  RecordSectionSpec,
+  RecordSectionState,
+  RecordSectionVerdict,
+  RecordSectionVerdicts,
   RecordStatement,
   RecordTone,
   RecordTranslate,
