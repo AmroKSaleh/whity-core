@@ -47,13 +47,19 @@ final class RoleCheckerRealEngineTest extends TestCase
      * WC-54 grant migration treats these as pre-existing and must not remove them
      * on down().
      *
+     * The `create`/`update` forms of each are deliberately absent: migration 112
+     * removed them as dead vocabulary shadowing `write`, and nothing consulted
+     * them. They were only ever WITNESSES here — stand-ins for "a permission an
+     * earlier migration owns" — so the invariant this list serves is unchanged,
+     * and the surviving read/write/delete forms witness it just as well.
+     *
      * @var array<int, string>
      */
     private const PRE_SEEDED_PERMISSIONS = [
-        'users:read', 'users:create', 'users:update', 'users:delete',
-        'roles:read', 'roles:create', 'roles:update', 'roles:delete',
-        'tenants:read', 'tenants:create', 'tenants:update', 'tenants:delete',
-        'ous:read', 'ous:create', 'ous:update', 'ous:delete', 'ous:assign',
+        'users:read', 'users:delete',
+        'roles:read', 'roles:delete',
+        'tenants:read', 'tenants:delete',
+        'ous:read', 'ous:delete', 'ous:assign',
     ];
 
     private PDO $pdo;

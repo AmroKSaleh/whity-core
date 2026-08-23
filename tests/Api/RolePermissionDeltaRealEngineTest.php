@@ -35,6 +35,27 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
 {
     private PDO $pdo;
 
+    /**
+     * Three real permission ids, resolved by NAME rather than written down.
+     *
+     * These were the literals 1, 2, and 3 — "any three valid permission ids" —
+     * which held until migration 112 removed the dead `create`/`update`
+     * vocabulary and left holes at 2 and 3. The seeded id space is not a
+     * contract, and a test that assumes it is fails the next time the catalogue
+     * changes for a reason that has nothing to do with the test.
+     *
+     * `ous:read` rather than `roles:read` for the third: these tests also pass
+     * 'roles:read' BY NAME to exercise id/name de-duplication, so reusing it here
+     * would make the dedupe assertion pass for the wrong reason.
+     *
+     * Chosen so their ids ASCEND, because `linkedPermissionIds()` returns them
+     * sorted: every `[$a, $b, $c]` assertion below therefore keeps the shape it
+     * had when it said `[1, 2, 3]`.
+     */
+    private int $permA;
+    private int $permB;
+    private int $permC;
+
     protected function setUp(): void
     {
         RoleChecker::clearCache();
@@ -47,7 +68,11 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
         );
         SchemaFromMigrations::syncSequences($this->pdo);
         MockRequestFactory::setTestTenant(1);
-    }
+    
+        $this->permA = $this->permIdFor('users:read');
+        $this->permB = $this->permIdFor('users:delete');
+        $this->permC = $this->permIdFor('ous:read');
+}
 
     protected function tearDown(): void
     {
@@ -60,22 +85,22 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
     public function testConcurrentAdminsDoNotClobberEachOther(): void
     {
         $handler = $this->handler();
-        $roleId = $this->createRole($handler, 'Editor', [1]);
+        $roleId = $this->createRole($handler, 'Editor', [$this->permA]);
 
         // Two admins, each holding the same stale view of the role (permission 1),
         // each adding a DIFFERENT permission. Through the full-replace PATCH they
         // would send [1, 2] and [1, 3] and the later write would erase the other's
         // addition. Through the delta endpoint each sends only what it adds.
         $handler->grantPermissions($this->authedRequest('POST', "/api/roles/{$roleId}/permissions", [
-            'permissions' => [2],
+            'permissions' => [$this->permB],
         ]), ['id' => (string) $roleId]);
 
         $handler->grantPermissions($this->authedRequest('POST', "/api/roles/{$roleId}/permissions", [
-            'permissions' => [3],
+            'permissions' => [$this->permC],
         ]), ['id' => (string) $roleId]);
 
         $this->assertSame(
-            [1, 2, 3],
+            [$this->permA, $this->permB, $this->permC],
             $this->linkedPermissionIds($roleId),
             'Both concurrent additions must survive; neither admin overwrites the other.'
         );
@@ -86,37 +111,37 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
     public function testGrantAddsWithoutDisturbingExistingGrants(): void
     {
         $handler = $this->handler();
-        $roleId = $this->createRole($handler, 'Editor', [1, 2]);
+        $roleId = $this->createRole($handler, 'Editor', [$this->permA, $this->permB]);
 
         $response = $handler->grantPermissions(
-            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => [3]]),
+            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => [$this->permC]]),
             ['id' => (string) $roleId]
         );
 
         $this->assertSame(200, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
         $this->assertSame(1, $data['granted']);
-        $this->assertSame([1, 2, 3], $this->linkedPermissionIds($roleId));
+        $this->assertSame([$this->permA, $this->permB, $this->permC], $this->linkedPermissionIds($roleId));
         // The response carries the resulting set so a caller need not re-GET.
         // (Ordered by permission NAME, as GET /api/roles/{id}/permissions is.)
         $returned = array_map('intval', array_column($data['permissions'], 'id'));
         sort($returned);
-        $this->assertSame([1, 2, 3], $returned);
+        $this->assertSame([$this->permA, $this->permB, $this->permC], $returned);
     }
 
     public function testGrantingAnAlreadyHeldPermissionSucceedsAndChangesNothing(): void
     {
         $handler = $this->handler();
-        $roleId = $this->createRole($handler, 'Editor', [1, 2]);
+        $roleId = $this->createRole($handler, 'Editor', [$this->permA, $this->permB]);
 
         $response = $handler->grantPermissions(
-            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => [1, 2]]),
+            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => [$this->permA, $this->permB]]),
             ['id' => (string) $roleId]
         );
 
         $this->assertSame(200, $response->getStatusCode(), 'A re-grant is a success, not a duplicate-key error.');
         $this->assertSame(0, json_decode($response->getBody(), true)['data']['granted']);
-        $this->assertSame([1, 2], $this->linkedPermissionIds($roleId));
+        $this->assertSame([$this->permA, $this->permB], $this->linkedPermissionIds($roleId));
     }
 
     public function testGrantAcceptsPermissionNamesAsWellAsIds(): void
@@ -126,13 +151,13 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
 
         $handler->grantPermissions(
             $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", [
-                'permissions' => ['users:read', 3],
+                'permissions' => ['users:read', $this->permC],
             ]),
             ['id' => (string) $roleId]
         );
 
         $this->assertSame(
-            [$this->permIdFor('users:read'), 3],
+            [$this->permIdFor('users:read'), $this->permC],
             $this->linkedPermissionIds($roleId)
         );
     }
@@ -144,13 +169,13 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
 
         $response = $handler->grantPermissions(
             $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", [
-                'permissions' => [1, 99999, 'nope:perm'],
+                'permissions' => [$this->permA, 99999, 'nope:perm'],
             ]),
             ['id' => (string) $roleId]
         );
 
         $this->assertSame(1, json_decode($response->getBody(), true)['data']['granted']);
-        $this->assertSame([1], $this->linkedPermissionIds($roleId));
+        $this->assertSame([$this->permA], $this->linkedPermissionIds($roleId));
     }
 
     // ── revoke ──────────────────────────────────────────────────────────────
@@ -158,31 +183,31 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
     public function testRevokeRemovesOnlyTheNamedGrants(): void
     {
         $handler = $this->handler();
-        $roleId = $this->createRole($handler, 'Editor', [1, 2, 3]);
+        $roleId = $this->createRole($handler, 'Editor', [$this->permA, $this->permB, $this->permC]);
 
         $response = $handler->revokePermissions(
-            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", ['permissions' => [2]]),
+            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", ['permissions' => [$this->permB]]),
             ['id' => (string) $roleId]
         );
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(1, json_decode($response->getBody(), true)['data']['revoked']);
-        $this->assertSame([1, 3], $this->linkedPermissionIds($roleId));
+        $this->assertSame([$this->permA, $this->permC], $this->linkedPermissionIds($roleId));
     }
 
     public function testRevokingAPermissionTheRoleDoesNotHoldSucceeds(): void
     {
         $handler = $this->handler();
-        $roleId = $this->createRole($handler, 'Editor', [1]);
+        $roleId = $this->createRole($handler, 'Editor', [$this->permA]);
 
         $response = $handler->revokePermissions(
-            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", ['permissions' => [2, 3]]),
+            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", ['permissions' => [$this->permB, $this->permC]]),
             ['id' => (string) $roleId]
         );
 
         $this->assertSame(200, $response->getStatusCode(), 'Revoking what is not held is a success.');
         $this->assertSame(0, json_decode($response->getBody(), true)['data']['revoked']);
-        $this->assertSame([1], $this->linkedPermissionIds($roleId));
+        $this->assertSame([$this->permA], $this->linkedPermissionIds($roleId));
     }
 
     // ── validation ──────────────────────────────────────────────────────────
@@ -190,7 +215,7 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
     public function testMissingPermissionsKeyIs400(): void
     {
         $handler = $this->handler();
-        $roleId = $this->createRole($handler, 'Editor', [1]);
+        $roleId = $this->createRole($handler, 'Editor', [$this->permA]);
 
         foreach (['grantPermissions', 'revokePermissions'] as $method) {
             $response = $handler->$method(
@@ -204,7 +229,7 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
     public function testEmptyPermissionListIsANoOpSuccess(): void
     {
         $handler = $this->handler();
-        $roleId = $this->createRole($handler, 'Editor', [1]);
+        $roleId = $this->createRole($handler, 'Editor', [$this->permA]);
 
         $response = $handler->grantPermissions(
             $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => []]),
@@ -212,7 +237,7 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
         );
 
         $this->assertSame(200, $response->getStatusCode());
-        $this->assertSame([1], $this->linkedPermissionIds($roleId));
+        $this->assertSame([$this->permA], $this->linkedPermissionIds($roleId));
     }
 
     // ── tenant boundary: identical to the endpoints these supplement ────────
@@ -221,23 +246,23 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
     {
         MockRequestFactory::setTestTenant(1);
         $handler = $this->handler();
-        $roleId = $this->createRole($handler, 'TenantAOnly', [1]);
+        $roleId = $this->createRole($handler, 'TenantAOnly', [$this->permA]);
 
         TenantContext::reset();
         MockRequestFactory::setTestTenant(2);
 
         $grant = $handler->grantPermissions(
-            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => [2]]),
+            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => [$this->permB]]),
             ['id' => (string) $roleId]
         );
         $revoke = $handler->revokePermissions(
-            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", ['permissions' => [1]]),
+            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", ['permissions' => [$this->permA]]),
             ['id' => (string) $roleId]
         );
 
         $this->assertSame(404, $grant->getStatusCode(), "Tenant B must not grant on tenant A's role.");
         $this->assertSame(404, $revoke->getStatusCode(), "Tenant B must not revoke on tenant A's role.");
-        $this->assertSame([1], $this->linkedPermissionIds($roleId), "Tenant A's grants are untouched.");
+        $this->assertSame([$this->permA], $this->linkedPermissionIds($roleId), "Tenant A's grants are untouched.");
     }
 
     public function testTenantCannotChangeAGlobalRoleButSystemTenantCan(): void
@@ -247,7 +272,7 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
         $handler = $this->handler();
 
         $denied = $handler->grantPermissions(
-            $this->authedRequest('POST', '/api/roles/1/permissions', ['permissions' => [1]]),
+            $this->authedRequest('POST', '/api/roles/1/permissions', ['permissions' => [$this->permA]]),
             ['id' => '1']
         );
         $this->assertSame(404, $denied->getStatusCode(), 'A tenant must not alter a global base role.');
@@ -255,7 +280,7 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
         TenantContext::reset();
         MockRequestFactory::setTestTenant(0);
         $allowed = $handler->grantPermissions(
-            $this->authedRequest('POST', '/api/roles/1/permissions', ['permissions' => [1]]),
+            $this->authedRequest('POST', '/api/roles/1/permissions', ['permissions' => [$this->permA]]),
             ['id' => '1']
         );
         $this->assertSame(200, $allowed->getStatusCode(), 'The SYSTEM tenant may alter a global base role.');
@@ -266,7 +291,7 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
         $handler = $this->handler();
 
         $response = $handler->grantPermissions(
-            $this->authedRequest('POST', '/api/roles/424242/permissions', ['permissions' => [1]]),
+            $this->authedRequest('POST', '/api/roles/424242/permissions', ['permissions' => [$this->permA]]),
             ['id' => '424242']
         );
 
@@ -291,15 +316,15 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
         $hooks->method('dispatchAsync');
         $handler = new RolesApiHandler($this->pdo, $hooks);
 
-        $roleId = $this->createRole($handler, 'Editor', [1]);
+        $roleId = $this->createRole($handler, 'Editor', [$this->permA]);
         $events = [];
 
         $handler->grantPermissions(
-            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => [2]]),
+            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", ['permissions' => [$this->permB]]),
             ['id' => (string) $roleId]
         );
         $handler->revokePermissions(
-            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", ['permissions' => [2]]),
+            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", ['permissions' => [$this->permB]]),
             ['id' => (string) $roleId]
         );
 
