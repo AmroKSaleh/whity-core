@@ -13,6 +13,9 @@ use Whity\Database\Database;
 use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Ou\OuReachResolver;
+use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
+use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Tenant\TenantContext;
@@ -28,6 +31,12 @@ use Whity\Core\Tenant\TenantContext;
  * Tests\Support\SchemaFromMigrations) the same test class runs against a real
  * PostgreSQL schema, exercising DocumentTemplateRepository::referencesBlock()'s
  * jsonb_path_exists() branch instead of the SQLite fetch+scan fallback.
+ *
+ * Since migration 117 it also mirrors the WHERE dimension. Blocks are named in
+ * the requirement alongside templates — *a secretary for a dean might have
+ * access to templates AND DESIGN BLOCKS more than a secretary of a department
+ * head* — and they are pointer-referenced by templates, so a block that reached
+ * further than the templates using it would be the wider hole of the two.
  */
 final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
 {
@@ -39,11 +48,22 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
     private const WRITER  = 12; // read+write, NO publish
     private const MANAGER = 13; // read + documents:use:contracts (the gated tag), no publish
 
+    // Two secretaries holding the SAME role, standing at different units.
+    private const DEAN_SECRETARY = 14; // stands at the Faculty
+    private const DEPT_SECRETARY = 15; // stands at Department A, beneath it
+
+    private const OU_FACULTY = 501;
+    private const OU_DEPT_A  = 502;
+    private const OU_DEPT_B  = 503;
+
+    private const ROLE_SECRETARY = 104;
+
     private const CONTRACTS_PERM = 'documents:use:contracts';
 
     private PDO $pdo;
     private DocumentBlocksApiHandler $handler;
     private DocumentTemplateRepository $templates;
+    private ResourceRoleAssignmentRepository $grants;
 
     protected function setUp(): void
     {
@@ -51,11 +71,13 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         $this->pdo = $this->makeSchema();
         $db = $this->wrapSqlite($this->pdo);
         $this->templates = new DocumentTemplateRepository($this->pdo);
+        $this->grants = new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry());
         $this->handler = new DocumentBlocksApiHandler(
             new DocumentBlockRepository($this->pdo),
             $this->templates,
             new DocumentAccessPolicy(),
-            new RoleChecker($db, new PermissionRegistry())
+            new RoleChecker($db, new PermissionRegistry()),
+            new OuReachResolver($this->pdo, $this->grants),
         );
     }
 
@@ -280,6 +302,110 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         return (int) $d['data']['id'];
     }
 
+    // ── the WHERE dimension: reach (migration 117) ───────────────────────────
+
+    /**
+     * The requirement, for BLOCKS: two secretaries holding the same permission
+     * and standing at different units receive different block sets.
+     *
+     * The permission-parity assertion comes first for the same reason it does in
+     * the templates test — without it this would only prove the policy runs.
+     */
+    public function testTwoSecretariesHoldingTheSamePermissionSeeDifferentBlockSets(): void
+    {
+        $checker = new RoleChecker($this->wrapSqlite($this->pdo), new PermissionRegistry());
+        $dean = $checker->getEffectivePermissionsForProfile(self::DEAN_SECRETARY, self::TENANT);
+        $dept = $checker->getEffectivePermissionsForProfile(self::DEPT_SECRETARY, self::TENANT);
+        sort($dean);
+        sort($dept);
+        self::assertSame($dean, $dept, 'identical permissions, or this test proves nothing');
+
+        $this->place('Faculty header', self::OU_FACULTY);
+        $this->place('Civil footer', self::OU_DEPT_A);
+        $this->place('Materials footer', self::OU_DEPT_B);
+
+        self::assertSame(
+            ['Civil footer', 'Faculty header', 'Materials footer'],
+            $this->visibleNames(self::DEAN_SECRETARY),
+            "the dean's secretary reaches the faculty and everything beneath it"
+        );
+        self::assertSame(
+            ['Civil footer'],
+            $this->visibleNames(self::DEPT_SECRETARY),
+            'a department secretary reaches only their own department'
+        );
+    }
+
+    /** A role granted at a unit gives standing there with no membership. */
+    public function testAGrantAtAUnitExtendsBlockReach(): void
+    {
+        $this->place('Materials footer', self::OU_DEPT_B);
+        self::assertSame([], $this->visibleNames(self::DEPT_SECRETARY));
+
+        $this->grants->grant(
+            self::TENANT,
+            ResourceTypeRegistry::TYPE_OU,
+            self::OU_DEPT_B,
+            self::ROLE_SECRETARY,
+            self::DEPT_SECRETARY
+        );
+        RoleChecker::clearCache();
+
+        self::assertSame(['Materials footer'], $this->visibleNames(self::DEPT_SECRETARY));
+    }
+
+    /** Unplaced blocks are unaffected — the migration changes no existing audience. */
+    public function testAnUnplacedBlockStaysVisibleToEveryone(): void
+    {
+        $res = $this->create(self::OWNER, [
+            'name' => 'Tenant-wide', 'data' => [['type' => 'text']], 'scope' => 'tenant',
+        ]);
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+
+        self::assertSame(['Tenant-wide'], $this->visibleNames(self::DEPT_SECRETARY));
+        self::assertSame(['Tenant-wide'], $this->visibleNames(self::VIEWER));
+    }
+
+    /** Filing a block in the organisation is a publish action. */
+    public function testPlacingABlockRequiresPublishPermission(): void
+    {
+        $res = $this->create(self::WRITER, [
+            'name' => 'Mine', 'data' => [['type' => 'text']], 'owner_ou_id' => self::OU_DEPT_A,
+        ]);
+        self::assertSame(403, $res->getStatusCode());
+    }
+
+    /**
+     * File a tenant-scoped block at a unit, as the admin (who holds publish).
+     */
+    private function place(string $name, int $ouId): void
+    {
+        $res = $this->create(self::OWNER, [
+            'name' => $name,
+            'data' => [['type' => 'text']],
+            'scope' => 'tenant',
+            'owner_ou_id' => $ouId,
+        ]);
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+    }
+
+    /**
+     * The names of the blocks this caller actually receives, sorted so the
+     * assertion is about the SET rather than about `updated_at` ordering.
+     *
+     * @return list<string>
+     */
+    private function visibleNames(int $userId): array
+    {
+        $names = array_map(
+            static fn (array $row): string => (string) $row['name'],
+            $this->list($userId)
+        );
+        sort($names);
+
+        return array_values($names);
+    }
+
     private function makeSchema(): PDO
     {
         $pdo = SchemaFromMigrations::make(true);
@@ -291,7 +417,8 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         $pdo->exec("INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES
             (101, 'viewer', '', 1, datetime('now')),
             (102, 'writer', '', 1, datetime('now')),
-            (103, 'manager', '', 1, datetime('now'))");
+            (103, 'manager', '', 1, datetime('now')),
+            (104, 'secretary', '', 1, datetime('now'))");
 
         $this->grant($pdo, 101, 'documents:read');
         $this->grant($pdo, 102, 'documents:read');
@@ -299,19 +426,35 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         $this->grant($pdo, 103, 'documents:read');
         $this->grant($pdo, 103, self::CONTRACTS_PERM); // the gated tag
 
+        // One shared role for both secretaries: identical permissions, so only
+        // placement can tell them apart.
+        $this->grant($pdo, 104, 'documents:read');
+        $this->grant($pdo, 104, 'documents:write');
+
         $pdo->exec("
             INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
                 (10, 'owner',   'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
                 (11, 'viewer',  'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
                 (12, 'writer',  'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-                (13, 'manager', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                (13, 'manager', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (14, 'dean secretary', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (15, 'dept secretary', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ");
+        $pdo->exec("INSERT INTO organizational_units (id, tenant_id, parent_id, name, slug, created_at) VALUES
+            (501, 1, NULL, 'Faculty of Engineering', 'faculty-eng', datetime('now')),
+            (502, 1, 501,  'Civil Engineering',      'civil-eng',   datetime('now')),
+            (503, 1, 501,  'Materials Science',      'materials',   datetime('now'))");
         $pdo->exec("
             INSERT INTO memberships (id, profile_id, tenant_id, role_id, status, created_at) VALUES
                 (1000, 10, 1, 1,   'active', datetime('now')),
                 (1001, 11, 1, 101, 'active', datetime('now')),
                 (1002, 12, 1, 102, 'active', datetime('now')),
                 (1003, 13, 1, 103, 'active', datetime('now'))
+        ");
+        $pdo->exec("
+            INSERT INTO memberships (id, profile_id, tenant_id, role_id, ou_id, is_primary, status, created_at) VALUES
+                (1004, 14, 1, 104, 501, true, 'active', datetime('now')),
+                (1005, 15, 1, 104, 502, true, 'active', datetime('now'))
         ");
         return $pdo;
     }

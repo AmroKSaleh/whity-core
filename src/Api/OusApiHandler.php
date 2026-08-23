@@ -658,6 +658,39 @@ class OusApiHandler
                 );
             }
 
+            // Refuse while designer rows are still FILED here (migration 117).
+            //
+            // `document_templates.owner_ou_id` / `document_blocks.owner_ou_id`
+            // carry ON DELETE SET NULL, the house convention for a nullable OU
+            // reference — and here that convention is the wrong semantic on its
+            // own: those columns are the WHERE half of a visibility rule, so
+            // letting the constraint fire would turn a delete into a silent
+            // WIDENING, republishing a faculty's templates to the whole tenant.
+            //
+            // A third 409 beside the children and members ones, rather than a
+            // cascade or an automatic re-filing to the parent: re-filing guesses
+            // at an audience the operator never chose, and both alternatives act
+            // where they could instead ask. The message names the count so the
+            // operator knows there is something to move, mirroring the two
+            // guards above. The constraint stays as the backstop for anything
+            // that deletes a unit by another route, where a widened-but-present
+            // row beats a pointer to a unit that no longer exists.
+            $placedStmt = $this->db->prepare("
+                SELECT
+                    (SELECT COUNT(*) FROM document_templates WHERE owner_ou_id = ? AND tenant_id = ?)
+                  + (SELECT COUNT(*) FROM document_blocks    WHERE owner_ou_id = ? AND tenant_id = ?)
+                    AS placed
+            ");
+            $placedStmt->execute([$id, $tenantId, $id, $tenantId]);
+            $placedCount = (int) $placedStmt->fetchColumn();
+            if ($placedCount > 0) {
+                return Response::error(
+                    'Cannot delete organizational unit with ' . $placedCount
+                    . ' document template(s)/block(s) filed against it',
+                    409
+                );
+            }
+
             // WC-713: the `ou.deleting` hook, the DELETE, and the `ou.deleted`
             // hook run inside ONE transaction. Previously the DELETE committed on
             // its own and the cleanup hook fired afterwards, so a listener that

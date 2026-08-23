@@ -12,6 +12,8 @@ use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
 use Whity\Core\Document\Render\RenderServiceUnavailableException;
+use Whity\Core\Ou\OuReachResolver;
+use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Settings\SettingsRegistry;
@@ -84,6 +86,11 @@ final class DocumentRenderApiHandler
         private readonly SettingsService $settings,
         private readonly DocumentRenderer $renderer,
         private readonly DocumentIssuer $issuer,
+        // The WHERE half of TEMPLATE visibility (migration 117): a template
+        // filed at an organizational unit is withheld from callers with no
+        // standing there, so this path cannot become a way to reach a template
+        // the designer's own list would not have shown.
+        private readonly OuReachResolver $ouReach,
     ) {
     }
 
@@ -105,7 +112,12 @@ final class DocumentRenderApiHandler
 
         $id = (int) ($params['id'] ?? 0);
         $row = $this->templates->findById($id, $tenantId);
-        if ($row === null || !$this->policy->canView($row, $callerId, $this->permissionResolver($callerId, $tenantId))) {
+        if ($row === null || !$this->policy->canView(
+            $row,
+            $callerId,
+            $this->permissionResolver($callerId, $tenantId),
+            $this->ouReach->reachFor($tenantId, $callerId),
+        )) {
             return Response::error('Template not found', 404);
         }
 
@@ -210,12 +222,10 @@ final class DocumentRenderApiHandler
     }
 
     /**
-     * @return callable(string): bool
+     * @return callable(string, int|null=): bool
      */
     private function permissionResolver(int $callerId, int $tenantId): callable
     {
-        $set = array_fill_keys($this->roleChecker->getEffectivePermissionsForProfile($callerId, $tenantId), true);
-
-        return static fn (string $permission): bool => isset($set[$permission]);
+        return ScopedPermissionSet::forProfile($this->roleChecker, $callerId, $tenantId);
     }
 }

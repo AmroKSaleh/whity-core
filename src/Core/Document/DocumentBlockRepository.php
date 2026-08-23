@@ -34,7 +34,7 @@ final class DocumentBlockRepository
     public function listForTenant(int $tenantId): array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
              FROM document_blocks WHERE tenant_id = :tenant_id ORDER BY updated_at DESC, id DESC'
         );
         $stmt->execute([':tenant_id' => $tenantId]);
@@ -50,7 +50,7 @@ final class DocumentBlockRepository
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
              FROM document_blocks WHERE id = :id AND tenant_id = :tenant_id'
         );
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
@@ -62,15 +62,15 @@ final class DocumentBlockRepository
     /**
      * @param array{name: string, data: array<string,mixed>|list<mixed>, scope?: string,
      *              required_permission?: ?string, is_system?: bool, created_by?: ?int,
-     *              starter_key?: ?string} $rec
+     *              owner_ou_id?: ?int, starter_key?: ?string} $rec
      * @return int The new row id.
      */
     public function create(int $tenantId, array $rec): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_blocks
-                 (tenant_id, name, data, scope, required_permission, is_system, created_by, starter_key, created_at, updated_at)
-             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, :starter_key, NOW(), NOW())'
+                 (tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at)
+             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, :owner_ou_id, :starter_key, NOW(), NOW())'
         );
         $stmt->execute([
             ':tenant_id'           => $tenantId,
@@ -80,6 +80,7 @@ final class DocumentBlockRepository
             ':required_permission' => $rec['required_permission'] ?? null,
             ':is_system'           => ($rec['is_system'] ?? false) ? 1 : 0,
             ':created_by'          => $rec['created_by'] ?? null,
+            ':owner_ou_id'         => $rec['owner_ou_id'] ?? null,
             ':starter_key'         => $rec['starter_key'] ?? null,
         ]);
 
@@ -108,7 +109,7 @@ final class DocumentBlockRepository
 
     /**
      * @param array{name?: string, data?: array<string,mixed>|list<mixed>, scope?: string,
-     *              required_permission?: ?string} $fields
+     *              required_permission?: ?string, owner_ou_id?: ?int} $fields
      * @return int Rows affected.
      */
     public function update(int $id, int $tenantId, array $fields): int
@@ -130,6 +131,10 @@ final class DocumentBlockRepository
         if (array_key_exists('required_permission', $fields)) {
             $set[] = 'required_permission = :required_permission';
             $params[':required_permission'] = $fields['required_permission'];
+        }
+        if (array_key_exists('owner_ou_id', $fields)) {
+            $set[] = 'owner_ou_id = :owner_ou_id';
+            $params[':owner_ou_id'] = $fields['owner_ou_id'];
         }
         if ($set === []) {
             return 0;
