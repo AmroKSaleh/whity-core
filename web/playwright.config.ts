@@ -75,7 +75,11 @@ export default defineConfig({
     },
     {
       name: 'admin',
-      testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile|website-settings|branding|global-settings|sso|email-settings|document-designer|rtl-direction)\.spec\.ts/,
+      // `document-record` (#993) joins the admin allow-list rather than being
+      // picked up automatically: this is an explicit per-project list, so a new
+      // spec file that is not named here runs under NO project at all and
+      // silently never executes.
+      testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile|website-settings|branding|global-settings|sso|email-settings|document-designer|document-record|rtl-direction)\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
     },

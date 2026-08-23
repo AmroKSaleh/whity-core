@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
@@ -316,18 +317,25 @@ export default function DocumentLibraryPage() {
             >
               {row.starred ? <IconStarFilled size={16} /> : <IconStar size={16} />}
             </button>
-            {row.content_url ? (
-              <a
-                href={row.content_url}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-primary hover:underline"
-              >
-                {row.title}
-              </a>
-            ) : (
-              <span className="font-medium">{row.title}</span>
-            )}
+            {/* #993: the title opens the document's RECORD, not its bytes.
+                It used to be a new-tab link to `content_url` — the current
+                artifact — which answered "let me read it" and nothing else: no
+                version history, no trail, no way back, and a superseded
+                document indistinguishable from a current one because the raw
+                file carries none of that. The record page is the surface that
+                says which version this is and what has happened to it, and the
+                file is still one click away from there.
+
+                A real `<Link>`, not an onClick: middle-click, ctrl-click and
+                "copy link address" are what makes a row with an address
+                different from a row that opens a modal. */}
+            <Link
+              href={`/admin/document-library/${row.id}`}
+              className="font-medium text-primary hover:underline"
+              data-testid={`document-row-${row.id}`}
+            >
+              {row.title}
+            </Link>
           </div>
         ),
       },

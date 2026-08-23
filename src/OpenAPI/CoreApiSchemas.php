@@ -3025,6 +3025,21 @@ final class CoreApiSchemas
                 // claim nobody made. Neither is in `required` for that reason.
                 'collection_ids' => ['type' => 'array', 'items' => self::int()],
                 'starred' => self::bool(),
+                // #993: the record page's per-region verdicts, keyed by region
+                // (`document`, `trail`, `recipients`). Sent by `GET /{id}` only
+                // — the LIST omits it, for the same reason the filing keys above
+                // are optional: a verdict is an answer about one record and one
+                // caller, and 25 of them per page would gate nothing.
+                //
+                // A region the caller may not see is ABSENT from the map. There
+                // is no `hidden` state on the wire and there must not be: a
+                // `{"state": "hidden"}` entry would tell a caller the exact
+                // thing withholding the region was for. See
+                // RecordSectionResolver.
+                'sections' => [
+                    'type' => 'object',
+                    'additionalProperties' => SchemaBuilder::ref('RecordSectionVerdict'),
+                ],
             ], ['id', 'tenant_id', 'template_name', 'title', 'created_at', 'artifacts']),
             // Not paginatedListEnvelope: the organizer echoes back WHICH view it
             // ran and what anchor it resolved to, so a client rendering a rail
