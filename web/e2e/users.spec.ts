@@ -45,15 +45,18 @@ test.describe('Users (admin)', () => {
   test('seeded users are listed by email', async ({ adminPage, page }) => {
     await adminPage.shell.clickNav('Users');
     await page.waitForURL('**/admin/users');
-    // Intentionally UNNAMED. Strict mode applies to the final locator, and the
-    // chained cell query resolves in exactly one of the page's two tables, so
-    // this is unambiguous as written.
+    // NAMED, because the page renders two tables (users, and pending
+    // invitations) and both carry an Email column.
     //
-    // Naming it `{ name: 'Users' }` was tried and REVERTED: it made this test
-    // fail with "element(s) not found" while the identical named locator kept
-    // working in navigation.spec. The cause was never established, so the
-    // hardening bought nothing and cost a green test.
-    const table = page.getByRole('table');
+    // This was tried and reverted once, with the cause recorded as unknown: the
+    // named locator failed here with "element(s) not found" while the identical
+    // locator kept working in navigation.spec. #967 established the cause —
+    // DataTable applied `ariaLabel` to its loading-skeleton table ONLY, so the
+    // accessible name vanished the moment the rows arrived. navigation.spec
+    // survived because it asserts a COLUMN HEADER, which the skeleton also
+    // renders; the cell query below needs real rows, so it could never win.
+    // With the name applied in both states the named locator is correct here.
+    const table = page.getByRole('table', { name: 'Users' });
     await expect(table.getByRole('cell', { name: 'admin@example.com' })).toBeVisible();
     await expect(table.getByRole('cell', { name: 'user@example.com' })).toBeVisible();
   });

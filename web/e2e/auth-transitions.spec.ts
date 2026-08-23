@@ -106,7 +106,16 @@ test.describe('Auth transitions', () => {
     await expect(page).toHaveURL(/\/admin\/users$/);
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
     // Named: the users page also renders a pending-invitations table.
-    await expect(page.getByRole('table', { name: 'Users' })).toBeVisible();
+    const usersTable = page.getByRole('table', { name: 'Users' });
+    await expect(usersTable).toBeVisible();
+    // The ROW is the assertion that carries this test's meaning (#967). A
+    // `table` element on its own is rendered by DataTable's loading skeleton —
+    // before any request is made — so asserting only that was satisfied by a
+    // table that was still empty, and stayed green even when the users request
+    // came back 500. Waiting for a row instead waits for the one thing a
+    // surviving session is needed for: the authenticated GET /api/v1/users
+    // after the reload actually returned this admin's own record.
+    await expect(usersTable.getByRole('cell', { name: ADMIN.email })).toBeVisible();
     await new AppShell(page).expectLoggedInAs(ADMIN.email);
   });
 });
