@@ -139,7 +139,10 @@ test.describe('the document library', () => {
     const rail = page.getByRole('navigation', { name: 'Document folders' });
 
     await rail.getByRole('button', { name: 'New collection' }).click();
-    await page.getByLabel('Name').fill(COLLECTION);
+    // `getByRole('textbox')`, not `getByLabel('Name')`: the latter matches by
+    // substring, so it also resolves the "Rename this collection" dialog itself
+    // and fails strict mode. Found the hard way in the rename step below.
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(COLLECTION);
     await page.getByRole('button', { name: 'Create', exact: true }).click();
 
     // In the rail, from the server's own list rather than from optimism.
@@ -152,7 +155,7 @@ test.describe('the document library', () => {
     const renamed = `${COLLECTION} renamed`;
     await page.getByRole('button', { name: 'This collection' }).click();
     await page.getByRole('menuitem', { name: /Rename/ }).click();
-    await page.getByLabel('Name').fill(renamed);
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed);
     await page.getByRole('button', { name: 'Rename', exact: true }).click();
 
     await expect(rail.getByRole('button', { name: renamed })).toBeVisible();
