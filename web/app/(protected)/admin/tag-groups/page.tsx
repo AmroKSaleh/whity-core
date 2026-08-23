@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
@@ -64,8 +65,22 @@ export default function TagGroupsPage() {
     return (body.data ?? []) as TagGroup[];
   }, [apiClient]);
 
-  const [editing, setEditing] = useState<TagGroup | 'new' | null>(null);
+  const router = useRouter();
+
+  // Only 'new' or closed now: editing an existing group happens on its record
+  // page (#882/#884), which is the only place the KEY has ever been editable.
+  // Creation stays a dialog — a group that does not exist yet has no id, so
+  // there is no address to send anybody.
+  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<TagGroup | null>(null);
+
+  /** #882: open the group's RECORD PAGE. */
+  const openRecord = useCallback(
+    (group: { id: number }) => {
+      router.push(`/admin/tag-groups/${group.id}`);
+    },
+    [router]
+  );
 
   const rows = (data ?? []).map((g) => ({
     ...g,
@@ -79,6 +94,17 @@ export default function TagGroupsPage() {
       header: t('tagGroups.table.key', 'Key'),
       enableSorting: true,
       enableColumnFilter: true,
+      // #882: the key opens the record. The key rather than the display label,
+      // because a group with neither language filled in has no label to click.
+      cell: (group) => (
+        <button
+          type="button"
+          onClick={() => openRecord(group)}
+          className="text-start font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {group.key}
+        </button>
+      ),
     },
     {
       accessorKey: 'displayLabel',
@@ -99,7 +125,7 @@ export default function TagGroupsPage() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setEditing(group)}>
+        <DropdownMenuItem onClick={() => openRecord(group)}>
           {t('tagGroups.rowActions.edit', 'Edit')}
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -122,7 +148,7 @@ export default function TagGroupsPage() {
         )}
         action={
           canManage ? (
-            <Button onClick={() => setEditing('new')} className="gap-2">
+            <Button onClick={() => setCreating(true)} className="gap-2">
               <IconPlus size={18} />
               {t('tagGroups.createButton', 'Create Tag Group')}
             </Button>
@@ -147,14 +173,13 @@ export default function TagGroupsPage() {
         />
       )}
 
-      {editing !== null && (
-        <TagGroupDialog
-          group={editing === 'new' ? null : editing}
+      {creating && (
+        <CreateTagGroupDialog
           apiClient={apiClient}
           addToast={addToast}
-          onClose={() => setEditing(null)}
+          onClose={() => setCreating(false)}
           onSaved={() => {
-            setEditing(null);
+            setCreating(false);
             refetch();
           }}
         />
@@ -176,25 +201,28 @@ export default function TagGroupsPage() {
   );
 }
 
-/** Create (group=null) or edit a tag group. Conditionally mounted, so form
- *  state seeds from props via useState initializers — no seeding effect. */
-function TagGroupDialog({
-  group,
+/**
+ * Create a tag group.
+ *
+ * CREATE ONLY since #882/#884: editing an existing group is `/admin/tag-groups/
+ * [id]`, which shows the tags inside it while you rename it — context a dialog
+ * over the list has nowhere to put. A record that does not exist yet has no id
+ * and therefore no address, which is why creation stays here.
+ */
+function CreateTagGroupDialog({
   apiClient,
   addToast,
   onClose,
   onSaved,
 }: {
-  group: TagGroup | null;
   apiClient: ApiClient;
   addToast: AddToast;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const t = useTranslation('admin');
-  const isEdit = group !== null;
-  const [key, setKey] = useState(group?.key ?? '');
-  const [displayName, setDisplayName] = useState<BilingualValue>(group?.display_name ?? {});
+  const [key, setKey] = useState('');
+  const [displayName, setDisplayName] = useState<BilingualValue>({});
   const [keyError, setKeyError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -216,17 +244,11 @@ function TagGroupDialog({
         key: trimmed,
         display_name: { ar: displayName.ar ?? '', en: displayName.en ?? '' },
       };
-      const response = isEdit
-        ? await apiClient(`/api/v1/tag-groups/${group.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-        : await apiClient('/api/v1/tag-groups', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
+      const response = await apiClient('/api/v1/tag-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
       if (response.status === 409) {
         setKeyError(t('tagGroups.form.key.conflict', 'A tag group with this key already exists.'));
         return;
@@ -234,12 +256,7 @@ function TagGroupDialog({
       if (!response.ok) {
         throw new Error('Save failed');
       }
-      addToast(
-        isEdit
-          ? t('tagGroups.form.updated', 'Tag group updated')
-          : t('tagGroups.form.created', 'Tag group created'),
-        'success'
-      );
+      addToast(t('tagGroups.form.created', 'Tag group created'), 'success');
       onSaved();
     } catch {
       addToast(t('tagGroups.form.error', 'Failed to save tag group'), 'error');
@@ -252,11 +269,7 @@ function TagGroupDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {isEdit
-              ? t('tagGroups.form.editTitle', 'Edit Tag Group')
-              : t('tagGroups.form.createTitle', 'Create Tag Group')}
-          </DialogTitle>
+          <DialogTitle>{t('tagGroups.form.createTitle', 'Create Tag Group')}</DialogTitle>
           <DialogDescription>
             {t(
               'tagGroups.form.description',
@@ -295,9 +308,7 @@ function TagGroupDialog({
           <Button type="button" onClick={() => void submit()} disabled={submitting}>
             {submitting
               ? t('tagGroups.form.saving', 'Saving…')
-              : isEdit
-                ? t('tagGroups.form.save', 'Save')
-                : t('tagGroups.form.create', 'Create')}
+              : t('tagGroups.form.create', 'Create')}
           </Button>
         </DialogFooter>
       </DialogContent>

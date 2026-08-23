@@ -81,7 +81,10 @@ export function DeleteTenantModal({
               {tenant.name}
             </div>
             <div className="text-xs text-muted-foreground">
-              {t('tenants.delete.slug', 'Slug: {slug}', { slug: tenant.slug })}
+              {/* The published contract makes `slug` nullable, so it is
+                  defaulted here rather than interpolated as "null" into a
+                  sentence the operator is reading before a destructive act. */}
+              {t('tenants.delete.slug', 'Slug: {slug}', { slug: tenant.slug ?? '—' })}
             </div>
           </div>
 

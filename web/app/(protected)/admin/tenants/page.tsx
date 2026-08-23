@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
@@ -18,16 +19,19 @@ import {
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateTenantModal } from './create-modal';
-import { EditTenantModal } from './edit-modal';
 import { DeleteTenantModal } from './delete-modal';
 
-export interface Tenant {
-  id: number;
-  name: string;
-  slug: string;
-  userCount: number;
-  createdAt: string;
-}
+/**
+ * The tenant row shape.
+ *
+ * Re-exported from the record screen, which derives it from the OpenAPI schema
+ * (WC-168), rather than hand-mirrored here: this page used to declare `slug` and
+ * `createdAt` as non-nullable while the published contract says both may be
+ * null, and the delete dialog read the first of those straight into a sentence.
+ */
+import type { Tenant } from './record-screen';
+
+export type { Tenant };
 
 export default function TenantsPage() {
   const { apiClient } = useAuth();
@@ -38,8 +42,9 @@ export default function TenantsPage() {
   const canEdit = hasPermission(TENANTS_WRITE);
   const canDelete = hasPermission(TENANTS_DELETE);
 
+  const router = useRouter();
+
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
 
@@ -66,10 +71,22 @@ export default function TenantsPage() {
     }
   }, [error, addToast]);
 
-  const handleEditClick = (tenant: Tenant) => {
-    setSelectedTenant(tenant);
-    setIsEditModalOpen(true);
-  };
+  /**
+   * #882: open the workspace's RECORD PAGE.
+   *
+   * This is the whole of what "Edit" means on this screen now — there is no
+   * edit dialog behind a flag to fall back to. #884 asked for a decision per
+   * screen, and for tenants the decision is that the page SUPERSEDES the modal:
+   * the dialog edited two fields and could show nothing else, while the record
+   * page carries the workspace's plan and entitlement overrides beside them and
+   * states the cross-tenant write rule instead of letting Save 403.
+   */
+  const openRecord = useCallback(
+    (tenant: Tenant) => {
+      router.push(`/admin/tenants/${tenant.id}`);
+    },
+    [router]
+  );
 
   const handleDeleteClick = (tenant: Tenant) => {
     setSelectedTenant(tenant);
@@ -82,6 +99,20 @@ export default function TenantsPage() {
       header: t('tenants.table.name', 'Name'),
       enableSorting: true,
       enableColumnFilter: true,
+      // #882: the row's own name opens the record — the affordance a list gets
+      // once its records have addresses. Same treatment the users and roles
+      // lists gained. Offered to every reader, not only writers: the record page
+      // is READABLE without tenants:write, and it is the only place a
+      // workspace's plan and entitlements are shown at all.
+      cell: (tenant) => (
+        <button
+          type="button"
+          onClick={() => openRecord(tenant)}
+          className="text-start font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {tenant.name}
+        </button>
+      ),
     },
     {
       accessorKey: 'slug',
@@ -93,21 +124,29 @@ export default function TenantsPage() {
     { accessorKey: 'createdAt', header: t('tenants.table.createdAt', 'Created At'), enableSorting: true },
   ];
 
+  // Always rendered now: "open this workspace" is a READ, available to anyone
+  // who can reach this page, and it is the only route to the plan and
+  // entitlement panels the record page carries. The write controls inside it
+  // stay gated on tenants:write separately — same reasoning as the users list's
+  // always-present row menu (#797 §2).
   const rowActions = (tenant: Tenant) => {
-    if (!canEdit && !canDelete) return null;
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('tenants.rowActions.label', 'Row actions')}
+          >
             <IconMenu2 size={16} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {canEdit && (
-            <DropdownMenuItem onClick={() => handleEditClick(tenant)}>
-              {t('tenants.actions.edit', 'Edit')}
-            </DropdownMenuItem>
-          )}
+          <DropdownMenuItem onClick={() => openRecord(tenant)}>
+            {canEdit
+              ? t('tenants.actions.edit', 'Edit')
+              : t('tenants.actions.view', 'Open workspace')}
+          </DropdownMenuItem>
           {canDelete && (
             <DropdownMenuItem
               onClick={() => handleDeleteClick(tenant)}
@@ -159,30 +198,20 @@ export default function TenantsPage() {
         }}
       />
 
+      {/* Delete stays a dialog on the LIST. A confirmation is not a record
+          surface — it has no fields, nothing to link to and nothing to come back
+          to afterwards, because the record it names is about to stop existing. */}
       {selectedTenant && (
-        <>
-          <EditTenantModal
-            isOpen={isEditModalOpen}
-            onOpenChange={setIsEditModalOpen}
-            tenant={selectedTenant}
-            onSuccess={() => {
-              setIsEditModalOpen(false);
-              setSelectedTenant(null);
-              fetchTenants();
-            }}
-          />
-
-          <DeleteTenantModal
-            isOpen={isDeleteModalOpen}
-            onOpenChange={setIsDeleteModalOpen}
-            tenant={selectedTenant}
-            onSuccess={() => {
-              setIsDeleteModalOpen(false);
-              setSelectedTenant(null);
-              fetchTenants();
-            }}
-          />
-        </>
+        <DeleteTenantModal
+          isOpen={isDeleteModalOpen}
+          onOpenChange={setIsDeleteModalOpen}
+          tenant={selectedTenant}
+          onSuccess={() => {
+            setIsDeleteModalOpen(false);
+            setSelectedTenant(null);
+            fetchTenants();
+          }}
+        />
       )}
     </div>
   );

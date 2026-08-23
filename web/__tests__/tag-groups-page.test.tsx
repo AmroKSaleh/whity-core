@@ -9,6 +9,17 @@
 
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+/**
+ * #882: the list routes to `/admin/tag-groups/[id]` now — the group's key opens
+ * its record page, which is the only surface that has ever let the key itself be
+ * edited. `useRouter` outside a mounted app router throws.
+ */
+const push = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push }),
+}));
 
 const mockApiClient = jest.fn();
 jest.mock('@/lib/auth-context', () => ({
@@ -121,5 +132,38 @@ describe('TagGroupsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /^create$/i }));
 
     await waitFor(() => expect(screen.getByText(/already exists/i)).toBeInTheDocument());
+  });
+});
+
+/**
+ * #882/#884: Edit is a RECORD PAGE now. The dialog that remains is create-only,
+ * because a group that does not exist yet has no id and therefore no address —
+ * and because the key, which the dialog offered only while creating, is finally
+ * editable afterwards on the record.
+ */
+describe('TagGroupsPage after the record page (#882)', () => {
+  beforeEach(() => {
+    mockApiClient.mockImplementation(() => jsonResponse(200, { data: GROUPS }));
+  });
+
+  it("opens the group's record from its key", async () => {
+    render(<TagGroupsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'priority' }));
+
+    expect(push).toHaveBeenCalledWith('/admin/tag-groups/1');
+  });
+
+  it('routes the Edit row action to the record rather than opening a dialog', async () => {
+    // userEvent, not fireEvent: the Radix dropdown opens on real pointer events.
+    const user = userEvent.setup();
+    render(<TagGroupsPage />);
+
+    await waitFor(() => expect(screen.getByText('priority')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /actions for priority/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /edit/i }));
+
+    expect(push).toHaveBeenCalledWith('/admin/tag-groups/1');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
