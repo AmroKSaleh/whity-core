@@ -340,6 +340,17 @@ rebase (`git push --force-with-lease`).
   predicate. A genuinely platform-wide table must be registered in
   `src/Core/Tenant/SanctionedGlobalTables.php`; a deliberate one-off unscoped
   query needs a reasoned `// @tenant-guard-ignore: <reason>` annotation.
+- **A route may only gate on a permission somebody holds, and that is
+  CI-enforced too.** `scripts/ci-permission-holder-guard.php` runs against the
+  migrated database and fails the build when a route's `requiredPermission` is
+  held by no role. Such a gate is not a permission check — it refuses *every*
+  caller, the administrator included, from the moment it ships. So when you move
+  a route onto a slug, the migration that **grants** that slug ships in the same
+  change, and it grants to whoever already holds the related capability rather
+  than to a role *named* `admin` (see
+  `database/migrations/111_grant_roles_read_to_role_writers.php`). A slug that
+  exists in the catalogue and is held by nobody is fine for as long as nothing
+  consults it.
 
 ### TypeScript (frontend)
 
