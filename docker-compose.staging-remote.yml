@@ -10,6 +10,13 @@
 # serves the user interface. The release job tags them together, so deploy them
 # together — a stack with only the app is an API nobody can log in to.
 #
+# A third, OPTIONAL tier sits behind the `render` profile: the document/label
+# PDF renderer (ADR 0012), published as `ghcr.io/<repo>/render` by the same
+# release job and under the same tag. Off unless you ask for it — most
+# deployments never export a PDF and should not carry a Chromium container —
+# but when it IS run it must be run at the tag that matches the other two.
+# See docs/wiki/Document-Render-Service.md.
+#
 # It is driven by .github/workflows/deploy-staging.yml, which copies this file
 # to the staging host and runs:
 #   WHITY_IMAGE=ghcr.io/<repo>:<tag> WHITY_WEB_IMAGE=ghcr.io/<repo>/web:<tag> \
@@ -83,6 +90,12 @@ services:
       # cannot derive behind the TLS-terminating proxy — notably the SSO/OIDC
       # redirect_uri (unset ⇒ relative callback ⇒ provider invalid_request).
       APP_URL: ${APP_URL:-}
+      # Document/label render tier (ADR 0012). Harmless when the `render`
+      # profile is not started AND when documents.render_enabled is off (its
+      # default) — the render endpoint 503s cleanly either way. The secret must
+      # match the render service's own and be >= 32 chars once both are up.
+      RENDER_SERVICE_URL: ${RENDER_SERVICE_URL:-http://render:8130}
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,6 +136,58 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  # The published RENDER image (#947) — the third tier of the same release.
+  #
+  # Opt-in twice over, on purpose: this profile has to be requested
+  # (`--profile render`) AND `documents.render_enabled` has to be turned on
+  # before core will call it. Without the image, an operator wanting server-side
+  # PDF had to hand-assemble a build context from the app and web images and
+  # redo it on every core bump; a miss there does not fail loudly, it exports
+  # documents that quietly stop matching the designer preview.
+  #
+  # Pin WHITY_RENDER_IMAGE to the SAME tag as WHITY_IMAGE and WHITY_WEB_IMAGE.
+  # `GET /health` on this service reports the CoreVersion it was built from, so
+  # a mismatched trio is one curl away from being obvious rather than showing up
+  # as an export that looks subtly wrong.
+  #
+  # Resource note: a render holds a live Chromium (~210 MB retained from the
+  # first request onward, ~813 MB peak for a 1500-page batch), and a batch that
+  # size also blows through three separate 30-second timeouts that sit BELOW
+  # the documents.render_max_rows/_max_pages ceilings. Every one of those
+  # failures reaches the API as an indistinguishable 503, so give this
+  # container a mem_limit you chose and read
+  # docs/wiki/Document-Render-Service.md before raising any limit.
+  render:
+    image: ${WHITY_RENDER_IMAGE:-ghcr.io/amroksaleh/whity-core/render:latest}
+    container_name: whity_staging_render
+    restart: unless-stopped
+    pull_policy: always
+    profiles:
+      - render
+    # Chromium is PID 1's child here and forks freely; an init reaps the zombies
+    # a long-lived browser process leaves behind.
+    init: true
+    environment:
+      # Deliberately `:-` and not the `:?` fail-fast guard the secrets above
+      # use. Compose interpolates EVERY service in the file, profile or no
+      # profile, so a `:?` here would make an ordinary two-tier `up` (which is
+      # what deploy-staging.yml runs, with no render secret in scope) fail on a
+      # service it never intended to start. The service itself covers the gap:
+      # it logs a loud warning at boot and refuses every POST /render with 401
+      # until the secret is at least 32 chars.
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-}
+    # Not published to the host by default: this is an INTERNAL service reached
+    # only by the app over the compose network, and the shared secret is the
+    # only thing standing between it and anyone who can reach the port.
+    expose:
+      - "8130"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8130/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres_data_staging:

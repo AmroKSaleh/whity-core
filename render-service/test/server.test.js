@@ -49,7 +49,18 @@ describe('whity_render server', () => {
   test('GET /health returns 200 with no auth required', async () => {
     const res = await request(app).get('/health');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: 'ok' });
+    expect(res.body.status).toBe('ok');
+  });
+
+  // The identity fields are always PRESENT, even when this checkout has never
+  // run `npm run build:info` (dist/build-info.json absent -> nulls). A consumer
+  // comparing the render tier's core_version against the app's must be able to
+  // read "this build does not know" from the same field shape rather than
+  // having to tell a missing key apart from an older service.
+  test('GET /health always carries the build-identity fields', async () => {
+    const res = await request(app).get('/health');
+    expect(res.body).toHaveProperty('core_version');
+    expect(res.body).toHaveProperty('commit');
   });
 
   test('POST /render without the secret header is 401', async () => {

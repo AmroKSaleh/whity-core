@@ -45,3 +45,14 @@ packages/ui/*
 
 packages/features/*
 !packages/features/src
+
+# The ONE PHP file this image needs: CoreVersion::VERSION is the single source
+# of truth every tier derives its version from, and the render image reports it
+# on /health so an operator can see whether the render tier still pairs with
+# the core it serves (scripts/write-build-info.js). Nothing else from src/ is
+# in the context — the ladder below re-includes exactly this file.
+!src
+src/*
+!src/Core
+src/Core/*
+!src/Core/CoreVersion.php
