@@ -31,6 +31,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@amroksaleh/ui/tabs"
 import { Textarea } from "@amroksaleh/ui/textarea"
 
+import { resolveContextPath } from "./context-path"
 import { resolveTablerIcon } from "./resolve-tabler-icon"
 import { submitPluginAction } from "./submit-plugin-action"
 import type {
@@ -277,7 +278,16 @@ function resolveDefault(block: { default?: unknown; defaultFrom?: string }, ctx:
  * `resolveFromContext`) — e.g. an edit modal PATCHing
  * `/api/persons/{edit-person.id}` for the row it was opened with. An
  * unresolved token becomes `''`, matching the web renderer/SDK contract's
- * no-cross-reference stance. */
+ * no-cross-reference stance.
+ *
+ * DELIBERATELY NOT the not-until-resolved rule the read paths follow
+ * (#949/#957), and the asymmetry is the point. A read that guesses is silent:
+ * nobody asked for it, nobody is watching it, and its answer is presented as
+ * fact. A submit is PRESSED, and every outcome it can have is reported back —
+ * the inline confirmation, the issues list, or the error alert below. Refusing
+ * it instead would have to SAY why, or Save becomes a no-op that reports
+ * nothing, which is the bug moved rather than fixed. That is its own copy and
+ * its own UX call; web left the same call the same way. */
 function interpolateEndpoint(endpoint: string, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): string {
   return endpoint.replace(/\{([^}]+)\}/g, (_match, ref: string) => {
     const resolved = resolveFromContext(ref, ctx)
@@ -327,23 +337,16 @@ function useEffectiveSource(source: string, params?: SourceParam[]): string {
  * would fetch every record the caller can see and render it as "the record this
  * page is about". Not fetching is the only honest answer to "which record?"
  * when nothing has said.
+ *
+ * A form's `dataSource.path` resolves through the same {@link resolveContextPath}
+ * for exactly that reason (#957) — it is a read, and reads that guess are the
+ * ones that go wrong quietly.
  */
 function useResolvedRecordSource(baseSource: string, params?: SourceParam[]): string | null {
   const ctx = React.useContext(MasterDetailContext)
   return React.useMemo(() => {
-    // Split on the tokens rather than replacing through a callback, matching
-    // the web renderer exactly: a callback recording "something did not
-    // resolve" in a closure variable is a reassignment during render. Splitting
-    // on a CAPTURING pattern puts every token at an odd index, so this is a map
-    // and a join with nothing mutable in it.
-    const parts = baseSource.split(/(\{[^{}]*\})/)
-    const resolvedParts = parts.map((part, index) => {
-      if (index % 2 === 0) return part
-      const value = resolveFromContext(part.slice(1, -1), ctx)
-      return value === undefined || value === null || value === "" ? null : encodeURIComponent(String(value))
-    })
-    if (resolvedParts.some((part) => part === null)) return null
-    const substituted = resolvedParts.join("")
+    const substituted = resolveContextPath(baseSource, (ref) => resolveFromContext(ref, ctx))
+    if (substituted === null) return null
     if (!params || params.length === 0) return substituted
     const pairs = params
       .map((param) => {
@@ -463,15 +466,14 @@ function collectAccessGates(blocks: Block[] | undefined, into: CollectedGate[] =
 
 /** Substitute a gate endpoint's `{token}` segments, or null when any is
  * unresolved. Null means NOT ASKED, exactly as it does for a `dataRecord.source`:
- * a half-substituted path names a different route with a different gate. */
+ * a half-substituted path names a different route with a different gate.
+ *
+ * The substitution itself is {@link resolveContextPath} — shared with
+ * `dataRecord.source` and a form's `dataSource.path` so the three cannot drift
+ * (#957; this file used to hold two hand-written copies of it and pass the
+ * form's path through untouched). */
 function resolveGateEndpoint(endpoint: string, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): string | null {
-  const parts = endpoint.split(/(\{[^{}]*\})/)
-  const resolved = parts.map((part, index) => {
-    if (index % 2 === 0) return part
-    const value = resolveFromContext(part.slice(1, -1), ctx)
-    return value === undefined || value === null || value === "" ? null : encodeURIComponent(String(value))
-  })
-  return resolved.some((part) => part === null) ? null : resolved.join("")
+  return resolveContextPath(endpoint, (ref) => resolveFromContext(ref, ctx))
 }
 
 /** The methods the host will resolve. Mirrors `BlockValidator::ACCESS_CHECK_METHODS`. */
@@ -2041,7 +2043,36 @@ function FormRenderer({ block }: { block: FormBlock }) {
   )
   const [submitting, setSubmitting] = React.useState(false)
   const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null)
-  const preload = usePluginData<Record<string, unknown>>(block.dataSource?.path ?? "__no_data_source__", (data) =>
+  // #957: `dataSource.path` carries the same `{token}` syntax a
+  // `dataRecord.source` does, and it now resolves by the same rule — NOT AT ALL
+  // until every token is bound. It used to be handed to `usePluginData`
+  // verbatim, so an edit form on a record pane requested
+  // `/things/%7Brecord%7D` and pre-populated with nothing; substituting `""`
+  // instead would have been no better, since `/things/` is very often the
+  // COLLECTION endpoint — a request that SUCCEEDS and pre-populates the form
+  // with the wrong record. See `resolveContextPath` for why `null` is the only
+  // honest answer, and why it matters more on a device than it does on the web.
+  const dataSourcePath =
+    block.dataSource === undefined ? null : resolveContextPath(block.dataSource.path, (ref) => resolveFromContext(ref, masterDetail))
+
+  // A form whose source names a record NOTHING HAS BOUND YET stays disabled,
+  // and this is the whole point of the issue rather than a detail of it. An
+  // enabled, un-prefilled edit form is indistinguishable from a record that
+  // genuinely holds no values — and against an update endpoint that replaces
+  // rather than merges (`SyncController::update()` writes every domain column
+  // as `values[col] ?? null`), submitting it writes blanks over every field the
+  // user did not retype and reports success. Offline that is unrecoverable by
+  // the time anyone sees it: the blanked row syncs up as a legitimate edit and
+  // nothing downstream can tell it from an intentional clear.
+  const isUnbound = block.dataSource !== undefined && dataSourcePath === null
+
+  // `""` is `usePluginData`'s own "nothing to fetch" (it bails on an empty
+  // source), so "this form declares no dataSource" and "its dataSource names a
+  // record nobody has chosen" reach the hook as the same thing: no request.
+  // That replaces a `"__no_data_source__"` sentinel which was NOT empty and so
+  // was fetched — every form without a dataSource cost the host one doomed
+  // round trip, and the reply, whatever it was, landed in this form's preload.
+  const preload = usePluginData<Record<string, unknown>>(dataSourcePath ?? "", (data) =>
     block.dataSource && data && typeof data === "object" ? (data as Record<string, unknown>) : null,
   )
 
@@ -2059,7 +2090,11 @@ function FormRenderer({ block }: { block: FormBlock }) {
     // Only re-seed when the preload data itself changes, not on every local edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block.dataSource, preload.status === "ready" ? preload.data : null])
-  const isPreloading = block.dataSource !== undefined && preload.status === "loading"
+  // An unbound form is not loading — nothing is on its way. `usePluginData`
+  // reports `loading` for a source it never fetched, so the two states have to
+  // be told apart here or the form would sit under a spinner's disabled
+  // fieldset saying nothing about why.
+  const isPreloading = block.dataSource !== undefined && !isUnbound && preload.status === "loading"
 
   const setValue = React.useCallback((name: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [name]: value }))
@@ -2091,8 +2126,20 @@ function FormRenderer({ block }: { block: FormBlock }) {
 
   return (
     <FormScopeContext.Provider value={scope}>
-      <fieldset disabled={submitting || isPreloading} className="space-y-4">
+      <fieldset disabled={submitting || isPreloading || isUnbound} className="space-y-4">
         <form onSubmit={submit} className="space-y-4">
+          {isUnbound && (
+            // Said out loud, and deliberately not styled as a failure — nothing
+            // has gone wrong, nothing has named a record yet. The same sentence
+            // this renderer's `dataRecord` already uses for the same state, so a
+            // detail pane whose record block and edit form are both waiting on
+            // one selection says one thing twice rather than two things once.
+            // (`data-slot` matches web's so the parity test can ask both
+            // renderers the same question with one selector.)
+            <p className="text-sm text-muted-foreground" data-slot="form-unbound">
+              No record selected
+            </p>
+          )}
           {result?.ok === false && (
             <Alert variant="destructive">
               <AlertDescription>{result.message}</AlertDescription>
