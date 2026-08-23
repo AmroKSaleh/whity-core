@@ -910,6 +910,36 @@ export type Block = BlockFacets &
   | RecordFieldsBlock
   | AccessGateBlock );
 
+/**
+ * Why one write capability came back false (issue #951).
+ *
+ * A capability is false for three unrelated reasons — nothing is registered to
+ * satisfy the action, the plugin registered the wrong method, or the caller
+ * lacks the RBAC — and the renderer used to answer all three by omitting the
+ * control, so a correct screen the viewer has no rights on looked exactly like
+ * a broken one. The control is now disabled and carries this instead.
+ */
+export interface CapabilityDenial {
+  /**
+   * The stable machine discriminant, used to key a localized string:
+   *   - `no-resource` the feature declares no resource at all;
+   *   - `no-route`    a resource exists but no route satisfies this action;
+   *   - `forbidden`   the route exists and the caller's RBAC denies it.
+   */
+  code: 'no-resource' | 'no-route' | 'forbidden';
+  /**
+   * The audience-safe explanation, shown to whoever is looking at the screen.
+   * Never names an internal identifier; doubles as the i18n fallback.
+   */
+  reason: string;
+  /**
+   * The operator-grade half: the exact route the platform looked for, or the
+   * exact RBAC the matched route demands. Non-null ONLY for a caller holding
+   * `plugins:read` — the server decides, the client just renders what it got.
+   */
+  detail: string | null;
+}
+
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {
   /** Unique kebab-case slug, also used in the /admin/x/[featureId] route. */
@@ -981,6 +1011,14 @@ export interface PluginFeature {
    * the renderer hides controls the caller cannot use.
    */
   capabilities: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
+  /**
+   * Why each FALSE capability is false (issue #951). One entry per denied
+   * capability — a granted one has none — so the object is empty when all
+   * three are held. Optional because a pre-#951 backend does not send it.
+   */
+  capabilityReasons?: Partial<
+    Record<'canCreate' | 'canEdit' | 'canDelete', CapabilityDenial>
+  >;
 }
 
 /** Narrow an unknown payload to the `{ data: PluginFeature[] }` envelope. */

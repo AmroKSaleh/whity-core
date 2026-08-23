@@ -14,6 +14,11 @@
  * never a throw.
  */
 
+// Type-only, so this stays a pure module with no runtime import: the denial
+// shape is the backend's wire contract (issue #951) and is declared where the
+// rest of that contract lives.
+import type { CapabilityDenial } from '@/lib/plugin-features';
+
 /** A JSON-schema node — either a `$ref` pointer or an inline schema. */
 export interface SchemaObject {
   $ref?: string;
@@ -154,6 +159,93 @@ export function effectiveCapabilities(
     canCreate: (spec?.canCreate ?? false) && (caller?.canCreate ?? false),
     canEdit: (spec?.canEdit ?? false) && (caller?.canEdit ?? false),
     canDelete: (spec?.canDelete ?? false) && (caller?.canDelete ?? false),
+  };
+}
+
+/** The three write actions {@link effectiveCapabilities} decides. */
+export type CrudAction = 'canCreate' | 'canEdit' | 'canDelete';
+
+/** Which spec operation each action is derived from, quoted back to an author. */
+const SPEC_OPERATION: Record<CrudAction, string> = {
+  canCreate: 'POST on the collection path',
+  canEdit: 'PATCH on the item path',
+  canDelete: 'DELETE on the item path',
+};
+
+/** The audience-safe text for an action the spec does not publish. */
+const SPEC_UNAVAILABLE: Record<CrudAction, string> = {
+  canCreate: 'Creating records is not available on this screen.',
+  canEdit: 'Editing records is not available on this screen.',
+  canDelete: 'Deleting records is not available on this screen.',
+};
+
+/**
+ * Why one write control is disabled, or null when it is usable (issue #951).
+ *
+ * `effectiveCapabilities` ANDs two independently-sourced answers, so a control
+ * is unusable for two independently-sourced reasons and the explanation has to
+ * come from whichever side said no:
+ *
+ *  - the SERVER said no. It knows most: whether a route exists at all and
+ *    whether this caller's RBAC allows it, with the audience split already
+ *    applied. Its answer wins whenever it has one.
+ *  - the SPEC said no — the plugin's own OpenAPI document publishes no such
+ *    operation. Only the client can see this, so the reason is built here.
+ *
+ * A missing spec entirely (`spec` null: the schema fetch failed) is its own
+ * answer and must not be reported as "the plugin did not declare it" — the
+ * screen is temporarily unreadable, not permanently incapable.
+ *
+ * @param includeDetail Whether to attach the author-facing `detail` to a
+ *        CLIENT-derived denial. Cosmetic only — it keeps the two audiences
+ *        consistent — because the detail is read off a document the browser
+ *        already holds. The gate that actually withholds anything is the
+ *        server's, which never sends what the caller may not have.
+ */
+export function capabilityDenial(
+  action: CrudAction,
+  spec: CrudCapabilities | null | undefined,
+  caller: CrudCapabilities | null | undefined,
+  serverReasons: Partial<Record<CrudAction, CapabilityDenial>> | undefined,
+  includeDetail: boolean
+): CapabilityDenial | null {
+  const specSaysYes = spec?.[action] ?? false;
+  const callerSaysYes = caller?.[action] ?? false;
+  if (specSaysYes && callerSaysYes) {
+    return null;
+  }
+
+  if (!callerSaysYes) {
+    const fromServer = serverReasons?.[action];
+    if (fromServer !== undefined) {
+      return fromServer;
+    }
+    // A server that predates #951 sends the boolean and no reason. Say the
+    // honest minimum rather than inventing a cause: "unavailable" would be a
+    // guess, and the one thing certain is that the platform withheld it.
+    return {
+      code: 'forbidden',
+      reason: 'This action is not available to you here.',
+      detail: null,
+    };
+  }
+
+  if (spec === null || spec === undefined) {
+    return {
+      code: 'no-route',
+      reason: 'This screen could not load its API schema, so its actions are unavailable.',
+      detail: includeDetail
+        ? "the resource's OpenAPI document could not be fetched or parsed"
+        : null,
+    };
+  }
+
+  return {
+    code: 'no-route',
+    reason: SPEC_UNAVAILABLE[action],
+    detail: includeDetail
+      ? `the plugin's OpenAPI document publishes no ${SPEC_OPERATION[action]} for this resource`
+      : null,
   };
 }
 

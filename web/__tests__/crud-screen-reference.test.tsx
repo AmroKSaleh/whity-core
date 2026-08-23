@@ -28,6 +28,12 @@ jest.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 const addToast = jest.fn();
 jest.mock('@/lib/toast-context', () => ({ useToast: () => ({ addToast }) }));
 jest.mock('@/lib/direction-context', () => ({ useDirection: () => ({ dir: 'ltr' }) }));
+// CrudScreen asks who may read a denial's author-facing half (issue #951).
+// Irrelevant to this spec — every capability here is granted — but the real
+// hook throws without its provider.
+jest.mock('@/hooks/useCapabilities', () => ({
+  useCapabilities: () => ({ hasPermission: () => false }),
+}));
 
 import { CrudScreen } from '@/components/plugin/crud-screen';
 import { toPayload } from '@/components/plugin/crud-form';

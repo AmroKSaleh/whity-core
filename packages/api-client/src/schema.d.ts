@@ -3104,6 +3104,12 @@ export interface components {
         BrandingResponse: {
             data: components["schemas"]["Branding"];
         };
+        CapabilityDenial: {
+            /** @enum {string} */
+            code: "no-resource" | "no-route" | "forbidden";
+            reason: string;
+            detail: string | null;
+        };
         DataType: {
             key: string;
             source: string;
@@ -3465,6 +3471,11 @@ export interface components {
                 canCreate: boolean;
                 canEdit: boolean;
                 canDelete: boolean;
+            };
+            capabilityReasons: {
+                canCreate?: components["schemas"]["CapabilityDenial"];
+                canEdit?: components["schemas"]["CapabilityDenial"];
+                canDelete?: components["schemas"]["CapabilityDenial"];
             };
             blocks?: {
                 [key: string]: unknown;

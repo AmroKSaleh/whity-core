@@ -3514,6 +3514,23 @@ final class CoreApiSchemas
                     'canEdit' => self::bool(),
                     'canDelete' => self::bool(),
                 ], ['canCreate', 'canEdit', 'canDelete']),
+                // #951: why a capability came back FALSE, so the renderer can
+                // disable the control and say what happened instead of omitting
+                // it (three unrelated causes used to render as one missing
+                // button). One entry per false capability — a true one has no
+                // entry — so every property here is optional and the object is
+                // empty when all three are granted. `detail` is the
+                // operator-grade half and is non-null only for a caller holding
+                // plugins:read; see FrontendFeaturesApiHandler for the audience
+                // split.
+                'capabilityReasons' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'canCreate' => SchemaBuilder::ref('CapabilityDenial'),
+                        'canEdit' => SchemaBuilder::ref('CapabilityDenial'),
+                        'canDelete' => SchemaBuilder::ref('CapabilityDenial'),
+                    ],
+                ],
                 // WC-226: present (and host-validated) ONLY for screen='blocks' —
                 // the platform-neutral block tree a renderer translates to native
                 // widgets. A coarse array of objects here; the SDK BlockValidator
@@ -3523,7 +3540,18 @@ final class CoreApiSchemas
                     'type' => 'array',
                     'items' => ['type' => 'object', 'additionalProperties' => true],
                 ],
-            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'embed', 'requiredPermission', 'capabilities']),
+            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'embed', 'requiredPermission', 'capabilities', 'capabilityReasons']),
+            // #951: one denied capability, explained for both audiences at once.
+            // `code` is the stable machine discriminant the renderer keys its
+            // localized string off; `reason` is the already-localizable English
+            // fallback, safe for any caller; `detail` names the route or the
+            // RBAC the platform actually looked at and is null unless the caller
+            // holds plugins:read.
+            'CapabilityDenial' => self::object([
+                'code' => ['type' => 'string', 'enum' => ['no-resource', 'no-route', 'forbidden']],
+                'reason' => self::str(),
+                'detail' => self::str(true),
+            ], ['code', 'reason', 'detail']),
             'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
 
             // WC-176 (#205): the caller's effective permission slugs. Mirrors

@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import {
+  capabilityDenial,
   deriveCrudModel,
   effectiveCapabilities,
   fetchSpec,
+  type CrudAction,
   type CrudField,
   type CrudModel,
 } from '@/lib/plugin-crud-schema';
@@ -19,6 +21,9 @@ import {
   type CrudRow,
 } from '@/components/plugin/crud-form';
 import { recordHref } from '@/lib/plugin-record-route';
+import type { CapabilityDenial, PluginFeature } from '@/lib/plugin-features';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { usePluginData } from '@/lib/use-plugin-data';
 import { useToast } from '@/lib/toast-context';
 import { useDirection } from '@/lib/direction-context';
 import { AdminHeader } from '@/components/admin/admin-header';
@@ -259,6 +264,115 @@ function CrudDeleteDialog({
 }
 
 /**
+ * The user-facing half of a denial, localized (issue #951).
+ *
+ * This is what `code` is FOR. The server sends English prose because it has to
+ * serve every client, and only a stable machine discriminant lets this one
+ * render the sentence in the reader's language. `denial.reason` stays as the
+ * fallback for a code this build does not know.
+ *
+ * Every key and every default is written out literally rather than templated
+ * from `code`: the catalogue extractor cannot read a key it has to compute, and
+ * it FAILS on those rather than shipping a string no translator ever sees.
+ *
+ * `detail` is deliberately not translated — it quotes route paths and RBAC
+ * slugs, which are identifiers, and it is read by plugin authors.
+ */
+function denialText(
+  denial: CapabilityDenial,
+  action: CrudAction,
+  t: TranslateFn
+): string {
+  if (denial.code === 'forbidden') {
+    switch (action) {
+      case 'canCreate':
+        return t(
+          'crud.capability.forbidden.create',
+          'You do not have permission to create records here.'
+        );
+      case 'canEdit':
+        return t(
+          'crud.capability.forbidden.edit',
+          'You do not have permission to edit records here.'
+        );
+      case 'canDelete':
+        return t(
+          'crud.capability.forbidden.delete',
+          'You do not have permission to delete records here.'
+        );
+    }
+  }
+
+  if (denial.code === 'no-resource' || denial.code === 'no-route') {
+    switch (action) {
+      case 'canCreate':
+        return t(
+          'crud.capability.unavailable.create',
+          'Creating records is not available on this screen.'
+        );
+      case 'canEdit':
+        return t(
+          'crud.capability.unavailable.edit',
+          'Editing records is not available on this screen.'
+        );
+      case 'canDelete':
+        return t(
+          'crud.capability.unavailable.delete',
+          'Deleting records is not available on this screen.'
+        );
+    }
+  }
+
+  return denial.reason;
+}
+
+/**
+ * A write control the caller cannot use: present, inert, and able to say why
+ * (issue #951).
+ *
+ * Follows the house pattern established by `PermissionButton`: the `title`
+ * lives on a WRAPPER because a disabled control emits no pointer events of its
+ * own, and the same text is repeated into an `sr-only` note because a native
+ * `title` on a wrapper is not reliably announced.
+ *
+ * The author-facing `detail` is appended after the reason when the server sent
+ * one, which it does only for a caller holding `plugins:read`. That is the
+ * whole fix for the seven-screens-with-no-Edit-button case: the person who can
+ * repair the plugin reads the cause off the control itself.
+ */
+function DeniedControl({
+  denial,
+  action,
+  t,
+  children,
+}: {
+  denial: CapabilityDenial | null;
+  action: CrudAction;
+  t: TranslateFn;
+  children: React.ReactNode;
+}) {
+  // Null means the model has not settled yet. The control must still be inert
+  // — enabling it would open a dialog with no fields behind it — but it has
+  // nothing true to say, and "this screen could not load its API schema" is a
+  // lie while the fetch is still in flight.
+  if (denial === null) {
+    return <span className="inline-flex">{children}</span>;
+  }
+
+  const reason = denialText(denial, action, t);
+  const text = denial.detail !== null ? `${reason} (${denial.detail})` : reason;
+
+  return (
+    <span title={text} className="inline-flex">
+      {children}
+      <span className="sr-only" role="note">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+/**
  * Schema-driven CRUD screen for a plugin feature (WC-169).
  *
  * On mount it fetches the public OpenAPI document (same-origin proxy) and the
@@ -275,13 +389,34 @@ function CrudDeleteDialog({
  * plugin declaration to do so: the record page is derived from the same OpenAPI
  * document this screen derives its table from, so a plugin gets record pages
  * for the resource it already published, without shipping a line of JavaScript.
+ *
+ * spec, and renders the standard admin list + create/edit/delete dialogs.
+ *
+ * A write control the caller cannot use is rendered DISABLED with its reason on
+ * hover, never omitted (issue #951). Omitting it collapsed three unrelated
+ * causes — no route behind the action, no permission, a plugin author's wrong
+ * method — into one missing button, which made a correct screen and a broken
+ * one pixel-identical. A 403 on the list still renders the access-denied card.
+ *
+ * Delete is disabled here rather than hidden, departing from
+ * `PermissionButton`'s `destructive` default. That default exists so nobody is
+ * tempted to click a destructive action they cannot complete, and a DISABLED
+ * control cannot be clicked either — so it costs nothing, while hiding would
+ * throw away the only signal that says whether the screen is right.
  */
 export function CrudScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
   const { dir } = useDirection();
   const router = useRouter();
   const t = useTranslation('plugin');
+  const { hasPermission } = useCapabilities();
   const basePath = feature.resource?.basePath ?? null;
+
+  // Who is shown the author-facing half of a denial (issue #951): the same
+  // audience the server applies to its own `detail`, so one screen never mixes
+  // the two voices. `plugins:read` gates the plugin console, i.e. exactly the
+  // people who can act on "no PATCH route is registered at …".
+  const showDiagnostics = hasPermission('plugins:read');
 
   // Resolved at render rather than inside the load effect below. A STRING
   // dependency is compared by value, so the list is not re-fetched merely
@@ -480,6 +615,31 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     feature.capabilities
   );
 
+  // Why each unusable control is unusable (issue #951). The server already
+  // decided who may read an author-facing `detail` and simply omits it
+  // otherwise; this flag applies the SAME audience rule to the denials derived
+  // here from the spec, which the server never saw.
+  const denialFor = (action: CrudAction): CapabilityDenial | null =>
+    capabilityDenial(
+      action,
+      model?.capabilities,
+      feature.capabilities,
+      feature.capabilityReasons,
+      showDiagnostics
+    );
+
+  // A model that has not arrived YET is not a model that failed to arrive.
+  // Both leave `model` null, and only the second is a cause worth stating —
+  // so while the fetch is in flight a denial is carried as null and the
+  // control renders inert but silent.
+  const isSettling = model === null && isLoading;
+  const settled = (denial: CapabilityDenial | null): CapabilityDenial | null =>
+    isSettling ? null : denial;
+
+  const createDenial = denialFor('canCreate');
+  const editDenial = denialFor('canEdit');
+  const deleteDenial = denialFor('canDelete');
+
   const columns: Column<CrudRow>[] = (model?.columns ?? []).map((column) => ({
     key: column.key,
     label: column.label,
@@ -508,49 +668,58 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
           return displayRow;
         });
 
-  const rowActions =
-    capabilities.canEdit || capabilities.canDelete
-      ? (displayRow: CrudRow) => {
-          const row = rows.find((candidate) => candidate.id === displayRow.id) ?? displayRow;
-          return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t('crud.rowActions.label', 'Row actions')}
-              >
-                <IconMenu2 />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {capabilities.canEdit && (
-                // #948: a NAVIGATION, not an overlay. The row's record has an
-                // address, so editing goes there — which is what makes "send me
-                // the link to that record" answerable, the back button work, and
-                // a reload land on the same record instead of the list.
-                <DropdownMenuItem
-                  onClick={() => router.push(recordHref(feature.id, row.id))}
-                >
-                  {t('crud.rowActions.edit', 'Edit')}
-                </DropdownMenuItem>
-              )}
-              {capabilities.canDelete && (
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => {
-                    setSelected(row);
-                    setIsDeleteOpen(true);
-                  }}
-                >
-                  {t('crud.rowActions.delete', 'Delete')}
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          );
-        }
-      : undefined;
+  // The row-actions column is always present now (issue #951). It used to
+  // disappear whenever BOTH item actions were unusable, which is the same
+  // erasure one level up: a screen with no row menu at all reads as a screen
+  // that was never meant to have one.
+  const rowActions = (displayRow: CrudRow) => {
+    const row = rows.find((candidate) => candidate.id === displayRow.id) ?? displayRow;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('crud.rowActions.label', 'Row actions')}
+          >
+            <IconMenu2 />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {editDenial === null ? (
+            <DropdownMenuItem
+              onClick={() => router.push(recordHref(feature.id, row.id))}
+            >
+              {t('crud.rowActions.edit', 'Edit')}
+            </DropdownMenuItem>
+          ) : (
+            <DeniedControl denial={settled(editDenial)} action="canEdit" t={t}>
+              <DropdownMenuItem disabled aria-disabled>
+                {t('crud.rowActions.edit', 'Edit')}
+              </DropdownMenuItem>
+            </DeniedControl>
+          )}
+          {deleteDenial === null ? (
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => {
+                setSelected(row);
+                setIsDeleteOpen(true);
+              }}
+            >
+              {t('crud.rowActions.delete', 'Delete')}
+            </DropdownMenuItem>
+          ) : (
+            <DeniedControl denial={settled(deleteDenial)} action="canDelete" t={t}>
+              <DropdownMenuItem variant="destructive" disabled aria-disabled>
+                {t('crud.rowActions.delete', 'Delete')}
+              </DropdownMenuItem>
+            </DeniedControl>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -558,12 +727,19 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
         title={feature.label}
         description={description}
         action={
-          capabilities.canCreate ? (
+          createDenial === null ? (
             <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
               <IconPlus size={18} />
               {t('crud.create.action', 'Create')}
             </Button>
-          ) : undefined
+          ) : (
+            <DeniedControl denial={settled(createDenial)} action="canCreate" t={t}>
+              <Button disabled aria-disabled className="gap-2">
+                <IconPlus size={18} />
+                {t('crud.create.action', 'Create')}
+              </Button>
+            </DeniedControl>
+          )
         }
       />
 

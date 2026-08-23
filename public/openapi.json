@@ -22571,6 +22571,31 @@
                     "data"
                 ]
             },
+            "CapabilityDenial": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "enum": [
+                            "no-resource",
+                            "no-route",
+                            "forbidden"
+                        ]
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "code",
+                    "reason",
+                    "detail"
+                ]
+            },
             "DataType": {
                 "type": "object",
                 "properties": {
@@ -24000,6 +24025,20 @@
                             "canDelete"
                         ]
                     },
+                    "capabilityReasons": {
+                        "type": "object",
+                        "properties": {
+                            "canCreate": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            },
+                            "canEdit": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            },
+                            "canDelete": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            }
+                        }
+                    },
                     "blocks": {
                         "type": "array",
                         "items": {
@@ -24020,7 +24059,8 @@
                     "action",
                     "embed",
                     "requiredPermission",
-                    "capabilities"
+                    "capabilities",
+                    "capabilityReasons"
                 ]
             },
             "FrontendFeatureListResponse": {

@@ -120,9 +120,28 @@ final class Plugin implements PluginInterface, PluginFrontendInterface
                 'requiredRole' => null,
                 'requiredPermission' => 'featapi:notes',
             ],
+            // #951's reported defect, reproduced: a resource whose item route
+            // is registered as PUT, which is a perfectly valid route the
+            // capability derivation simply does not read (it derives edit from
+            // PATCH). Nothing is registered for create or delete either, so
+            // this resource exercises every no-route denial at once.
+            [
+                'method' => 'GET',
+                'path' => '/api/featapi/gadgets',
+                'handler' => $ok,
+                'requiredRole' => null,
+                'requiredPermission' => 'featapi:gadgets',
+            ],
+            [
+                'method' => 'PUT',
+                'path' => '/api/featapi/gadgets/{id:\d+}',
+                'handler' => $ok,
+                'requiredRole' => null,
+                'requiredPermission' => 'featapi:gadgets',
+            ],
         ];
     }
-    public function getPermissions(): array { return ['featapi:view', 'featapi:manage', 'featapi:notes', 'featapi:admin']; }
+    public function getPermissions(): array { return ['featapi:view', 'featapi:manage', 'featapi:notes', 'featapi:admin', 'featapi:gadgets']; }
     public function getHooks(): array { return []; }
     public function getMigrations(): array { return []; }
     public function getFrontendFeatures(): array
@@ -142,6 +161,13 @@ final class Plugin implements PluginInterface, PluginFrontendInterface
                 'label' => 'Admin Console',
                 'screen' => 'custom',
                 'requiredPermission' => 'featapi:admin',
+            ],
+            [
+                'id' => 'featapi-gadgets',
+                'label' => 'Gadgets',
+                'screen' => 'crud',
+                'requiredPermission' => 'featapi:gadgets',
+                'resource' => ['basePath' => '/api/featapi/gadgets', 'titleField' => 'name'],
             ],
         ];
     }
@@ -245,6 +271,9 @@ PHP);
             'embed' => null,
             'requiredPermission' => 'featapi:view',
             'capabilities' => ['canCreate' => true, 'canEdit' => true, 'canDelete' => true],
+            // #951: a GRANTED capability has nothing to explain, so the map is
+            // empty rather than carrying three null-ish entries.
+            'capabilityReasons' => [],
         ], $byId['featapi-widgets']);
 
         $this->assertSame([
@@ -260,6 +289,25 @@ PHP);
             'embed' => null,
             'requiredPermission' => 'featapi:admin',
             'capabilities' => ['canCreate' => false, 'canEdit' => false, 'canDelete' => false],
+            // #951: every capability is false and each says so in its own right.
+            // This caller does not hold plugins:read, so `detail` is withheld.
+            'capabilityReasons' => [
+                'canCreate' => [
+                    'code' => 'no-resource',
+                    'reason' => 'Creating records is not available on this screen.',
+                    'detail' => null,
+                ],
+                'canEdit' => [
+                    'code' => 'no-resource',
+                    'reason' => 'Editing records is not available on this screen.',
+                    'detail' => null,
+                ],
+                'canDelete' => [
+                    'code' => 'no-resource',
+                    'reason' => 'Deleting records is not available on this screen.',
+                    'detail' => null,
+                ],
+            ],
         ], $byId['featapi-console'], "A custom screen without a resource carries resource: null and all-false capabilities");
     }
 
@@ -338,6 +386,130 @@ PHP);
         );
     }
 
+    // ============ why a capability came back false (#951) ============
+
+    public function testDeniedCapabilityIsExplainedAsForbiddenWhenTheRouteExists(): void
+    {
+        TenantContext::setTenantId(1);
+
+        // Holds view but not manage: the PATCH/DELETE item routes ARE
+        // registered, and it is the caller's RBAC that denies them.
+        $response = $this->handler(['featapi:view'])->list($this->authedRequest(42));
+
+        $reasons = $this->reasonsFor($response, 'featapi-widgets');
+
+        $this->assertSame('forbidden', $reasons['canEdit']['code']);
+        $this->assertSame(
+            'You do not have permission to edit records here.',
+            $reasons['canEdit']['reason'],
+            'The user-facing half names no identifier — only the fact, about the reader'
+        );
+    }
+
+    public function testWrongMethodRegistrationIsExplainedAsAMissingRouteNotAsPermission(): void
+    {
+        TenantContext::setTenantId(1);
+
+        // The gadgets resource registers PUT at the item path and the caller
+        // holds its permission outright, so nothing here is an RBAC failure.
+        // This is #951's reported case: the screen lists records and offers no
+        // way to edit them, and until now said nothing about why.
+        $response = $this->handler(['featapi:gadgets', 'plugins:read'])->list($this->authedRequest(42));
+
+        $reasons = $this->reasonsFor($response, 'featapi-gadgets');
+
+        $this->assertSame(
+            'no-route',
+            $reasons['canEdit']['code'],
+            'A permitted caller facing a wrong-method registration must not be told it is a permission problem'
+        );
+
+        $detail = $reasons['canEdit']['detail'];
+        $this->assertIsString($detail, 'A plugins:read caller must be given the operator detail');
+        $this->assertStringContainsString(
+            "no PATCH route is registered at '/api/featapi/gadgets/{id}'",
+            $detail,
+            'The author is told the exact method and path the platform looked for'
+        );
+        $this->assertStringContainsString(
+            'never PUT',
+            $detail,
+            'And the one mistake that most often produces it is named outright'
+        );
+    }
+
+    public function testOperatorDetailIsWithheldFromACallerWhoCannotActOnIt(): void
+    {
+        TenantContext::setTenantId(1);
+
+        // Same screen, same denial — but a caller with no plugins:read.
+        $response = $this->handler(['featapi:gadgets'])->list($this->authedRequest(42));
+
+        $reasons = $this->reasonsFor($response, 'featapi-gadgets');
+
+        $this->assertNull(
+            $reasons['canEdit']['detail'],
+            'Route diagnostics are meaningless to a user and are not theirs to read'
+        );
+        $this->assertSame(
+            'Editing records is not available on this screen.',
+            $reasons['canEdit']['reason'],
+            'They still get an answer — just the one written for them'
+        );
+    }
+
+    public function testForbiddenDetailNamesTheRouteRbacOnlyForAPluginReader(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $withRead = $this->reasonsFor(
+            $this->handler(['featapi:view', 'plugins:read'])->list($this->authedRequest(42)),
+            'featapi-widgets'
+        );
+        $withoutRead = $this->reasonsFor(
+            $this->handler(['featapi:view'])->list($this->authedRequest(42)),
+            'featapi-widgets'
+        );
+
+        $this->assertSame(
+            "PATCH /api/featapi/widgets/{id} requires permission 'featapi:manage'",
+            $withRead['canEdit']['detail']
+        );
+        $this->assertNull(
+            $withoutRead['canEdit']['detail'],
+            'The permission slug is RBAC surface: naming it to someone who does not hold it is the one real leak here'
+        );
+    }
+
+    public function testGrantedCapabilitiesCarryNoReasonAtAll(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $response = $this->handler(['featapi:view', 'featapi:manage'])->list($this->authedRequest(42));
+
+        $this->assertSame(
+            [],
+            $this->reasonsFor($response, 'featapi-widgets'),
+            'Nothing is denied, so there is nothing to explain'
+        );
+    }
+
+    public function testReasonsDoNotChangeTheCapabilitiesThemselves(): void
+    {
+        TenantContext::setTenantId(1);
+
+        // The whole point of #951 is that the ANSWER was already right and only
+        // the explanation was discarded. A plugins:read caller must not be
+        // granted anything a plain caller is not.
+        $withRead = $this->handler(['featapi:view', 'plugins:read'])->list($this->authedRequest(42));
+        $withoutRead = $this->handler(['featapi:view'])->list($this->authedRequest(42));
+
+        $this->assertSame(
+            $this->featureById($withoutRead, 'featapi-widgets')['capabilities'],
+            $this->featureById($withRead, 'featapi-widgets')['capabilities']
+        );
+    }
+
     // ==================== fail-closed ====================
 
     public function testUnresolvedTenantContextFailsClosed(): void
@@ -385,6 +557,30 @@ PHP);
             );
 
         return new FrontendFeaturesApiHandler($this->loader, $roleChecker, $this->router);
+    }
+
+    /**
+     * The decoded feature entry with the given id.
+     *
+     * @return array<string, mixed>
+     */
+    private function featureById(\Whity\Core\Response $response, string $id): array
+    {
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $byId = array_column(json_decode($response->getBody(), true)['data'], null, 'id');
+        $this->assertArrayHasKey($id, $byId, "Feature '{$id}' is missing from the response");
+
+        return $byId[$id];
+    }
+
+    /**
+     * The `capabilityReasons` map of the feature with the given id (#951).
+     *
+     * @return array<string, array{code: string, reason: string, detail: string|null}>
+     */
+    private function reasonsFor(\Whity\Core\Response $response, string $id): array
+    {
+        return $this->featureById($response, $id)['capabilityReasons'];
     }
 
     private function authedRequest(int $userId): Request
