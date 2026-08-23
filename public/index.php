@@ -682,6 +682,26 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
     ];
     $items[] = [
+        'id' => 'document-library',
+        'label' => 'Documents',
+        'href' => '/admin/document-library',
+        'icon' => 'folders',
+        'group' => 'admin',
+        'order' => 9.3,
+        // #978 (#947 item 5): the ORGANIZER, which browses issued documents —
+        // as distinct from the entry above it, which is the template DESIGNER.
+        // Two entries rather than one screen with tabs: designing a template and
+        // finding a document somebody issued are different tasks done by
+        // different people, and the designer is a full-screen editor in the
+        // `(editor)` route group with no app sidebar at all.
+        //
+        // Mirrors GET /api/documents (DocumentsApiHandler), gated on
+        // documents:read. The nav item carries the requirement so a
+        // permission-aware client hides it; the API enforces it, and row-level
+        // visibility is enforced on top of that by DocumentVisibilityPolicy.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
+    ];
+    $items[] = [
         'id' => 'approval-gating',
         'label' => 'Approval Gating',
         'href' => '/admin/registrations',
@@ -1956,9 +1976,9 @@ $router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentR
 // top (you raised it, or you hold documents:read:all); the re-render is gated on
 // documents:render and APPENDS an artifact rather than replacing one, so an
 // artifact URL handed out today still resolves to those bytes after a
-// correction. Item 3 (routing) keys off documents.id; item 5 (the browser)
-// derives its folders from these rows rather than from a stored tree, which is
-// why there is no folder surface here.
+// correction. Item 3 (routing) keys off documents.id; item 5 (the organizer,
+// wired further down this step) derives its folders from these rows by QUERY
+// rather than from a stored tree, which is why no folder table exists.
 // Routing's four repositories, built before the handlers that read them. The
 // recipient repository is shared by three consumers — the routing handler, the
 // visibility policy and the inbox source — so it is built ONCE: three instances
@@ -1992,6 +2012,48 @@ $documentVisibilityPolicy = new \Whity\Core\Document\DocumentVisibilityPolicy(
     $resourceRoleAssignmentRepository
 );
 
+// Still 13a-nonies-bis: THE DOCUMENT ORGANIZER's registries (#978, implementing
+// #947 item 5). They are built here rather than at a step of their own because
+// the documents handler below reads them and PHP does not hoist.
+//
+// Folders are DERIVED — no folder tree is stored, because a document raised
+// centrally and needed by fifteen units has no single home and a stored answer
+// has to be maintained as the organisation changes. What IS stored is a
+// person's own filing (migration 114), which claims nothing about the document.
+//
+// The registries are built PER REQUEST, deliberately. Availability is measured
+// against the live schema (PdoSchemaPresence), and a process-level cache would
+// be per FrankenPHP worker — eight of them, each frozen at whatever the schema
+// looked like when it first answered. #701 already cost this codebase that bug
+// once, in the permission cache.
+//
+// A view is absent unless the facts it reads exist, so the three folders #947
+// item 5 derives from ROUTING are still not registered — and note what that
+// means now that item 3 HAS landed above: its tables make the `routing.engine`
+// substrate resolvable, but a resolvable substrate is not a folder. Each of
+// those three needs a predicate on DocumentCriteria and a view registration of
+// its own, which is item 5 follow-up work rather than something routing's
+// arrival supplies. Registering them here to be filtered out would have been a
+// stub with a label, and the filter would have stopped hiding them today.
+$documentSubstrates = new \Whity\Core\Document\Organizer\DocumentSubstrateRegistry(
+    new \Whity\Core\Document\Organizer\PdoSchemaPresence($db->getPdo())
+);
+\Whity\Core\Document\Organizer\CoreDocumentSubstrates::registerInto($documentSubstrates);
+
+$documentViews = new \Whity\Core\Document\Organizer\DocumentViewRegistry($documentSubstrates);
+\Whity\Core\Document\Organizer\CoreDocumentViews::registerInto($documentViews);
+
+// Both are HostWiredService, so \Whity\app() refuses to improvise one — and
+// these two are the worst case for improvising, because an empty registry
+// renders as "this tenant has no folders", which is what a correctly-wired
+// installation with no substrates would also render. Registered in BOTH entry
+// points; a registry wired in only one is the divergence this repo has paid
+// for in #717 and #724, and BaseCommand::setupKernel() carries the twin.
+\Whity\register_service(\Whity\Core\Document\Organizer\DocumentSubstrateRegistry::class, $documentSubstrates); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Core\Document\Organizer\DocumentViewRegistry::class, $documentViews); // @phpstan-ignore-line
+
+$documentCollectionRepository = new \Whity\Core\Document\DocumentCollectionRepository($db->getPdo());
+
 $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     $documentRepository,
     $documentArtifactRepository,
@@ -2002,8 +2064,23 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     $documentRenderer,
     $documentIssuer,
     $roleChecker,
-    $settingsService
+    $settingsService,
+    $documentViews,
+    $documentSubstrates,
+    $documentCollectionRepository,
+    // The connection, for the two questions the organizer asks about the OU
+    // tree: PrimaryMembershipOu (which unit is the caller in) and OuSubtree
+    // (what is beneath a unit). Both are #947 item 3's shared statics, adopted
+    // rather than duplicated — an earlier draft of this branch carried its own
+    // instance-cached copies of both, which is precisely the drift those two
+    // classes exist to prevent.
+    $db->getPdo()
 );
+// `/api/documents/views` is registered BEFORE the `{id:\d+}` routes and cannot
+// collide with them: the id constraint is digits-only, so `views` was never a
+// candidate match. Spelling that out because the reverse order would look
+// equally fine and would be a bug the day the constraint is loosened.
+$router->register('GET',  '/api/documents/views',                                      [$documentsHandler, 'views'],           null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents',                                            [$documentsHandler, 'list'],            null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}',                                   [$documentsHandler, 'show'],            null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/content',                           [$documentsHandler, 'content'],         null, null, CorePermissions::DOCUMENTS_READ);
@@ -2070,6 +2147,27 @@ $meInboxHandler = new \Whity\Api\MeInboxApiHandler($tokenValidator, $inboxSource
 // already names exactly one person.
 $router->register('GET', '/api/me/inbox/sources', [$meInboxHandler, 'sources'], null);
 $router->register('GET', '/api/me/inbox',         [$meInboxHandler, 'list'],    null);
+
+// 13a-nonies-quinquies. Per-user collections (#978), and the star that is one
+// of them under a well-known key. Gated on documents:read rather than a
+// permission of their own: a collection is invisible to everyone but its owner
+// and confers nothing, so a `documents:organize` nobody would ever revoke
+// separately would be a second name for the permission beside it. See
+// DocumentCollectionsApiHandler.
+$documentCollectionsHandler = new \Whity\Api\DocumentCollectionsApiHandler(
+    $documentCollectionRepository,
+    $documentRepository,
+    $documentVisibilityPolicy,
+    $roleChecker
+);
+$router->register('GET',    '/api/document-collections',                                       [$documentCollectionsHandler, 'list'],           null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST',   '/api/document-collections',                                       [$documentCollectionsHandler, 'create'],         null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PATCH',  '/api/document-collections/{id:\d+}',                              [$documentCollectionsHandler, 'update'],         null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('DELETE', '/api/document-collections/{id:\d+}',                              [$documentCollectionsHandler, 'delete'],         null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PUT',    '/api/document-collections/{id:\d+}/documents/{documentId:\d+}',   [$documentCollectionsHandler, 'addDocument'],    null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('DELETE', '/api/document-collections/{id:\d+}/documents/{documentId:\d+}',   [$documentCollectionsHandler, 'removeDocument'], null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PUT',    '/api/documents/{id:\d+}/star',                                    [$documentCollectionsHandler, 'star'],           null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('DELETE', '/api/documents/{id:\d+}/star',                                    [$documentCollectionsHandler, 'unstar'],         null, null, CorePermissions::DOCUMENTS_READ);
 
 // 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3):
 // a brand-new tenant should never open the designer to an empty library. The

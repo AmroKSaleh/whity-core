@@ -173,6 +173,39 @@ abstract class BaseCommand
         );
         \Whity\register_service(\Whity\Core\Inbox\InboxSourceRegistry::class, $inboxSourceRegistry);
 
+        // DOCUMENT ORGANIZER registries (#978). Built here for the same reason
+        // the routing rule catalogue above is: a CLI-driven caller resolving
+        // either of these from the container must get the POPULATED one.
+        //
+        // The failure an empty one produces is the quietest in this file. An
+        // empty view registry answers "this installation computes no document
+        // folders" — which is a perfectly ordinary answer, indistinguishable
+        // from a correctly-wired install whose substrates are genuinely absent,
+        // and it is the exact absent-versus-empty conflation #978 exists to
+        // prevent one layer up. Both classes are HostWiredService, so an
+        // unregistered lookup throws instead of improvising; registering them
+        // here is what keeps that throw from being the CLI's normal state.
+        //
+        // Per request on the HTTP side, per command here — never cached across
+        // either. Availability is measured against the live schema, and a
+        // cached answer would outlive the migration that changes it (#701).
+        $documentSubstrateRegistry = new \Whity\Core\Document\Organizer\DocumentSubstrateRegistry(
+            new \Whity\Core\Document\Organizer\PdoSchemaPresence($db->getPdo())
+        );
+        \Whity\Core\Document\Organizer\CoreDocumentSubstrates::registerInto($documentSubstrateRegistry);
+
+        $documentViewRegistry = new \Whity\Core\Document\Organizer\DocumentViewRegistry($documentSubstrateRegistry);
+        \Whity\Core\Document\Organizer\CoreDocumentViews::registerInto($documentViewRegistry);
+
+        \Whity\register_service(
+            \Whity\Core\Document\Organizer\DocumentSubstrateRegistry::class,
+            $documentSubstrateRegistry
+        );
+        \Whity\register_service(
+            \Whity\Core\Document\Organizer\DocumentViewRegistry::class,
+            $documentViewRegistry
+        );
+
         // Status-page probe catalogue (WC-status-probes), registered as a service
         // exactly as public/index.php does. A divergence between the two entry
         // points here is the recurring bug class this repo has already paid for

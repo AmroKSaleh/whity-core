@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Document;
 
 use PDO;
+use Whity\Core\Document\Organizer\DocumentCriteria;
 
 /**
  * Data-access for `documents` (#947 item 1) — the RECORD half of an issued
@@ -22,12 +23,22 @@ use PDO;
  * -----------------------------------------
  * {@see DocumentVisibilityPolicy} decides whether a caller sees only their own
  * documents or all of the tenant's, and the answer is pushed down into the
- * WHERE clause here as `$onlyCreatedBy` rather than applied to a fetched page.
- * The template/block repositories filter in PHP and can afford to — a tenant
- * holds a few dozen templates. Documents accumulate without bound, so filtering
- * a page after LIMIT returns short pages (25 rows fetched, 3 visible, "page 2"
- * of a total the caller cannot see) and a total that does not match what is
- * listed. The count below applies the same predicate for the same reason.
+ * WHERE clause here (as {@see DocumentCriteria}'s `restrictToCreator`) rather
+ * than applied to a fetched page. The template/block repositories filter in PHP
+ * and can afford to — a tenant holds a few dozen templates. Documents
+ * accumulate without bound, so filtering a page after LIMIT returns short pages
+ * (25 rows fetched, 3 visible, "page 2" of a total the caller cannot see) and a
+ * total that does not match what is listed. The count applies the same
+ * predicate for the same reason.
+ *
+ * THE ORGANIZER'S FOLDERS LAND HERE AS CRITERIA (#978)
+ * ----------------------------------------------------
+ * #947 item 5's browser stores no folder tree; every folder is a query. Those
+ * queries arrive as a {@see DocumentCriteria} — a closed vocabulary this class
+ * translates into literal SQL fragments — rather than as SQL a view supplied.
+ * {@see criteriaSql()} says why that boundary is where it is, and
+ * {@see \Whity\Core\Document\Organizer\DocumentViewRegistry} says what it costs
+ * to extend.
  */
 final class DocumentRepository
 {
@@ -149,36 +160,34 @@ final class DocumentRepository
     }
 
     /**
-     * A page of the tenant's documents, newest first.
+     * A page of the tenant's documents matching a view's criteria, newest first.
      *
-     * @param int|null $onlyCreatedBy When set, restricts to documents this
-     *        profile raised — the SQL half of {@see DocumentVisibilityPolicy}.
-     *        Null means the caller holds the tenant-wide read grant.
      * @return list<array<string, mixed>>
      */
-    public function listForTenant(int $tenantId, ?int $onlyCreatedBy, int $limit, int $offset): array
+    public function listForCriteria(int $tenantId, DocumentCriteria $criteria, int $limit, int $offset): array
     {
-        // Two literal statements rather than one built by concatenation: the
-        // tenant predicate guard reads this source, and a WHERE clause assembled
-        // from fragments is one it cannot verify. The duplication is four lines
-        // and buys a check that actually runs.
-        if ($onlyCreatedBy === null) {
-            $stmt = $this->db->prepare(
-                'SELECT id, tenant_id, document_template_id, template_name, title, origin_ou_id, created_by, created_at
-                 FROM documents WHERE tenant_id = :tenant_id
-                 ORDER BY id DESC LIMIT :limit OFFSET :offset'
-            );
-            $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
-        } else {
-            $stmt = $this->db->prepare(
-                'SELECT id, tenant_id, document_template_id, template_name, title, origin_ou_id, created_by, created_at
-                 FROM documents WHERE tenant_id = :tenant_id AND (' . self::VISIBLE_TO_CALLER . ')
-                 ORDER BY id DESC LIMIT :limit OFFSET :offset'
-            );
-            $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
-            $stmt->bindValue(':created_by', $onlyCreatedBy, PDO::PARAM_INT);
+        if ($criteria->matchesNothing) {
+            return [];
         }
 
+        // The table is NOT aliased, and that is a constraint rather than a
+        // style: self::VISIBLE_TO_CALLER correlates its subqueries on
+        // `documents.id`, and PostgreSQL makes the original table name
+        // unusable once an alias is introduced. An alias here would work on
+        // SQLite and fail on production.
+        $sql = 'SELECT id, tenant_id, document_template_id, template_name, title,
+                       origin_ou_id, created_by, created_at
+                  FROM documents
+                 WHERE tenant_id = :tenant_id';
+        $bindings = [];
+        $sql .= $this->criteriaSql($criteria, $bindings);
+        $sql .= ' ORDER BY id DESC LIMIT :limit OFFSET :offset';
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        foreach ($bindings as $name => $value) {
+            $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
         // LIMIT/OFFSET are bound as INT explicitly. PDO's default is PARAM_STR,
         // which emulated prepares quote — `LIMIT '25'` is a syntax error on
         // PostgreSQL and silently accepted on SQLite, so the SQLite unit run
@@ -194,23 +203,125 @@ final class DocumentRepository
     }
 
     /**
-     * How many documents the same predicate as {@see listForTenant()} matches,
-     * so the pagination envelope reports a total the caller can actually reach.
+     * How many documents the same criteria as {@see listForCriteria()} match, so
+     * the pagination envelope reports a total the caller can actually reach.
      */
-    public function countForTenant(int $tenantId, ?int $onlyCreatedBy): int
+    public function countForCriteria(int $tenantId, DocumentCriteria $criteria): int
     {
-        if ($onlyCreatedBy === null) {
-            $stmt = $this->db->prepare('SELECT COUNT(*) FROM documents WHERE tenant_id = :tenant_id');
-            $stmt->execute([':tenant_id' => $tenantId]);
-        } else {
-            $stmt = $this->db->prepare(
-                'SELECT COUNT(*) FROM documents
-                 WHERE tenant_id = :tenant_id AND (' . self::VISIBLE_TO_CALLER . ')'
-            );
-            $stmt->execute([':tenant_id' => $tenantId, ':created_by' => $onlyCreatedBy]);
+        if ($criteria->matchesNothing) {
+            return 0;
         }
 
+        $sql = 'SELECT COUNT(*) FROM documents WHERE tenant_id = :tenant_id';
+        $bindings = [];
+        $sql .= $this->criteriaSql($criteria, $bindings);
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        foreach ($bindings as $name => $value) {
+            $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $stmt->execute();
+
         return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Translate a view's criteria into `AND …` clauses appended to a statement
+     * that ALREADY binds `tenant_id`.
+     *
+     * WHY THIS IS ASSEMBLED AND THE OLD PAIR OF STATEMENTS WAS NOT
+     * ------------------------------------------------------------
+     * This method used to be two literal statements — "all of the tenant's" and
+     * "only mine" — precisely so scripts/ci-tenant-predicate-guard.php could
+     * read them. #978 adds a view registry, and the product of {creator} ×
+     * {unit set} × {collection} × {search} is sixteen statements written out,
+     * which is not a defensible way to keep a linter happy.
+     *
+     * The invariant survives intact because of WHERE the tenant predicate sits:
+     * `WHERE tenant_id = :tenant_id` is in the LITERAL base of both callers,
+     * and the scanner stitches a statement's literal fragments together within
+     * the enclosing function, so what it evaluates already carries the
+     * predicate. Every fragment below is likewise a literal in this file — none
+     * is supplied by a view, a plugin or a request, which is the property
+     * {@see DocumentCriteria} exists to guarantee and the reason its vocabulary
+     * is closed.
+     *
+     * The collection filter is a correlated EXISTS rather than a JOIN: a join
+     * against a membership table returns the document once per matching row and
+     * has to be re-collapsed, and it silently multiplies the COUNT — the exact
+     * bug that makes a pagination total disagree with its own page.
+     *
+     * @param array<string, int|string> $bindings Filled in with the values to bind.
+     */
+    private function criteriaSql(DocumentCriteria $criteria, array &$bindings): string
+    {
+        $sql = '';
+
+        // The VISIBILITY restriction and the VIEW's own creator filter are
+        // separate clauses that are both ANDed — see DocumentCriteria for why
+        // collapsing them into one would let a view widen what a caller may see.
+        //
+        // Visibility is self::VISIBLE_TO_CALLER, the three-disjunct predicate
+        // #947 item 3 widened this from "created_by = me": you raised it, you
+        // are a routing recipient of it, or you hold a role granted on it. The
+        // constant is interpolated rather than re-spelled so the list and the
+        // count cannot drift — the defect that makes a pagination total a page
+        // the caller can never reach. Its own `:created_by` binding is the
+        // CALLER, which is why the view's creator filter below binds a
+        // differently-named placeholder.
+        if ($criteria->restrictToCreator !== null) {
+            $sql .= ' AND (' . self::VISIBLE_TO_CALLER . ')';
+            $bindings[':created_by'] = $criteria->restrictToCreator;
+        }
+
+        if ($criteria->createdBy !== null) {
+            $sql .= ' AND created_by = :view_created_by';
+            $bindings[':view_created_by'] = $criteria->createdBy;
+        }
+
+        if ($criteria->originOuIds !== null) {
+            // An empty anchor set cannot be written as `IN ()` — that is a
+            // syntax error on PostgreSQL — and must not silently become "no
+            // filter", which would turn "my unit's documents" into the whole
+            // tenant's. `matchesNothing` is the intended way to say it, so this
+            // is the belt to that braces.
+            if ($criteria->originOuIds === []) {
+                return $sql . ' AND 1 = 0';
+            }
+            $placeholders = [];
+            foreach (array_values($criteria->originOuIds) as $i => $ouId) {
+                $name = ':origin_ou_' . $i;
+                $placeholders[] = $name;
+                $bindings[$name] = $ouId;
+            }
+            $sql .= ' AND origin_ou_id IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        if ($criteria->inCollectionId !== null) {
+            $sql .= ' AND EXISTS (SELECT 1 FROM document_collection_items i
+                                   WHERE i.tenant_id = :tenant_id
+                                     AND i.collection_id = :collection_id
+                                     AND i.document_id = documents.id)';
+            $bindings[':collection_id'] = $criteria->inCollectionId;
+        }
+
+        if ($criteria->search !== null && $criteria->search !== '') {
+            // LOWER(…) LIKE rather than ILIKE: ILIKE is PostgreSQL-only, and a
+            // predicate that works on production but not on the engine the unit
+            // suite builds its schema on is a predicate nothing tests. The
+            // wildcards are added here so a term containing `%` or `_` is
+            // matched literally rather than as a pattern the caller did not write.
+            // `ESCAPE` is spelled out because SQLite has NO default escape
+            // character for LIKE while PostgreSQL's is a backslash — omitting it
+            // would make the escaping above work on production and be visible as
+            // literal backslashes in the test engine.
+            $sql .= " AND LOWER(title) LIKE :search ESCAPE '\\'";
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], strtolower($criteria->search));
+            $bindings[':search'] = '%' . $escaped . '%';
+        }
+
+        return $sql;
     }
 
     /**

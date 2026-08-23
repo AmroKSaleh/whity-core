@@ -267,6 +267,16 @@ final class TenantOwnedTables
         // type joins on `ou_types.tenant_id = organizational_units.tenant_id`
         // rather than on the id alone.
         'ou_types' => '102_create_ou_types.php',
+
+        // #978 (#947 item 5) — the document organizer's per-user collections
+        // (migration 114). Tenant-owned AND profile-owned: a collection is one
+        // person's filing of documents inside ONE tenant, so every read binds
+        // tenant_id AND profile_id and the guard polices the first of those.
+        // The item table carries its own tenant_id for the same reason
+        // `document_artifacts` does — the membership join must be verifiable
+        // here, not inferred from the collection it hangs off.
+        'document_collections' => '114_create_document_collections.php',
+        'document_collection_items' => '114_create_document_collections.php',
     ];
 
     /**

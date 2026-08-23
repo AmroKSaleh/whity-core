@@ -114,6 +114,7 @@ final class CoreApiSchemas
             self::documentRecordRoutes(),
             self::documentRoutingRoutes(),
             self::meInboxRoutes(),
+            self::documentCollectionRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
             self::tagRoutes(),
@@ -3017,8 +3018,28 @@ final class CoreApiSchemas
                 // re-rendered: every earlier artifact is still fetchable at its
                 // own content_url.
                 'artifacts' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentArtifact')],
+                // #978: the CALLER's own filing of this document. Both keys are
+                // OPTIONAL and their ABSENCE is meaningful — the routes that
+                // know who is asking (list, get) compute them; the render route
+                // does not, and defaulting `starred` to false there would be a
+                // claim nobody made. Neither is in `required` for that reason.
+                'collection_ids' => ['type' => 'array', 'items' => self::int()],
+                'starred' => self::bool(),
             ], ['id', 'tenant_id', 'template_name', 'title', 'created_at', 'artifacts']),
-            'DocumentListResponse' => self::paginatedListEnvelope('Document'),
+            // Not paginatedListEnvelope: the organizer echoes back WHICH view it
+            // ran and what anchor it resolved to, so a client rendering a rail
+            // does not have to re-derive the selection from its own URL — and
+            // the anchor the server actually used (the caller's own unit, when
+            // none was supplied) is visible rather than assumed.
+            'DocumentListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('Document')],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+                'view' => self::object([
+                    'key' => self::str(),
+                    'ou_id' => self::int(true),
+                    'collection_id' => self::int(true),
+                ], ['key']),
+            ], ['data', 'pagination', 'view']),
             'DocumentResponse' => self::dataEnvelope(SchemaBuilder::ref('Document')),
             // The re-render body. Same render inputs as DocumentRenderRequest
             // minus `persist`/`title`: this route ALWAYS persists (that is what
@@ -3181,6 +3202,108 @@ final class CoreApiSchemas
                 'open_count' => self::int(),
             ], ['key', 'label', 'origin', 'item_fields', 'open_count']),
             'InboxSourceListResponse' => self::listEnvelope('InboxSource'),
+            // ── The document organizer (#978, implementing #947 item 5) ───────
+            // A "folder" is a NAMED QUERY, never a stored container: a document
+            // raised centrally and needed by fifteen units has no single home,
+            // and a stored tree has to be maintained as the organisation
+            // changes. So this describes the folders that EXIST, which is not
+            // the same as the folders somebody specified.
+            //
+            // `requires` names the fact sources the view reads. A view whose
+            // sources this installation does not record is NOT IN THE RESPONSE
+            // AT ALL. Note the converse, which #947 item 3 landing made
+            // concrete: its facts now exist, so the routing substrates resolve,
+            // and item 5's "awaiting me", "acted on by me" and "passed through
+            // my unit" are still absent because a substrate is not a folder —
+            // each needs a predicate and a registration. An empty "Awaiting me"
+            // would state "nothing awaits you", which is false and which the
+            // reader cannot check.
+            //
+            // `available: false` is the DIFFERENT case: the folder is real and
+            // THIS caller cannot anchor it (they belong to no unit). It carries
+            // the reason and is rendered disabled, per #951 — a control hidden
+            // for three unrelated causes makes all three look identical.
+            'DocumentView' => self::object([
+                'key' => self::str(),
+                // English. A client translates the keys it knows and falls back
+                // to this for a view registered by a later feature or a plugin,
+                // which it cannot have a translation for.
+                'label' => self::str(),
+                'description' => self::str(),
+                // `derived` (a fact about the document) or `personal` (a fact
+                // about you).
+                'group' => self::str(),
+                'parameters' => ['type' => 'array', 'items' => self::object([
+                    'name' => self::str(),
+                    'required' => self::bool(),
+                ], ['name', 'required'])],
+                'requires' => ['type' => 'array', 'items' => self::str()],
+                'available' => self::bool(),
+                'unavailable_reason' => self::str(true),
+            ], ['key', 'label', 'description', 'group', 'parameters', 'requires', 'available']),
+            // What this installation does NOT record, and what would supply it.
+            // A diagnostic, deliberately a separate field from `data`: an
+            // operator asking "why is there no inbox here" otherwise has no
+            // answer at all, and nothing in this list has a key to open, so no
+            // client can mistake it for a folder.
+            'DocumentSubstrate' => self::object([
+                'key' => self::str(),
+                'description' => self::str(),
+                'provenance' => self::str(true),
+            ], ['key', 'description']),
+            'DocumentViewListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentView')],
+                'unavailable_substrates' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentSubstrate')],
+            ], ['data', 'unavailable_substrates']),
+
+            // ── Per-user collections (#978) ──────────────────────────────────
+            // The one part of the organizer that is stored, because it is the
+            // one part that claims nothing about the document: "I filed this"
+            // is a fact about me.
+            //
+            // `system_key` is `starred` for the collection the star control
+            // addresses and null for one somebody made. It is the collection's
+            // IDENTITY rather than its name, which is why the name is free to
+            // be renamed or translated and why a keyed collection refuses
+            // rename and delete (409). Starring is not a separate concept —
+            // there is no `document_stars` table; migration 114 argues why.
+            //
+            // `item_count` is how many documents are FILED, which can exceed
+            // how many the owner may still read: visibility narrows over time
+            // and a stored pointer is never a grant.
+            'DocumentCollection' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'profile_id' => self::int(),
+                'name' => self::str(),
+                'system_key' => self::str(true),
+                'created_at' => self::str(),
+                'item_count' => self::int(),
+            ], ['id', 'tenant_id', 'profile_id', 'name', 'created_at']),
+            'DocumentCollectionListResponse' => self::listEnvelope('DocumentCollection'),
+            'DocumentCollectionResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentCollection')),
+            'DocumentCollectionCreateRequest' => self::object([
+                'name' => self::str(),
+            ], ['name']),
+            'DocumentCollectionUpdateRequest' => self::object([
+                'name' => self::str(),
+            ], ['name']),
+            // Read back rather than asserted: filing is idempotent, and two
+            // clicks racing a concurrent un-star from another tab both land
+            // here, so the row that is actually there is the answer.
+            'DocumentCollectionMembershipResponse' => self::dataEnvelope(self::object([
+                'collection_id' => self::int(),
+                'document_id' => self::int(),
+                'in_collection' => self::bool(),
+            ], ['collection_id', 'document_id', 'in_collection'])),
+            // The starred collection as it now stands, plus the resulting state.
+            // `data` is null only on an un-star by someone who has never starred
+            // anything — creating the collection just to delete a row from it
+            // would write a row to record an absence.
+            'DocumentStarResponse' => self::object([
+                'data' => ['oneOf' => [SchemaBuilder::ref('DocumentCollection'), ['type' => 'null']]],
+                'starred' => self::bool(),
+            ], ['data', 'starred']),
 
             // ── Document/label designer blocks (WC-521) ───────────────────────
             // `data` is the verbatim client DocElement[] fragment (freeform array);
@@ -5900,15 +6023,55 @@ final class CoreApiSchemas
         ];
 
         return [
+            // The organizer's rail (#978). Listed BEFORE /api/documents/{id}
+            // because `views` is not a digit and could never have matched that
+            // route's constraint — said out loud so the ordering is a decision
+            // rather than an accident if the constraint is ever loosened.
+            self::permissionRoute('GET', '/api/documents/views', 'documents:read', [
+                'summary' => 'List the document folders this installation can actually compute',
+                'description' =>
+                    'A folder is a derived query, never a stored container. A view whose fact source this '
+                    . 'installation does not record is ABSENT from this response rather than present and '
+                    . 'empty — an empty "Awaiting me" would state "nothing awaits you", which is false and '
+                    . 'unfalsifiable from outside. A view the CALLER cannot anchor (they belong to no unit) '
+                    . 'is present with available=false and a reason, to be rendered disabled (#951). '
+                    . '`unavailable_substrates` says what this installation does not record and what would '
+                    . 'supply it.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The computable folders, plus the fact sources this installation lacks',
+                        'DocumentViewListResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/documents', 'documents:read', [
                 'summary' => 'List issued documents visible to the caller (newest first, paginated)',
+                'description' =>
+                    'Naming no view is the plain tenant-wide list. `view` selects one of the folders from '
+                    . 'GET /api/documents/views; a key this installation cannot compute is a 404, because '
+                    . 'from outside it does not exist.',
                 'tags' => ['documents'],
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    self::queryParam('view', 'string', 'Folder key from GET /api/documents/views (default "all")'),
+                    self::queryParam(
+                        'ou_id',
+                        'integer',
+                        'Anchor unit for the unit-scoped folders. Defaults to the caller\'s own unit.'
+                    ),
+                    self::queryParam('collection_id', 'integer', 'Required by the "collection" view'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring of the document title'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The documents the caller may see, with pagination', 'DocumentListResponse'),
+                    400 => self::errorResponse('A required view parameter is missing, or ou_id is not a unit in this tenant'),
+                    404 => self::errorResponse(
+                        'No such view, this installation cannot compute it, or the named collection '
+                        . 'belongs to somebody else'
+                    ),
+                    422 => self::errorResponse('The view exists but the caller cannot anchor it (e.g. they belong to no unit)'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('GET', '/api/documents/{id:\\d+}', 'documents:read', [
@@ -6124,6 +6287,130 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+        ];
+    }
+
+    /**
+     * Per-user document collections and the star (#978, implementing #947
+     * item 5).
+     *
+     * Every route is gated on `documents:read`, INCLUDING the writes, and a
+     * `documents:organize` beside it was rejected: a permission earns its
+     * existence by being withholdable from somebody who holds its neighbours,
+     * and there is no administrator who wants a colleague to read documents but
+     * not to keep a private note of which ones matter. A collection is
+     * invisible to everyone else, confers nothing, and dies with its owner.
+     *
+     * What IS enforced is ownership — a collection is looked up by
+     * (id, tenant, profile), so another person's id is NOT FOUND rather than
+     * forbidden, since collection ids are enumerable — and document visibility
+     * on the way in, so the filing endpoints cannot be used to discover which
+     * document ids exist.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentCollectionRoutes(): array
+    {
+        $notFound = self::errorResponse('Collection not found, or not the caller\'s');
+        $nameErrors = [
+            409 => self::errorResponse('The caller already has a collection with that name'),
+            422 => self::errorResponse('name is missing, empty, or over 160 characters'),
+        ];
+
+        return [
+            self::permissionRoute('GET', '/api/document-collections', 'documents:read', [
+                'summary' => 'List the caller\'s own document collections, with item counts',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The caller\'s collections', 'DocumentCollectionListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-collections', 'documents:read', [
+                'summary' => 'Create one of the caller\'s own collections',
+                'description' =>
+                    '`system_key` is never accepted from a client: minting a well-known key would be '
+                    . 'claiming the target of the star control.',
+                'tags' => ['documents'],
+                'request' => 'DocumentCollectionCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created collection', 'DocumentCollectionResponse'),
+                ] + $nameErrors + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-collections/{id:\\d+}', 'documents:read', [
+                'summary' => 'Rename one of the caller\'s own collections',
+                'description' =>
+                    'Refused with 409 for a built-in (system_key) collection: the star control addresses '
+                    . 'it by key and does not label it from the row, so renaming it would rename something '
+                    . 'nothing displays.',
+                'tags' => ['documents'],
+                'request' => 'DocumentCollectionUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The renamed collection', 'DocumentCollectionResponse'),
+                    404 => $notFound,
+                ] + $nameErrors + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-collections/{id:\\d+}', 'documents:read', [
+                'summary' => 'Delete one of the caller\'s own collections (the documents are untouched)',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('Deletion confirmation', 'MutationResponse'),
+                    404 => $notFound,
+                    409 => self::errorResponse('A built-in collection cannot be deleted'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute(
+                'PUT',
+                '/api/document-collections/{id:\\d+}/documents/{documentId:\\d+}',
+                'documents:read',
+                [
+                    'summary' => 'File a document into one of the caller\'s collections (idempotent)',
+                    'tags' => ['documents'],
+                    'responses' => [
+                        200 => self::jsonResponse('The resulting membership, read back', 'DocumentCollectionMembershipResponse'),
+                        404 => self::errorResponse('Collection not found, or the document is not visible to the caller'),
+                    ] + self::authErrors(),
+                ]
+            ),
+            self::permissionRoute(
+                'DELETE',
+                '/api/document-collections/{id:\\d+}/documents/{documentId:\\d+}',
+                'documents:read',
+                [
+                    'summary' => 'Remove a document from one of the caller\'s collections (idempotent)',
+                    'description' =>
+                        'Deliberately does NOT re-check the document\'s visibility: un-filing something the '
+                        . 'caller can no longer read is exactly the case they need, and refusing it would '
+                        . 'leave a row they own and cannot get rid of.',
+                    'tags' => ['documents'],
+                    'responses' => [
+                        200 => self::jsonResponse('The resulting membership, read back', 'DocumentCollectionMembershipResponse'),
+                        404 => $notFound,
+                    ] + self::authErrors(),
+                ]
+            ),
+            self::permissionRoute('PUT', '/api/documents/{id:\\d+}/star', 'documents:read', [
+                'summary' => 'Star a document — files it into the caller\'s well-known "starred" collection',
+                'description' =>
+                    'Starring is a collection, not a second concept. The collection is created on first '
+                    . 'use rather than seeded per profile, which would write a row for every member of '
+                    . 'every tenant to record something nobody has done.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The starred collection and the resulting state', 'DocumentStarResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/documents/{id:\\d+}/star', 'documents:read', [
+                'summary' => 'Un-star a document',
+                'description' =>
+                    'A 200 even when the caller has never starred anything: they asked for a state that is '
+                    . 'already true, and creating the collection just to delete a row from it would write a '
+                    . 'row to record an absence.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The starred collection (null if none) and the resulting state', 'DocumentStarResponse'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 

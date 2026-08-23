@@ -8,6 +8,7 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Document\DocumentRepository;
+use Whity\Core\Document\Organizer\DocumentCriteria;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\RBAC\CorePermissions;
@@ -94,8 +95,8 @@ final class DocumentVisibilityWideningRealEngineTest extends TestCase
 
     public function testTheListAndTheCountApplyTheSamePredicate(): void
     {
-        $rows = $this->documents->listForTenant(self::TENANT, self::ME, 25, 0);
-        $total = $this->documents->countForTenant(self::TENANT, self::ME);
+        $rows = $this->documents->listForCriteria(self::TENANT, self::visibleTo(self::ME), 25, 0);
+        $total = $this->documents->countForCriteria(self::TENANT, self::visibleTo(self::ME));
 
         $titles = array_map(static fn (array $r): string => (string) $r['title'], $rows);
         sort($titles);
@@ -110,7 +111,7 @@ final class DocumentVisibilityWideningRealEngineTest extends TestCase
 
     public function testAnEveryoneGrantDoesNotWidenVisibility(): void
     {
-        $rows = $this->documents->listForTenant(self::TENANT, self::ME, 25, 0);
+        $rows = $this->documents->listForCriteria(self::TENANT, self::visibleTo(self::ME), 25, 0);
         $titles = array_map(static fn (array $r): string => (string) $r['title'], $rows);
 
         self::assertNotContains(
@@ -129,7 +130,7 @@ final class DocumentVisibilityWideningRealEngineTest extends TestCase
     {
         $visibleInList = array_map(
             static fn (array $r): int => (int) $r['id'],
-            $this->documents->listForTenant(self::TENANT, self::ME, 25, 0)
+            $this->documents->listForCriteria(self::TENANT, self::visibleTo(self::ME), 25, 0)
         );
 
         foreach ($this->ids as $label => $id) {
@@ -164,7 +165,7 @@ final class DocumentVisibilityWideningRealEngineTest extends TestCase
 
         $titles = array_map(
             static fn (array $r): string => (string) $r['title'],
-            $this->documents->listForTenant(self::TENANT, self::ME, 25, 0)
+            $this->documents->listForCriteria(self::TENANT, self::visibleTo(self::ME), 25, 0)
         );
         self::assertContains('Routed to me', $titles, 'the list must agree with the single-row policy');
     }
@@ -175,13 +176,13 @@ final class DocumentVisibilityWideningRealEngineTest extends TestCase
             $this->policy->restrictToCreator(self::ME, $this->holds(CorePermissions::DOCUMENTS_READ_ALL)),
             'documents:read:all means no restriction at all'
         );
-        self::assertSame(5, $this->documents->countForTenant(self::TENANT, null));
+        self::assertSame(5, $this->documents->countForCriteria(self::TENANT, DocumentCriteria::unfiltered()));
     }
 
     public function testAnotherTenantSeesNoneOfIt(): void
     {
-        self::assertSame(0, $this->documents->countForTenant(self::OTHER_TENANT, self::ME));
-        self::assertSame([], $this->documents->listForTenant(self::OTHER_TENANT, self::ME, 25, 0));
+        self::assertSame(0, $this->documents->countForCriteria(self::OTHER_TENANT, self::visibleTo(self::ME)));
+        self::assertSame([], $this->documents->listForCriteria(self::OTHER_TENANT, self::visibleTo(self::ME), 25, 0));
 
         // Every subquery in the predicate re-binds the tenant, so a recipient row
         // or a grant in one tenant cannot make another tenant's document appear.
@@ -267,5 +268,21 @@ final class DocumentVisibilityWideningRealEngineTest extends TestCase
         }
 
         return $pdo;
+    }
+
+    /**
+     * The visibility restriction as #978's criteria object expresses it.
+     *
+     * `restrictToCreator` is the same value the removed
+     * `listForTenant($tenantId, $onlyCreatedBy, …)` took positionally — it names
+     * the profile whose visibility the query is narrowed to, and the repository
+     * expands it into the same three-disjunct VISIBLE_TO_CALLER predicate this
+     * file was written to pin. Named rather than positional so a reader cannot
+     * mistake it for "documents this profile created", which is a different
+     * filter that #978 also has.
+     */
+    private static function visibleTo(int $profileId): DocumentCriteria
+    {
+        return new DocumentCriteria(restrictToCreator: $profileId);
     }
 }

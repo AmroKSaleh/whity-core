@@ -14,11 +14,17 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
+use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
+use Whity\Core\Document\Organizer\CoreDocumentSubstrates;
+use Whity\Core\Document\Organizer\CoreDocumentViews;
+use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
+use Whity\Core\Document\Organizer\DocumentViewRegistry;
+use Whity\Core\Document\Organizer\PdoSchemaPresence;
 use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\RBAC\CorePermissions;
@@ -104,6 +110,15 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
         $roleChecker = new RoleChecker($db, new PermissionRegistry());
         $policy = new DocumentAccessPolicy();
 
+        // #978 added the organizer's collaborators. They are wired here the way
+        // public/index.php wires them rather than stubbed, because this file's
+        // assertions include the LIST route and a stub would let the shared
+        // wiring drift without any test noticing.
+        $substrates = new DocumentSubstrateRegistry(new PdoSchemaPresence($this->pdo));
+        CoreDocumentSubstrates::registerInto($substrates);
+        $views = new DocumentViewRegistry($substrates);
+        CoreDocumentViews::registerInto($views);
+
         $this->handler = new DocumentsApiHandler(
             $this->documentRepo,
             $this->artifactRepo,
@@ -122,7 +137,11 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
             $renderer,
             $issuer,
             $roleChecker,
-            $this->settingsService
+            $this->settingsService,
+            $views,
+            $substrates,
+            new DocumentCollectionRepository($this->pdo),
+            $this->pdo
         );
 
         // Documents are created the way production creates them — through the

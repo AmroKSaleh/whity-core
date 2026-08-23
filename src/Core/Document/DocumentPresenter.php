@@ -40,13 +40,42 @@ final class DocumentPresenter
     /**
      * One document, with its artifacts newest-first.
      *
-     * @param array<string, mixed>       $document  A normalized `documents` row.
-     * @param list<array<string, mixed>> $artifacts Normalized `document_artifacts` rows, newest first.
+     * THE ORGANIZER FIELDS ARE ABSENT RATHER THAN FALSE (#978)
+     * --------------------------------------------------------
+     * `collection_ids` and `starred` appear only when the caller supplied a
+     * filing to render — which the organizer's list and show routes do and the
+     * RENDER route does not, because it has just issued a document and has not
+     * asked anyone whether they filed it.
+     *
+     * The tempting alternative is to default them to `[]` and `false`, and it is
+     * the one thing this codebase keeps refusing to do: `starred: false` is a
+     * claim ("you have not starred this") that the route did not compute, and a
+     * client cannot tell it apart from one that did. #756 is the same mistake
+     * with a fabricated changelog and #951 with a control hidden for three
+     * different reasons. An absent key means "not computed here"; a present
+     * `false` means "asked, and no".
+     *
+     * @param array<string, mixed>       $document            A normalized `documents` row.
+     * @param list<array<string, mixed>> $artifacts           Normalized `document_artifacts` rows, newest first.
+     * @param list<int>|null             $collectionIds       The CALLER's collections holding this document,
+     *                                                        or null when filing was not computed.
+     * @param int|null                   $starredCollectionId The caller's starred collection id, used to
+     *                                                        derive `starred` from the same list rather
+     *                                                        than from a second query.
      * @return array<string, mixed>
      */
-    public static function document(array $document, array $artifacts): array
-    {
+    public static function document(
+        array $document,
+        array $artifacts,
+        ?array $collectionIds = null,
+        ?int $starredCollectionId = null,
+    ): array {
         $id = (int) $document['id'];
+
+        $filing = $collectionIds === null ? [] : [
+            'collection_ids' => array_values($collectionIds),
+            'starred' => $starredCollectionId !== null && in_array($starredCollectionId, $collectionIds, true),
+        ];
 
         return [
             'id'                   => $id,
@@ -65,7 +94,41 @@ final class DocumentPresenter
                 static fn (array $a): array => self::artifact($a),
                 $artifacts
             ),
+        ] + $filing;
+    }
+
+    /**
+     * One of the caller's collections.
+     *
+     * `profile_id` is on the wire even though it can only ever be the caller's:
+     * a client caching a rail across an account switch has one field to check
+     * rather than an assumption to hold. `item_count` is how many documents are
+     * FILED, which is not always how many the owner may still read — see
+     * {@see DocumentCollectionRepository::listOwned()}.
+     *
+     * @param array<string, mixed> $collection
+     * @return array<string, mixed>
+     */
+    public static function collection(array $collection): array
+    {
+        $presented = [
+            'id' => (int) $collection['id'],
+            'tenant_id' => (int) $collection['tenant_id'],
+            'profile_id' => (int) $collection['profile_id'],
+            'name' => (string) $collection['name'],
+            // Null for an ordinary collection somebody made; `starred` for the
+            // one the star control addresses. It is the collection's IDENTITY,
+            // which is why the API refuses to rename or delete a keyed one and
+            // why the name beside it is free to change.
+            'system_key' => $collection['system_key'] ?? null,
+            'created_at' => (string) $collection['created_at'],
         ];
+
+        if (array_key_exists('item_count', $collection)) {
+            $presented['item_count'] = (int) $collection['item_count'];
+        }
+
+        return $presented;
     }
 
     /**

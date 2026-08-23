@@ -4,16 +4,25 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
+use PDO;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
+use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentPresenter;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
+use Whity\Core\Document\Organizer\CoreDocumentViews;
+use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
+use Whity\Core\Document\Organizer\DocumentViewContext;
+use Whity\Core\Document\Organizer\DocumentViewPresenter;
+use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Ou\OuSubtree;
+use Whity\Core\Ou\PrimaryMembershipOu;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
 use Whity\Core\Document\Render\RenderServiceUnavailableException;
 use Whity\Core\Request;
@@ -26,9 +35,11 @@ use Whity\Http\PaginationParams;
 use Whity\Storage\StorageException;
 
 /**
- * Issued documents (#947 item 1):
+ * Issued documents (#947 item 1) and the organizer that browses them
+ * (#947 item 5, via #978):
  *
  *   GET  /api/documents                                    (documents:read)
+ *   GET  /api/documents/views                              (documents:read)
  *   GET  /api/documents/{id}                               (documents:read)
  *   GET  /api/documents/{id}/content                       (documents:read)
  *   GET  /api/documents/{id}/artifacts/{artifactId}/content (documents:read)
@@ -39,17 +50,29 @@ use Whity\Storage\StorageException;
  * row-filtered by {@see DocumentVisibilityPolicy} on top — the route
  * permission is the baseline, never the whole answer.
  *
- * WHY THE READ SURFACE IS THIS SMALL
- * ----------------------------------
- * #947 item 5 builds the document BROWSER, and its central argument is that
- * every useful folder is a QUERY over what routing already holds rather than
- * a stored tree. Anticipating those queries here — a `?folder=awaiting-me`,
- * an OU-subtree filter — would mean inventing them before the routing facts
- * they read exist, and item 5 would inherit a half-shaped surface it has to
- * unpick. So this list is deliberately the plain one: the tenant's documents,
- * newest first, paginated, filtered to what the caller may see. The columns
- * item 5 needs are indexed (migration 108) and the filter it will add is one
- * predicate in {@see DocumentRepository}.
+ * THE BROWSER IS A QUERY SURFACE, NOT A TREE (#978)
+ * -------------------------------------------------
+ * When item 1 shipped, this list was deliberately the plain one and this
+ * docblock said so: inventing folder filters before the facts they read existed
+ * would have left item 5 a half-shaped surface to unpick. #978 is item 5, and
+ * the shape it arrives with is the one that argument implied — the list is
+ * unchanged for a caller who names no view, and a `?view=` selects a folder from
+ * {@see DocumentViewRegistry}.
+ *
+ * A folder is a QUERY. Nothing stores where a document lives, because a document
+ * raised centrally and needed by fifteen units has no single home and any stored
+ * answer has to be maintained as the organisation changes. The only stored thing
+ * is a person's own filing — collections, migration 114 — which claims nothing
+ * about the document.
+ *
+ * {@see views()} is what makes that honest from the outside: it returns the
+ * folders this installation can actually COMPUTE. Three of item 5's six —
+ * "awaiting me", "acted on by me", "passed through my unit" — are NOT among
+ * them. #947 item 3 has landed, so the routing facts they read exist and their
+ * substrates resolve; what does not exist is the three predicates and the three
+ * view registrations, which are item 5 work. A resolvable fact source is not a
+ * folder. An empty "Awaiting me" would state *"nothing awaits you"*, which is
+ * false and which the reader cannot check.
  *
  * What IS here beyond reading is the re-render, because it is the observable
  * half of the immutability guarantee: {@see rerender()} appends a NEW artifact
@@ -62,7 +85,9 @@ use Whity\Storage\StorageException;
  * A document the caller may not see is reported as missing, not as forbidden.
  * A 403 confirms the id exists, which for an enumerable integer id leaks the
  * shape of the tenant's activity — the same reasoning the template handlers
- * already apply.
+ * already apply. A view key naming a folder this installation cannot compute is
+ * reported the same way, and for the same reason: from outside, it does not
+ * exist.
  */
 final class DocumentsApiHandler
 {
@@ -77,11 +102,73 @@ final class DocumentsApiHandler
         private readonly DocumentIssuer $issuer,
         private readonly RoleChecker $roleChecker,
         private readonly SettingsService $settings,
+        // ── #978: the organizer ──────────────────────────────────────────────
+        private readonly DocumentViewRegistry $views,
+        private readonly DocumentSubstrateRegistry $substrates,
+        private readonly DocumentCollectionRepository $collections,
+        // The connection, for the two OU-tree questions the organizer asks:
+        // {@see PrimaryMembershipOu} (which unit is the caller in) and
+        // {@see OuSubtree} (what lies beneath a unit). Both arrived with #947
+        // item 3 as shared statics precisely so a second copy of either cannot
+        // drift from the first, so this handler uses them rather than wrapping
+        // them in collaborators of its own.
+        private readonly PDO $db,
     ) {
     }
 
     /**
-     * GET /api/documents — the caller's visible documents, newest first.
+     * GET /api/documents/views — the folders this installation can compute.
+     *
+     * The response has two halves and they answer two different questions.
+     * `views` is what the rail renders, each carrying whether THIS caller can
+     * anchor it and, when not, why (#951: disabled with a reason, never
+     * hidden). `unavailable_substrates` is what this installation does not
+     * record and what would supply it — the answer to "why is there no inbox
+     * here", which otherwise has no answer at all from outside.
+     *
+     * A view with a REQUIRED parameter is a template rather than a folder: the
+     * client instantiates it (one rail entry per collection) rather than opening
+     * it bare, so it is reported without a caller-level resolution instead of
+     * being resolved with a missing parameter and reported unavailable — which
+     * would be a true statement about the wrong thing.
+     */
+    public function views(Request $request): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+
+        $viewContext = $this->viewContext($request, $tenantId, $callerId, null);
+        if ($viewContext instanceof Response) {
+            return $viewContext;
+        }
+
+        $data = [];
+        foreach ($this->views->available() as $view) {
+            $data[] = DocumentViewPresenter::view(
+                $view,
+                $view->requiredParameters() === [] ? $view->resolve($viewContext) : null
+            );
+        }
+
+        return Response::json([
+            'data' => $data,
+            'unavailable_substrates' => array_map(
+                static fn ($substrate): array => DocumentViewPresenter::substrate($substrate),
+                $this->substrates->unavailable()
+            ),
+        ]);
+    }
+
+    /**
+     * GET /api/documents — the caller's visible documents, newest first,
+     * optionally narrowed to one of the organizer's folders.
+     *
+     * `?view=` names a folder, `?ou_id=` anchors the unit ones, `?collection_id=`
+     * opens one of the caller's collections and `?q=` filters by title. A
+     * request naming none of them is the plain item-1 list it always was.
      */
     public function list(Request $request): Response
     {
@@ -91,30 +178,107 @@ final class DocumentsApiHandler
         }
         [$tenantId, $callerId] = $ctx;
 
+        $query = self::query($request);
+        $viewKey = self::stringParam($query, 'view') ?? CoreDocumentViews::ALL;
+
+        // Null covers "no such key" AND "registered, but this installation
+        // cannot compute it". Both are 404 — from outside, a folder whose facts
+        // are not recorded here does not exist, and reporting it any other way
+        // invites a client to render it as a real-but-unavailable folder, which
+        // is the empty-inbox lie one step removed.
+        $view = $this->views->get($viewKey);
+        if ($view === null) {
+            return Response::error('Unknown document view', 404);
+        }
+
+        foreach ($view->requiredParameters() as $required) {
+            if (self::stringParam($query, $required) === null) {
+                return Response::error("This view requires a '{$required}' parameter", 400);
+            }
+        }
+
+        // Ownership is established HERE, before any view resolves, and a
+        // collection that is not the caller's is reported missing rather than
+        // forbidden. Without this check a caller could pass a colleague's
+        // collection id and read back which of the documents they can already
+        // see that colleague had filed — the row-visibility predicate would
+        // still apply, so nothing new becomes readable, but WHO FILED WHAT is
+        // itself private and would leak. Collection ids are enumerable
+        // integers, so it would leak by walking them.
+        $collectionId = self::intParam($query, 'collection_id');
+        if ($collectionId !== null
+            && $this->collections->findOwned($collectionId, $tenantId, $callerId) === null) {
+            return Response::error('Collection not found', 404);
+        }
+
+        $viewContext = $this->viewContext($request, $tenantId, $callerId, $collectionId);
+        if ($viewContext instanceof Response) {
+            return $viewContext;
+        }
+
+        $resolution = $view->resolve($viewContext);
+        if ($resolution->criteria === null) {
+            // The view is real and this caller cannot anchor it. 422, not 404:
+            // the folder exists, the client was right to ask, and the reason is
+            // about the caller rather than about the view — a 404 here would be
+            // indistinguishable from the unbuilt case above.
+            return Response::error(
+                $resolution->unavailableReason ?? 'This view is not available to you',
+                422
+            );
+        }
+
         // Resolved ONCE and pushed into the query: see
         // DocumentVisibilityPolicy::restrictToCreator() for why this is a
-        // predicate rather than a post-filter over the fetched page.
-        $onlyMine = $this->visibility->restrictToCreator($callerId, $this->permissionResolver($callerId, $tenantId));
+        // predicate rather than a post-filter over the fetched page. Applied
+        // AFTER the view resolves, so a view can never widen it.
+        $criteria = $resolution->criteria->withRequestScope(
+            $this->visibility->restrictToCreator($callerId, $this->permissionResolver($callerId, $tenantId)),
+            self::stringParam($query, 'q')
+        );
 
         $p = PaginationParams::fromPath($request->getPath());
-        $total = $this->documents->countForTenant($tenantId, $onlyMine);
-        $rows = $this->documents->listForTenant($tenantId, $onlyMine, $p->perPage, $p->offset);
+        $total = $this->documents->countForCriteria($tenantId, $criteria);
+        $rows = $this->documents->listForCriteria($tenantId, $criteria, $p->perPage, $p->offset);
 
         // The artifact list is fetched per document rather than in one join:
         // the join returns a document once per artifact and has to be
         // re-collapsed in PHP, and a page is at most PaginationParams::MAX_PER_PAGE
-        // rows. When the browser (item 5) makes this a hot path, the fix is a
-        // single `WHERE document_id IN (...)` fetch collapsed once — not a
-        // wider row shape here.
+        // rows.
+        //
+        // The FILING, by contrast, is one query for the whole page — the star
+        // and the "filed in" badge are on every row, so the per-row form is the
+        // textbook N+1 that only bites once a tenant has volume.
+        $filing = $this->collections->collectionIdsForDocuments(
+            $tenantId,
+            $callerId,
+            array_map(static fn (array $row): int => (int) $row['id'], $rows)
+        );
+        $starredId = $viewContext->starredCollectionId;
+
         $data = array_map(
             fn (array $row): array => DocumentPresenter::document(
                 $row,
-                $this->artifacts->listForDocument((int) $row['id'], $tenantId)
+                $this->artifacts->listForDocument((int) $row['id'], $tenantId),
+                $filing[(int) $row['id']] ?? [],
+                $starredId
             ),
             $rows
         );
 
-        return Response::json(['data' => $data, 'pagination' => $p->meta($total)]);
+        return Response::json([
+            'data' => $data,
+            'pagination' => $p->meta($total),
+            // Echoed so a client rendering a rail can tell which entry is
+            // selected without re-parsing its own URL, and so the anchor the
+            // server actually used (the caller's own unit, when none was
+            // supplied) is visible rather than guessed at.
+            'view' => [
+                'key' => $view->key,
+                'ou_id' => $viewContext->effectiveOuId(),
+                'collection_id' => $collectionId,
+            ],
+        ]);
     }
 
     /**
@@ -128,12 +292,22 @@ final class DocumentsApiHandler
         if ($resolved instanceof Response) {
             return $resolved;
         }
-        [$tenantId, , $document] = $resolved;
+        [$tenantId, $callerId, $document] = $resolved;
+
+        $documentId = (int) $document['id'];
+        $filing = $this->collections->collectionIdsForDocuments($tenantId, $callerId, [$documentId]);
+        $starred = $this->collections->findBySystemKey(
+            DocumentCollectionRepository::STARRED_KEY,
+            $tenantId,
+            $callerId
+        );
 
         return Response::json([
             'data' => DocumentPresenter::document(
                 $document,
-                $this->artifacts->listForDocument((int) $document['id'], $tenantId)
+                $this->artifacts->listForDocument($documentId, $tenantId),
+                $filing[$documentId] ?? [],
+                $starred === null ? null : (int) $starred['id']
             ),
         ]);
     }
@@ -354,6 +528,125 @@ final class DocumentsApiHandler
         }
 
         return [$tenantId, $callerId];
+    }
+
+    /**
+     * Build the context a view resolves against.
+     *
+     * The picked anchor is validated to be a unit IN THIS TENANT and otherwise
+     * left alone: row visibility is enforced on every result, so anchoring at a
+     * unit the caller has no standing in returns what they could already see and
+     * nothing more. Refusing it as well would report "forbidden" for a query
+     * whose real answer is "nothing", which tells an outsider the unit is busy.
+     * An id that is not a unit here is a 400 rather than a silent fallback to
+     * the caller's own unit — a folder quietly answering about a different unit
+     * than the one on screen is worse than an error.
+     *
+     * @return DocumentViewContext|Response
+     */
+    private function viewContext(Request $request, int $tenantId, int $callerId, ?int $collectionId): DocumentViewContext|Response
+    {
+        $anchorOuId = self::intParam(self::query($request), 'ou_id');
+        if ($anchorOuId !== null && !$this->ouExistsInTenant($tenantId, $anchorOuId)) {
+            return Response::error('ou_id does not reference an organizational unit in this tenant', 400);
+        }
+
+        $starred = $this->collections->findBySystemKey(
+            DocumentCollectionRepository::STARRED_KEY,
+            $tenantId,
+            $callerId
+        );
+
+        return new DocumentViewContext(
+            $tenantId,
+            $callerId,
+            PrimaryMembershipOu::forProfile($this->db, $tenantId, $callerId),
+            $anchorOuId,
+            $collectionId,
+            $starred === null ? null : (int) $starred['id'],
+            // A NARROW, pre-bound subtree capability rather than the connection:
+            // the tenant is closed over here, so a view — including a plugin's —
+            // can ask what is beneath a unit and cannot ask anything else, and
+            // cannot ask it of another tenant. See DocumentViewContext for why
+            // handing views raw access would be the wrong shape.
+            fn (int $anchor): array => OuSubtree::descendantIds($this->db, $tenantId, [$anchor]),
+        );
+    }
+
+    /**
+     * Whether a picked anchor is a unit in this tenant.
+     *
+     * A one-line literal read with its tenant predicate spelled out, mirroring
+     * {@see \Whity\Api\TwoFactorPoliciesApiHandler}'s. {@see OuSubtree} would
+     * answer it as a side effect — an unknown root contributes nothing — but
+     * only as SILENCE, and an anchor that is quietly ignored means the folder
+     * answers about a different unit than the one on screen. That is worse than
+     * an error, so the error is explicit.
+     */
+    private function ouExistsInTenant(int $tenantId, int $ouId): bool
+    {
+        $stmt = $this->db->prepare(
+            'SELECT 1 FROM organizational_units WHERE id = :id AND tenant_id = :tenant_id LIMIT 1'
+        );
+        $stmt->execute([':id' => $ouId, ':tenant_id' => $tenantId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * The request's query parameters.
+     *
+     * Reads `$_GET` first and overlays anything embedded in the path, mirroring
+     * {@see PaginationParams::fromPath()} — a handler test builds a Request with
+     * the query string in the path and no superglobal, and a reader that only
+     * consulted one of the two would work in exactly one of the two places.
+     *
+     * @return array<string, string>
+     */
+    private static function query(Request $request): array
+    {
+        $params = [];
+        foreach ($_GET as $key => $value) {
+            if (is_string($key) && is_string($value)) {
+                $params[$key] = $value;
+            }
+        }
+
+        $queryString = parse_url($request->getPath(), PHP_URL_QUERY);
+        if (is_string($queryString) && $queryString !== '') {
+            parse_str($queryString, $parsed);
+            foreach ($parsed as $key => $value) {
+                if (is_string($key) && is_string($value)) {
+                    $params[$key] = $value;
+                }
+            }
+        }
+
+        return $params;
+    }
+
+    /**
+     * A non-empty string parameter, or null. An empty value is null rather than
+     * `''`: `?q=` is what a cleared search box sends, and treating it as a term
+     * would filter every title down to the ones containing nothing.
+     *
+     * @param array<string, string> $query
+     */
+    private static function stringParam(array $query, string $name): ?string
+    {
+        $value = trim($query[$name] ?? '');
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * @param array<string, string> $query
+     */
+    private static function intParam(array $query, string $name): ?int
+    {
+        $value = $query[$name] ?? '';
+
+        return ctype_digit($value) ? (int) $value : null;
     }
 
     /**

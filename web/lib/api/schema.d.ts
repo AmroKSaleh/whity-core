@@ -781,6 +781,69 @@ export interface paths {
         patch: operations["patch_api_v1_document_blocks_id"];
         trace?: never;
     };
+    "/api/v1/document-collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller's own document collections, with item counts */
+        get: operations["get_api_v1_document_collections"];
+        put?: never;
+        /**
+         * Create one of the caller's own collections
+         * @description `system_key` is never accepted from a client: minting a well-known key would be claiming the target of the star control.
+         */
+        post: operations["post_api_v1_document_collections"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-collections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete one of the caller's own collections (the documents are untouched) */
+        delete: operations["delete_api_v1_document_collections_id"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename one of the caller's own collections
+         * @description Refused with 409 for a built-in (system_key) collection: the star control addresses it by key and does not label it from the row, so renaming it would rename something nothing displays.
+         */
+        patch: operations["patch_api_v1_document_collections_id"];
+        trace?: never;
+    };
+    "/api/v1/document-collections/{id}/documents/{documentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** File a document into one of the caller's collections (idempotent) */
+        put: operations["put_api_v1_document_collections_id_documents_documentid"];
+        post?: never;
+        /**
+         * Remove a document from one of the caller's collections (idempotent)
+         * @description Deliberately does NOT re-check the document's visibility: un-filing something the caller can no longer read is exactly the case they need, and refusing it would leave a row they own and cannot get rid of.
+         */
+        delete: operations["delete_api_v1_document_collections_id_documents_documentid"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -842,8 +905,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List issued documents visible to the caller (newest first, paginated) */
+        /**
+         * List issued documents visible to the caller (newest first, paginated)
+         * @description Naming no view is the plain tenant-wide list. `view` selects one of the folders from GET /api/documents/views; a key this installation cannot compute is a 404, because from outside it does not exist.
+         */
         get: operations["get_api_v1_documents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the document folders this installation can actually compute
+         * @description A folder is a derived query, never a stored container. A view whose fact source this installation does not record is ABSENT from this response rather than present and empty — an empty "Awaiting me" would state "nothing awaits you", which is false and unfalsifiable from outside. A view the CALLER cannot anchor (they belong to no unit) is present with available=false and a reason, to be rendered disabled (#951). `unavailable_substrates` says what this installation does not record and what would supply it.
+         */
+        get: operations["get_api_v1_documents_views"];
         put?: never;
         post?: never;
         delete?: never;
@@ -967,6 +1053,30 @@ export interface paths {
         /** Act on a route: forward, acknowledge, return, or add a note */
         post: operations["post_api_v1_documents_id_routes_routeid_actions"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/star": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Star a document — files it into the caller's well-known "starred" collection
+         * @description Starring is a collection, not a second concept. The collection is created on first use rather than seeded per profile, which would write a row for every member of every tenant to record something nobody has done.
+         */
+        put: operations["put_api_v1_documents_id_star"];
+        post?: never;
+        /**
+         * Un-star a document
+         * @description A 200 even when the caller has never starred anything: they asked for a state that is already true, and creating the collection just to delete a row from it would write a row to record an absence.
+         */
+        delete: operations["delete_api_v1_documents_id_star"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3513,6 +3623,8 @@ export interface components {
             created_at: string;
             content_url?: string | null;
             artifacts: components["schemas"]["DocumentArtifact"][];
+            collection_ids?: number[];
+            starred?: boolean;
         };
         DocumentArtifact: {
             id: number;
@@ -3563,9 +3675,42 @@ export interface components {
             scope?: "personal" | "tenant" | "global" | "system";
             required_permission?: string | null;
         };
+        DocumentCollection: {
+            id: number;
+            tenant_id: number;
+            profile_id: number;
+            name: string;
+            system_key?: string | null;
+            created_at: string;
+            item_count?: number;
+        };
+        DocumentCollectionCreateRequest: {
+            name: string;
+        };
+        DocumentCollectionListResponse: {
+            data: components["schemas"]["DocumentCollection"][];
+        };
+        DocumentCollectionMembershipResponse: {
+            data: {
+                collection_id: number;
+                document_id: number;
+                in_collection: boolean;
+            };
+        };
+        DocumentCollectionResponse: {
+            data: components["schemas"]["DocumentCollection"];
+        };
+        DocumentCollectionUpdateRequest: {
+            name: string;
+        };
         DocumentListResponse: {
             data: components["schemas"]["Document"][];
             pagination: components["schemas"]["Pagination"];
+            view: {
+                key: string;
+                ou_id?: number | null;
+                collection_id?: number | null;
+            };
         };
         DocumentRenderRequest: {
             dataRows?: {
@@ -3650,6 +3795,15 @@ export interface components {
             };
             label?: string | null;
         };
+        DocumentStarResponse: {
+            data: components["schemas"]["DocumentCollection"] | null;
+            starred: boolean;
+        };
+        DocumentSubstrate: {
+            key: string;
+            description: string;
+            provenance?: string | null;
+        };
         DocumentTemplate: {
             id: number;
             tenant_id: number;
@@ -3705,6 +3859,23 @@ export interface components {
         DocumentTrailListResponse: {
             data: components["schemas"]["DocumentTrailEvent"][];
             pagination: components["schemas"]["Pagination"];
+        };
+        DocumentView: {
+            key: string;
+            label: string;
+            description: string;
+            group: string;
+            parameters: {
+                name: string;
+                required: boolean;
+            }[];
+            requires: string[];
+            available: boolean;
+            unavailable_reason?: string | null;
+        };
+        DocumentViewListResponse: {
+            data: components["schemas"]["DocumentView"][];
+            unavailable_substrates: components["schemas"]["DocumentSubstrate"][];
         };
         DomainVerificationChallenge: {
             record_name: string;
@@ -9422,6 +9593,477 @@ export interface operations {
             };
         };
     };
+    get_api_v1_document_collections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's collections */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentCollectionListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_collections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentCollectionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created collection */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentCollectionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller already has a collection with that name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description name is missing, empty, or over 160 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_document_collections_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deletion confirmation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MutationResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Collection not found, or not the caller's */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A built-in collection cannot be deleted */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_document_collections_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentCollectionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The renamed collection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentCollectionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Collection not found, or not the caller's */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller already has a collection with that name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description name is missing, empty, or over 160 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_document_collections_id_documents_documentid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                documentId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resulting membership, read back */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentCollectionMembershipResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Collection not found, or the document is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_document_collections_id_documents_documentid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                documentId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resulting membership, read back */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentCollectionMembershipResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Collection not found, or not the caller's */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_document_templates: {
         parameters: {
             query?: never;
@@ -9900,6 +10542,14 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100) */
                 per_page?: number;
+                /** @description Folder key from GET /api/documents/views (default "all") */
+                view?: string;
+                /** @description Anchor unit for the unit-scoped folders. Defaults to the caller's own unit. */
+                ou_id?: number;
+                /** @description Required by the "collection" view */
+                collection_id?: number;
+                /** @description Case-insensitive substring of the document title */
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -9914,6 +10564,89 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentListResponse"];
+                };
+            };
+            /** @description A required view parameter is missing, or ou_id is not a unit in this tenant */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such view, this installation cannot compute it, or the named collection belongs to somebody else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The view exists but the caller cannot anchor it (e.g. they belong to no unit) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_documents_views: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The computable folders, plus the fact sources this installation lacks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentViewListResponse"];
                 };
             };
             /** @description Missing or invalid authentication */
@@ -10585,6 +11318,140 @@ export interface operations {
             };
             /** @description No open item on this route, a forward from the last step, a return from the first, an empty note, or an unknown action */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_documents_id_star: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The starred collection and the resulting state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentStarResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_documents_id_star: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The starred collection (null if none) and the resulting state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentStarResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
