@@ -271,6 +271,48 @@ they may not.
 redirects and never 404s the address away. What renders is the page with a stated cause,
 which is the difference between "you may not see this" and "this is broken".
 
+## Issued documents — `documentViewer` (#947 item 4)
+
+Core holds issued documents: a `documents` record with an identity, and one **immutable**
+artifact per render appended to it. `documentViewer` shows one inside a plugin's screen.
+
+```php
+['type' => 'documentViewer',
+ 'documentIdFrom' => 'work-order.documentId',   // REQUIRED: a context reference
+ 'artifactIdFrom' => 'trail-event.artifactId',  // optional: PIN one version
+ 'emptyText'      => 'No work order issued yet.'],
+```
+
+**It declares no `source`, and that is the point.** Every `source`/`recordPath` in this
+contract is ownership-checked against the routes the *declaring* plugin registered, so core's
+`/api/v1/documents/{id}` cannot be named by a plugin — the same reason `ouScopePicker` has no
+`source`. The host fetches core's own document routes under the caller's session and the
+`documents:read` gate they already carry. There is no prop with which to point it elsewhere.
+
+**No literal twin for `documentIdFrom`.** The four literal leaves (`heading`, `text`,
+`badge`, `stat`) keep a required literal beside their `...From` twin because an unresolved
+binding should still render *a* title. Here the fallback would be a *different document*, so
+nothing renders until something names one and `emptyText` is what the reader sees meanwhile.
+
+**Which artifact is on screen is always stated.** Without `artifactIdFrom` the viewer opens
+on the **current** artifact and says so, with the count of the others and a picker for them;
+an earlier artifact carries a warning naming the newer one. With `artifactIdFrom` it opens on
+that artifact — the binding an append-only trail wants, so "what circulated on the 4th" shows
+what circulated on the 4th — and a pin the record does not have is a **refusal**, never a
+silent substitution of the current version.
+
+**Renderer rules.** Fetch the record, then the chosen artifact's bytes, with the caller's
+session; frame the bytes from a same-origin blob (an API response cannot be framed — core
+sends `frame-ancestors 'none'` on every one). State the version on every render. Never draw
+an empty frame: a browser that cannot display a PDF inline, an artifact whose media type no
+frame can draw, a document that is missing or invisible, a record with no stored file, and a
+failed storage read are five different sentences. There is no prop to hide the version history or the download, and none for height
+or zoom.
+
+**Preview is not view.** The designer previews an unsaved template. This views a persisted
+artifact, and its only input is a document id — nothing accepts raw bytes or a template, so
+the record chrome can never wrap something that was never issued.
+
 ## Writing a new renderer (web / mobile / desktop)
 
 A renderer is a recursive function `render(block)` that switches on `block.type`, maps each

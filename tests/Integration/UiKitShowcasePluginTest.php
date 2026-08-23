@@ -701,7 +701,11 @@ final class UiKitShowcasePluginTest extends TestCase
                 "the showcase must never declare '{$reserved}' as a record fact (#895)"
             );
         }
-        $this->assertSame(['name', 'role', 'status', 'joined'], $declared);
+        // `documentId` joined the whitelist with #947 item 4's `documentViewer`
+        // demo, which binds to it. It is a FACT about the record — which
+        // document was issued from it — so it belongs here; the guard above is
+        // what keeps a caller flag out, and it still runs over this list.
+        $this->assertSame(['name', 'role', 'status', 'joined', 'documentId'], $declared);
     }
 
     /**

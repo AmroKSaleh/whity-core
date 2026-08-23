@@ -845,6 +845,8 @@ function BlockNode({ block }: { block: Block }) {
       return <DataRecordRenderer block={block} />
     case "recordFields":
       return <RecordFieldsRenderer block={block} />
+    case "documentViewer":
+      return <DocumentViewerRenderer />
     case "modal":
       return <ModalRenderer block={block} />
     case "drawer":
@@ -876,6 +878,38 @@ function BlockNode({ block }: { block: Block }) {
     default:
       return <UnsupportedBlock reason={(block as { type?: string }).type ?? "unknown"} />
   }
+}
+
+// ---------------------------------------------------------------- documents
+
+/**
+ * `documentViewer` on the OFFLINE desktop host (#947 item 4).
+ *
+ * The web renderer fetches core's `/api/v1/documents/{id}` and streams the
+ * artifact's bytes into a frame. This host has no documents subsystem to fetch
+ * from: it serves the plugin's own routes over `/__whity/*` and boots with no
+ * server behind it, which is the point of the offline build. Issued documents
+ * live on the server, with the storage and the RBAC that make them auditable.
+ *
+ * So this SAYS THAT, and does not fall through to the generic `UnsupportedBlock`
+ * or to a blank frame. #951 is the position it follows: a capability that is
+ * absent here is shown with its reason, never silently omitted — a plugin author
+ * whose block vanished on the device would have no way to tell an unsupported
+ * type from a broken declaration, and a reader would have no way to tell an
+ * empty document from an unavailable one (#756).
+ *
+ * The block's own `emptyText` is deliberately NOT reused here. It answers a
+ * different question — "nothing on this page has named a document yet" — and an
+ * author's wording for that ("this record has no work order yet") would be a
+ * false statement about the record on a device that simply cannot look.
+ */
+function DocumentViewerRenderer() {
+  return (
+    <EmptyState
+      title="Issued documents are not available offline"
+      description="This document lives on the server, where it is stored and access-checked. Open it from the web app."
+    />
+  )
 }
 
 // ---------------------------------------------------------------- data-bound blocks

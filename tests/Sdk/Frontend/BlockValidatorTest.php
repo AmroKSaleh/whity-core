@@ -531,12 +531,12 @@ final class BlockValidatorTest extends TestCase
         // SP1 display types + SP2 data-bound types + SP3 interactive types
         // (WC-233) + SP4 chart type (WC-240) + workflow types and the OU scope
         // picker (#868) + the record blocks (#883) + the access gate (#909)
-        // + the graph block (#950)
+        // + the graph block (#950) + the document viewer (#947 item 4)
         $expected = [
             'accessGate', 'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataRecord', 'dataStat', 'dataTable', 'dateInput', 'divider', 'drawer',
             'fieldArray', 'fileInput', 'flow', 'form', 'grid', 'heading', 'icon', 'inbox', 'keyValue', 'list', 'markdown', 'math',
-            'modal', 'numberInput', 'ouScopePicker', 'recordFields', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
+            'documentViewer', 'modal', 'numberInput', 'ouScopePicker', 'recordFields', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput', 'timeline',
         ];
         sort($expected);
@@ -3232,5 +3232,180 @@ final class BlockValidatorTest extends TestCase
                 "'flow' must not grow a write surface of its own — editing is a form opened from a node"
             );
         }
+    }
+
+    // ==================== #947 item 4: documentViewer ====================
+
+    /**
+     * A viewer is a LEAF. It renders a document, not a region of a page — there
+     * is nothing for a child block to mean inside one.
+     */
+    public function testDocumentViewerIsInTheWhitelistAsALeaf(): void
+    {
+        $this->assertTrue(BlockContract::isKnown('documentViewer'));
+        $this->assertFalse(BlockContract::isContainer('documentViewer'));
+        $this->assertSame([], BlockContract::childSlots('documentViewer'));
+    }
+
+    /**
+     * The structural claim the type exists to make: no `source`.
+     *
+     * Core's `/api/v1/documents/{id}` is unnameable by a plugin — every source
+     * prop is ownership-checked against the declaring plugin's own routes — so a
+     * source here could only ever point at a plugin's own republication of an
+     * audit record, gated however that plugin chose. Asserted against the RULE
+     * rather than against a tree, so a `source` added later has to face this.
+     */
+    public function testDocumentViewerDeclaresNoSourceProp(): void
+    {
+        $rule = BlockContract::rulesFor('documentViewer');
+        $this->assertIsArray($rule);
+
+        foreach (['source', 'endpoint', 'path', 'url'] as $prop) {
+            $this->assertArrayNotHasKey(
+                $prop,
+                $rule['props'],
+                "'documentViewer' must declare no {$prop}: the host fetches core's own document routes"
+            );
+        }
+    }
+
+    /**
+     * Read-only by construction, like `timeline` and `flow`: nothing to submit,
+     * and — the part specific to this type — no switch with which a plugin could
+     * hide the version history or the download.
+     */
+    public function testDocumentViewerOffersNoWriteSurfaceAndNoSuppressionSwitches(): void
+    {
+        $rule = BlockContract::rulesFor('documentViewer');
+        $this->assertIsArray($rule);
+
+        $forbidden = ['submit', 'action', 'method', 'actions', 'showVersions', 'hideVersions', 'allowDownload', 'height', 'zoom'];
+        foreach ($forbidden as $prop) {
+            $this->assertArrayNotHasKey(
+                $prop,
+                $rule['props'],
+                "'documentViewer' must not declare {$prop}"
+            );
+        }
+    }
+
+    public function testMinimalDocumentViewerIsValid(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'documentViewer', 'documentIdFrom' => 'record'],
+        ]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    /**
+     * `documentIdFrom` is REQUIRED and has no literal twin. The four literal
+     * leaves keep a literal because an unresolved title should still render A
+     * title; inverted here the fallback would be a DIFFERENT document.
+     */
+    public function testDocumentViewerWithoutADocumentBindingIsRefused(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'documentViewer', 'emptyText' => 'Nothing yet'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('documentIdFrom', implode('; ', $result['errors']));
+    }
+
+    public function testDocumentViewerDeclaresNoLiteralDocumentId(): void
+    {
+        $rule = BlockContract::rulesFor('documentViewer');
+        $this->assertIsArray($rule);
+
+        $this->assertArrayNotHasKey(
+            'documentId',
+            $rule['props'],
+            'a literal document id is a different document rendered with full confidence'
+        );
+        $this->assertArrayNotHasKey('artifactId', $rule['props']);
+    }
+
+    /**
+     * Both bindings are ordinary context references, so a dotted
+     * `{blockId}.{field}` and a bare selector name both validate and a malformed
+     * one does not.
+     */
+    public function testDocumentViewerBindingsTakeTheUsualContextReferences(): void
+    {
+        $ok = BlockValidator::validate([
+            [
+                'type' => 'documentViewer',
+                'documentIdFrom' => 'evt.documentId',
+                'artifactIdFrom' => 'evt.artifactId',
+            ],
+        ]);
+        $this->assertTrue($ok['ok'], implode('; ', $ok['errors']));
+
+        $bad = BlockValidator::validate([
+            ['type' => 'documentViewer', 'documentIdFrom' => 'a.b.c'],
+        ]);
+        $this->assertFalse($bad['ok']);
+    }
+
+    /**
+     * The bindings are PLUMBING, not statements, so they are deliberately NOT in
+     * the fact-binding guard — the same line #895 draws for `defaultFrom` and
+     * `params.from`: one seeds a control the server re-validates, the other
+     * narrows a fetch, and this one selects which resource is fetched. A guard
+     * here would refuse a correct program (a payload is free to call its
+     * document pointer whatever it likes), and a guard that refuses correct
+     * programs gets deleted.
+     *
+     * Pinned as a test because the opposite reading is a plausible "fix": the
+     * prop LOOKS like `textFrom`, and it is not one.
+     */
+    public function testDocumentBindingsAreNotFactGuarded(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'documentViewer', 'documentIdFrom' => 'evt.permitted'],
+        ]);
+
+        $this->assertTrue(
+            $result['ok'],
+            'documentIdFrom selects a resource; it does not state anything about the record'
+        );
+    }
+
+    /**
+     * A viewer is mountable ANYWHERE — a card, a tab, a record subtree, an
+     * overlay. It is not a form input, so it must not require a form ancestor.
+     */
+    public function testDocumentViewerNeedsNoFormAncestor(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'card',
+                'title' => 'Work order',
+                'children' => [['type' => 'documentViewer', 'documentIdFrom' => 'wo.documentId']],
+            ],
+        ]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    /** It carries the universal facet like every other type (#909). */
+    public function testDocumentViewerCarriesVisibleWhen(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'accessGate',
+                'id' => 'may-read',
+                'check' => ['method' => 'GET', 'endpoint' => '/api/v1/acme/things/1'],
+            ],
+            [
+                'type' => 'documentViewer',
+                'documentIdFrom' => 'record',
+                'visibleWhen' => ['access' => 'may-read', 'equals' => true],
+            ],
+        ]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
     }
 }

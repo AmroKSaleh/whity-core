@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.35).
+ * SDK identity (v1.36).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -492,13 +492,55 @@ namespace Whity\Sdk;
  * `maxNodes` may LOWER the ceiling and not raise it: a plugin knows its labels
  * are long or its target is a phone, which is knowledge worth applying, but it
  * cannot know that 400 nodes are legible on every platform this tree may render
- * on. Additive; every tree that validated under 1.34 still validates)
+ * on. Additive; every tree that validated under 1.34 still validates) ->
+ * 1.36 (THE DOCUMENT VIEWER: `documentViewer` joins
+ * {@see \Whity\Sdk\Frontend\Blocks\BlockContract}, declaring no `source` and no
+ * new prop-rule kind.
+ * #947 item 1 gave core an issued document — a record with an identity and one
+ * immutable artifact per render — and nothing in this contract could show one.
+ * A plugin whose record has an issued work order could link out to it at best,
+ * and a link out of a record is where the reader stops reading the record.
+ * COMPOSING WAS NOT AVAILABLE, and not for want of pieces. Every `source` and
+ * `recordPath` in this contract is ownership-checked against the routes the
+ * DECLARING plugin registered, so core's `/api/v1/documents/{id}` cannot be
+ * named by any plugin; the only composition that would work is a plugin
+ * republishing core's document reads through a route of its own, gated however
+ * that plugin chose. `ouScopePicker` already refused that trade for the OU tree
+ * and the refusal is worth more here, because the thing being republished is an
+ * audit record. So this type follows the same shape: no `source` prop at all,
+ * the host fetching core's own endpoints under the caller's session and the
+ * `documents:read` gate they already carry, and no prop with which to point it
+ * anywhere else.
+ * WHICH DOCUMENT is a `contextPath` (`documentIdFrom`) and there is deliberately
+ * NO literal twin. The `heading`/`text`/`badge`/`stat` rule — literal required,
+ * `...From` additive — exists because an unresolved binding should still render
+ * A title, a duller version of the right answer. Inverted here the fallback is
+ * not duller, it is A DIFFERENT DOCUMENT rendered with full confidence, so
+ * nothing renders until something has said which one and `emptyText` is what an
+ * author says in the meantime.
+ * WHICH ARTIFACT is the question a re-render creates, and the block answers it
+ * two ways. `artifactIdFrom` PINS one — the binding an append-only trail needs,
+ * so an event saying "this is what circulated on the 4th" can show what
+ * circulated on the 4th rather than what the document says today. Absent, the
+ * viewer shows the CURRENT artifact and says so on screen, with the count of the
+ * others and the way to reach them. Showing the newest SILENTLY was the
+ * alternative and is the one thing a viewer of an auditable record must not do:
+ * a corrected document then reads as though it had always said that. The
+ * renderer never falls back between the two — a pinned artifact that is not on
+ * the record is an explicit failure state, because quietly substituting the
+ * current one answers a question about the past with a fact about the present.
+ * NOT OFFERED, deliberately: a prop to hide the version history (a plugin
+ * deciding what a reader of an audit record may know is not a presentation
+ * choice), a prop to suppress the download (the bytes were already served), and
+ * any height/zoom prop (presentational, and the page's own aspect ratio is a
+ * fact the renderer can read). Additive; every tree that validated under 1.35
+ * still validates)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.35.0';
+    public const VERSION = '1.36.0';
 
     /**
      * Static identity only — never instantiated.

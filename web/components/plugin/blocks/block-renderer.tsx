@@ -34,6 +34,7 @@ import type {
   DataStatBlock,
   DataTableBlock,
   DateInputBlock,
+  DocumentViewerBlock,
   DrawerBlock,
   FieldArrayBlock,
   FileInputBlock,
@@ -79,6 +80,7 @@ import type {
 } from '@/lib/plugin-features';
 import { OU_SCOPE_KINDS, isOuScopeValue } from '@/lib/plugin-features';
 import { buildFlowModel } from '@/components/plugin/blocks/flow-model';
+import { DocumentViewer } from '@/components/plugin/blocks/document-viewer';
 import { Chart } from '@amroksaleh/ui/chart';
 import { DataTable as SharedDataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
@@ -3678,6 +3680,37 @@ function isBlockVisible(
   return true;
 }
 
+/**
+ * DocumentViewerRenderer — an issued document (#947 item 4).
+ *
+ * The block declares no path and this renderer takes none from it: the ids come
+ * out of the master-detail context and the fetching is the host's, against
+ * core's own `/api/v1/documents/*` under the caller's session. See the SDK
+ * contract for why that is structural rather than stylistic.
+ *
+ * `resolveContextRef` returning `undefined` means "nothing has said which
+ * document yet", which is a resting state and not a failure — it is passed
+ * through as `null` and the viewer renders the author's `emptyText`. The same
+ * miss on `artifactIdFrom` means the pin is not resolvable YET; it is also
+ * passed as null, so the viewer opens on the current artifact rather than
+ * refusing. A pin that resolves to an artifact the record does not have is the
+ * different case, and the viewer refuses that one.
+ */
+function DocumentViewerRenderer({ block }: { block: DocumentViewerBlock }) {
+  const md = useMasterDetail();
+  const documentId = resolveContextRef(md, block.documentIdFrom) ?? null;
+  const pinnedArtifactId =
+    isNonEmptyString(block.artifactIdFrom) ? resolveContextRef(md, block.artifactIdFrom) ?? null : null;
+
+  return (
+    <DocumentViewer
+      documentId={documentId}
+      pinnedArtifactId={pinnedArtifactId}
+      emptyText={block.emptyText}
+    />
+  );
+}
+
 // ---- dispatch: validate per the contract, then render or degrade ----
 
 /**
@@ -3980,6 +4013,12 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <BilingualTextRenderer block={block} /> : <UnsupportedBlock type="bilingualText" />;
     case 'referenceSelect':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isNonEmptyString(block.source) && isNonEmptyString(block.valueField) && isNonEmptyString(block.labelField) ? <ReferenceSelectRenderer block={block} /> : <UnsupportedBlock type="referenceSelect" />;
+    case 'documentViewer':
+      return isNonEmptyString(block.documentIdFrom) ? (
+        <DocumentViewerRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="documentViewer" />
+      );
     case 'ouScopePicker':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <OuScopePickerRenderer block={block} /> : <UnsupportedBlock type="ouScopePicker" />;
     case 'submitButton':

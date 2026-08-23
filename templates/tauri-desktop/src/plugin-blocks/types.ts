@@ -654,6 +654,24 @@ export interface AccessGateBlock {
   otherwise?: Block[]
 }
 
+/** Leaf: an ISSUED DOCUMENT (#947 item 4).
+ *
+ * Carries no `source` — the ids come out of the master-detail context and the
+ * host does the fetching against core's own `/api/v1/documents/*`, because every
+ * `source` in the contract is ownership-checked against the DECLARING plugin's
+ * routes and core's cannot be named by one. See the SDK's `documentViewer`
+ * docblock.
+ *
+ * `documentIdFrom` has no literal twin on purpose: an unresolved binding renders
+ * `emptyText`, never a different document. `artifactIdFrom` pins the opening
+ * version. */
+export interface DocumentViewerBlock {
+  type: "documentViewer"
+  documentIdFrom: string
+  artifactIdFrom?: string
+  emptyText?: string
+}
+
 export type Block = BlockFacets &
   ( | SectionBlock
   | CardBlock
@@ -693,6 +711,7 @@ export type Block = BlockFacets &
   | BilingualTextInputBlock
   | ReferenceSelectBlock
   | OuScopePickerBlock
+  | DocumentViewerBlock
   | SubmitButtonBlock
   | ActionButtonBlock
   | ChartBlock
