@@ -105,6 +105,13 @@ to seed each tenant, pre-filled with real company info.
   SVG rendered as an inert `data:` URI `<img>` (no script/fetch). Image `src` is
   hardened to `http(s)` only via `new URL().protocol` (regex guards were not
   accepted by CodeQL).
+- **Server-side PDF** goes through the optional `whity_render` container
+  (`ghcr.io/<repo>/render`), which runs `PrintDocument` — *this* file, bundled
+  from source at image build time — inside headless Chromium, so an export and
+  the on-screen preview cannot be two renderers. Deploying it, pairing its tag
+  with the app's, and sizing its (substantial) memory footprint:
+  [Document-Render-Service.md](./Document-Render-Service.md) ·
+  [ADR 0012](../adr/0012-document-render-microservice.md).
 
 ---
 

@@ -59,10 +59,8 @@
         "crud.delete.submit": "Delete",
         "crud.delete.title": "Delete {resource}",
         "crud.dialog.cancel": "Cancel",
-        "crud.edit.description": "Update {item}.",
         "crud.edit.pending": "Saving...",
         "crud.edit.submit": "Save changes",
-        "crud.edit.title": "Edit {resource}",
         "crud.empty.description": "Nothing to show for this feature yet.",
         "crud.empty.description.canCreate": "Create the first record to get started.",
         "crud.empty.title": "No records yet",
@@ -85,6 +83,13 @@
         "crud.noResource.description": "The '{id}' feature does not declare a REST resource to render.",
         "crud.noResource.title": "No resource",
         "crud.options.loadError": "Failed to load options.",
+        "crud.record.back": "Back to {resource}",
+        "crud.record.error.title": "This record could not be loaded",
+        "crud.record.fields.empty": "This record has no fields to show.",
+        "crud.record.missing.description": "No record with the id {id} is visible to you in {resource}. It may have been deleted, or it may be outside what you are allowed to see.",
+        "crud.record.missing.title": "Record not found",
+        "crud.record.readOnly.noOperation": "This resource publishes no update operation, so its records cannot be edited here.",
+        "crud.record.readOnly.noPermission": "You do not hold the permission to edit this record, so it is shown read-only.",
         "crud.retry": "Retry",
         "crud.rowActions.delete": "Delete",
         "crud.rowActions.edit": "Edit",
@@ -115,6 +120,12 @@
         "hello.message.label": "Greeting message",
         "hello.message.placeholder": "Write a greeting...",
         "hello.submit": "Add greeting",
-        "hello.submit.pending": "Adding..."
+        "hello.submit.pending": "Adding...",
+        "record.customScreen.description": "Records of '{id}' are handled by the screen registered for it, not by this page.",
+        "record.customScreen.title": "This feature provides its own screen",
+        "record.noRecord.description": "This address is missing the record it is about.",
+        "record.noRecord.title": "No record named",
+        "record.noRecordPage.description": "The '{id}' feature does not describe individual records, so there is nothing at this address.",
+        "record.noRecordPage.title": "No record page"
     }
 }

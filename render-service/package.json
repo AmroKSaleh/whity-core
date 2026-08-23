@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build:harness": "node scripts/build-harness.js",
-    "start": "npm run build:harness && node src/server.js",
+    "build:info": "node scripts/write-build-info.js",
+    "start": "npm run build:harness && npm run build:info && node src/server.js",
     "test": "jest"
   },
   "dependencies": {

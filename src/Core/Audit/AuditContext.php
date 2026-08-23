@@ -37,6 +37,18 @@ final class AuditContext
     private static ?string $ipAddress = null;
 
     /**
+     * The queued job currently being executed, or null outside the worker (#935).
+     *
+     * Lives here rather than on {@see AuditOrigin} because it changes per unit of
+     * work: one worker process runs many jobs, while an origin is decided once at
+     * bootstrap and is immutable by design. {@see \Whity\Core\Queue\JobRunner}
+     * sets it before a handler runs and {@see self::reset()} clears it in the same
+     * `finally` that already clears the actor — so a job name cannot leak into the
+     * next job any more than a tenant or an actor can.
+     */
+    private static ?string $job = null;
+
+    /**
      * Set the acting user id and client IP for the current request.
      *
      * @param int|null    $actorUserId The authenticated user id, or null.
@@ -70,6 +82,27 @@ final class AuditContext
     }
 
     /**
+     * Record which queued job is executing (#935).
+     *
+     * @param string|null $job The job's registry name, or null to clear it.
+     * @return void
+     */
+    public static function setJob(?string $job): void
+    {
+        self::$job = $job;
+    }
+
+    /**
+     * The queued job currently executing.
+     *
+     * @return string|null The job name, or null when not inside a job.
+     */
+    public static function getJob(): ?string
+    {
+        return self::$job;
+    }
+
+    /**
      * Clear the request-scoped actor and IP.
      *
      * Called between requests so no actor identity leaks into the next request
@@ -81,5 +114,6 @@ final class AuditContext
     {
         self::$actorUserId = null;
         self::$ipAddress = null;
+        self::$job = null;
     }
 }

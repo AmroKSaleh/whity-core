@@ -418,6 +418,36 @@ function columnsFrom(
  * Defensive by design: anything missing degrades to empty fields / false
  * capabilities — this function never throws on sparse or empty specs.
  */
+/**
+ * Fetch the public OpenAPI document through the same-origin proxy route
+ * (`app/openapi.json/route.ts`) — the input every derivation in this module
+ * takes.
+ *
+ * A plain fetch is deliberate: apiClient rewrites non-/api relative paths to
+ * the backend origin, which would bypass the proxy and require backend CORS —
+ * and the public document needs none of apiClient's cookie/refresh machinery.
+ *
+ * It lives beside the derivation rather than in the list screen (#948) because
+ * the record page needs the same document, and reaching into `crud-screen.tsx`
+ * for it would pull the whole list screen — table, dialogs and all — into the
+ * record page's bundle to get one fetch.
+ */
+export async function fetchSpec(): Promise<OpenApiSpec | null> {
+  try {
+    const response = await fetch('/openapi.json');
+    if (!response.ok) {
+      return null;
+    }
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null) {
+      return null;
+    }
+    return body as OpenApiSpec;
+  } catch {
+    return null;
+  }
+}
+
 export function deriveCrudModel(
   spec: OpenApiSpec,
   basePath: string

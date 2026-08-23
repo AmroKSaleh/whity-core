@@ -10,6 +10,11 @@
 # `render-service/Dockerfile.dockerignore` (not the root .dockerignore) shapes
 # this build's context — see that file's header comment.
 #
+# Published by .github/workflows/release.yml as `ghcr.io/<repo>/render`, under
+# the SAME tags as the app and web images and from the same gated job, because
+# a render tier is only correct against the core release it was built from —
+# see docs/wiki/Document-Render-Service.md.
+#
 # Two stages: `build` installs ALL deps (incl. esbuild, a devDependency) and
 # bundles the harness; `runtime` installs prod-only deps and copies in just the
 # bundle output + server source, so the shipped image carries no TypeScript
@@ -31,6 +36,27 @@ COPY packages/ui/src /workspace/packages/ui/src
 COPY packages/features/src /workspace/packages/features/src
 
 RUN npm run build:harness
+
+# The image's IDENTITY, baked in beside the bundle it describes.
+#
+# This is the THIRD published image of one release (app / web / render) and the
+# only one whose whole reason for existing is parity with the other two: the
+# bundle above is compiled from web/ + packages/ source, so a render container
+# left a release behind keeps answering 200 while producing PDFs that no longer
+# match the designer preview — the exact drift ADR 0012 exists to prevent, and
+# the exact drift that is invisible without something to compare.
+#
+# Neither input can be derived inside the build: the context is a copied tree
+# with no .git, and src/ is excluded from it apart from the one file re-included
+# below. Same shape as web/Dockerfile, for the same reason. Both stay in the
+# BUILD stage — only the resulting dist/build-info.json crosses into `runtime`.
+#
+# Placed after build:harness on purpose: a new commit then invalidates this
+# layer alone and the (slow) bundle build stays cached.
+ARG WHITY_BUILD_COMMIT=""
+ENV WHITY_BUILD_COMMIT=$WHITY_BUILD_COMMIT
+COPY src/Core/CoreVersion.php /workspace/src/Core/CoreVersion.php
+RUN npm run build:info
 
 FROM node:22-bookworm-slim AS runtime
 

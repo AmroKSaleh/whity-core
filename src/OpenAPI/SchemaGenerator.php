@@ -42,6 +42,37 @@ use Whity\Core\Router;
 class SchemaGenerator
 {
     /**
+     * `info.description`: the conventions a reader needs before reading any
+     * operation.
+     *
+     * The request-body sentence is the one that earns its place (#954). A
+     * generated client could not previously tell an operation that takes
+     * nothing from one nobody had documented — both are simply an absent
+     * `requestBody` — and that ambiguity is what produced a report of 116
+     * "undocumented" write endpoints most of which correctly take no body.
+     * Saying so here costs nothing and is asserted by
+     * tests/OpenAPI/RequestSchemaContractTest.php.
+     *
+     * The alternative — giving those operations an explicit empty body — was
+     * rejected: OpenAPI 3.0 has no spelling for "must not carry a body", so the
+     * nearest thing (`{type: object}` with no properties) says "send any JSON
+     * object", which is less true than saying nothing. See the same test file.
+     *
+     * Concatenated rather than a heredoc ON PURPOSE: a heredoc takes its line
+     * endings from the checkout, so this string would be CRLF on a Windows
+     * working copy and LF in CI, and the two would generate byte-different
+     * documents — a spec-drift failure that reproduces on one machine only.
+     */
+    private const DOCUMENT_DESCRIPTION =
+        'Request bodies are declared, not implied: where an operation accepts one, it is described '
+        . 'here. An operation with no `requestBody` accepts none — a reviewed contract, not a gap in '
+        . 'this document. The exception is an operation marked `x-whity-undocumented: true`: that one '
+        . 'carries no authored contract at all, its summary and responses are generated defaults, and '
+        . 'it may well take a body. Every CORE operation in the published `public/openapi.json` is '
+        . 'authored, so the marker appears there only on plugin routes that declare no schema of their '
+        . 'own; a document served live by a running instance may mark core routes too.';
+
+    /**
      * @var string API title
      */
     private string $title;
@@ -123,7 +154,7 @@ class SchemaGenerator
      */
     public function generateAndValidate(): array
     {
-        $builder = new SchemaBuilder($this->title, $this->version);
+        $builder = new SchemaBuilder($this->title, $this->version, self::DOCUMENT_DESCRIPTION);
         $builder->addBearerAuth();
         $this->conflicts = [];
 
@@ -355,6 +386,36 @@ class SchemaGenerator
                 ? array_values($schema['tags'])
                 : [$this->getTag($path)],
         ];
+
+        // The long-form prose that sits beside `summary` in OpenAPI 3.0. Sixteen
+        // catalogue entries had been writing one for as long as they have
+        // existed — the OU pagination note, the store-allowlist caveat, the
+        // 409-while-referenced warnings — and none of it was ever emitted,
+        // because nothing here read the key (#954). Same class of loss as the
+        // branding request body: declared, merged, and silently discarded.
+        if (is_string($schema['description'] ?? null) && $schema['description'] !== '') {
+            $operation['description'] = $schema['description'];
+        }
+
+        // #954: separate "declares no request body" from "nobody wrote a
+        // contract for this at all". Those are the same absent key to a reader,
+        // and conflating them is what inflated the original report — a count of
+        // undocumented write routes in which most entries were endpoints that
+        // correctly take nothing (POST /auth/logout, /notifications/{id}/read).
+        //
+        // A null $schema is precisely the second case: the route carried no
+        // declaration of its own AND the core catalogue has no entry for it, so
+        // the summary and responses below are generated defaults rather than
+        // anything a human wrote. Everything else in the document was authored,
+        // which makes an absent requestBody there a decision rather than a gap.
+        //
+        // The published public/openapi.json is generated from the catalogue and
+        // the plugins alone, so nothing in it is marked; the LIVE document also
+        // carries the routes on RouteCatalogueCompletenessTest's
+        // KNOWN_UNDOCUMENTED list, and those are the ones this flags.
+        if ($schema === null || $schema === []) {
+            $operation['x-whity-undocumented'] = true;
+        }
 
         // RFC 8594 / OpenAPI 3.0 deprecation flag.
         if (!empty($schema['deprecated'])) {

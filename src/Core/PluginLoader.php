@@ -156,10 +156,15 @@ class PluginLoader
      * Optional audit writer that plugin-declared events are subscribed to
      * ({@see \Whity\Sdk\PluginEventsInterface}, SDK 1.29).
      *
-     * Null in hosts that have not wired one (the CLI, the plugin smoke test),
-     * where declarations are skipped rather than failing — the same behaviour a
-     * null permission registry has. Wired together with the hook manager or not
-     * at all: a logger with no hook manager has nothing to subscribe to.
+     * Null in hosts that have not wired one (the plugin smoke test), where
+     * declarations are skipped rather than failing — the same behaviour a null
+     * permission registry has. Wired together with the hook manager or not at
+     * all: a logger with no hook manager has nothing to subscribe to.
+     *
+     * The CLI wired one in #931 and the `queue:work` worker in #935, so the two
+     * unattended paths now record what they do. This list is worth keeping
+     * accurate: while it named the CLI, it read as a deliberate exemption rather
+     * than a gap, which is part of why the worker's went unnoticed.
      */
     private ?AuditLogger $auditLogger = null;
 

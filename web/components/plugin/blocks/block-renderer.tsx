@@ -128,6 +128,7 @@ import {
   type FormBlockContextValue,
   type FieldArrayValue,
 } from '@/components/plugin/blocks/form-context';
+import { resolveContextPath } from '@/components/plugin/blocks/context-path';
 import { submitPluginAction } from '@/lib/plugin-action-submit';
 import type { ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
@@ -993,15 +994,12 @@ function collectAccessGates(blocks: Block[] | undefined, into: CollectedGate[] =
  * `/api/v1/roles/`, a different route with a different gate. Being told whether
  * you may write the collection, and rendering an editor for one record on the
  * strength of it, is worse than being told nothing.
+ *
+ * The substitution itself is {@link resolveContextPath} — shared with
+ * `dataRecord.source` and a form's `dataSource.path` so the three cannot drift.
  */
 function resolveGateEndpoint(md: MasterDetail | null, endpoint: string): string | null {
-  const parts = endpoint.split(/(\{[^{}]*\})/);
-  const resolved = parts.map((part, index) => {
-    if (index % 2 === 0) return part;
-    const value = resolveContextRef(md, part.slice(1, -1));
-    return value === undefined || value === '' ? null : encodeURIComponent(value);
-  });
-  return resolved.some((part) => part === null) ? null : resolved.join('');
+  return resolveContextPath(endpoint, (ref) => resolveContextRef(md, ref));
 }
 
 /** The methods the host will resolve. Mirrors `BlockValidator::ACCESS_CHECK_METHODS`. */
@@ -1125,26 +1123,18 @@ function AccessGateRenderer({ block }: { block: AccessGateBlock }) {
  * see, take whatever the envelope held, and render it as "the record this page
  * is about". Not fetching is the only honest answer to "which record?" when
  * nothing has said.
+ *
+ * A form's `dataSource.path` resolves through the same {@link resolveContextPath}
+ * for exactly that reason (#949) — it is a read, and reads that guess are the
+ * ones that go wrong quietly.
  */
 function useResolvedRecordSource(
   baseSource: string,
   params?: SourceParam[]
 ): string | null {
   const md = useMasterDetail();
-  // Split on the tokens rather than replacing through a callback: a callback
-  // that recorded "something did not resolve" in a closure variable is a
-  // reassignment during render, which the React compiler refuses (and is right
-  // to — the same expression would read differently on a re-render). Splitting
-  // on a CAPTURING pattern puts every token at an odd index, so the whole thing
-  // becomes a map and a join with nothing mutable in it.
-  const parts = baseSource.split(/(\{[^{}]*\})/);
-  const resolvedParts = parts.map((part, index) => {
-    if (index % 2 === 0) return part;
-    const value = resolveContextRef(md, part.slice(1, -1));
-    return value === undefined || value === '' ? null : encodeURIComponent(value);
-  });
-  if (resolvedParts.some((part) => part === null)) return null;
-  const substituted = resolvedParts.join('');
+  const substituted = resolveContextPath(baseSource, (ref) => resolveContextRef(md, ref));
+  if (substituted === null) return null;
   if (!params || params.length === 0 || md === null) return substituted;
   const qs = params
     .map((p) => {

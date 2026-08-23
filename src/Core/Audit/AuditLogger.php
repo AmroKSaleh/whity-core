@@ -153,14 +153,37 @@ final class AuditLogger implements AuditLoggerInterface
             $targetId = $options['target_id'] ?? null;
             $metadata = $this->sanitizeMetadata($options['metadata'] ?? []);
 
-            // Stamped AFTER sanitising, and assigned key by key so the writer's
-            // account of where a row came from always wins. The metadata above
-            // is caller data — a hook payload, or a plugin's declared event
-            // travelling the same path — and provenance a caller could
-            // overwrite would be provenance an attacker could launder.
+            // Provenance is WRITER-owned, so the caller's own copies of these
+            // keys are dropped before the writer states its account. Overwriting
+            // them was not enough (#935): a writer with no origin overwrites
+            // nothing, so a hook payload carrying `_origin: cli` used to reach
+            // the row unchallenged and an HTTP action could present itself as an
+            // operator's shell command. Likewise `_origin_command`, which an
+            // origin only sets when it HAS a command — `AuditOrigin::job()` never
+            // does, and `cli()` does not when argv[1] is unrecognisable.
+            //
+            // The metadata above is caller data — a hook payload, or a plugin's
+            // declared event travelling the same path — and provenance a caller
+            // could overwrite would be provenance an attacker could launder.
+            unset(
+                $metadata[AuditOrigin::METADATA_KEY],
+                $metadata[AuditOrigin::COMMAND_METADATA_KEY]
+            );
+
             if ($this->origin !== null) {
                 foreach ($this->origin->toMetadata() as $key => $value) {
                     $metadata[$key] = $value;
+                }
+
+                // The worker's origin names the CHANNEL but not the job, because
+                // one process runs many (#935). The unit of work comes from the
+                // per-job context instead — stamped here, in the same
+                // writer-owned block, so it cannot be forged either.
+                if (!array_key_exists(AuditOrigin::COMMAND_METADATA_KEY, $metadata)) {
+                    $job = AuditOrigin::normalizeUnitName(AuditContext::getJob());
+                    if ($job !== null) {
+                        $metadata[AuditOrigin::COMMAND_METADATA_KEY] = $job;
+                    }
                 }
             }
 
