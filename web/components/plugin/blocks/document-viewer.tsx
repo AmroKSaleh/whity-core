@@ -91,7 +91,17 @@
 import * as React from 'react';
 import { IconDownload, IconFileText } from '@tabler/icons-react';
 import { apiClient } from '@/lib/api-client';
-import { formatRecordDateTime } from '@amroksaleh/features/record';
+// NOTE THE IMPORT PATH: the dedicated `record/format` subpath, not the slice's
+// barrel, and it is load-bearing rather than stylistic — the same reason
+// `print-document.tsx` documents for its own subpath. `@amroksaleh/features/record`
+// re-exports the whole record slice (`RecordPageShell` and friends), and pulling
+// that barrel in here for one date formatter put it into web's Storybook preview
+// graph for the first time, where react-docgen's TS resolution recursed until
+// `RangeError: Maximum call stack size exceeded` failed the gallery build. The
+// alternative was a third private copy of a nine-line formatter, which `format.ts`
+// exists specifically to prevent — two copies had already disagreed about whether
+// an empty string is a date.
+import { formatRecordDateTime } from '@amroksaleh/features/record/format';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
@@ -171,7 +181,7 @@ const DOCUMENTS_PATH = '/api/v1/documents';
  * first paint disagree.
  */
 function browserShowsPdfInline(): boolean {
-  const supported = (navigator as Navigator & { pdfViewerEnabled?: boolean }).pdfViewerEnabled;
+  const supported = (navigator as unknown as { pdfViewerEnabled?: boolean }).pdfViewerEnabled;
   return supported !== false;
 }
 
