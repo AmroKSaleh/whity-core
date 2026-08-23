@@ -668,6 +668,33 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_READ,
     ];
     $items[] = [
+        'id' => 'inbox',
+        'label' => 'Inbox',
+        'href' => '/admin/inbox',
+        'icon' => 'inbox',
+        'group' => 'admin',
+        // Near the top on purpose: this is the surface a person opens daily,
+        // where the entries below it are things they go looking for.
+        'order' => 1.5,
+        // #978, consuming #881. DELIBERATELY UNGATED — no requiredPermission and
+        // no requiredRole.
+        //
+        // It mirrors GET /api/me/inbox, which is session-gated and
+        // unpermissioned, exactly like /api/me/notifications and
+        // /api/me/sessions: an inbox row already names exactly one person, so a
+        // tenant-wide permission has no work left to do. Gating the nav entry on
+        // anything would hide the page from people whose work is IN it —
+        // migration 113 makes the same argument about acting on a route ("being
+        // a recipient IS the authorization"), and a hidden inbox would strand
+        // every item routed to somebody who cannot browse the document library.
+        //
+        // The page is a consumer of the #881 SOURCE REGISTRY rather than a
+        // routing screen, which is why the label is "Inbox" and not "Documents
+        // awaiting you": routing is one registered source of possibly several,
+        // and #947 refused it a surface of its own precisely so this entry never
+        // has to become one entry per source.
+    ];
+    $items[] = [
         'id' => 'documents',
         'label' => 'Document Designer',
         'href' => '/admin/documents',
