@@ -98,6 +98,18 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
     },
+    // #964: the plugin screen-override mechanism, proven in a real browser.
+    // Runs admin-authenticated (DemoCatalog's migration grants
+    // demo_catalog:view to admin). It needs a browser specifically: the
+    // override registry has one instance per Next module graph, and only the
+    // client bundle can show whether the registrations reached the browser —
+    // jest has a single graph and cannot tell the two apart.
+    {
+      name: 'plugins-override',
+      testMatch: /plugin-screen-override\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
+    },
     // The multi-role matrix (WC-173): one spec file, three role projects.
     // All three share the same testMatch, so every e2e/matrix-*.spec.ts runs
     // once per role; specs read the role via the `role` fixture (which parses

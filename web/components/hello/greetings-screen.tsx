@@ -91,13 +91,32 @@ async function readErrorMessage(
 }
 
 /**
- * Bespoke override screen for the HelloWorld plugin's `hello-greetings`
- * feature — the canonical reference for the custom-screen pattern.
+ * The SHAPE of a bespoke override screen for a plugin feature: it fetches the
+ * plugin's greetings on mount, lets the caller post a new one, and degrades to
+ * an access-denied card on a 403.
  *
- * The dynamic feature host resolves this component via the plugin UI registry
- * (see `lib/plugin-ui-registry.tsx`), so it ALWAYS wins over the generic
- * schema-driven renderer. It fetches the plugin's greetings on mount, lets the
- * caller post a new one, and degrades to an access-denied card on a 403.
+ * NOT REGISTERED, DELIBERATELY (#964). This was registered against the
+ * HelloWorld plugin's `hello-greetings` feature back when the registry was
+ * write-only — nothing it registered ever rendered (the registrations ran in
+ * the server's module graph, the lookup happened in the browser's), so the
+ * feature has been served by the generic schema-driven CRUD screen since the
+ * day this file was written. Fixing the registry meant deciding which of those
+ * two screens `hello-greetings` should actually have, and the generic one has
+ * since grown everything this screen lacks: capability-gated controls that are
+ * disabled WITH A REASON rather than absent (#199/#951/#953), edit and delete,
+ * and a record route with a real address (#948). This screen would have shown
+ * a delegate an enabled "Add greeting" form that 403s on submit — so switching
+ * to it would have been a regression across three shipped issues, on the only
+ * `screen: 'crud'` feature in the repo.
+ *
+ * The live reference for the override mechanism is `DemoCatalogScreen`
+ * (`components/demo-catalog/demo-catalog-screen.tsx`), registered in
+ * `lib/plugin-screens.tsx` for the DemoCatalog plugin's `screen: 'custom'`
+ * feature — which has no host-derived screen to displace, and so demonstrates
+ * the mechanism without trading anything away for it. This file stays as the
+ * pattern's worked example (it has a Storybook gallery entry alongside it) and
+ * as what a plugin would write when the block DSL genuinely cannot express its
+ * screen.
  */
 export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
