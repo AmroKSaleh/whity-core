@@ -64,20 +64,20 @@ final class DocumentRenderer
         $maxTemplateBytes = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES]
             ?? SettingsRegistry::defaultFor(SettingsRegistry::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES));
         if ($templateBytes > $maxTemplateBytes) {
-            throw new DocumentRenderRejectedException(
+            throw DocumentRenderRejectedException::because(
                 "Template exceeds the maximum render size ({$maxTemplateBytes} bytes)"
             );
         }
 
         $dataRows = $this->normalizeDataRows($rawDataRows, $templateData);
         if ($dataRows === null) {
-            throw new DocumentRenderRejectedException('dataRows must be a list of flat string maps');
+            throw DocumentRenderRejectedException::because('dataRows must be a list of flat string maps');
         }
 
         $maxRows = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_ROWS]
             ?? SettingsRegistry::defaultFor(SettingsRegistry::DOCUMENTS_RENDER_MAX_ROWS));
         if (count($dataRows) > $maxRows) {
-            throw new DocumentRenderRejectedException("Too many dataset rows (max {$maxRows})");
+            throw DocumentRenderRejectedException::because("Too many dataset rows (max {$maxRows})");
         }
 
         $pagesPerRow = max(1, count($templateData['pages'] ?? []));
@@ -85,7 +85,7 @@ final class DocumentRenderer
         $maxUnits = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_PAGES]
             ?? SettingsRegistry::defaultFor(SettingsRegistry::DOCUMENTS_RENDER_MAX_PAGES));
         if ($totalUnits > $maxUnits) {
-            throw new DocumentRenderRejectedException(
+            throw DocumentRenderRejectedException::because(
                 "Render would produce too many pages ({$totalUnits}, max {$maxUnits})"
             );
         }

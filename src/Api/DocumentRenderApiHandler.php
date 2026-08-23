@@ -129,7 +129,8 @@ final class DocumentRenderApiHandler
         try {
             $pdf = $this->renderer->render($tenantId, $templateData, $body['dataRows'] ?? null, $body['sheet'] ?? null);
         } catch (DocumentRenderRejectedException $e) {
-            return Response::error($e->getMessage(), 422);
+            // ->clientMessage, never ->getMessage(): see the exception's docblock.
+            return Response::error($e->clientMessage, 422);
         } catch (RenderServiceUnavailableException $e) {
             error_log('[DocumentRenderApiHandler] render failed: ' . $e->getMessage());
             return Response::error('Document rendering is temporarily unavailable', 503);

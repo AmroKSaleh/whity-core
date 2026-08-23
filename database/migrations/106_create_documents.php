@@ -158,10 +158,13 @@ class CreateDocuments
 {
     public static function up(Database $db): void
     {
-        // NOTE: one literal CREATE TABLE per table, not a loop over interpolated
-        // names — TenantOwnedTablesTest and CoreTablesTest re-derive their
-        // registries by scanning this source, so the names must appear literally.
-        // Migration 059 carries the same note for the same reason.
+        // NOTE: one literal create-table statement for each table, not a loop
+        // over interpolated names — TenantOwnedTablesTest and CoreTablesTest
+        // re-derive their registries by scanning this source, so the names must
+        // appear literally. Migration 059 carries the same note, and spells the
+        // keyword in lowercase prose for the same reason this does:
+        // MigrationSchemaTest scans for the create keyword and would read a
+        // capitalised one in a comment as a real table declaration.
         $db->exec("
             CREATE TABLE IF NOT EXISTS documents (
                 id                   BIGSERIAL     NOT NULL PRIMARY KEY,
