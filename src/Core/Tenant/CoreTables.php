@@ -58,6 +58,8 @@ final class CoreTables
         'devices' => '044_create_devices.php',
         'document_artifacts' => '108_create_documents.php',
         'document_blocks' => '059_create_document_designer_tables.php',
+        'document_collection_items' => '114_create_document_collections.php',
+        'document_collections' => '114_create_document_collections.php',
         'document_route_events' => '112_create_document_routing.php',
         'document_route_recipients' => '112_create_document_routing.php',
         'document_route_steps' => '112_create_document_routing.php',
