@@ -764,20 +764,12 @@ final class MigrationSchemaTest extends TestCase
     {
         return [
             'users:read' => ['users.read', 'users:read'],
-            'users:create' => ['users.create', 'users:create'],
-            'users:update' => ['users.update', 'users:update'],
             'users:delete' => ['users.delete', 'users:delete'],
             'roles:read' => ['roles.read', 'roles:read'],
-            'roles:create' => ['roles.create', 'roles:create'],
-            'roles:update' => ['roles.update', 'roles:update'],
             'roles:delete' => ['roles.delete', 'roles:delete'],
             'tenants:read' => ['tenants.read', 'tenants:read'],
-            'tenants:create' => ['tenants.create', 'tenants:create'],
-            'tenants:update' => ['tenants.update', 'tenants:update'],
             'tenants:delete' => ['tenants.delete', 'tenants:delete'],
             'ous:read' => ['ous.read', 'ous:read'],
-            'ous:create' => ['ous.create', 'ous:create'],
-            'ous:update' => ['ous.update', 'ous:update'],
             'ous:delete' => ['ous.delete', 'ous:delete'],
             'ous:assign' => ['ous.assign', 'ous:assign'],
         ];
