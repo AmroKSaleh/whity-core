@@ -470,16 +470,22 @@ jobs:
   # leaving a plugin that declares `^1.30` bound to a contract nobody can
   # identify from the constraint, on devices, offline (#849).
   #
-  # Its own job rather than a step in `static-analysis`, for one reason: it
-  # reads GIT HISTORY, so it needs fetch-depth: 0. A shallow checkout does not
-  # error here — it answers `git log develop -- sdk/src/Sdk.php` with a SMALLER
-  # set of used versions, so a number that is already taken reads as free, which
-  # is the same silent false green the guard exists to remove. Keeping it in its
-  # own job keeps the full fetch off the other jobs, which do not need it.
+  # Its own job rather than a step in `static-analysis`, for one reason: these
+  # guards read GIT HISTORY, so they need fetch-depth: 0. A shallow checkout does
+  # not error — it answers with a SMALLER set than the real one, so a number that
+  # is already taken reads as free, which is the same silent false green the
+  # guards exist to remove. Keeping them in their own job keeps the full fetch off
+  # the other jobs, which do not need it.
   #
-  # No `composer install`: the guard reads two files and shells out to git.
-  sdk-version:
-    name: SDK version collision (against develop's history)
+  # BOTH hand-allocated numbers live here (#971). The migration prefix is the same
+  # shape of defect as Sdk::VERSION: two parallel branches each pick 106, neither
+  # can see the other, git does not conflict because the filenames differ, and the
+  # second PR's CI is honestly green against a base that predates the first. One
+  # full fetch serves both checks.
+  #
+  # No `composer install`: the guards read files and shell out to git.
+  history-guards:
+    name: Version and migration-number collisions (against develop's history)
     needs: changes
     if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.desktop_host == 'true'
     runs-on: ubuntu-latest
@@ -503,6 +509,9 @@ jobs:
 
       - name: SDK version-collision guard
         run: php scripts/ci-sdk-version-collision.php
+
+      - name: Migration-number collision guard
+        run: php scripts/ci-migration-number-collision.php
 
   # The English translation catalogue must stay a faithful projection of the
   # t() calls that produce it. A converted screen whose keys were never
@@ -1190,7 +1199,7 @@ jobs:
       - test
       - coverage
       - static-analysis
-      - sdk-version
+      - history-guards
       - i18n-catalogue
       - postgres-migrations
       - postgres-integration
