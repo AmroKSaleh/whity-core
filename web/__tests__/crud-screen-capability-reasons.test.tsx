@@ -21,6 +21,8 @@ import type { OpenApiSpec } from '@/lib/plugin-crud-schema';
 import type { CapabilityDenial, PluginFeature } from '@/lib/plugin-features';
 
 const mockApiClient = jest.fn();
+const recordPush = jest.fn();
+
 jest.mock('@/lib/api-client', () => ({
   apiClient: (...args: unknown[]) => mockApiClient(...args),
 }));
@@ -28,6 +30,9 @@ jest.mock('@/lib/api-client', () => ({
 // Module-level, so `addToast` keeps a STABLE identity: it is a dependency of
 // the load effect, and a fresh mock per render re-triggers the fetch forever.
 const addToast = jest.fn();
+// crud-screen navigates to the record page for Edit (#948/#960), so the
+// router has to exist even for the tests that only assert denial states.
+jest.mock('next/navigation', () => ({ useRouter: () => ({ push: recordPush }) }));
 jest.mock('@/lib/toast-context', () => ({ useToast: () => ({ addToast }) }));
 jest.mock('@/lib/direction-context', () => ({ useDirection: () => ({ dir: 'ltr' }) }));
 

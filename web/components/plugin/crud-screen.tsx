@@ -12,7 +12,6 @@ import {
   type CrudField,
   type CrudModel,
 } from '@/lib/plugin-crud-schema';
-import type { PluginFeature } from '@/lib/plugin-features';
 import {
   CrudFields,
   preferredLocalizedText,
@@ -24,6 +23,7 @@ import { recordHref } from '@/lib/plugin-record-route';
 import type { CapabilityDenial, PluginFeature } from '@/lib/plugin-features';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { usePluginData } from '@/lib/use-plugin-data';
+import type { TranslateFn } from '@amroksaleh/features/i18n';
 import { useToast } from '@/lib/toast-context';
 import { useDirection } from '@/lib/direction-context';
 import { AdminHeader } from '@/components/admin/admin-header';

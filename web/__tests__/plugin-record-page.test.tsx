@@ -35,6 +35,11 @@ import type { PluginFeature } from '@/lib/plugin-features';
 
 const push = jest.fn();
 let params: Record<string, string> = {};
+// crud-screen reads capability denials to decide whether a control is
+// disabled-with-a-reason (#951), so the hook must be present even here.
+jest.mock('@/hooks/useCapabilities', () => ({
+  useCapabilities: () => ({ hasPermission: () => true }),
+}));
 jest.mock('next/navigation', () => ({
   useParams: () => params,
   useRouter: () => ({ push }),
