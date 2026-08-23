@@ -75,6 +75,20 @@ final class SchemaFromMigrations
      */
     public static function make(bool $stringifyFetches = false): PDO
     {
+        // Migration CLASSES must be declared on every path, not only on the one
+        // that RUNS them (#938). The Postgres fast path clones a cached template
+        // instead of migrating, and a WARM template short-circuits the template
+        // build too — so nothing ever required the migration files, and any test
+        // naming a migration class got `Class "Database\Migrations\..." not
+        // found`. Cold template: 32 pass. Warm template: three real-engine tests
+        // fail. CI never sees it, because CI provisions a fresh Postgres per job
+        // and its template is therefore always cold — so the failure is reachable
+        // only locally, and only on a SECOND run, which is exactly the run where a
+        // new error is most likely to be blamed on the change in hand.
+        //
+        // The template exists to skip the WORK, not the DEFINITIONS.
+        self::loadMigrationClasses();
+
         $pgDsn = $_ENV['PHPUNIT_PG_DSN'] ?? getenv('PHPUNIT_PG_DSN') ?: null;
 
         if ($pgDsn !== null) {
@@ -1011,15 +1025,13 @@ final class SchemaFromMigrations
             $db = self::databaseWrapper($pdo);
         }
 
-        $dir   = dirname(__DIR__, 2) . '/database/migrations';
-        $files = glob($dir . '/*.php') ?: [];
-        sort($files);
+        self::loadMigrationClasses();
 
         // Some migrations (e.g. 010) print to stdout (generated password notices).
         // PHPUnit treats any test-time stdout output as a failure, so silence it.
         ob_start();
         try {
-            foreach ($files as $file) {
+            foreach (self::migrationFiles() as $file) {
                 $class = self::resolveMigrationClass($file);
                 try {
                     $class::up($db);
@@ -1039,10 +1051,41 @@ final class SchemaFromMigrations
         }
     }
 
+    /**
+     * Every migration file, in application order.
+     *
+     * @return list<string> Absolute paths, sorted by their numeric prefix.
+     */
+    private static function migrationFiles(): array
+    {
+        $dir   = dirname(__DIR__, 2) . '/database/migrations';
+        $files = glob($dir . '/*.php') ?: [];
+        sort($files);
+
+        return array_values($files);
+    }
+
+    /**
+     * Declare every migration class WITHOUT running any of them (#938).
+     *
+     * Requiring a migration file only defines its class — migrations do nothing
+     * until `up()` is called — so this is safe on the clone path, where the
+     * schema already exists and re-running the migrations would be both wrong
+     * and slow.
+     *
+     * Idempotent via `require_once`, and cheap enough to call unconditionally.
+     * The alternative is a class table whose contents depend on which path
+     * `make()` happened to take, which is the defect this closes.
+     */
+    public static function loadMigrationClasses(): void
+    {
+        foreach (self::migrationFiles() as $file) {
+            require_once $file;
+        }
+    }
+
     private static function resolveMigrationClass(string $file): string
     {
-        require_once $file;
-
         $name  = pathinfo($file, PATHINFO_FILENAME); // e.g. 001_create_users_roles
         $parts = explode('_', $name);
         array_shift($parts);                          // strip the numeric prefix

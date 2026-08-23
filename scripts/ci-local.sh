@@ -209,7 +209,10 @@ job_phpstan() {
     printf '\033[0;33m    note: running against the working copy; untracked files are analysed too.\n'
     printf '          Use --clean for a CI-faithful result.\033[0m\n'
   fi
-  run_in_ci vendor/bin/phpstan analyse src tests plugins sdk ops --memory-limit=512M
+  # Paths and memory limit come from the composer script, so this cannot
+  # drift from CI again (#934: this line said 512M while the workflow said
+  # 1G and a plain dev container inherited PHP's 128M default).
+  run_in_ci composer phpstan
 }
 
 # ---------------------------------------------------------------------------
