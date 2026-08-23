@@ -34,13 +34,24 @@ operator-driven runbook — no deployment self-mutates.
 - Releases are git tags `v<VERSION>` on `main`. The release workflow
   (`.github/workflows/release.yml`) **refuses** a tag that does not match
   `CoreVersion::VERSION`, re-runs the full backend suite on the tagged
-  commit, pushes **both** container images to GHCR under the same tags —
-  the API `ghcr.io/<repo>` and the UI `ghcr.io/<repo>/web`, each as
-  `:vX.Y.Z` and `:latest` — and creates the GitHub Release with generated
-  notes.
-- The two images are one release: they are built by the same gated job and
-  carry identical tags, so a deployment upgrades them as a pair. Running a
+  commit, pushes **all three** container images to GHCR under the same tags —
+  the API `ghcr.io/<repo>`, the UI `ghcr.io/<repo>/web` and the document
+  render tier `ghcr.io/<repo>/render`, each as `:vX.Y.Z` and `:latest` — and
+  creates the GitHub Release with generated notes.
+- The three images are one release: they are built by the same gated job and
+  carry identical tags, so a deployment upgrades them as a set. Running a
   `v0.3.0` API against a `v0.2.0` UI is not a supported configuration.
+- The API and UI are both required; **`/render` is optional to run** (it is
+  behind a Compose profile — see
+  [Document-Render-Service.md](./Document-Render-Service.md)) but is published
+  unconditionally, because it is the one image an operator cannot build from
+  the others: its build context spans the app repo *and* the web source.
+  A deployment that runs it must run it at the tag matching the other two —
+  the renderer inside it is compiled from that release's `web/` and
+  `packages/` source, so an older render tier exports documents that no longer
+  match the designer preview while looking perfectly healthy.
+  `GET /health` on the render service reports the `core_version` it was built
+  from, which is the cheapest way to catch that.
 
 ## Cutting a release (maintainers)
 
@@ -114,7 +125,10 @@ For a compose-based deployment (the per-product deployment anatomy in
 
    (Container-image deployments instead pull `ghcr.io/<repo>:v<VERSION>`
    **and** `ghcr.io/<repo>/web:v<VERSION>` and update both compose/image
-   references — the UI ships as its own image.)
+   references — the UI ships as its own image. Deployments running the
+   optional render profile pull `ghcr.io/<repo>/render:v<VERSION>` in the
+   same step; leaving it behind is a silent export-drift bug, not an
+   outage.)
 
 3. **Run migrations** (also applies any new migrations from installed
    plugins): `php public/index.php migrate run` — in compose,
@@ -180,6 +194,17 @@ For a compose-based deployment (the per-product deployment anatomy in
    A `core_version` that lags `version` means the frontend was not rebuilt —
    go back to step 5. Worth wiring into monitoring: comparing those two
    fields is the cheapest alarm for a half-applied update.
+
+   **If the render profile is running, it is a third tier to check** — and the
+   one whose staleness is least visible, since a stale render container is
+   healthy and merely exports the previous release's layout:
+
+   ```bash
+   curl -s http://<render-host>:8130/health | jq '{status, core_version, commit}'
+   ```
+
+   Its `core_version` must equal the other two. See
+   [Document-Render-Service.md](./Document-Render-Service.md).
 
 ## Rolling back
 

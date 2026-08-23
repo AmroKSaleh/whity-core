@@ -6,7 +6,11 @@
  * A minimal INTERNAL API — never exposed publicly, called only by whity-core's
  * DocumentRenderApiHandler over the compose network:
  *
- *   GET  /health  — liveness probe (no auth; no secrets in the response).
+ *   GET  /health  — liveness probe (no auth; no secrets in the response). Also
+ *                   reports this image's IDENTITY (core_version + commit, from
+ *                   dist/build-info.json) so a render container that has
+ *                   drifted from the core it serves is visible from outside
+ *                   the box — see scripts/write-build-info.js.
  *   POST /render  — {template, dataRows?, sheet?, blocks?} -> raw PDF bytes.
  *                   Requires the `X-Render-Secret` header to match
  *                   RENDER_SHARED_SECRET (>= 32 chars) exactly.
@@ -18,6 +22,7 @@
  */
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
@@ -61,8 +66,33 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '25mb' }));
 
+/**
+ * This build's identity, frozen at build time by scripts/write-build-info.js.
+ *
+ * Read once at boot, not per request: it cannot change while the process
+ * lives, and /health is the endpoint an orchestrator hammers.
+ *
+ * Absent only when the service is run straight from a checkout without
+ * `npm run build:info` (an image build always produces it, and the build fails
+ * if it cannot). Reported as nulls in that case rather than omitted, so a
+ * consumer reads "this build does not know" from the same field shape instead
+ * of having to distinguish a missing key from an old service.
+ */
+const BUILD_INFO = (() => {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'dist', 'build-info.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    return {
+      core_version: parsed.core_version || null,
+      commit: parsed.commit || null,
+    };
+  } catch {
+    return { core_version: null, commit: null };
+  }
+})();
+
 app.get('/health', (_req, res) => {
-  res.status(200).json({ status: 'ok' });
+  res.status(200).json({ status: 'ok', ...BUILD_INFO });
 });
 
 app.use('/_harness', express.static(HARNESS_DIR));

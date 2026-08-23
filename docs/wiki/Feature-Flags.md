@@ -183,6 +183,15 @@ also asserts the disabled path never reaches the expensive/external part.**
 Current `FEATURE_FLAG_KEYS`, in registry declaration order. "Global-only" means
 the flag is operator-level and not tenant-overridable (`SettingsRegistry::isGlobalOnly()`).
 
+Global-only is **enforced, not advisory**, and it is worth knowing exactly how
+before you go looking for a per-tenant toggle that does not exist: such a key is
+omitted from the per-tenant registry (`GET /api/v1/settings` never lists it) and
+`PATCH /api/v1/settings` refuses it outright —
+`422  <key> is a global instance setting and cannot be set per-tenant.` It is
+settable only on the global surface (`PATCH /api/v1/settings/global`) and in the
+admin Feature Flags tab. A global-only key never silently accepts a per-tenant
+write; if you got a `200`, you were on the global surface.
+
 | Flag key | Default | Global-only | Controls | Why an operator would turn it off |
 | --- | --- | --- | --- | --- |
 | `mcp.enabled` | `false` | no (per-tenant) | Whether the MCP JSON-RPC endpoint (`src/Mcp/JsonRpc/Dispatcher.php`) accepts tool/resource/prompt calls for a tenant | Most instances don't want to expose an AI-agent-facing API surface at all; opt-in per tenant |
@@ -201,6 +210,23 @@ flip it off during an incident or compliance freeze without losing the
 allowlist you already configured. Both are checked, allowlist after switch,
 in `InstallFromStoreApiHandler::resolveStoreOrigin()` before any outbound
 request.
+
+`documents.render_enabled` is global-only for a different reason: it does not
+express a preference at all, it asserts a fact about the deployment — whether a
+Chromium-bearing render container (`ghcr.io/<repo>/render`, ADR 0012) is
+actually running. A per-tenant value could not make one appear. The render
+**limits** beside it (`documents.render_max_rows`, `_max_pages`,
+`_max_template_bytes`) are ordinary tenant-overridable settings, and
+deliberately so: they are the knob for holding a low instance-wide ceiling while
+raising it for the one tenant that legitimately exports large batches. Those
+ceilings are also where an operator meets this tier's real cost, and it is not
+the cost the numbers imply: `render_max_rows = 500` over a three-page template
+is 1500 pages, which measures at ~813 MB of container memory and 78 seconds —
+and **fails on stock settings anyway**, because three separate 30-second
+timeouts sit beneath the limits the settings advertise. Every one of those
+failures, an OOM kill included, reaches the caller as the same generic `503`.
+Measured figures, the timeouts, and how to tell the cases apart:
+[Document-Render-Service.md](./Document-Render-Service.md).
 
 ---
 
