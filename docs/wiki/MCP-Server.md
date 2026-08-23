@@ -12,8 +12,15 @@ The MCP surface is not a separate process. It is served by the same FrankenPHP p
 
 ```text
 POST /mcp   ← JSON-RPC 2.0 message (request, notification, or batch)
-GET  /mcp   ← reserved for server-initiated SSE (not yet implemented)
+GET  /mcp   ← 405: this server offers no standing SSE stream
 ```
+
+There is deliberately no standing server-to-client stream. Under FrankenPHP a held
+connection occupies a worker for its whole life, and there are eight of them —
+eight subscribed MCP clients would leave nothing to serve HTTP with. Server-initiated
+notifications are instead framed onto the **POST response** as `text/event-stream`,
+which the MCP spec allows and which writes a complete body in one pass rather than
+pinning a worker. See [Change notifications](#change-notifications).
 
 The call path is:
 
@@ -274,15 +281,75 @@ The `initialize` response declares the server's capabilities and protocol versio
 {
   "protocolVersion": "2025-03-26",
   "capabilities": {
-    "tools":     { "listChanged": false },
-    "resources": { "subscribe": false, "listChanged": false },
-    "prompts":   { "listChanged": false }
+    "tools":     { "listChanged": true },
+    "resources": { "subscribe": false, "listChanged": true },
+    "prompts":   { "listChanged": true }
   },
   "serverInfo": { "name": "whity-core", "version": "1.0" }
 }
 ```
 
 Batch requests are supported: a JSON array of request objects returns a JSON array of responses. Notifications (objects without an `id` member) are processed but produce no response.
+
+---
+
+## Change notifications
+
+MCP clients cache the discovery lists at connection time. A client that connected
+before a plugin rebuild used to keep its stale tool definitions indefinitely — which
+is how records were once written double-encoded against a server that had been
+serving the corrected schema all along (#952).
+
+The server now emits the spec's list-change notifications:
+
+| Notification | Sent when |
+| --- | --- |
+| `notifications/tools/list_changed` | the derived tool catalogue differs from the one this client was last told about |
+| `notifications/resources/list_changed` | likewise for the resource catalogue |
+| `notifications/prompts/list_changed` | likewise for the prompt catalogue |
+
+**How it is decided.** The signal is content-derived, not event-driven: each worker
+hashes the catalogue it would actually serve (`src/Mcp/Notifications/CatalogSignature.php`)
+and compares that against what the calling client has already been told. This is what
+makes it safe across the worker pool — a worker that has not yet picked up a plugin
+change computes the old signature and stays silent, so no client is ever told about a
+catalogue the answering worker cannot then serve. The "already told" marker lives in
+the shared store, so one change produces one notification per client rather than one
+per worker.
+
+**How it is delivered.** On the client's next `POST /mcp`, provided the client
+advertised `Accept: text/event-stream` (the MCP spec requires conformant clients to).
+The response becomes an SSE body carrying the notification frames first and the
+JSON-RPC response last. A client that did not offer to read an event stream is left
+alone and keeps receiving plain JSON.
+
+**What it costs when nobody is listening.** Nothing. There are no connections to
+push to and no work is done on the reload path; a reload that no client ever follows
+up on produces no notification and no error.
+
+**What fires it.** Any change to the content of a served list: a plugin install,
+update, or uninstall; an administrative enable or disable; a `POST /api/plugins/reload`
+that finds a disk change; the per-request hot reload in development; and a deploy
+that changes core routes. Reverts are announced too — an install followed by an
+uninstall announces twice, because a client told about the second catalogue has its
+record of the first retired.
+
+**What does not fire it.** A worker boot on an unchanged catalogue (otherwise eight
+workers would announce eight times); a reload that finds no disk change; ordinary
+requests; and a plugin tripping the runtime error boundary, which leaves its
+declarations registered and short-circuited — its behaviour changed, its tool
+definitions did not. A caller whose *permissions* changed also sees a different
+`tools/list` without any notification: that is a grant change, not a registry
+change.
+
+**Bound.** The shared store is a counter store with no value semantics, so what is
+recorded is "this client has been told about this catalogue", not "the catalogue I
+last served". Retiring a client's stale records on the way past covers reverts
+within what a worker has observed (`CatalogSignature::RECENT_LIMIT`, the last 8
+catalogues per list); beyond that a record expires on its own after
+`ListChangedNotifier::SEEN_TTL_SECONDS` (24h). The failure mode at expiry is one
+redundant `tools/list` round trip, which is the direction a correctness fix should
+fail in.
 
 ---
 

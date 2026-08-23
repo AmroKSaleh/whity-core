@@ -210,6 +210,8 @@ use Whity\Mcp\Auth\McpTokenService;
 use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
 use Whity\Mcp\McpFeatureDisabledException;
+use Whity\Mcp\Notifications\CatalogSignature;
+use Whity\Mcp\Notifications\ListChangedNotifier;
 use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
@@ -2333,9 +2335,22 @@ $tenantMcpEnabled = static function (int $tenantId) use ($settingsService): bool
     $settings = $settingsService->effective($tenantId);
     return ($settings[SettingsRegistry::MCP_ENABLED] ?? 'false') === 'true';
 };
+// #952: MCP clients cache the discovery lists at connection time, so a client
+// that connected before a plugin rebuild kept its stale tool definitions
+// indefinitely — which is how records were written double-encoded against a
+// server that was already serving the corrected schema. The signature is derived
+// from the catalogue this worker would actually serve, so each of the eight
+// FrankenPHP workers answers for itself and none announces a change it cannot
+// then serve; the shared store is what keeps eight workers from each announcing
+// the same change to the same client.
+$mcpCatalogSignature = new CatalogSignature($toolDeriver, $resourceDeriver, $promptRegistry);
+$mcpListChangedNotifier = new ListChangedNotifier(
+    $mcpCatalogSignature,
+    new DatabaseSharedStore($db->getPdo()),
+);
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher([
-        'initialize'              => new InitializeHandler(),
+        'initialize'              => new InitializeHandler(listChanged: true),
         'ping'                    => new PingHandler(),
         'notifications/cancelled' => new CancelledNotificationHandler(),
         'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator),
@@ -2344,7 +2359,7 @@ $mcpTransportHandler = new McpTransportHandler(
         'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
         'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
         'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
-    ], $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled),
+    ], $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier),
     enabled: (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VALIDATE_BOOLEAN),
 );
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
@@ -2355,6 +2370,33 @@ $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']
 // shadowed by a plugin claiming the same path.
 $pluginLoader->load();
 $pluginLoader->collectMcpPrompts($promptRegistry);
+
+// #952: everything the MCP layer memoized off the plugin registry is rebuilt
+// whenever the registry changes. Announcing a change while continuing to serve
+// the pre-change catalogue would be worse than the silence this issue is about:
+// the client would refetch, be handed the stale list again, and now believe it
+// is current. ToolDeriver's caches and the prompt registry are per-worker, so
+// this runs in whichever worker did the reload — the others converge through the
+// worker-recycle contract (WC-212), and until they do their catalogue signature
+// still reports what they are actually serving, so they stay quiet.
+//
+// The prompt registry is cleared before re-seeding: the prompts handlers hold
+// this exact instance, so it cannot be replaced, and appending to it would leave
+// an uninstalled plugin's prompts listed forever.
+$refreshMcpCatalog = static function (string $trigger) use (
+    $promptRegistry,
+    $pluginLoader,
+    $mcpCatalogSignature
+): void {
+    ToolDeriver::clearCache();
+    $promptRegistry->reset();
+    CorePrompts::register($promptRegistry);
+    $pluginLoader->collectMcpPrompts($promptRegistry);
+    // Last: the signature must be computed from the refreshed catalogue, not the
+    // one being replaced.
+    $mcpCatalogSignature->invalidate();
+};
+$pluginLoader->onRegistryChanged($refreshMcpCatalog);
 // The producer end of the queue learns the plugin handlers too. $jobsRegistry is
 // the SAME object JobsApiHandler already holds, so registering into it now is
 // what makes a plugin's submittable job acceptable at POST /api/jobs — and, just

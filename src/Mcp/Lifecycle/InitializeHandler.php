@@ -15,14 +15,30 @@ use Whity\Mcp\JsonRpc\MethodHandler;
  */
 final class InitializeHandler implements MethodHandler
 {
+    /**
+     * @param bool $listChanged Whether this host emits `notifications/*\/list_changed`
+     *                          (#952). Declared per the spec's rule that a server must
+     *                          not send a notification it did not advertise — and, just
+     *                          as importantly, a client that is never told the server
+     *                          can announce changes has no reason to listen for one.
+     *                          Defaults to false so a host that has not wired the
+     *                          notifier keeps advertising what it can actually do.
+     */
+    public function __construct(
+        private readonly bool $listChanged = false,
+    ) {}
+
     public function __invoke(?array $params, ?string $bearerToken): mixed
     {
         return [
             'protocolVersion' => '2025-03-26',
             'capabilities'    => [
-                'tools'     => ['listChanged' => false],
-                'resources' => ['subscribe' => false, 'listChanged' => false],
-                'prompts'   => ['listChanged' => false],
+                'tools'     => ['listChanged' => $this->listChanged],
+                // subscribe stays false: per-resource subscriptions are a
+                // different feature from list-level change announcements, and
+                // nothing here implements them.
+                'resources' => ['subscribe' => false, 'listChanged' => $this->listChanged],
+                'prompts'   => ['listChanged' => $this->listChanged],
             ],
             'serverInfo' => [
                 'name'    => 'whity-core',
