@@ -17,6 +17,7 @@ import * as React from 'react';
 import type { Block, FormBlock, LocalizedTextValue, OuScopeValue } from '@/lib/plugin-features';
 import { isOuScopeValue } from '@/lib/plugin-features';
 import { apiClient } from '@/lib/api-client';
+import { resolveContextPath } from '@/components/plugin/blocks/context-path';
 import { submitPluginAction, type ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { IconAlertTriangle } from '@tabler/icons-react';
@@ -291,8 +292,32 @@ export function FormProvider({
   const [isLoading, setIsLoading] = React.useState(block.dataSource !== undefined);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
-  const dataSourcePath = block.dataSource?.path;
+  // #949: `dataSource.path` carries the same `{token}` syntax a
+  // `dataRecord.source` does, and it now resolves by the same rule — NOT AT
+  // ALL until every token is bound. Substituting `''` would turn
+  // `/things/{record}` into `/things/`, which is very often the COLLECTION
+  // endpoint: a request that succeeds and pre-populates the form with the
+  // wrong thing. Handing the path over raw, which is what this did, was worse
+  // still — the form fetched `/things/%7Brecord%7D` and pre-populated with
+  // nothing at all.
+  //
+  // `null` is what the two of them have in common: no fetch. Read
+  // {@link resolveContextPath} for why that is the only honest answer.
+  const dataSourcePath =
+    block.dataSource === undefined
+      ? undefined
+      : resolveContextPath(block.dataSource.path, resolveRef);
   const dataSourceMethod = block.dataSource?.method;
+
+  // A form whose source names a record NOTHING HAS BOUND YET stays disabled,
+  // and this is the whole point of the issue rather than a detail of it. An
+  // enabled, un-prefilled edit form is indistinguishable from a record that
+  // genuinely holds no values — and against an update endpoint that replaces
+  // rather than merges, submitting it writes blanks over every field the user
+  // did not retype, and returns success. Disabled is the state that is true:
+  // the stored values have not been loaded, and cannot be until something says
+  // which record this is about.
+  const isUnbound = block.dataSource !== undefined && dataSourcePath === null;
 
   React.useEffect(() => {
     if (!dataSourcePath || !dataSourceMethod) return;
@@ -399,6 +424,21 @@ export function FormProvider({
     // tokens in the endpoint (e.g. an edit form inside a modal PATCHing
     // /api/persons/{edit-person.id} for the opened row). Unresolved → '' (a
     // runtime no-op), same as the SDK contract's no-cross-reference stance.
+    //
+    // DELIBERATELY NOT the not-until-resolved rule the read path above now
+    // follows (#949), and the asymmetry is the point. A read that guesses is
+    // silent: nobody asked for it, nobody is watching it, and its answer is
+    // presented as fact. A submit is pressed, and every outcome it can have is
+    // reported back — success toast, issues report, or error toast. The
+    // dangerous truncation is a TRAILING token collapsing onto a live
+    // collection route, and a trailing token belongs to the PUT/PATCH edit
+    // endpoints, where the collection answers 404 or 405 — visibly, to a user
+    // who is waiting for an answer.
+    //
+    // Refusing the submit instead would have to SAY why, or the Save button
+    // becomes a no-op that reports nothing — which is the bug #949 is about,
+    // moved rather than fixed. That is its own copy and its own UX call, not a
+    // rider on this one.
     const endpoint = block.submit.endpoint.replace(
       /\{([^}]+)\}/g,
       (_match: string, ref: string) => encodeURIComponent(resolveRef?.(ref) ?? '')
@@ -441,7 +481,17 @@ export function FormProvider({
         {loadError !== null && (
           <p className="text-sm text-destructive" role="alert">{loadError}</p>
         )}
-        <fieldset disabled={isLoading} className="contents">
+        {isUnbound && (
+          // Said out loud, and deliberately not styled as a failure — nothing
+          // has gone wrong, nothing has named a record yet. The same sentence
+          // and the same key a `dataRecord` uses for the same state, so a
+          // detail pane whose record block and edit form are both waiting on
+          // one selection says one thing twice rather than two things once.
+          <p className="text-sm text-muted-foreground" data-slot="form-unbound">
+            {t('blocks.record.unbound', 'No record selected.')}
+          </p>
+        )}
+        <fieldset disabled={isLoading || isUnbound} className="contents">
           {children}
         </fieldset>
         {serverIssues !== null && serverIssues.length > 0 && (
