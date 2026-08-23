@@ -30,7 +30,15 @@ class RefreshTokenReuseDetectionTest extends TestCase
     private const TEST_SECRET_KEY = 'test-secret-key-for-integration-tests-padded-min-32-byte-key';
     private const TEST_USER_PASSWORD = 'testpassword123';
     private const TEST_USER_EMAIL = 'testuser@example.com';
-    private const TEST_USER_ID = 2;
+    /**
+     * Deliberately far above anything the migrations seed.
+     *
+     * This was 2 — the next free id after the seeded profiles — which held
+     * only until one more was seeded. #928 added the CLI service principal and
+     * every test here died on a UNIQUE violation. A sentinel id no seed will
+     * reach removes the coupling instead of moving it one row along.
+     */
+    private const TEST_USER_ID = 900002;
     private const TEST_TENANT_ID = 1;
     private const TEST_ROLE_ID = 1;
     private const TEST_ROLE_NAME = 'admin';

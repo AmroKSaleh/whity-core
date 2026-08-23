@@ -34,7 +34,16 @@ class AuthFlowTest extends TestCase
     private const TEST_SECRET_KEY = 'test-secret-key-for-integration-tests-padded-min-32-byte-key';
     private const TEST_USER_PASSWORD = 'testpassword123';
     private const TEST_USER_EMAIL = 'testuser@example.com';
-    private const TEST_USER_ID = 2; // id=1 is reserved for the system admin seeded by migration 010
+    /**
+     * Deliberately far above anything the migrations seed.
+     *
+     * This used to be 2 — "the next free id after the system admin" — which
+     * held only until a migration seeded one more profile. #928's CLI service
+     * principal took id 2 and every test in this file died on a UNIQUE
+     * violation. A sentinel id that no seed will ever reach removes the
+     * coupling rather than moving it one row along.
+     */
+    private const TEST_USER_ID = 900001;
     private const TEST_TENANT_ID = 1;
     private const TEST_ROLE_ID = 1;
     private const TEST_ROLE_NAME = 'admin';
