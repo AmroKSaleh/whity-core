@@ -112,6 +112,8 @@ final class CoreApiSchemas
             self::documentTemplateRoutes(),
             self::documentBlockRoutes(),
             self::documentRecordRoutes(),
+            self::documentRoutingRoutes(),
+            self::meInboxRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
             self::tagRoutes(),
@@ -3026,6 +3028,160 @@ final class CoreApiSchemas
                 'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
             ], []),
 
+            // -- Document routing (#947 item 3) --------------------------------
+            // A ROUTE is one circulation of one document; its STEPS are the
+            // ordered plan, and each step names a RULE rather than a person, so
+            // the people are resolved at send time against the organisation as
+            // it stands then. The TRAIL is append-only and is the system of
+            // record - there is no status column anywhere in routing, on purpose.
+            //
+            // `rule_config` is freeform because a rule's parameters are open by
+            // construction: core cannot know what an `acme:committee` rule needs
+            // to be told, and the only code that does is the resolver the plugin
+            // registered (which validates it at authoring time). Contrast the
+            // trail below, whose shape IS fixed and is therefore typed.
+            'RoutingRule' => self::object([
+                'kind' => self::str(),
+                'label' => self::str(),
+                // 'core', or the plugin that contributed the kind.
+                'source' => self::str(),
+            ], ['kind', 'label', 'source']),
+            'RoutingRuleListResponse' => self::listEnvelope('RoutingRule'),
+
+            'DocumentRouteStep' => self::object([
+                'id' => self::int(),
+                // A 1-based AUTHORING ORDINAL, not a depth: see migration 112.
+                'position' => self::int(),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+                'label' => self::str(true),
+            ], ['id', 'position', 'rule_kind', 'rule_config']),
+            'DocumentRoute' => self::object([
+                'id' => self::int(),
+                'document_id' => self::int(),
+                'title' => self::str(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteStep')],
+            ], ['id', 'document_id', 'title', 'created_at', 'steps']),
+            'DocumentRouteListResponse' => self::listEnvelope('DocumentRoute'),
+            // `resolved` and `delivered` are on the envelope rather than on the
+            // route, because they describe what THIS request did rather than a
+            // property of the record: `resolved` is how many people the first
+            // step's rule answered with, `delivered` how many rows that became
+            // after de-duplicating against chains that already reached them. A
+            // rule that matched nobody is legal, and reporting the counts is what
+            // makes it VISIBLE in the response instead of six weeks later.
+            'DocumentRouteResponse' => self::object([
+                'data' => SchemaBuilder::ref('DocumentRoute'),
+                'resolved' => self::int(),
+                'delivered' => self::int(),
+            ], ['data', 'resolved', 'delivered']),
+            // `steps` is required and must be non-empty: a route with no steps
+            // would issue a document to nobody and record it as sent.
+            'DocumentRouteCreateRequest' => self::object([
+                'title' => self::str(true),
+                'steps' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'rule_kind' => self::str(),
+                        'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+                        'label' => self::str(true),
+                    ], ['rule_kind']),
+                ],
+            ], ['steps']),
+
+            // The trail. Every field is a COLUMN (migration 112) rather than a
+            // JSONB key, because the shape is fixed and known to core - which is
+            // the argument for the table existing at all.
+            'DocumentTrailEvent' => self::object([
+                'id' => self::int(),
+                'document_id' => self::int(),
+                'route_id' => self::int(),
+                // Null on an `issued` event, which is about the route rather than
+                // any one step.
+                'step_id' => self::int(true),
+                'actor_profile_id' => self::int(true),
+                'action' => ['type' => 'string', 'enum' => ['issued', 'forwarded', 'acknowledged', 'returned', 'noted']],
+                'from_ou_id' => self::int(true),
+                // Null whenever the act named no SINGLE unit - a tenant-wide
+                // fan-out has no destination, and naming one would make the
+                // browser's "passed through my unit" folder report a unit that
+                // was never involved.
+                'to_ou_id' => self::int(true),
+                'note' => self::str(true),
+                'occurred_at' => self::str(),
+            ], ['id', 'document_id', 'route_id', 'action', 'occurred_at']),
+            'DocumentTrailListResponse' => self::paginatedListEnvelope('DocumentTrailEvent'),
+
+            // A recipient row: the inbox, and the document's own view of where it
+            // currently is. `open` is DERIVED from `closed_by_event_id` and both
+            // are published - the boolean is what a screen renders, the pointer
+            // is what lets a reader follow the claim back into the trail and
+            // check it.
+            'DocumentRouteRecipient' => self::object([
+                'id' => self::int(),
+                'document_id' => self::int(),
+                'route_id' => self::int(),
+                'step_id' => self::int(),
+                'profile_id' => self::int(),
+                'ou_id' => self::int(true),
+                // The recipient whose action produced this row; null at the first
+                // step. This is what makes distribution fan out rather than block.
+                'parent_recipient_id' => self::int(true),
+                'created_by_event_id' => self::int(),
+                'closed_by_event_id' => self::int(true),
+                'open' => self::bool(),
+                'created_at' => self::str(),
+            ], ['id', 'document_id', 'route_id', 'step_id', 'profile_id', 'created_by_event_id', 'open', 'created_at']),
+            'DocumentRouteRecipientListResponse' => self::listEnvelope('DocumentRouteRecipient'),
+
+            'DocumentRouteActionRequest' => self::object([
+                'action' => ['type' => 'string', 'enum' => ['forwarded', 'acknowledged', 'returned', 'noted']],
+                // Required for `noted` (an empty note records nothing), optional
+                // on the other three.
+                'note' => self::str(true),
+            ], ['action']),
+            'DocumentRouteActionResponse' => self::object([
+                'data' => SchemaBuilder::ref('DocumentTrailEvent'),
+                'resolved' => self::int(),
+                'delivered' => self::int(),
+            ], ['data', 'resolved', 'delivered']),
+
+            // -- The inbox (#881, first source contributed by #947 item 3) -----
+            // Field names are the props the `inbox` block type declares (#868),
+            // so a screen can point a block straight at this endpoint and the two
+            // cannot disagree. `status` is NOT a stored status: for the routing
+            // source it is read from the trail event that created the item.
+            'InboxItem' => self::object([
+                // A string, because the eventual cross-source aggregate will mix
+                // sources whose ids are not integers.
+                'id' => self::str(),
+                'title' => self::str(),
+                'subtitle' => self::str(true),
+                'timestamp' => self::str(),
+                'status' => self::str(true),
+                'resource_type' => self::str(true),
+                'resource_id' => self::str(true),
+                // Source-specific extras a client may use and must not depend on.
+                'meta' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['id', 'title', 'timestamp']),
+            'InboxItemListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('InboxItem')],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+                'source' => self::str(),
+            ], ['data', 'pagination', 'source']),
+            'InboxSource' => self::object([
+                'key' => self::str(),
+                'label' => self::str(),
+                'origin' => self::str(),
+                // The `inbox` block prop => item field mapping, published rather
+                // than left for each client to hardcode.
+                'item_fields' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                'open_count' => self::int(),
+            ], ['key', 'label', 'origin', 'item_fields', 'open_count']),
+            'InboxSourceListResponse' => self::listEnvelope('InboxSource'),
+
             // ── Document/label designer blocks (WC-521) ───────────────────────
             // `data` is the verbatim client DocElement[] fragment (freeform array);
             // documents reference a block by POINTER (a `blockInstance` element
@@ -5793,6 +5949,181 @@ final class CoreApiSchemas
                     503 => self::errorResponse('Rendering or persistence is disabled, or the render service is unavailable'),
                 ] + self::authErrors(),
             ]),
+        ];
+    }
+
+    /**
+     * Document ROUTING routes (#947 item 3).
+     *
+     * Three views in #978 read these: the composer (`/routing-rules` + POST
+     * `/routes`), the trail view (`/trail`), and acting (`/actions`).
+     *
+     * TWO DIFFERENT KINDS OF GATE. Issuing a route is `documents:route`
+     * (migration 113). ACTING on an item that reached you carries NO permission
+     * and is session-gated only, because being a recipient IS the authorization:
+     * the route named a rule, the rule resolved to you, and the engine wrote the
+     * row. A second permission on top would let a route resolve to somebody who
+     * then cannot answer it - the item stays open forever and the person holding
+     * it cannot discover why. Same posture as `/api/me/notifications`.
+     *
+     * Reads are `documents:read` at the route and row-filtered on top by
+     * DocumentVisibilityPolicy (you raised it, you hold documents:read:all, a
+     * route reached you, or a role was granted to you on the document), so a
+     * caller who may not see a document is told it does not exist.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentRoutingRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/routing-rules', 'documents:read', [
+                'summary' => 'List the routing rule kinds a route step may name on this instance',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        "Core's own kinds plus any a plugin registered",
+                        'RoutingRuleListResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/documents/{id:\\d+}/routes', 'documents:route', [
+                'summary' => 'Issue a route on a document: create it, its ordered steps and the first step\'s recipients',
+                'tags' => ['documents'],
+                'request' => 'DocumentRouteCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse(
+                        'The route with its steps, and how many recipients the first step resolved to and delivered',
+                        'DocumentRouteResponse'
+                    ),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    422 => self::errorResponse(
+                        'No steps, a step naming an unregistered rule kind, a config the rule refused, '
+                        . 'or a step/recipient ceiling exceeded'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/routes', 'documents:read', [
+                'summary' => 'List the circulations of a document, newest first, each with its steps',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The routes on this document', 'DocumentRouteListResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/trail', 'documents:read', [
+                'summary' => "The document's append-only routing trail, oldest first (paginated)",
+                'tags' => ['documents'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The trail across every route on this document',
+                        'DocumentTrailListResponse'
+                    ),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/recipients', 'documents:read', [
+                'summary' => 'Who the document\'s routes reached, and what became of each item',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'Every recipient row on this document',
+                        'DocumentRouteRecipientListResponse'
+                    ),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'POST',
+                'path' => '/api/documents/{id:\\d+}/routes/{routeId:\\d+}/actions',
+                'requiredRole' => null,
+                // Deliberately unpermissioned - see the group docblock. Being a
+                // recipient is the authorization; `noted` needs only visibility.
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Act on a route: forward, acknowledge, return, or add a note',
+                    'tags' => ['documents'],
+                    'request' => 'DocumentRouteActionRequest',
+                    'responses' => [
+                        201 => self::jsonResponse(
+                            'The appended trail event, and how many recipients the act resolved to and delivered',
+                            'DocumentRouteActionResponse'
+                        ),
+                        404 => self::errorResponse('Document or route not found, or not visible to the caller'),
+                        422 => self::errorResponse(
+                            'No open item on this route, a forward from the last step, a return from the '
+                            . 'first, an empty note, or an unknown action'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The caller's INBOX (#881), read one registered source at a time.
+     *
+     * Self-scoped to the caller's own (tenant, profile) and session-gated with NO
+     * RBAC permission - an inbox row already names exactly one person, so a
+     * tenant-wide permission has no work left to do. Matches the other `/api/me`
+     * self-service surfaces.
+     *
+     * `source` IS REQUIRED on the list. #881 names three questions that arise
+     * only when sources are AGGREGATED - ordering across heterogeneous sources,
+     * per-source failure isolation, and pagination across sources - and says each
+     * needs deciding before an aggregate ships. Answering an unsourced request
+     * would decide all three by accident, and the answer would silently become
+     * wrong the day a second source registers. So it is a 422 naming the
+     * registered keys, and the aggregate is a later behaviour for that case
+     * reading this same registry.
+     *
+     * Routing's recipients are the first source rather than a surface of their
+     * own: two inbox surfaces would be the same mistake as two audit trails.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function meInboxRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/me/inbox/sources',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => "The registered inbox sources, with the caller's open count for each",
+                    'tags' => ['inbox'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Every registered source, its item-field mapping and the open count',
+                            'InboxSourceListResponse'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/me/inbox',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => "A page of one inbox source's items awaiting the caller",
+                    'tags' => ['inbox'],
+                    'parameters' => [
+                        self::queryParam('source', 'string', 'REQUIRED. A key from /api/me/inbox/sources'),
+                        self::queryParam('open', 'boolean', 'Falsey to include the caller\'s history as well (default open-only)'),
+                        self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                        self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    ],
+                    'responses' => [
+                        200 => self::jsonResponse("That source's items, with pagination", 'InboxItemListResponse'),
+                        422 => self::errorResponse("'source' is missing or names no registered source"),
+                    ] + self::authErrors(),
+                ],
+            ],
         ];
     }
 

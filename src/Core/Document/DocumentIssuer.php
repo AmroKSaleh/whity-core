@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Document;
 
 use PDO;
+use Whity\Core\Ou\PrimaryMembershipOu;
 use Whity\Storage\StorageException;
 
 /**
@@ -211,18 +212,11 @@ final class DocumentIssuer
      */
     private function originOuFor(int $tenantId, int $profileId): ?int
     {
-        $stmt = $this->db->prepare(
-            "SELECT ou_id FROM memberships
-              WHERE tenant_id = :tenant_id
-                AND profile_id = :profile_id
-                AND status = 'active'
-                AND ou_id IS NOT NULL
-              ORDER BY is_primary DESC, id ASC
-              LIMIT 1"
-        );
-        $stmt->execute([':tenant_id' => $tenantId, ':profile_id' => $profileId]);
-        $ouId = $stmt->fetchColumn();
-
-        return $ouId === false || $ouId === null ? null : (int) $ouId;
+        // Delegated to {@see PrimaryMembershipOu} since #947 item 3, which needs
+        // the identical answer to stamp `document_route_events.from_ou_id`. Two
+        // copies differing by one ORDER BY would make a document's origin unit
+        // and the unit its own issue event records disagree — for the same
+        // person, in the same request — with nothing to flag it.
+        return PrimaryMembershipOu::forProfile($this->db, $tenantId, $profileId);
     }
 }

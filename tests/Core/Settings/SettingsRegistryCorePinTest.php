@@ -89,6 +89,9 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_pages',
             'documents.render_max_template_bytes',
             'documents.persist_enabled',
+            // #947 item 3 — routing ceilings, tenant-overridable like the render ones.
+            'documents.routing_max_steps',
+            'documents.routing_max_recipients_per_step',
             'data_types.bulk_max_ids',
             'error_tracking.enabled',
             'error_tracking.provider',
@@ -194,6 +197,13 @@ final class SettingsRegistryCorePinTest extends TestCase
             // a second off-by-default gate would 503 a correctly-configured
             // `persist: true`.
             'documents.persist_enabled' => 'true',
+            // 20 steps: well past the longest real approval chain, low enough
+            // that a client looping over a step builder cannot commission a
+            // thousand-step transaction.
+            'documents.routing_max_steps' => '20',
+            // 500, matching the render row ceiling: the point at which "this is
+            // a distribution" stops being a plausible reading of one step.
+            'documents.routing_max_recipients_per_step' => '500',
             'data_types.bulk_max_ids' => '500',
             'error_tracking.enabled' => 'false',
             'error_tracking.provider' => 'internal',

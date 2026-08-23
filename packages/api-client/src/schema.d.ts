@@ -903,6 +903,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/recipients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Who the document's routes reached, and what became of each item */
+        get: operations["get_api_v1_documents_id_recipients"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/render": {
         parameters: {
             query?: never;
@@ -914,6 +931,58 @@ export interface paths {
         put?: never;
         /** Re-render the document and APPEND a new artifact (never replaces one) */
         post: operations["post_api_v1_documents_id_render"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the circulations of a document, newest first, each with its steps */
+        get: operations["get_api_v1_documents_id_routes"];
+        put?: never;
+        /** Issue a route on a document: create it, its ordered steps and the first step's recipients */
+        post: operations["post_api_v1_documents_id_routes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/routes/{routeId}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Act on a route: forward, acknowledge, return, or add a note */
+        post: operations["post_api_v1_documents_id_routes_routeid_actions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/trail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The document's append-only routing trail, oldest first (paginated) */
+        get: operations["get_api_v1_documents_id_trail"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1491,6 +1560,40 @@ export interface paths {
         post?: never;
         /** Unlink one of the caller's SSO identities */
         delete: operations["delete_api_v1_me_identities_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A page of one inbox source's items awaiting the caller */
+        get: operations["get_api_v1_me_inbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/inbox/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The registered inbox sources, with the caller's open count for each */
+        get: operations["get_api_v1_me_inbox_sources"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2467,6 +2570,23 @@ export interface paths {
         post: operations["post_api_v1_roles_id_permissions"];
         /** Revoke permissions from a role (subtractive, idempotent) */
         delete: operations["delete_api_v1_roles_id_permissions"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/routing-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the routing rule kinds a route step may name on this instance */
+        get: operations["get_api_v1_routing_rules"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3469,6 +3589,67 @@ export interface components {
         DocumentResponse: {
             data: components["schemas"]["Document"];
         };
+        DocumentRoute: {
+            id: number;
+            document_id: number;
+            title: string;
+            created_by?: number | null;
+            created_at: string;
+            steps: components["schemas"]["DocumentRouteStep"][];
+        };
+        DocumentRouteActionRequest: {
+            /** @enum {string} */
+            action: "forwarded" | "acknowledged" | "returned" | "noted";
+            note?: string | null;
+        };
+        DocumentRouteActionResponse: {
+            data: components["schemas"]["DocumentTrailEvent"];
+            resolved: number;
+            delivered: number;
+        };
+        DocumentRouteCreateRequest: {
+            title?: string | null;
+            steps: {
+                rule_kind: string;
+                rule_config?: {
+                    [key: string]: unknown;
+                };
+                label?: string | null;
+            }[];
+        };
+        DocumentRouteListResponse: {
+            data: components["schemas"]["DocumentRoute"][];
+        };
+        DocumentRouteRecipient: {
+            id: number;
+            document_id: number;
+            route_id: number;
+            step_id: number;
+            profile_id: number;
+            ou_id?: number | null;
+            parent_recipient_id?: number | null;
+            created_by_event_id: number;
+            closed_by_event_id?: number | null;
+            open: boolean;
+            created_at: string;
+        };
+        DocumentRouteRecipientListResponse: {
+            data: components["schemas"]["DocumentRouteRecipient"][];
+        };
+        DocumentRouteResponse: {
+            data: components["schemas"]["DocumentRoute"];
+            resolved: number;
+            delivered: number;
+        };
+        DocumentRouteStep: {
+            id: number;
+            position: number;
+            rule_kind: string;
+            rule_config: {
+                [key: string]: unknown;
+            };
+            label?: string | null;
+        };
         DocumentTemplate: {
             id: number;
             tenant_id: number;
@@ -3507,6 +3688,23 @@ export interface components {
             /** @enum {string} */
             scope?: "personal" | "tenant" | "global" | "system";
             required_permission?: string | null;
+        };
+        DocumentTrailEvent: {
+            id: number;
+            document_id: number;
+            route_id: number;
+            step_id?: number | null;
+            actor_profile_id?: number | null;
+            /** @enum {string} */
+            action: "issued" | "forwarded" | "acknowledged" | "returned" | "noted";
+            from_ou_id?: number | null;
+            to_ou_id?: number | null;
+            note?: string | null;
+            occurred_at: string;
+        };
+        DocumentTrailListResponse: {
+            data: components["schemas"]["DocumentTrailEvent"][];
+            pagination: components["schemas"]["Pagination"];
         };
         DomainVerificationChallenge: {
             record_name: string;
@@ -3705,6 +3903,35 @@ export interface components {
             scopes?: string;
             domain?: string | null;
             enabled?: boolean;
+        };
+        InboxItem: {
+            id: string;
+            title: string;
+            subtitle?: string | null;
+            timestamp: string;
+            status?: string | null;
+            resource_type?: string | null;
+            resource_id?: string | null;
+            meta?: {
+                [key: string]: unknown;
+            };
+        };
+        InboxItemListResponse: {
+            data: components["schemas"]["InboxItem"][];
+            pagination: components["schemas"]["Pagination"];
+            source: string;
+        };
+        InboxSource: {
+            key: string;
+            label: string;
+            origin: string;
+            item_fields: {
+                [key: string]: string;
+            };
+            open_count: number;
+        };
+        InboxSourceListResponse: {
+            data: components["schemas"]["InboxSource"][];
         };
         InstallFromStoreRequest: {
             /**
@@ -4510,6 +4737,14 @@ export interface components {
             name?: string;
             description?: string;
             permissions?: (number | string)[];
+        };
+        RoutingRule: {
+            kind: string;
+            label: string;
+            source: string;
+        };
+        RoutingRuleListResponse: {
+            data: components["schemas"]["RoutingRule"][];
         };
         SelectTenantRequest: {
             tenant_id: number;
@@ -9948,6 +10183,73 @@ export interface operations {
             };
         };
     };
+    get_api_v1_documents_id_recipients: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every recipient row on this document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRouteRecipientListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     post_api_v1_documents_id_render: {
         parameters: {
             query?: never;
@@ -10046,6 +10348,324 @@ export interface operations {
             };
             /** @description Rendering or persistence is disabled, or the render service is unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_documents_id_routes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The routes on this document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRouteListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_documents_id_routes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentRouteCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The route with its steps, and how many recipients the first step resolved to and delivered */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRouteResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No steps, a step naming an unregistered rule kind, a config the rule refused, or a step/recipient ceiling exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_documents_id_routes_routeid_actions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                routeId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentRouteActionRequest"];
+            };
+        };
+        responses: {
+            /** @description The appended trail event, and how many recipients the act resolved to and delivered */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRouteActionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document or route not found, or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No open item on this route, a forward from the last step, a return from the first, an empty note, or an unknown action */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_documents_id_trail: {
+        parameters: {
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100) */
+                per_page?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The trail across every route on this document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentTrailListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13372,6 +13992,154 @@ export interface operations {
             };
             /** @description Cannot remove the only sign-in method of a passwordless account */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_me_inbox: {
+        parameters: {
+            query?: {
+                /** @description REQUIRED. A key from /api/me/inbox/sources */
+                source?: string;
+                /** @description Falsey to include the caller's history as well (default open-only) */
+                open?: boolean;
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100) */
+                per_page?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description That source's items, with pagination */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxItemListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 'source' is missing or names no registered source */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_me_inbox_sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every registered source, its item-field mapping and the open count */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxSourceListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -19130,6 +19898,71 @@ export interface operations {
                 };
             };
             /** @description Role not found or not manageable by the tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_routing_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Core's own kinds plus any a plugin registered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingRuleListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
             404: {
                 headers: {
                     [name: string]: unknown;

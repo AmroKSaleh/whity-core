@@ -204,4 +204,30 @@ final class DocumentRepositoryRealEngineTest extends TestCase
 
         self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_A));
     }
+
+    /**
+     * The `resource_type = 'document'` literal in
+     * {@see \Whity\Core\Document\DocumentRepository}'s visibility predicate must
+     * agree with the registry constant (#947 item 3).
+     *
+     * The clause is written as literal SQL because a nowdoc cannot interpolate a
+     * class constant and concatenating around it would destroy exactly the
+     * literal-SQL readability scripts/ci-tenant-predicate-guard.php depends on.
+     * So the duplication is deliberate — and pinned here, because the failure it
+     * would otherwise produce is silent: renaming the resource type would empty
+     * the resource-role disjunct of every RESTRICTED document list, and a list
+     * quietly returning fewer rows is the failure mode nobody notices.
+     */
+    public function testTheVisibilityPredicateNamesTheRegisteredDocumentResourceType(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../src/Core/Document/DocumentRepository.php');
+        self::assertIsString($source);
+
+        self::assertStringContainsString(
+            "rra.resource_type = '" . \Whity\Core\RBAC\ResourceTypeRegistry::TYPE_DOCUMENT . "'",
+            $source,
+            'DocumentRepository::VISIBLE_TO_CALLER must name ResourceTypeRegistry::TYPE_DOCUMENT. '
+            . 'If the constant was renamed, the SQL literal has to move with it.'
+        );
+    }
 }

@@ -78,6 +78,24 @@ class ResourceTypeRegistry implements HostWiredService
      */
     public const TYPE_OU = 'ou';
 
+    /**
+     * The issued DOCUMENT — the second resource type core ships (#947 item 3).
+     *
+     * #947 names `resource_role_assignments` as the answer to "who may act on a
+     * document", and until now no such type was registered: every write to that
+     * table passes through {@see exists()}, so a grant naming a document was
+     * refused outright and the composition #947 describes could not be written
+     * down at all.
+     *
+     * It qualifies on the same test `ou` does. A document is a first-class core
+     * record with its own table, its own id and its own permissions (migrations
+     * 108/109/113) — not a plugin's idea of a record — so grants against it are
+     * core's to define. It is also what an `inbox` block's `scopedPermission`
+     * resolves against, since the thing a person holds authority over is the
+     * document rather than the assignment row that mentions it.
+     */
+    public const TYPE_DOCUMENT = 'document';
+
     public function __construct(?HookManager $hookManager = null)
     {
         $this->hookManager = $hookManager;
@@ -179,7 +197,7 @@ class ResourceTypeRegistry implements HostWiredService
         // Set first so the dispatch hook cannot recurse back into lazy core
         // registration (same guard as PermissionRegistry).
         $this->coreRegistered = true;
-        $this->storeAndDispatch(self::CORE_SOURCE, [self::TYPE_OU]);
+        $this->storeAndDispatch(self::CORE_SOURCE, [self::TYPE_OU, self::TYPE_DOCUMENT]);
     }
 
     /**

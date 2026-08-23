@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.36).
+ * SDK identity (v1.37).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -534,13 +534,44 @@ namespace Whity\Sdk;
  * choice), a prop to suppress the download (the bytes were already served), and
  * any height/zoom prop (presentational, and the page's own aspect ratio is a
  * fact the renderer can read). Additive; every tree that validated under 1.35
- * still validates)
+ * still validates) ->
+ * 1.37 (DOCUMENT ROUTING RULES: {@see \Whity\Sdk\Routing\PluginRoutingRulesInterface}
+ * joins the optional capability interfaces, with
+ * {@see \Whity\Sdk\Routing\RoutingRuleResolverInterface},
+ * {@see \Whity\Sdk\Routing\RoutingRuleContext} and
+ * {@see \Whity\Sdk\Routing\ResolvedRecipient} as its contract.
+ * #947 item 3 puts a document routing engine in core, and the load-bearing
+ * decision is that a route STEP NAMES A RULE, NEVER A PERSON: the rule is
+ * resolved at send time, against the organisation as it stands then, so a unit
+ * created last week is included because it exists rather than because somebody
+ * remembered to add it. A stored recipient list omits it, the document still
+ * renders, every step still completes and the run reports SUCCESS — which is why
+ * the rule is the contract and the list is not offered.
+ * Core owns two kinds, `role` and `role_below_actor`, and both are generic in
+ * the strong sense: every deployment has roles and every deployment has a unit
+ * tree. Anything narrower is what one organisation happens to mean by "the next
+ * people" — a `supervisor` means three different things in three deployments —
+ * so it arrives through this interface instead of being guessed at in core.
+ * A RESOLVER RETURNS SUGGESTIONS AND WRITES NOTHING. It answers "who, and via
+ * which unit", and the host filters every profile against the ACTIVE MEMBERSHIPS
+ * of the tenant owning the route before a single inbox row exists — so a
+ * resolver, correct or buggy, cannot place a document in another tenant's inbox,
+ * and that check is not a rule every plugin author has to remember.
+ * `validate()` runs at authoring time and its message reaches the person
+ * composing the route verbatim; a throw from `resolve()` is plugin code
+ * misbehaving and its text is logged rather than shown.
+ * BARE SLUGS ONLY: declare `committee`, get `acme:committee`. Two plugins may
+ * both declare `committee` without colliding, and no plugin can mint a bare kind
+ * — so a step already stored naming `role` cannot be re-pointed by installing a
+ * plugin, which matters more here than in most catalogues because the step
+ * decides who receives a document.
+ * Additive; every tree that validated under 1.36 still validates)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.36.0';
+    public const VERSION = '1.37.0';
 
     /**
      * Static identity only — never instantiated.

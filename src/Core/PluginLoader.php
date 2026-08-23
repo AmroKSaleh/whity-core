@@ -17,6 +17,8 @@ use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Health\HealthProbeRegistry;
 use Whity\Core\Health\InvalidHealthProbeException;
 use Whity\Core\Ou\InvalidOuTypeException;
+use Whity\Core\Document\Routing\InvalidRoutingRuleException;
+use Whity\Core\Document\Routing\RoutingRuleRegistry;
 use Whity\Core\Ou\OuTypeRegistry;
 use Whity\Sdk\Health\PluginHealthProbesInterface;
 use Whity\Core\DataType\DataTypeRegistry;
@@ -30,6 +32,7 @@ use Whity\Core\Settings\PluginSettingsRegistry;
 use Whity\Sdk\Settings\PluginSettingsInterface;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Ou\PluginOuTypesInterface;
+use Whity\Sdk\Routing\PluginRoutingRulesInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 use Whity\Sdk\Tenant\PluginTablesInterface;
 use Whity\Core\Hooks\HookManager;
@@ -117,6 +120,8 @@ class PluginLoader
      * rather than failing, matching how a null permission registry behaves.
      */
     private ?OuTypeRegistry $ouTypeRegistry = null;
+
+    private ?RoutingRuleRegistry $routingRuleRegistry = null;
 
     /**
      * Optional catalogue of plugin-contributed status-page probes.
@@ -386,6 +391,7 @@ class PluginLoader
      * @param PluginSettingsRegistry|null $pluginSettingsRegistry Optional catalogue of plugin-declared settings
      * @param AuditLogger|null $auditLogger Optional audit writer for plugin-declared events
      * @param OuTypeRegistry|null $ouTypeRegistry Optional catalogue of plugin-contributed OU types
+     * @param RoutingRuleRegistry|null $routingRuleRegistry Optional catalogue of plugin-contributed document routing rules
      */
     public function __construct(
         string $pluginDir,
@@ -400,13 +406,15 @@ class PluginLoader
         ?DataTypeRegistry $dataTypeRegistry = null,
         ?PluginSettingsRegistry $pluginSettingsRegistry = null,
         ?AuditLogger $auditLogger = null,
-        ?OuTypeRegistry $ouTypeRegistry = null
+        ?OuTypeRegistry $ouTypeRegistry = null,
+        ?RoutingRuleRegistry $routingRuleRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
         $this->permissionRegistry = $permissionRegistry;
         $this->resourceTypeRegistry = $resourceTypeRegistry;
         $this->ouTypeRegistry = $ouTypeRegistry;
+        $this->routingRuleRegistry = $routingRuleRegistry;
         $this->healthProbeRegistry = $healthProbeRegistry;
         $this->tableOwnershipRegistry = $tableOwnershipRegistry;
         $this->dataTypeRegistry = $dataTypeRegistry;
@@ -2960,6 +2968,42 @@ class PluginLoader
                 $this->logWarning("Plugin {$pluginKey} declares an invalid OU type: " . $e->getMessage());
             } catch (Throwable $e) {
                 $this->handlePluginThrowable($pluginKey, $e, 'getOuTypes');
+            }
+        }
+
+        // 2a-pre-bis. Register declared DOCUMENT ROUTING RULES (#947 item 3).
+        //     Same shape as (2a) and (2a-pre): an OPTIONAL interface, so a plugin
+        //     contributing no rule kinds implements nothing and is skipped, and
+        //     the source is $plugin->getName() — supplied here, never taken from
+        //     the plugin's own return value — so a kind is namespaced under its
+        //     real owner.
+        //
+        //     That is what stops two plugins colliding on `committee`, and what
+        //     stops any plugin minting a BARE kind and shadowing core's `role` or
+        //     `role_below_actor`. A route step already stored naming `role`
+        //     therefore cannot be re-pointed by installing a plugin, which
+        //     matters more here than in most catalogues: the step decides WHO
+        //     RECEIVES a document, so a shadowed kind would silently redirect a
+        //     circulation.
+        //
+        //     Registering a rule does NOT create any route, step or recipient. It
+        //     makes the kind nameable by whoever composes a route and supplies the
+        //     resolver the engine calls when a step naming it is reached.
+        //
+        //     Two boundaries, because two different things can go wrong: a
+        //     malformed DECLARATION is a logged warning (the plugin keeps serving,
+        //     it simply contributes no rules), while a getRoutingRules() that
+        //     THROWS is plugin code misbehaving and goes through the lifecycle
+        //     error boundary that can eventually fail the plugin.
+        if ($this->routingRuleRegistry !== null && $plugin instanceof PluginRoutingRulesInterface) {
+            try {
+                $this->routingRuleRegistry->register($plugin->getName(), $plugin->getRoutingRules());
+            } catch (InvalidRoutingRuleException $e) {
+                $this->logWarning(
+                    "Plugin {$pluginKey} declares an invalid routing rule: " . $e->getMessage()
+                );
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getRoutingRules');
             }
         }
 

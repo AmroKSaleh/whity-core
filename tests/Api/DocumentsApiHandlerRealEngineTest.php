@@ -20,8 +20,11 @@ use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
+use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Request;
 use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Core\Settings\SettingsRegistry;
@@ -105,7 +108,15 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
             $this->documentRepo,
             $this->artifactRepo,
             $store,
-            new DocumentVisibilityPolicy(),
+            // #947 item 3 widened the policy with two disjuncts (a route reached
+            // you, or a role was granted to you on the document), so it now takes
+            // the two repositories that answer them. Required rather than
+            // nullable: an unwired policy would silently fall back to the interim
+            // rule and hide documents from the people a route was built to reach.
+            new DocumentVisibilityPolicy(
+                new RouteRecipientRepository($this->pdo),
+                new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
+            ),
             $this->templateRepo,
             $policy,
             $renderer,

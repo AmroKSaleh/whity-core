@@ -378,6 +378,46 @@ $ouTypeRegistry = new \Whity\Core\Ou\OuTypeRegistry($hookManager);
 $ouTypeRegistry->registerCoreOuTypes();
 \Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry); // @phpstan-ignore-line
 
+// 4c-ante-bis. Document ROUTING RULE catalogue (#947 item 3): WHICH rule kinds a
+// route step may name. Core owns two, `role` and `role_below_actor`, and both are
+// generic in the strong sense — every deployment has roles and every deployment
+// has a unit tree — so both resolve correctly on an install core has never seen.
+// The plugin loader below adds whatever plugins contribute, namespaced under the
+// plugin name IT supplies, so no plugin can mint a bare kind and shadow core's.
+//
+// Registered as a service for the same reason the resource-type catalogue is: a
+// handler that built its own instance would see none of the plugins'
+// contributions, and `GET /api/routing-rules` would tell an author that the kind
+// their plugin ships does not exist — while a route already naming it would fail
+// to resolve at send time.
+//
+// The two core resolvers take the PDO handle because they query memberships;
+// they are the only routing rules core ships, and anything narrower than "holders
+// of a role, optionally within my subtree" is a particular organisation's idea of
+// "the next people" and belongs in a plugin.
+$routingRuleRegistry = new \Whity\Core\Document\Routing\RoutingRuleRegistry($hookManager);
+$routingRuleRegistry->registerCoreRoutingRules(
+    new \Whity\Core\Document\Routing\RoleRuleResolver($db->getPdo()),
+    new \Whity\Core\Document\Routing\RoleBelowActorRuleResolver($db->getPdo())
+);
+\Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry); // @phpstan-ignore-line
+
+// 4c-ante-ter. INBOX SOURCE catalogue (#881). The inbox surface belongs to this
+// registry rather than to any one subsystem: routing's recipient rows ARE an
+// inbox, and shipping them behind their own endpoint would leave a person who
+// receives work from several systems with several correct lists whose union
+// exists nowhere. Two inbox surfaces would be the same mistake as two audit
+// trails.
+//
+// Core's one source is registered at step 13a-nonies-ter below, where the
+// recipient repository it reads is built. Only core may contribute today: the
+// plugin-facing half (#881's `PluginInboxSourcesInterface`) is deliberately not
+// published yet, because #881's own open question about cross-source ORDERING is
+// a question about that interface, and publishing a contract we then have to
+// break in a version-pinned SDK is worse than not publishing one.
+$inboxSourceRegistry = new \Whity\Core\Inbox\InboxSourceRegistry();
+\Whity\register_service(\Whity\Core\Inbox\InboxSourceRegistry::class, $inboxSourceRegistry); // @phpstan-ignore-line
+
 // 4c-bis. Status-page probe catalogue (WC-status-probes): WHICH components this
 // deployment samples for /status. Core's four (database, queue, scheduler,
 // render) are registered here; the plugin loader below adds whatever plugins
@@ -880,7 +920,11 @@ $pluginLoader = new PluginLoader(
     $auditLogger,
     // Plugin-contributed OU types (#822): built at step 4c-ante above. The
     // loader stamps each declared slug with the plugin's own namespace.
-    $ouTypeRegistry
+    $ouTypeRegistry,
+    // Plugin-contributed document routing rules (#947 item 3, SDK 1.36): built at
+    // step 4c-ante-bis above. Same stamping rule — a plugin declares WHICH kinds,
+    // never WHO said so, which is what stops it shadowing `role`.
+    $routingRuleRegistry
 );
 
 // 9b. Initialize deployment manager
@@ -1915,11 +1959,44 @@ $router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentR
 // correction. Item 3 (routing) keys off documents.id; item 5 (the browser)
 // derives its folders from these rows rather than from a stored tree, which is
 // why there is no folder surface here.
+// Routing's four repositories, built before the handlers that read them. The
+// recipient repository is shared by three consumers — the routing handler, the
+// visibility policy and the inbox source — so it is built ONCE: three instances
+// would be three query surfaces the tenant-predicate guard has to police
+// separately, for no gain.
+$routeRepository = new \Whity\Core\Document\Routing\RouteRepository($db->getPdo());
+$routeStepRepository = new \Whity\Core\Document\Routing\RouteStepRepository($db->getPdo());
+$routeEventRepository = new \Whity\Core\Document\Routing\RouteEventRepository($db->getPdo());
+$routeRecipientRepository = new \Whity\Core\Document\Routing\RouteRecipientRepository($db->getPdo());
+
+// Resource-scoped role grants. Built HERE rather than inline at the grants
+// handler further down, because #947 item 3's visibility disjunct needs it and
+// PHP does not hoist: leaving it where it was would mean either a null at
+// document-wiring time — a boot-time fatal on every request, not a test failure
+// — or a second instance built from the same PDO, which is two query surfaces
+// the tenant-predicate guard has to police separately for no gain. The same move
+// migration 108's PR made with the storage driver, for the same reason.
+$resourceRoleAssignmentRepository = new \Whity\Core\RBAC\ResourceRoleAssignmentRepository(
+    $db->getPdo(),
+    $resourceTypeRegistry,
+    $logger
+);
+
+// #947 item 3 widens document visibility with two disjuncts item 1 left a home
+// for: a route reached you, or a role was granted to you on the document. Both
+// collaborators are REQUIRED rather than nullable — an unwired policy would
+// silently fall back to the interim rule and hide documents from exactly the
+// people a route was built to reach, with nothing in any log to say why.
+$documentVisibilityPolicy = new \Whity\Core\Document\DocumentVisibilityPolicy(
+    $routeRecipientRepository,
+    $resourceRoleAssignmentRepository
+);
+
 $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     $documentRepository,
     $documentArtifactRepository,
     $documentArtifactStore,
-    new \Whity\Core\Document\DocumentVisibilityPolicy(),
+    $documentVisibilityPolicy,
     $documentTemplateRepository,
     $documentAccessPolicy,
     $documentRenderer,
@@ -1932,6 +2009,67 @@ $router->register('GET',  '/api/documents/{id:\d+}',                            
 $router->register('GET',  '/api/documents/{id:\d+}/content',                           [$documentsHandler, 'content'],         null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/artifacts/{artifactId:\d+}/content', [$documentsHandler, 'artifactContent'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST', '/api/documents/{id:\d+}/render',                            [$documentsHandler, 'rerender'],        null, null, CorePermissions::DOCUMENTS_RENDER);
+
+// 13a-nonies-ter. DOCUMENT ROUTING (#947 item 3) — routes, ordered steps, the
+// append-only trail, and recipients as the inbox.
+//
+// Three semantics, each enforced somewhere specific rather than by convention:
+// a step names a RULE (there is no column for a person), distribution FANS OUT
+// (each recipient resolves the next step relative to themselves, and no row can
+// hold a step-level barrier), and the trail is APPEND-ONLY (RouteEventRepository
+// has no update and no delete path, so a correction is a new `noted` event).
+//
+// The engine also emits every appended event onto the durable spine through
+// HookManager::dispatchAsync, AFTER its own commit — #947 notes documents emit
+// nothing into `domain_events` today. One trail, one broadcast derived from it;
+// the broadcast is never read as authoritative.
+$documentRouter = new \Whity\Core\Document\Routing\DocumentRouter(
+    $db->getPdo(),
+    $routeRepository,
+    $routeStepRepository,
+    $routeEventRepository,
+    $routeRecipientRepository,
+    $routingRuleRegistry,
+    $settingsService,
+    $hookManager
+);
+$documentRoutingHandler = new \Whity\Api\DocumentRoutingApiHandler(
+    $documentRepository,
+    $routeRepository,
+    $routeStepRepository,
+    $routeEventRepository,
+    $routeRecipientRepository,
+    $documentRouter,
+    $routingRuleRegistry,
+    $documentVisibilityPolicy,
+    $roleChecker
+);
+$router->register('GET',  '/api/routing-rules',                                        [$documentRoutingHandler, 'rules'],      null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST', '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'create'],     null, null, CorePermissions::DOCUMENTS_ROUTE);
+$router->register('GET',  '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'list'],       null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/documents/{id:\d+}/trail',                             [$documentRoutingHandler, 'trail'],      null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/documents/{id:\d+}/recipients',                        [$documentRoutingHandler, 'recipients'], null, null, CorePermissions::DOCUMENTS_READ);
+// Deliberately UNPERMISSIONED (null, null): being a recipient IS the
+// authorization — the route named a rule, the rule resolved to you, and the
+// engine wrote the row. Requiring a permission on top would let a route resolve
+// to somebody who then cannot answer it, leaving the item open forever with no
+// way for them to discover why. Same posture as /api/me/notifications.
+$router->register('POST', '/api/documents/{id:\d+}/routes/{routeId:\d+}/actions',      [$documentRoutingHandler, 'act'],        null);
+
+// 13a-nonies-quater. Routing's recipients registered as an #881 INBOX SOURCE —
+// not a surface of their own. The `document_route_recipients` table IS an inbox,
+// and a second inbox endpoint beside the notification one would leave a person
+// receiving work from several systems with several correct lists whose union
+// exists nowhere.
+$inboxSourceRegistry->registerCoreSource(
+    \Whity\Core\Inbox\InboxSourceRegistry::CORE_DOCUMENT_ROUTING,
+    new \Whity\Core\Document\Routing\DocumentRoutingInboxSource($routeRecipientRepository)
+);
+$meInboxHandler = new \Whity\Api\MeInboxApiHandler($tokenValidator, $inboxSourceRegistry);
+// Session-gated, unpermissioned, like the other /api/me surfaces: an inbox row
+// already names exactly one person.
+$router->register('GET', '/api/me/inbox/sources', [$meInboxHandler, 'sources'], null);
+$router->register('GET', '/api/me/inbox',         [$meInboxHandler, 'list'],    null);
 
 // 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3):
 // a brand-new tenant should never open the designer to an empty library. The
@@ -1998,7 +2136,9 @@ $router->register('DELETE', '/api/entity-tags/all', [$entityTagsHandler, 'detach
 // not have the feature.
 $resourceRoleGrantsHandler = new \Whity\Api\ResourceRoleGrantsApiHandler(
     $db->getPdo(),
-    new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($db->getPdo(), $resourceTypeRegistry, $logger),
+    // Built at the routing-repositories block above, where the document
+    // visibility policy also needs it.
+    $resourceRoleAssignmentRepository,
     $resourceTypeRegistry,
     $roleChecker,
     $hookManager

@@ -95,7 +95,10 @@ final class SettingsApiRealEngineTest extends TestCase
         // The instance-governance / storage / mail / billing keys — and the
         // documents.render_enabled MASTER SWITCH itself — are GLOBAL-ONLY
         // (WC-696206d8) and excluded from the per-tenant surface.
-        self::assertCount(12, $data['registry']);
+        // 14 since #947 item 3 added documents.routing_max_steps and
+        // documents.routing_max_recipients_per_step - both per-tenant
+        // overridable, for the same reason the render ceilings are.
+        self::assertCount(14, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

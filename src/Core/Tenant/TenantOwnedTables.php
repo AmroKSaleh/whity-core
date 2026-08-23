@@ -132,6 +132,24 @@ final class TenantOwnedTables
         'documents'          => '108_create_documents.php',
         'document_artifacts' => '108_create_documents.php',
 
+        // #947 item 3 — the document ROUTING engine (migration 112). Four
+        // tables, all tenant-owned with an explicit `tenant_id` rather than one
+        // inferred through the document: the predicate guard has to be able to
+        // police an inbox read and a trail read DIRECTLY, and the inbox query
+        // ("my open rows") never joins `documents` at all in its count form.
+        // Same trade `notification_deliveries`, `entity_tags` and `event_outbox`
+        // above already make.
+        //
+        // `document_route_events` is the APPEND-ONLY trail
+        // ({@see \Whity\Core\Document\Routing\RouteEventRepository} has no
+        // update and no delete path), and `document_route_recipients` is the
+        // inbox — registered as an #881 source rather than owning a surface of
+        // its own.
+        'document_routes'            => '112_create_document_routing.php',
+        'document_route_steps'       => '112_create_document_routing.php',
+        'document_route_events'      => '112_create_document_routing.php',
+        'document_route_recipients'  => '112_create_document_routing.php',
+
         // WC-525 — admin-enforced 2FA policy registry (migration 061): tenant/OU/
         // user-scoped rows an admin sets to require 2FA enrollment. Every query
         // binds tenant_id so a policy can never leak across tenants.

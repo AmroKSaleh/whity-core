@@ -226,6 +226,29 @@ final class SettingsRegistry
     // being silently global-only, and it should not be reproduced one key down.
     public const DOCUMENTS_PERSIST_ENABLED = 'documents.persist_enabled';
 
+    // Routing ceilings (#947 item 3). Both resolve per-tenant, then global, then
+    // the registry default — the ordinary SettingsService::effective() chain, so
+    // neither number is ever written into the engine.
+    //
+    //   - routing_max_steps: how many steps one route may declare. Bounds
+    //     AUTHORING: a route is created complete, in one transaction, so the
+    //     step count is the size of that transaction.
+    //   - routing_max_recipients_per_step: how many people one step may resolve
+    //     to. Bounds DELIVERY, which is the unbounded one — a `role` rule
+    //     against a tenant-wide role fans out to however many people hold it,
+    //     and every one of them is an inbox row written inside the acting
+    //     person's request.
+    //
+    // Exceeding either is a 422 that NAMES the number, never a truncation.
+    // Delivering to the first 500 of 900 and reporting success is the
+    // stored-recipient-list failure #947 exists to prevent, reached by a
+    // different route: the run looks fine and a whole group never hears about
+    // the document. Tenant-overridable for the reason the render ceilings are —
+    // one tenant circulating institution-wide notices and another routing
+    // three-person approvals want genuinely different numbers.
+    public const DOCUMENTS_ROUTING_MAX_STEPS = 'documents.routing_max_steps';
+    public const DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP = 'documents.routing_max_recipients_per_step';
+
     // Bulk data-type lifecycle batch ceiling (WC-746). The largest number of ids
     // `POST /api/data-types/{type}/bulk` accepts in one request. An unbounded id
     // list is a denial-of-service with a polite name: every id costs a
@@ -548,6 +571,16 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
         // Opt-OUT, not opt-in — see the constant's own note.
         self::DOCUMENTS_PERSIST_ENABLED => 'true',
+        // 20 steps. Well past the longest real approval chain anybody described
+        // (raise -> unit head -> faculty -> registry -> archive is five), and low
+        // enough that a client looping over a step builder cannot commission a
+        // thousand-step transaction.
+        self::DOCUMENTS_ROUTING_MAX_STEPS => '20',
+        // 500 recipients per step — the same number the render row ceiling uses,
+        // deliberately: it is the point at which "this is a distribution" stops
+        // being a plausible reading of a single step, and an author who really
+        // means to reach a thousand people should say so by raising the limit.
+        self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => '500',
         // 500 ids per bulk lifecycle request. Chosen to cover the motivating
         // screens — "empty the trash", "retire this selection" — in a single
         // call, while still bounding the work one request can commission. Each
@@ -841,6 +874,8 @@ final class SettingsRegistry
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
             self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
             self::DOCUMENTS_PERSIST_ENABLED => self::validateBoolean($value, self::DOCUMENTS_PERSIST_ENABLED),
+            self::DOCUMENTS_ROUTING_MAX_STEPS => self::validateRoutingMaxSteps($value),
+            self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => self::validateRoutingMaxRecipients($value),
             self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
             // Error tracking. These five were declared with defaults, types,
             // enum options and a global-only marking, but never given a
@@ -1090,6 +1125,54 @@ final class SettingsRegistry
     {
         if ($value !== 'true' && $value !== 'false') {
             return "mcp.enabled must be 'true' or 'false'.";
+        }
+
+        return null;
+    }
+
+    /**
+     * Max steps one route may declare: a whole number, at least 1, capped at 200
+     * (a sanity ceiling on the ADMIN-set value itself — not the enforced
+     * default).
+     */
+    private static function validateRoutingMaxSteps(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.routing_max_steps must be a whole number.';
+        }
+        $steps = (int) $value;
+        if ($steps < 1) {
+            // Not zero. A route with no steps issues a document to nobody and
+            // records it as sent, which is the one outcome the engine refuses
+            // outright — so the ceiling must not be settable to a value that
+            // makes every route illegal instead.
+            return 'documents.routing_max_steps must be at least 1.';
+        }
+        if ($steps > 200) {
+            // A sanity bound on the ADMIN-set value, not on the enforced
+            // default: a route is written in ONE transaction, so this is a
+            // ceiling on how long that transaction may be held.
+            return 'documents.routing_max_steps must be 200 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Max people one step may resolve to: a whole number, at least 1, capped at
+     * 100000 (a sanity ceiling on the admin-set value itself).
+     */
+    private static function validateRoutingMaxRecipients(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.routing_max_recipients_per_step must be a whole number.';
+        }
+        $recipients = (int) $value;
+        if ($recipients < 1) {
+            return 'documents.routing_max_recipients_per_step must be at least 1.';
+        }
+        if ($recipients > 100000) {
+            return 'documents.routing_max_recipients_per_step must be 100000 or fewer.';
         }
 
         return null;

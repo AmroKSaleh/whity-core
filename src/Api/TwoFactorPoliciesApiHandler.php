@@ -35,8 +35,6 @@ final class TwoFactorPoliciesApiHandler
 {
     private const SCOPE_TYPES = ['tenant', 'ou', 'user'];
 
-    /** Belt-and-braces bound on the OU descendant walk (mirrors RoleChecker's MAX_HIERARCHY_DEPTH). */
-    private const MAX_HIERARCHY_DEPTH = 64;
 
     private PDO $db;
     private TwoFactorPoliciesRepository $repo;
@@ -344,42 +342,20 @@ final class TwoFactorPoliciesApiHandler
      * the given OU ids, tenant scoped. Downward BFS over
      * organizational_units.parent_id — the reverse direction of
      * RoleChecker's upward ancestor walk. Bounded by
-     * {@see self::MAX_HIERARCHY_DEPTH} against a malformed/cyclic hierarchy.
+     * {@see \Whity\Core\Ou\OuSubtree::MAX_DEPTH} against a malformed/cyclic
+     * hierarchy.
      *
      * @param list<int> $rootIds
      * @return list<int>
      */
     private function descendantOuIds(int $tenantId, array $rootIds): array
     {
-        $stmt = $this->db->prepare('SELECT id, parent_id FROM organizational_units WHERE tenant_id = ?');
-        $stmt->execute([$tenantId]);
-
-        $childrenByParent = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if ($row['parent_id'] !== null) {
-                $childrenByParent[(int) $row['parent_id']][] = (int) $row['id'];
-            }
-        }
-
-        $visited = [];
-        $queue = $rootIds;
-        $depth = 0;
-        while ($queue !== [] && $depth < self::MAX_HIERARCHY_DEPTH) {
-            $next = [];
-            foreach ($queue as $ouId) {
-                if (isset($visited[$ouId])) {
-                    continue;
-                }
-                $visited[$ouId] = true;
-                foreach ($childrenByParent[$ouId] ?? [] as $childId) {
-                    $next[] = $childId;
-                }
-            }
-            $queue = $next;
-            $depth++;
-        }
-
-        return array_keys($visited);
+        // Delegated to {@see \Whity\Core\Ou\OuSubtree} since #947 item 3, which
+        // needs the same downward walk for its `role_below_actor` routing rule.
+        // The two copies already differed in nothing that mattered, and a third
+        // is how "below my unit" comes to mean two different sets of people in
+        // two screens of the same product.
+        return \Whity\Core\Ou\OuSubtree::descendantIds($this->db, $tenantId, $rootIds);
     }
 
         /**
