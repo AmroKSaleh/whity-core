@@ -221,6 +221,125 @@ final class RequestSchemaContractTest extends TestCase
     }
 
     /**
+     * WHY THE BODY-LESS ROUTES DO NOT DECLARE AN EMPTY BODY, and what is done
+     * instead (#954).
+     *
+     * The obvious reading of the downstream report is that `POST /auth/logout`
+     * and its ~50 friends should declare an explicit empty request body, so
+     * "send nothing" is stated rather than inferred from a missing key. They
+     * should not, for four reasons:
+     *
+     *  1. OpenAPI 3.0 has no spelling for "this operation must not carry a
+     *     body". The nearest thing, `{type: object}` with no properties, means
+     *     "send any JSON object" — strictly LESS true than saying nothing.
+     *  2. It is the "present-but-empty" column of the report we are closing,
+     *     and {@see testNoDeclaredRequestBodyIsEmpty} already calls that a
+     *     defect. Adding 50 of them to fix a reporting artifact would be
+     *     writing the defect on purpose.
+     *  3. {@see SchemaGenerator} attaches `400 Invalid request body` to any
+     *     operation that declares one. These routes do not answer 400 for a
+     *     body reason, so the document would acquire ~50 false responses.
+     *  4. Generated clients get worse, not better: openapi-typescript would
+     *     give every one of them a `body` member and openapi-fetch callers
+     *     would be pushed to send `{}` to endpoints that ignore it.
+     *
+     * The ambiguity is real, though — an absent key genuinely cannot be told
+     * from an omission — so it is closed from the other end. Every operation
+     * with no authored contract is MARKED `x-whity-undocumented`, and
+     * `info.description` states the resulting rule. An absent `requestBody` on
+     * an unmarked operation therefore means "takes none", and this is the gate
+     * that keeps that true.
+     */
+    public function testAnAbsentRequestBodyMeansTakesNoneRatherThanUndocumented(): void
+    {
+        $spec = $this->generateFromLiveRouterShape();
+
+        $this->assertStringContainsString(
+            'x-whity-undocumented',
+            (string) (self::dig($spec, 'info')['description'] ?? ''),
+            'info.description must state the convention the assertions below enforce — a rule no '
+            . 'reader of the document is told about is not a contract, just a habit.'
+        );
+
+        $catalogued = [];
+        foreach (CoreApiSchemas::routes() as $route) {
+            $catalogued[$route['method'] . ' ' . $this->specPath($route)] = true;
+        }
+
+        $unexplained = [];
+        foreach (self::dig($spec, 'paths') as $path => $operations) {
+            foreach (self::dig($operations) as $method => $operation) {
+                $method = strtoupper((string) $method);
+                $operation = self::dig($operation);
+                if (!in_array($method, self::WRITE_METHODS, true) || $this->isPluginPath((string) $path)) {
+                    continue;
+                }
+                if ($this->resolveRequestSchema($spec, $operation) !== null) {
+                    // A marked operation is one nobody wrote a contract for, so
+                    // it cannot also be carrying a declared body.
+                    $this->assertArrayNotHasKey(
+                        'x-whity-undocumented',
+                        $operation,
+                        "{$method} {$path} declares a request body AND claims to be undocumented"
+                    );
+                    continue;
+                }
+                if (isset($catalogued[$method . ' ' . $path]) || isset($operation['x-whity-undocumented'])) {
+                    continue;
+                }
+                $unexplained[] = $method . ' ' . $path;
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $unexplained,
+            "These write operations have no request body, no catalogue entry, and no\n"
+            . "x-whity-undocumented marker — so a client cannot tell whether they take\n"
+            . "nothing or were simply never documented:\n" . implode("\n", $unexplained)
+        );
+    }
+
+    /**
+     * The last clause of `info.description`: in the PUBLISHED document the
+     * marker only ever lands on a plugin route.
+     *
+     * public/openapi.json is generated from the catalogue and the plugins
+     * alone, so every CORE operation in it was authored — which is what lets a
+     * client read an absent `requestBody` there as "takes none" with no caveat.
+     * A plugin that ships no schema of its own is the plugin's business, and
+     * the marker is how the document says so rather than pretending otherwise.
+     */
+    public function testThePublishedDocumentMarksNoCoreOperationUndocumented(): void
+    {
+        $raw = file_get_contents(dirname(__DIR__, 2) . '/public/openapi.json');
+        $this->assertIsString($raw, 'could not read public/openapi.json');
+
+        $spec = json_decode($raw, true);
+        $this->assertIsArray($spec, 'public/openapi.json must be a JSON object');
+
+        $marked = [];
+        foreach (self::dig($spec, 'paths') as $path => $operations) {
+            foreach (self::dig($operations) as $method => $operation) {
+                if (!isset(self::dig($operation)['x-whity-undocumented'])) {
+                    continue;
+                }
+                if (!$this->isPluginPath((string) $path)) {
+                    $marked[] = strtoupper((string) $method) . ' ' . $path;
+                }
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $marked,
+            "The published spec claims every CORE operation in it is authored, but these are marked\n"
+            . "undocumented. Either declare them in CoreApiSchemas or amend info.description:\n"
+            . implode("\n", $marked)
+        );
+    }
+
+    /**
      * A route declaring a request body must not ALSO declare a body-less shape:
      * the resolved schema has to have properties, or a client learns nothing.
      * This is what the downstream report counted as "present-but-empty".
@@ -730,7 +849,10 @@ final class RequestSchemaContractTest extends TestCase
 
     private function isPluginPath(string $path): bool
     {
-        foreach (['/api/v1/hello', '/api/v1/demo-catalog', '/api/v1/uikit'] as $prefix) {
+        // `/api/v1/example` is plugins/ExamplePlugin.php and was missing here,
+        // so POST /api/v1/example/secure has been counted against core's
+        // request-body coverage all along — a plugin route core cannot declare.
+        foreach (['/api/v1/hello', '/api/v1/demo-catalog', '/api/v1/uikit', '/api/v1/example'] as $prefix) {
             if (str_starts_with($path, $prefix)) {
                 return true;
             }
