@@ -165,8 +165,9 @@ services:
     pull_policy: always
     profiles:
       - render
-    # Chromium is PID 1's child here and forks freely; an init reaps the zombies
-    # a long-lived browser process leaves behind.
+    # `node src/server.js` is PID 1 and the whole Chromium process tree hangs
+    # off it; an init reaps the zombies a long-lived browser leaves behind
+    # rather than leaving them to a PID 1 that was never written to.
     init: true
     environment:
       # Deliberately `:-` and not the `:?` fail-fast guard the secrets above
