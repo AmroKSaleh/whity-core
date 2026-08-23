@@ -188,6 +188,23 @@ class PluginLoader
     private ?PluginRoleSeeder $roleSeeder;
 
     /**
+     * Optional host callback fired after the set of registered plugin
+     * capabilities changes (#952).
+     *
+     * The host wires this to whatever it memoized off the registry — the MCP
+     * catalogue is the reason it exists. A worker that reloads plugins but keeps
+     * serving a tool list derived before the reload is not merely slow to catch
+     * up: it is a server that announces a change and then answers with the old
+     * answer, which is worse than never announcing at all.
+     *
+     * Null in hosts that memoize nothing (the CLI, the plugin smoke test), which
+     * is why it is a nullable seam rather than a constructor requirement.
+     *
+     * @var (\Closure(string): void)|null
+     */
+    private ?\Closure $registryChangeListener = null;
+
+    /**
      * @var array<PluginInterface> Registered plugins
      */
     private array $plugins = [];
@@ -405,6 +422,61 @@ class PluginLoader
     public function enableCache(?string $cacheFile = null): void
     {
         $this->cacheFile = $cacheFile ?? ($this->pluginDir . '/plugin_manifest.json');
+    }
+
+    /**
+     * Register the host callback fired when the registered capability set changes.
+     *
+     * Fires on: a {@see reload()} that actually rebuilt the registry (which is
+     * also how an install and an update arrive, via PluginInstaller), an
+     * administrative {@see disablePlugin()}, and a {@see reEnablePlugin()}.
+     * {@see uninstallPlugin()} inherits it through the disable it performs.
+     *
+     * Deliberately does NOT fire on: the initial {@see load()} at worker boot —
+     * nothing has been memoized yet, and with eight FrankenPHP workers booting,
+     * a boot-time announcement would be eight announcements of nothing; a
+     * {@see reload()} that found no disk change; or a plugin tripping the runtime
+     * error boundary, which leaves its capabilities registered and
+     * short-circuited, so its declarations are unchanged even though its
+     * behaviour is not.
+     *
+     * The listener is invoked inside an error boundary: a host that fails to
+     * refresh its own caches gets a log line, and the plugin operation that
+     * triggered it still completes.
+     *
+     * @param (\Closure(string): void)|null $listener Receives the triggering
+     *        operation's name, for logging. Null unregisters.
+     * @return void
+     */
+    public function onRegistryChanged(?\Closure $listener): void
+    {
+        $this->registryChangeListener = $listener;
+    }
+
+    /**
+     * Fire the registry-change listener, absorbing anything it throws.
+     *
+     * Same contract the loader applies to plugins: one participant's failure
+     * costs itself its effect and costs the host nothing. A listener that throws
+     * must not abort a reload half-way through, and must not turn the admin
+     * request that triggered it into a 500.
+     *
+     * @param string $trigger The operation that changed the registry.
+     * @return void
+     */
+    private function announceRegistryChange(string $trigger): void
+    {
+        if ($this->registryChangeListener === null) {
+            return;
+        }
+
+        try {
+            ($this->registryChangeListener)($trigger);
+        } catch (Throwable $e) {
+            $this->logWarning(
+                "Registry-change listener failed after {$trigger}: " . $e->getMessage()
+            );
+        }
     }
 
     /**
@@ -628,6 +700,11 @@ class PluginLoader
         $this->loadDiscovered($this->discover());
 
         $this->fingerprint = $current;
+
+        // Announced only after the registry is whole again: a listener that reads
+        // the catalogue must not see it mid-rebuild, with the old plugins already
+        // unregistered and the new ones not yet in.
+        $this->announceRegistryChange('reload');
 
         return true;
     }
@@ -1365,12 +1442,26 @@ class PluginLoader
      * - A descriptor with a missing or empty `name` is dropped with a warning.
      * - A getMcpPrompts() call that throws is caught, logged, and treated as
      *   if the plugin contributed nothing; remaining plugins still run.
+     * - A plugin that is administratively disabled, auto-failed, or otherwise
+     *   not active contributes NOTHING, exactly as in {@see collectJobs()}. A
+     *   disabled plugin whose prompts an AI agent could still list and fetch
+     *   would still be part of the platform's surface, which is not what
+     *   disabling one means — and it is what made prompts/list keep advertising
+     *   a plugin after it was turned off (#952).
      */
     public function collectMcpPrompts(PromptRegistry $registry): void
     {
         foreach ($this->registeredPlugins as $pluginKey => $info) {
             $plugin = $info['plugin'];
             if (!$plugin instanceof PluginMcpInterface) {
+                continue;
+            }
+
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
                 continue;
             }
             try {
@@ -1727,6 +1818,8 @@ class PluginLoader
         }
         unset($this->discoveredDisabledByDisk[$pluginKey]);
 
+        $this->announceRegistryChange('enable');
+
         return true;
     }
 
@@ -1756,6 +1849,12 @@ class PluginLoader
         if ($info !== null) {
             $this->persistDisableSignal($pluginKey, $info['plugin']->getName());
         }
+
+        // Announced from here rather than from disableInMemory(): that helper also
+        // runs once per already-disabled plugin during loadDiscovered(), and a
+        // boot is not a change (see onRegistryChanged()). uninstallPlugin() goes
+        // through this method, so it is covered without announcing twice.
+        $this->announceRegistryChange('disable');
 
         return true;
     }
