@@ -32,7 +32,10 @@
     "nikic/php-parser": "^5.0"
   },
   "scripts": {
-    "phpstan": "phpstan analyse src tests plugins sdk ops --memory-limit=1G"
+    "phpstan": [
+      "Composer\\Config::disableProcessTimeout",
+      "phpstan analyse src tests plugins sdk ops --memory-limit=1G"
+    ]
   },
   "scripts-descriptions": {
     "phpstan": "Static analysis over the same paths, at the same memory limit, as CI (#934)."
