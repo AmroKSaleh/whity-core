@@ -95,6 +95,30 @@ use Whity\Sdk\Frontend\Blocks\BlockValidator;
  *    still returns 200 with the OTHER valid features — never a 500.
  * Validation never throws (the SDK validator is pure and worker-safe), so a
  * malformed plugin tree can neither crash the request nor leak across workers.
+ *
+ * Reporting what was dropped (#953)
+ * ---------------------------------
+ * Both of the above refuse features on purpose and the rules are right, but a
+ * refused feature simply was not in the navigation, which looks exactly like a
+ * permission problem, a caching problem, or a typo in the screen id. Finding
+ * the real cause meant reading container logs.
+ *
+ * So the response carries a `dropped` array naming each refused descriptor and
+ * why. It covers BOTH refusal points — the loader's, at plugin load, and this
+ * handler's block-tree validation, per request — because they are one question
+ * to an administrator ("which screens should be here and are not?") and putting
+ * the answer on the response that BUILDS the navigation is what makes the
+ * question and the answer adjacent.
+ *
+ * The key is emitted only to a caller holding
+ * {@see CorePermissions::PLUGINS_READ}: the reasons quote route paths and
+ * permission names, and every authenticated caller fetches this endpoint. Its
+ * ABSENCE is meaningful — an empty array means "nothing was refused", a missing
+ * key means "not yours to read" — so a client is never left guessing which it
+ * is looking at. The list is NOT permission-filtered per descriptor the way
+ * `data` is: a dropped feature is a defect in a plugin's declaration, not
+ * something the caller could hold rights over, and several of the refusals are
+ * precisely that its declared permission was invalid.
  */
 final class FrontendFeaturesApiHandler
 {
@@ -196,6 +220,11 @@ final class FrontendFeaturesApiHandler
                 $tenantId
             );
 
+            // Refusals made while serving THIS request (#953). The loader's own
+            // refusals are read back separately below; they happened at load
+            // time and are not re-derived per request.
+            $droppedHere = [];
+
             $data = [];
             foreach ($this->pluginLoader->getFrontendFeatures() as $feature) {
                 // Defence in depth: a descriptor without a string permission
@@ -217,7 +246,7 @@ final class FrontendFeaturesApiHandler
                 // null when the feature must be dropped (already logged).
                 $validatedBlocks = null;
                 if (($feature['screen'] ?? null) === 'blocks') {
-                    $validatedBlocks = $this->validateBlocksOrNull($feature);
+                    $validatedBlocks = $this->validateBlocksOrNull($feature, $droppedHere);
                     if ($validatedBlocks === null) {
                         continue;
                     }
@@ -233,7 +262,18 @@ final class FrontendFeaturesApiHandler
                 );
             }
 
-            return Response::json(['data' => $data], 200);
+            $body = ['data' => $data];
+
+            // #953. Same audience as a capability's `detail`, for the same
+            // reason: these reasons are for whoever can repair the plugin.
+            if ($includeDetail) {
+                $body['dropped'] = array_merge(
+                    $this->pluginLoader->getDroppedFrontendFeatures(),
+                    $droppedHere
+                );
+            }
+
+            return Response::json($body, 200);
         } catch (\Throwable) {
             // Never leak internal exception details to clients.
             return Response::error('Failed to fetch frontend features', 500);
@@ -354,23 +394,25 @@ final class FrontendFeaturesApiHandler
      * errors are for operators only and never surface to the client.
      *
      * @param array<string, mixed> $feature The normalized loader descriptor.
+     * @param list<array{plugin: string, featureId: string|null, reason: string}> $dropped
+     *        Collects this refusal for the response's `dropped` array (#953).
      * @return list<mixed>|null The validated tree, or null when the feature must be dropped.
      */
-    private function validateBlocksOrNull(array $feature): ?array
+    private function validateBlocksOrNull(array $feature, array &$dropped): ?array
     {
         $featureId = isset($feature['id']) && is_string($feature['id']) ? $feature['id'] : '(no id)';
         $pluginName = isset($feature['plugin']) && is_string($feature['plugin']) ? $feature['plugin'] : '(unknown)';
 
         $blocks = $feature['blocks'] ?? null;
         if (!is_array($blocks)) {
-            $this->logBlocksDropped($pluginName, $featureId, ["'blocks' must be an array, got " . get_debug_type($blocks)]);
+            $this->logBlocksDropped($pluginName, $featureId, ["'blocks' must be an array, got " . get_debug_type($blocks)], $dropped);
 
             return null;
         }
 
         $result = BlockValidator::validate($blocks);
         if ($result['ok'] !== true) {
-            $this->logBlocksDropped($pluginName, $featureId, $result['errors']);
+            $this->logBlocksDropped($pluginName, $featureId, $result['errors'], $dropped);
 
             return null;
         }
@@ -384,12 +426,18 @@ final class FrontendFeaturesApiHandler
      *
      * Structured + secret-free: the validator errors are path-qualified contract
      * diagnostics (block type/prop names), never request data or secrets, and are
-     * passed as PSR-3 context for operator triage — they are NEVER returned to the
-     * client. A no-op when no logger is wired.
+     * passed as PSR-3 context for operator triage. A no-op when no logger is
+     * wired — which is exactly why the refusal is ALSO collected into `$dropped`
+     * (#953): an unwired logger, or a log nobody reads, used to mean the answer
+     * existed nowhere at all.
+     *
+     * The errors reach the client only through the `dropped` array, which is
+     * served solely to a plugin administrator.
      *
      * @param list<string> $errors The validator errors (path-qualified contract diagnostics).
+     * @param list<array{plugin: string, featureId: string|null, reason: string}> $dropped
      */
-    private function logBlocksDropped(string $pluginName, string $featureId, array $errors): void
+    private function logBlocksDropped(string $pluginName, string $featureId, array $errors, array &$dropped): void
     {
         $this->logger?->warning(
             'Frontend feature with screen:blocks dropped: invalid block tree',
@@ -399,6 +447,12 @@ final class FrontendFeaturesApiHandler
                 'errors' => $errors,
             ]
         );
+
+        $dropped[] = [
+            'plugin' => $pluginName,
+            'featureId' => $featureId,
+            'reason' => 'invalid block tree: ' . implode('; ', $errors),
+        ];
     }
 
     /**

@@ -3552,7 +3552,28 @@ final class CoreApiSchemas
                 'reason' => self::str(),
                 'detail' => self::str(true),
             ], ['code', 'reason', 'detail']),
-            'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
+            // #953: a feature descriptor the host REFUSED, and why. Refused at
+            // plugin load (an ownership or shape rule) or while serving the
+            // request (an invalid block tree) — one question to an
+            // administrator, so one list.
+            'DroppedFrontendFeature' => self::object([
+                'plugin' => self::str(),
+                'featureId' => self::str(true),
+                'reason' => self::str(),
+            ], ['plugin', 'featureId', 'reason']),
+            // `dropped` is NOT required: it is present only for a caller holding
+            // plugins:read, and its absence is what says "not yours to read" as
+            // distinct from an empty array's "nothing was refused".
+            'FrontendFeatureListResponse' => self::object(
+                [
+                    'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('FrontendFeature')],
+                    'dropped' => [
+                        'type' => 'array',
+                        'items' => SchemaBuilder::ref('DroppedFrontendFeature'),
+                    ],
+                ],
+                ['data']
+            ),
 
             // WC-176 (#205): the caller's effective permission slugs. Mirrors
             // MeCapabilitiesApiHandler's ACTUAL output: a data envelope wrapping

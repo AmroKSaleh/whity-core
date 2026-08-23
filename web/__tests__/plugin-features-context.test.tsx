@@ -97,7 +97,7 @@ describe('PluginFeaturesProvider auth-awareness', () => {
 
   it('fetches when a user signs in after mounting signed-out (the SPA login flow)', async () => {
     mockUseAuth.mockReturnValue(authState(null));
-    mockFetch.mockResolvedValue([FEATURE]);
+    mockFetch.mockResolvedValue({ features: [FEATURE], dropped: [] });
 
     const { rerender } = render(
       <PluginFeaturesProvider>
@@ -126,7 +126,7 @@ describe('PluginFeaturesProvider auth-awareness', () => {
 
   it('clears the list on logout', async () => {
     mockUseAuth.mockReturnValue(authState({ id: 2 }));
-    mockFetch.mockResolvedValue([FEATURE]);
+    mockFetch.mockResolvedValue({ features: [FEATURE], dropped: [] });
 
     const { rerender } = render(
       <PluginFeaturesProvider>
@@ -152,7 +152,7 @@ describe('PluginFeaturesProvider auth-awareness', () => {
 
   it('refetches when a different user signs in', async () => {
     mockUseAuth.mockReturnValue(authState({ id: 2 }));
-    mockFetch.mockResolvedValue([FEATURE]);
+    mockFetch.mockResolvedValue({ features: [FEATURE], dropped: [] });
 
     const { rerender } = render(
       <PluginFeaturesProvider>
@@ -161,7 +161,7 @@ describe('PluginFeaturesProvider auth-awareness', () => {
     );
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
 
-    mockFetch.mockResolvedValue([]);
+    mockFetch.mockResolvedValue({ features: [], dropped: [] });
     mockUseAuth.mockReturnValue(authState({ id: 7 }));
     rerender(
       <PluginFeaturesProvider>

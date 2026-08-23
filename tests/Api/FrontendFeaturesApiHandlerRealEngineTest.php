@@ -169,6 +169,16 @@ final class Plugin implements PluginInterface, PluginFrontendInterface
                 'requiredPermission' => 'featapi:gadgets',
                 'resource' => ['basePath' => '/api/featapi/gadgets', 'titleField' => 'name'],
             ],
+            // #953: a descriptor the LOADER refuses — its resource names a GET
+            // route this plugin never registered. It never reaches the served
+            // list; the point is that it no longer vanishes silently either.
+            [
+                'id' => 'featapi-ghost',
+                'label' => 'Ghost',
+                'screen' => 'crud',
+                'requiredPermission' => 'featapi:view',
+                'resource' => ['basePath' => '/api/featapi/ghosts', 'titleField' => 'name'],
+            ],
         ];
     }
 }
@@ -507,6 +517,47 @@ PHP);
         $this->assertSame(
             $this->featureById($withoutRead, 'featapi-widgets')['capabilities'],
             $this->featureById($withRead, 'featapi-widgets')['capabilities']
+        );
+    }
+
+    // ============ refusals reach an administrator (#953) ============
+
+    public function testALoaderRefusedDescriptorReachesTheAdministratorWithItsReason(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $response = $this->handler(['featapi:view', 'plugins:read'])->list($this->authedRequest(42));
+        $body = json_decode($response->getBody(), true);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertNotContains(
+            'featapi-ghost',
+            array_column($body['data'], 'id'),
+            'Surfacing the refusal must not serve the refused screen'
+        );
+
+        $byId = array_column($body['dropped'], null, 'featureId');
+        $this->assertArrayHasKey('featapi-ghost', $byId);
+        $this->assertSame('FeatApi', $byId['featapi-ghost']['plugin']);
+        $this->assertStringContainsString(
+            "resource.basePath '/api/featapi/ghosts' is not a GET route this plugin registered",
+            $byId['featapi-ghost']['reason']
+        );
+    }
+
+    public function testARefusedDescriptorIsNotReportedToAnOrdinaryCaller(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $body = json_decode(
+            $this->handler(['featapi:view'])->list($this->authedRequest(42))->getBody(),
+            true
+        );
+
+        $this->assertArrayNotHasKey(
+            'dropped',
+            $body,
+            'The reasons quote route paths, and every authenticated caller fetches this endpoint'
         );
     }
 

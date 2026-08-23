@@ -3388,6 +3388,11 @@ export interface components {
             record_type: string;
             record_value: string;
         };
+        DroppedFrontendFeature: {
+            plugin: string;
+            featureId: string | null;
+            reason: string;
+        };
         EmailOnlyRequest: {
             email: string;
         };
@@ -3483,6 +3488,7 @@ export interface components {
         };
         FrontendFeatureListResponse: {
             data: components["schemas"]["FrontendFeature"][];
+            dropped?: components["schemas"]["DroppedFrontendFeature"][];
         };
         GenericMessageDataResponse: {
             data: {

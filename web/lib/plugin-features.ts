@@ -1021,6 +1021,37 @@ export interface PluginFeature {
   >;
 }
 
+/**
+ * A feature descriptor the host REFUSED, and why (issue #953).
+ *
+ * A rejected feature used to just not be in the navigation — indistinguishable
+ * from a permission problem, a caching problem, or a typo in the screen id, and
+ * findable only by reading container logs. The rules that reject are correct;
+ * the answer was in the wrong place.
+ *
+ * Served only to a caller holding `plugins:read`, because the reasons quote
+ * route paths and permission names.
+ */
+export interface DroppedPluginFeature {
+  /** The declaring plugin's name, matching {@link PluginFeature.plugin}. */
+  plugin: string;
+  /** The declared feature id, or null when the descriptor had no usable one. */
+  featureId: string | null;
+  /** The host's exact reason for refusing it. */
+  reason: string;
+}
+
+/** What {@link fetchPluginFeatures} resolves to. */
+export interface PluginFeatureList {
+  features: PluginFeature[];
+  /**
+   * Refused descriptors. Empty for a caller who may not read them, which is
+   * indistinguishable here from "nothing was refused" — deliberately: only the
+   * plugin console renders this, and it is gated on the same permission.
+   */
+  dropped: DroppedPluginFeature[];
+}
+
 /** Narrow an unknown payload to the `{ data: PluginFeature[] }` envelope. */
 function isFeatureListResponse(body: unknown): body is { data: PluginFeature[] } {
   if (typeof body !== 'object' || body === null || !('data' in body)) {
@@ -1030,12 +1061,50 @@ function isFeatureListResponse(body: unknown): body is { data: PluginFeature[] }
 }
 
 /**
- * Fetch the permission-filtered feature list for the current user.
+ * Read the optional `dropped` array off the envelope (issue #953).
+ *
+ * Defensive per entry rather than all-or-nothing: this is diagnostic data, and
+ * one malformed row must not cost the administrator the other reasons.
+ */
+function readDropped(body: unknown): DroppedPluginFeature[] {
+  if (typeof body !== 'object' || body === null || !('dropped' in body)) {
+    return [];
+  }
+  const raw = (body as { dropped: unknown }).dropped;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const dropped: DroppedPluginFeature[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.plugin !== 'string' || typeof record.reason !== 'string') {
+      continue;
+    }
+    dropped.push({
+      plugin: record.plugin,
+      featureId: typeof record.featureId === 'string' ? record.featureId : null,
+      reason: record.reason,
+    });
+  }
+  return dropped;
+}
+
+/** The all-failures fallback, so every failure branch returns the same shape. */
+const EMPTY_FEATURE_LIST: PluginFeatureList = { features: [], dropped: [] };
+
+/**
+ * Fetch the permission-filtered feature list for the current user, plus the
+ * descriptors the host refused (issue #953, empty unless the caller holds
+ * `plugins:read`).
  *
  * Resolves to an empty list on any failure (non-ok status, malformed body,
  * network error) — callers render "no plugin features" rather than crash.
  */
-export async function fetchPluginFeatures(): Promise<PluginFeature[]> {
+export async function fetchPluginFeatures(): Promise<PluginFeatureList> {
   // Bounded for the same reason as NavigationProvider's fetch (see
   // navigation-context.tsx): this provider also wraps the whole
   // authenticated app, so an unbounded hang here blocks every admin page. A
@@ -1048,15 +1117,15 @@ export async function fetchPluginFeatures(): Promise<PluginFeature[]> {
       signal: controller.signal,
     });
     if (!response.ok) {
-      return [];
+      return EMPTY_FEATURE_LIST;
     }
     const body: unknown = await response.json();
     if (!isFeatureListResponse(body)) {
-      return [];
+      return EMPTY_FEATURE_LIST;
     }
-    return body.data;
+    return { features: body.data, dropped: readDropped(body) };
   } catch {
-    return [];
+    return EMPTY_FEATURE_LIST;
   } finally {
     clearTimeout(hangGuard);
   }
