@@ -1,24 +1,29 @@
 ﻿'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import {
   deriveCrudModel,
   effectiveCapabilities,
+  fetchSpec,
   type CrudField,
   type CrudModel,
-  type LocalizedTextValue,
-  type OpenApiSpec,
-  type ReferenceConfig,
 } from '@/lib/plugin-crud-schema';
 import type { PluginFeature } from '@/lib/plugin-features';
-import { usePluginData } from '@/lib/use-plugin-data';
+import {
+  CrudFields,
+  preferredLocalizedText,
+  toLocalizedTextValue,
+  useCrudForm,
+  type CrudRow,
+} from '@/components/plugin/crud-form';
+import { recordHref } from '@/lib/plugin-record-route';
 import { useToast } from '@/lib/toast-context';
 import { useDirection } from '@/lib/direction-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@amroksaleh/ui/button';
-import { BilingualInput } from '@amroksaleh/ui/bilingual-input';
 import {
   Dialog,
   DialogContent,
@@ -33,15 +38,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@amroksaleh/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@amroksaleh/ui/select';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { ErrorState } from '@amroksaleh/ui/empty-state';
 import {
@@ -50,7 +46,7 @@ import {
   IconPlus,
   IconShieldLock,
 } from '@tabler/icons-react';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * i18n (domain `plugin`): only the CHROME this file authors is keyed. The
@@ -59,15 +55,6 @@ import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
  * `feature.plugin`, `feature.requiredPermission`, the titleField row title,
  * and any `{ error }` message the backend returns.
  */
-
-/**
- * Row view-model for the schema-driven table: a plain record of unknown cell
- * values that still satisfies DataTable's `{ id: string | number }` bound.
- * Cells are rendered by DataTable via String(...), and column keys come from
- * the derived model, so `unknown` + narrowing keeps this fully typed without
- * resorting to `any`.
- */
-type CrudRow = { id: string | number } & Record<string, unknown>;
 
 /** Narrow raw list items to rows; entries without a usable id are dropped. */
 function toRows(items: unknown[]): CrudRow[] {
@@ -109,281 +96,10 @@ async function readErrorMessage(
   return fallback;
 }
 
-/**
- * Fetch the public OpenAPI document through the same-origin proxy route
- * (`app/openapi.json/route.ts`). A plain fetch is deliberate: apiClient
- * rewrites non-/api relative paths to the backend origin, which would bypass
- * the proxy and require backend CORS — and the public document needs none of
- * apiClient's cookie/refresh machinery.
- */
-async function fetchSpec(): Promise<OpenApiSpec | null> {
-  try {
-    const response = await fetch('/openapi.json');
-    if (!response.ok) {
-      return null;
-    }
-    const body: unknown = await response.json();
-    if (typeof body !== 'object' || body === null) {
-      return null;
-    }
-    return body as OpenApiSpec;
-  } catch {
-    return null;
-  }
-}
-
-/** Form values: strings for text-ish inputs, booleans for checkboxes, {ar,en} for LocalizedText. */
-export type FormValues = Record<string, string | boolean | LocalizedTextValue>;
-
-/** Narrow an unknown raw value to a {@link LocalizedTextValue}, defensively. */
-function toLocalizedTextValue(raw: unknown): LocalizedTextValue {
-  if (typeof raw !== 'object' || raw === null) {
-    return {};
-  }
-  const record = raw as Record<string, unknown>;
-  const value: LocalizedTextValue = {};
-  if (typeof record.ar === 'string') {
-    value.ar = record.ar;
-  }
-  if (typeof record.en === 'string') {
-    value.en = record.en;
-  }
-  return value;
-}
-
-/**
- * WC-532: the dir-preferred language for a LocalizedText value, falling back
- * to the other language when the preferred one is empty, or `null` when both
- * are empty (the caller renders an "untranslated" marker in that case).
- */
-function preferredLocalizedText(
-  value: LocalizedTextValue,
-  dir: 'ltr' | 'rtl'
-): string | null {
-  const preferred = dir === 'rtl' ? value.ar : value.en;
-  const fallback = dir === 'rtl' ? value.en : value.ar;
-  const chosen = preferred?.trim() ? preferred : fallback?.trim() ? fallback : null;
-  return chosen;
-}
-
-/** Seed form values from the field list and (for edit) the selected row. */
-function initialFormValues(
-  fields: CrudField[],
-  row: CrudRow | null
-): FormValues {
-  const values: FormValues = {};
-  for (const field of fields) {
-    const raw = row?.[field.name];
-    if (field.kind === 'checkbox') {
-      values[field.name] = typeof raw === 'boolean' ? raw : false;
-    } else if (field.kind === 'localized-text') {
-      values[field.name] = toLocalizedTextValue(raw);
-    } else if (
-      typeof raw === 'string' ||
-      typeof raw === 'number' ||
-      typeof raw === 'boolean'
-    ) {
-      values[field.name] = String(raw);
-    } else {
-      values[field.name] = '';
-    }
-  }
-  return values;
-}
-
-/**
- * Client-side required/number/maxLength checks; the server stays authoritative.
- *
- * Takes `t` as a parameter because a plain function cannot call a hook; the
- * file has exactly one domain, so the extractor still attributes these keys to
- * it. `field.label` is plugin data and travels as a placeholder — the sentence
- * around it stays one translatable unit.
- */
-function validateFormValues(
-  fields: CrudField[],
-  values: FormValues,
-  t: TranslateFn
-): Record<string, string> {
-  const errors: Record<string, string> = {};
-  for (const field of fields) {
-    if (field.kind === 'checkbox') {
-      continue;
-    }
-    if (field.kind === 'localized-text') {
-      const value = values[field.name];
-      const localized = typeof value === 'object' ? value : {};
-      // Required means AT LEAST ONE language is filled — Phase-1 does not
-      // force translating both languages before saving.
-      if (field.required && !localized.ar?.trim() && !localized.en?.trim()) {
-        errors[field.name] = t(
-          'crud.field.requiredLocalized',
-          '{label} is required (at least one language)',
-          { label: field.label }
-        );
-      }
-      continue;
-    }
-    const value = values[field.name];
-    const text = typeof value === 'string' ? value.trim() : '';
-    if (field.required && text === '') {
-      errors[field.name] = t('crud.field.required', '{label} is required', {
-        label: field.label,
-      });
-      continue;
-    }
-    if (text !== '' && field.kind === 'number' && Number.isNaN(Number(text))) {
-      errors[field.name] = t('crud.field.number', '{label} must be a number', {
-        label: field.label,
-      });
-      continue;
-    }
-    if (field.maxLength !== undefined && text.length > field.maxLength) {
-      errors[field.name] = t(
-        'crud.field.maxLength',
-        '{label} must be at most {max} characters',
-        { label: field.label, max: field.maxLength }
-      );
-    }
-  }
-  return errors;
-}
-
-/**
- * Convert form values to the JSON payload; empty optional fields are omitted.
- * Exported for unit testing (the reference-id coercion in particular).
- */
-export function toPayload(
-  fields: CrudField[],
-  values: FormValues
-): Record<string, unknown> {
-  const payload: Record<string, unknown> = {};
-  for (const field of fields) {
-    const value = values[field.name];
-    if (field.kind === 'checkbox') {
-      payload[field.name] = value === true;
-      continue;
-    }
-    if (field.kind === 'localized-text') {
-      const localized = typeof value === 'object' ? value : {};
-      const isEmpty = !localized.ar?.trim() && !localized.en?.trim();
-      if (isEmpty && !field.required) {
-        continue;
-      }
-      payload[field.name] = { ar: localized.ar ?? '', en: localized.en ?? '' };
-      continue;
-    }
-    const text = typeof value === 'string' ? value : '';
-    if (text === '' && !field.required) {
-      continue;
-    }
-    // A reference submits its chosen value; coerce a numeric id (the common
-    // FK) to a number, leave a non-numeric key (a string FK) as-is.
-    const asNumber = field.kind === 'number' || (field.kind === 'reference' && /^\d+$/.test(text));
-    payload[field.name] = asNumber ? Number(text) : text;
-  }
-  return payload;
-}
-
-/**
- * A `kind: "reference"` form field: a dropdown populated from the referenced
- * collection (usePluginData over `resource`), each row mapped {value:
- * valueField, label: labelField}. The submitted value is the chosen FK id
- * (coerced in toPayload). Mirrors the block-DSL referenceSelect renderer.
- */
-function ReferenceField({
-  field,
-  reference,
-  value,
-  error,
-  onChange,
-}: {
-  field: CrudField;
-  reference: ReferenceConfig;
-  value: string;
-  error: string | undefined;
-  onChange: (value: string) => void;
-}) {
-  const t = useTranslation('plugin');
-  const inputId = `crud-field-${field.name}`;
-  const state = usePluginData<Array<Record<string, unknown>>>(
-    reference.resource,
-    (body) => (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null)
-  );
-
-  const options =
-    state.status === 'ready'
-      ? state.data.flatMap((row) => {
-          const rawValue = row[reference.valueField];
-          const rawLabel = row[reference.labelField];
-          if (rawValue === undefined || rawValue === null) {
-            return [];
-          }
-          return [
-            {
-              value: String(rawValue),
-              label:
-                rawLabel === undefined || rawLabel === null
-                  ? String(rawValue)
-                  : String(rawLabel),
-            },
-          ];
-        })
-      : [];
-
-  return (
-    <div className="space-y-2">
-      <label htmlFor={inputId} className="text-sm font-medium">
-        {field.label}
-        {field.required && <span className="text-destructive"> *</span>}
-      </label>
-      {state.status === 'error' ? (
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground">
-          <span>{t('crud.options.loadError', 'Failed to load options.')}</span>
-          <Button type="button" variant="outline" size="sm" onClick={state.retry}>
-            {t('crud.retry', 'Retry')}
-          </Button>
-        </div>
-      ) : (
-        <Select
-          value={value}
-          onValueChange={onChange}
-          disabled={state.status === 'loading'}
-        >
-          <SelectTrigger
-            id={inputId}
-            className="w-full"
-            aria-invalid={error !== undefined}
-          >
-            <SelectValue
-              placeholder={
-                state.status === 'loading'
-                  ? t('crud.loading', 'Loading…')
-                  : t('crud.select.placeholder', 'Select {label}', {
-                      label: field.label.toLowerCase(),
-                    })
-              }
-            />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-
-interface CrudFormDialogProps {
+interface CrudCreateDialogProps {
   title: string;
   description: string;
   fields: CrudField[];
-  /** The row being edited, or null when creating. */
-  initialRow: CrudRow | null;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   submitLabel: string;
@@ -393,50 +109,35 @@ interface CrudFormDialogProps {
 }
 
 /**
- * Generic create/edit dialog built from derived schema fields. The parent
- * remounts it via `key` on each open, so plain useState defaults reset
- * without a synchronous setState in an effect.
+ * The CREATE dialog, built from the derived schema fields (#948 narrowed it
+ * from create-and-edit to create).
+ *
+ * Editing left: a record has an address now, so the Edit row action navigates
+ * to `/admin/x/[featureId]/[recordId]` and the record page renders the same
+ * fields with room to breathe. Creation stays a dialog, and the asymmetry is
+ * the point — a record that does not exist yet has no id, so there is no URL
+ * to send anybody, nothing to bookmark, and nothing to come back to. An
+ * overlay is the honest shape for a transient thing.
+ *
+ * The parent remounts it via `key` on each open, so plain useState defaults
+ * reset without a synchronous setState in an effect.
  *
  * `title`, `description`, `submitLabel` and `busyLabel` are the CALLER's
  * strings and are never keyed here — the caller owns their wording (and keys
  * them itself where they are ours).
  */
-function CrudFormDialog({
+function CrudCreateDialog({
   title,
   description,
   fields,
-  initialRow,
   isOpen,
   onOpenChange,
   submitLabel,
   busyLabel,
   onSubmit,
-}: CrudFormDialogProps) {
+}: CrudCreateDialogProps) {
   const t = useTranslation('plugin');
-  const [values, setValues] = useState<FormValues>(() =>
-    initialFormValues(fields, initialRow)
-  );
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const setValue = (name: string, value: string | boolean | LocalizedTextValue) => {
-    setValues((current) => ({ ...current, [name]: value }));
-  };
-
-  const handleSubmit = async () => {
-    const validationErrors = validateFormValues(fields, values, t);
-    setErrors(validationErrors);
-    if (Object.keys(validationErrors).length > 0) {
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      await onSubmit(toPayload(fields, values));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  const form = useCrudForm(fields, null);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -446,128 +147,13 @@ function CrudFormDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          {fields.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              {t('crud.form.empty', 'This action takes no input.')}
-            </p>
-          )}
-          {fields.map((field) => {
-            const inputId = `crud-field-${field.name}`;
-            const error = errors[field.name];
-            const value = values[field.name];
-            const text = typeof value === 'string' ? value : '';
-
-            if (field.kind === 'checkbox') {
-              return (
-                <div key={field.name} className="space-y-2">
-                  <label
-                    htmlFor={inputId}
-                    className="flex w-fit cursor-pointer items-center gap-2"
-                  >
-                    <input
-                      id={inputId}
-                      type="checkbox"
-                      checked={value === true}
-                      onChange={(event) =>
-                        setValue(field.name, event.target.checked)
-                      }
-                      className="size-4 rounded border-border"
-                    />
-                    <span className="text-sm font-medium">{field.label}</span>
-                  </label>
-                  {error && <p className="text-xs text-destructive">{error}</p>}
-                </div>
-              );
-            }
-
-            if (field.kind === 'localized-text') {
-              const localized = typeof value === 'object' ? value : {};
-              return (
-                <div key={field.name} className="space-y-2">
-                  <span className="text-sm font-medium">
-                    {field.label}
-                    {field.required && <span className="text-destructive"> *</span>}
-                  </span>
-                  <BilingualInput
-                    id={inputId}
-                    value={localized}
-                    onChange={(next) => setValue(field.name, next)}
-                  />
-                  {error && <p className="text-xs text-destructive">{error}</p>}
-                </div>
-              );
-            }
-
-            if (field.kind === 'reference' && field.reference) {
-              return (
-                <ReferenceField
-                  key={field.name}
-                  field={field}
-                  reference={field.reference}
-                  value={text}
-                  error={error}
-                  onChange={(next) => setValue(field.name, next)}
-                />
-              );
-            }
-
-            return (
-              <div key={field.name} className="space-y-2">
-                <label htmlFor={inputId} className="text-sm font-medium">
-                  {field.label}
-                  {field.required && (
-                    <span className="text-destructive"> *</span>
-                  )}
-                </label>
-
-                {field.kind === 'select' ? (
-                  <Select
-                    value={text}
-                    onValueChange={(next) => setValue(field.name, next)}
-                  >
-                    <SelectTrigger
-                      id={inputId}
-                      className="w-full"
-                      aria-invalid={error !== undefined}
-                    >
-                      <SelectValue
-                        placeholder={t('crud.select.placeholder', 'Select {label}', {
-                          label: field.label.toLowerCase(),
-                        })}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(field.options ?? []).map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {option}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : field.kind === 'textarea' ? (
-                  <Textarea
-                    id={inputId}
-                    value={text}
-                    maxLength={field.maxLength}
-                    aria-invalid={error !== undefined}
-                    onChange={(event) => setValue(field.name, event.target.value)}
-                  />
-                ) : (
-                  <Input
-                    id={inputId}
-                    type={field.kind === 'number' ? 'number' : 'text'}
-                    value={text}
-                    maxLength={field.maxLength}
-                    aria-invalid={error !== undefined}
-                    onChange={(event) => setValue(field.name, event.target.value)}
-                  />
-                )}
-
-                {error && <p className="text-xs text-destructive">{error}</p>}
-              </div>
-            );
-          })}
+        <div className="py-2">
+          <CrudFields
+            fields={fields}
+            values={form.values}
+            errors={form.errors}
+            onChange={form.setValue}
+          />
         </div>
 
         <DialogFooter>
@@ -575,12 +161,16 @@ function CrudFormDialog({
             type="button"
             variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={isSubmitting}
+            disabled={form.isSubmitting}
           >
             {t('crud.dialog.cancel', 'Cancel')}
           </Button>
-          <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
-            {isSubmitting ? busyLabel : submitLabel}
+          <Button
+            type="button"
+            onClick={() => void form.submit(onSubmit)}
+            disabled={form.isSubmitting}
+          >
+            {form.isSubmitting ? busyLabel : submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -673,15 +263,23 @@ function CrudDeleteDialog({
  *
  * On mount it fetches the public OpenAPI document (same-origin proxy) and the
  * feature's list endpoint in parallel, derives the table/form model from the
- * spec, and renders the standard admin list + create/edit/delete dialogs.
- * Write controls render only when the spec publishes the operation AND the
- * server reports the caller may perform it (issue #199), so a read-only
- * delegated caller never sees a control whose submit would 403; a 403 on the
- * list still renders the access-denied card.
+ * spec, and renders the standard admin list, the create dialog and the delete
+ * confirmation. Write controls render only when the spec publishes the
+ * operation AND the server reports the caller may perform it (issue #199), so a
+ * read-only delegated caller never sees a control whose submit would 403; a 403
+ * on the list still renders the access-denied card.
+ *
+ * EDITING IS A NAVIGATION (#948). The Edit row action goes to
+ * `/admin/x/[featureId]/[recordId]`, the record's own address, rather than
+ * opening a dialog over the list. It applies to EVERY crud feature and needs no
+ * plugin declaration to do so: the record page is derived from the same OpenAPI
+ * document this screen derives its table from, so a plugin gets record pages
+ * for the resource it already published, without shipping a line of JavaScript.
  */
 export function CrudScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
   const { dir } = useDirection();
+  const router = useRouter();
   const t = useTranslation('plugin');
   const basePath = feature.resource?.basePath ?? null;
 
@@ -703,7 +301,6 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selected, setSelected] = useState<CrudRow | null>(null);
 
@@ -829,34 +426,6 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     return true;
   };
 
-  const handleEdit = async (
-    payload: Record<string, unknown>
-  ): Promise<boolean> => {
-    if (selected === null) {
-      return false;
-    }
-    const response = await apiClient(
-      `${basePath}/${encodeURIComponent(String(selected.id))}`,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }
-    );
-    if (!response.ok) {
-      addToast(
-        await readErrorMessage(response, t('crud.error.update', 'Failed to update record')),
-        'error'
-      );
-      return false;
-    }
-    addToast(t('crud.toast.updated', 'Record updated successfully'), 'success');
-    setIsEditOpen(false);
-    setSelected(null);
-    refetch();
-    return true;
-  };
-
   const handleDelete = async (): Promise<boolean> => {
     if (selected === null) {
       return false;
@@ -956,11 +525,12 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {capabilities.canEdit && (
+                // #948: a NAVIGATION, not an overlay. The row's record has an
+                // address, so editing goes there — which is what makes "send me
+                // the link to that record" answerable, the back button work, and
+                // a reload land on the same record instead of the list.
                 <DropdownMenuItem
-                  onClick={() => {
-                    setSelected(row);
-                    setIsEditOpen(true);
-                  }}
+                  onClick={() => router.push(recordHref(feature.id, row.id))}
                 >
                   {t('crud.rowActions.edit', 'Edit')}
                 </DropdownMenuItem>
@@ -1036,7 +606,7 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
       )}
 
       {model !== null && (
-        <CrudFormDialog
+        <CrudCreateDialog
           // Remount on each open so the form resets to its defaults without a
           // synchronous setState in an effect.
           key={isCreateOpen ? 'create-open' : 'create-closed'}
@@ -1045,34 +615,11 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
             plugin: feature.plugin,
           })}
           fields={model.createFields}
-          initialRow={null}
           isOpen={isCreateOpen}
           onOpenChange={setIsCreateOpen}
           submitLabel={t('crud.create.action', 'Create')}
           busyLabel={t('crud.create.pending', 'Creating...')}
           onSubmit={handleCreate}
-        />
-      )}
-
-      {model !== null && selected !== null && (
-        <CrudFormDialog
-          key={`edit-${String(selected.id)}-${isEditOpen ? 'open' : 'closed'}`}
-          title={t('crud.edit.title', 'Edit {resource}', { resource: feature.label })}
-          description={t('crud.edit.description', 'Update {item}.', {
-            item: rowTitle(selected),
-          })}
-          fields={model.editFields}
-          initialRow={selected}
-          isOpen={isEditOpen}
-          onOpenChange={(open) => {
-            setIsEditOpen(open);
-            if (!open) {
-              setSelected(null);
-            }
-          }}
-          submitLabel={t('crud.edit.submit', 'Save changes')}
-          busyLabel={t('crud.edit.pending', 'Saving...')}
-          onSubmit={handleEdit}
         />
       )}
 

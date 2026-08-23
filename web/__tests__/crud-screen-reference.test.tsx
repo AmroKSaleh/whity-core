@@ -19,11 +19,18 @@ jest.mock('@/lib/api-client', () => ({
   apiClient: (...args: unknown[]) => mockApiClient(...args),
 }));
 
+// #948: the Edit row action is a navigation now, so the screen calls
+// useRouter() on every render — unmounted here, the app router invariant throws
+// before the FK dropdown this file is about ever renders.
+const push = jest.fn();
+jest.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
+
 const addToast = jest.fn();
 jest.mock('@/lib/toast-context', () => ({ useToast: () => ({ addToast }) }));
 jest.mock('@/lib/direction-context', () => ({ useDirection: () => ({ dir: 'ltr' }) }));
 
-import { CrudScreen, toPayload } from '@/components/plugin/crud-screen';
+import { CrudScreen } from '@/components/plugin/crud-screen';
+import { toPayload } from '@/components/plugin/crud-form';
 
 beforeAll(() => {
   if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false;

@@ -229,6 +229,48 @@ and still cannot state it as a property of the record (#895).
 
 ---
 
+## Record pages — one record, with an address (#948)
+
+A plugin feature is served at `/admin/x/{featureId}`. **One record of it is served at
+`/admin/x/{featureId}/{recordId}`**, and the host seeds that second segment into the
+master-detail context under the reserved name `record`. That is the whole mechanism: no new
+block type, no extra descriptor key, and nothing for a plugin to import.
+
+```php
+// The list, and the link out of it.
+['type' => 'dataTable',
+    'source'  => '/api/acme/widgets',
+    'columns' => [['key' => 'name', 'label' => 'Name']],
+    // {field} placeholders are substituted from the row.
+    'rowActions' => [['label' => 'Open', 'href' => '/admin/x/acme-widgets/{id}']],
+]
+
+// The record page's own tree reads the route's record the ordinary way.
+['type' => 'dataRecord',
+    'id'     => 'widget',
+    'source' => '/api/acme/widgets/{record}',
+    'fields' => [['field' => 'name', 'label' => 'Name']],
+    'children' => [['type' => 'recordFields', 'from' => 'widget']],
+]
+```
+
+**Unbound is a state, not an error.** On the feature page nothing has named a record, so
+`{record}` does not resolve and the `dataRecord` renders its empty text instead of fetching
+`/api/acme/widgets` — the collection — and presenting whatever came back as "the record this
+page is about". The same tree therefore renders correctly at both addresses: a master-detail
+pane where the selection comes from a click, a record page where it comes from the URL.
+
+**A `screen:'crud'` feature gets a record page with nothing declared at all.** The host
+derives it from the OpenAPI document the plugin already publishes: the row's Edit action
+navigates to `/admin/x/{featureId}/{recordId}`, and the page renders the record's own fields
+— as a form when the caller may `PATCH` it, and as a description list, with the reason, when
+they may not.
+
+**An id the resource does not know keeps its URL and says so.** The host cannot answer
+"does this record exist?" — only the plugin's own endpoint can — so a record page never
+redirects and never 404s the address away. What renders is the page with a stated cause,
+which is the difference between "you may not see this" and "this is broken".
+
 ## Writing a new renderer (web / mobile / desktop)
 
 A renderer is a recursive function `render(block)` that switches on `block.type`, maps each
