@@ -6,6 +6,8 @@ namespace Whity\Core\Document;
 
 use PDO;
 use Whity\Core\Document\Organizer\DocumentCriteria;
+use Whity\Core\Document\Organizer\DocumentOrder;
+use Whity\Core\Document\Organizer\DocumentSortField;
 
 /**
  * Data-access for `documents` (#947 item 1) — the RECORD half of an issued
@@ -160,12 +162,20 @@ final class DocumentRepository
     }
 
     /**
-     * A page of the tenant's documents matching a view's criteria, newest first.
+     * A page of the tenant's documents matching a view's criteria.
+     *
+     * Newest first unless an `$order` is named — see {@see orderSql()} for why
+     * the default is not expressible as one.
      *
      * @return list<array<string, mixed>>
      */
-    public function listForCriteria(int $tenantId, DocumentCriteria $criteria, int $limit, int $offset): array
-    {
+    public function listForCriteria(
+        int $tenantId,
+        DocumentCriteria $criteria,
+        int $limit,
+        int $offset,
+        ?DocumentOrder $order = null
+    ): array {
         if ($criteria->matchesNothing) {
             return [];
         }
@@ -181,7 +191,7 @@ final class DocumentRepository
                  WHERE tenant_id = :tenant_id';
         $bindings = [];
         $sql .= $this->criteriaSql($criteria, $bindings);
-        $sql .= ' ORDER BY id DESC LIMIT :limit OFFSET :offset';
+        $sql .= $this->orderSql($order) . ' LIMIT :limit OFFSET :offset';
 
         $stmt = $this->db->prepare($sql);
         $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
@@ -322,6 +332,74 @@ final class DocumentRepository
         }
 
         return $sql;
+    }
+
+    /**
+     * The `ORDER BY` clause, as a LITERAL fragment chosen by a `match` over a
+     * closed enum.
+     *
+     * WHY THE REQUEST'S STRING NEVER REACHES THIS SQL
+     * -----------------------------------------------
+     * An identifier cannot be bound as a parameter, so `ORDER BY` is the one
+     * clause where request text is habitually interpolated — and where doing so
+     * is an injection. The request names a {@see DocumentSortField} case or is
+     * rejected at the edge ({@see \Whity\Api\DocumentsApiHandler::order()}), and
+     * what lands here is a `match` over that enum whose arms are string
+     * literals. The direction is derived from a BOOLEAN for the same reason: not
+     * from `'asc'`/`'desc'` text that happened to validate.
+     *
+     * WHY EVERY ARM CARRIES `, id DESC`
+     * ---------------------------------
+     * A non-unique sort key makes pagination lose and repeat rows. Two documents
+     * issued in the same second, or from the same template, have no defined
+     * relative position, so the engine is free to order them differently between
+     * the query for page 1 and the query for page 2 — and a row that moves
+     * across the boundary is either shown twice or never shown at all. There is
+     * no error, no gap in the numbering, and the total still adds up: the
+     * failure is a document the reader concludes was never issued. `id` is
+     * unique per tenant and never reused, so appending it makes every order
+     * total.
+     *
+     * WHY THE DEFAULT IS `id DESC` RATHER THAN `created_at DESC`
+     * ---------------------------------------------------------
+     * They are not the same order, and the difference is the reason this is not
+     * expressible as a {@see DocumentOrder}. `created_at` is set by `NOW()`,
+     * which in PostgreSQL is the TRANSACTION's start time — several documents
+     * issued inside one transaction share it exactly, and their order among
+     * themselves is then arbitrary. `id DESC` is the order they were actually
+     * recorded in. Keeping it as the unnamed default also means a caller who
+     * names no sort gets the list #947 item 1 shipped, byte for byte.
+     *
+     * WHY `LOWER()` ON THE TEXT COLUMNS, AND WHAT IT DOES NOT DO
+     * ---------------------------------------------------------
+     * Without it, PostgreSQL under the C locale orders every capital ahead of
+     * every lowercase letter, so `Zebra` precedes `apple` and an alphabetical
+     * list is not one. `LOWER()` is applied here rather than relying on a
+     * case-insensitive collation because the unit suite builds its schema on
+     * SQLite, whose default is already case-sensitive-but-different, and a
+     * predicate that orders one way in CI and another in production is one
+     * nothing tests.
+     *
+     * It is NOT linguistic collation. For Arabic — a standing requirement here —
+     * `LOWER()` is a no-op and the result is codepoint order, which groups the
+     * script correctly but does not implement Arabic alphabetisation (or
+     * Latin-with-diacritics, for that matter). Doing that properly means an ICU
+     * collation chosen per tenant, which is a decision about the tenant's
+     * language rather than about this clause, and is deliberately not made here.
+     */
+    private function orderSql(?DocumentOrder $order): string
+    {
+        if ($order === null) {
+            return ' ORDER BY id DESC';
+        }
+
+        $direction = $order->descending ? ' DESC' : ' ASC';
+
+        return match ($order->field) {
+            DocumentSortField::Title        => ' ORDER BY LOWER(title)' . $direction . ', id DESC',
+            DocumentSortField::CreatedAt    => ' ORDER BY created_at' . $direction . ', id DESC',
+            DocumentSortField::TemplateName => ' ORDER BY LOWER(template_name)' . $direction . ', id DESC',
+        };
     }
 
     /**

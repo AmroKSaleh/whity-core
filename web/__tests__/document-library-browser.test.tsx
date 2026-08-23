@@ -1,0 +1,566 @@
+/**
+ * The document library's browser affordances: layout, sorting, collections
+ * management, and — the part that matters most — the several DIFFERENT things a
+ * page with no rows can mean.
+ *
+ * WHAT IS PINNED HERE AND WHY
+ * ---------------------------
+ * #987 built a rail whose whole purpose is that "absent", "unavailable to you"
+ * and "empty" never look alike, and `document-organizer-rail.test.tsx` pins that
+ * for the rail. This file pins the same distinction one pane to the right, where
+ * it is much easier to lose: every zero-row page answered with one tidy sentence
+ * erases it completely, and nothing fails when it does.
+ *
+ * It also pins that SORTING IS THE SERVER'S. The shared DataTable can sort
+ * client-side, which in server-pagination mode sorts the page it was handed and
+ * presents the result as a sorted library — so the assertions below are about
+ * the request that goes out, not about the order of the rows that come back.
+ */
+
+import React from 'react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
+
+const mockApiClient = jest.fn();
+/**
+ * The forwarder is built ONCE, inside the factory, and that is load-bearing.
+ *
+ * `useFetch` keys its effect on the function identity it is handed, and this
+ * screen passes `apiClient` as a dependency of all four of its fetches. A mock
+ * returning a fresh arrow from every `useAuth()` call therefore refetches on
+ * every render, forever: the first draft of this file did exactly that and every
+ * assertion failed on a table stuck at "Loading…". The real `useAuth` memoises
+ * `apiClient` with `useCallback`, so the stable forwarder is the faithful mock —
+ * a per-render one would be testing a component in a state production never
+ * reaches.
+ */
+jest.mock('@/lib/auth-context', () => {
+  const apiClient = (...args: unknown[]) => mockApiClient(...args);
+  return { useAuth: () => ({ apiClient }) };
+});
+
+const addToast = jest.fn();
+jest.mock('@/lib/toast-context', () => ({
+  useToast: () => ({ addToast }),
+}));
+
+import DocumentLibraryPage from '@/app/(protected)/admin/document-library/page';
+import { libraryEmptyState } from '@/app/(protected)/admin/document-library/library-empty-state';
+import type {
+  DocumentCollection,
+  DocumentRow,
+  DocumentView,
+} from '@/app/(protected)/admin/document-library/types';
+
+// ── fixtures ───────────────────────────────────────────────────────────────
+
+function view(overrides: Partial<DocumentView> & Pick<DocumentView, 'key'>): DocumentView {
+  return {
+    label: overrides.key,
+    description: `The ${overrides.key} folder.`,
+    group: 'derived',
+    parameters: [],
+    requires: [],
+    available: true,
+    unavailable_reason: null,
+    ...overrides,
+  };
+}
+
+const VIEWS: DocumentView[] = [
+  view({ key: 'all', label: 'All documents' }),
+  view({ key: 'created-by-me', label: 'Created by me' }),
+  view({
+    key: 'raised-by-my-unit',
+    label: 'Raised by my unit',
+    parameters: [{ name: 'ou_id', required: false }],
+  }),
+  view({ key: 'starred', label: 'Starred', group: 'personal' }),
+  view({
+    key: 'collection',
+    label: 'Collection',
+    group: 'personal',
+    parameters: [{ name: 'collection_id', required: true }],
+  }),
+];
+
+const Q3: DocumentCollection = {
+  id: 5,
+  tenant_id: 1,
+  profile_id: 10,
+  name: 'Q3 audit',
+  system_key: null,
+  created_at: '2026-08-01 10:00:00',
+  item_count: 2,
+};
+
+const STARRED: DocumentCollection = {
+  id: 6,
+  tenant_id: 1,
+  profile_id: 10,
+  name: 'Starred',
+  system_key: 'starred',
+  created_at: '2026-08-01 10:00:00',
+  item_count: 1,
+};
+
+function row(overrides: Partial<DocumentRow> & Pick<DocumentRow, 'id' | 'title'>): DocumentRow {
+  return {
+    template_name: 'Invoice template',
+    origin_ou_id: 3,
+    created_by: 10,
+    created_at: '2026-08-01 10:00:00',
+    content_url: `/api/v1/documents/${overrides.id}/content`,
+    artifacts: [],
+    collection_ids: [],
+    starred: false,
+    ...overrides,
+  };
+}
+
+const INVOICE = row({ id: 1, title: 'Invoice 42' });
+// An Arabic title, because a document browser is where bidi filenames land.
+const ARABIC = row({ id: 2, title: 'تقرير الربع الثالث', collection_ids: [5] });
+
+interface Handled {
+  ok: boolean;
+  status?: number;
+  body: unknown;
+}
+
+/** Every request the page issues, in order, so an assertion can name one. */
+let calls: { url: string; method: string }[] = [];
+
+/**
+ * Route requests by URL rather than by call order.
+ *
+ * The page fires four independent fetches on mount and their completion order is
+ * not defined; an ordered mock queue would pass or fail depending on which
+ * microtask won. Also lets one test change one endpoint's answer without
+ * restating the other three.
+ */
+function installApi(options: {
+  views?: Handled;
+  collections?: Handled;
+  ous?: Handled;
+  documents?: (url: string) => Handled;
+  mutation?: Handled;
+} = {}) {
+  calls = [];
+  mockApiClient.mockImplementation((url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET';
+    calls.push({ url, method });
+
+    const answer = (handled: Handled) =>
+      Promise.resolve({
+        ok: handled.ok,
+        status: handled.status ?? (handled.ok ? 200 : 500),
+        json: () => Promise.resolve(handled.body),
+      } as Response);
+
+    if (method !== 'GET') {
+      return answer(options.mutation ?? { ok: true, body: { data: {} } });
+    }
+    if (url.startsWith('/api/v1/documents/views')) {
+      return answer(options.views ?? { ok: true, body: { data: VIEWS, unavailable_substrates: [] } });
+    }
+    if (url.startsWith('/api/v1/document-collections')) {
+      return answer(options.collections ?? { ok: true, body: { data: [Q3, STARRED] } });
+    }
+    if (url.startsWith('/api/v1/ous')) {
+      return answer(
+        options.ous ?? {
+          ok: true,
+          body: {
+            data: [{ id: 3, name: 'Registry', parent_id: null }],
+            pagination: { page: 1, perPage: 100, total: 1, totalPages: 1 },
+          },
+        }
+      );
+    }
+    if (url.startsWith('/api/v1/documents')) {
+      return answer(
+        options.documents?.(url) ?? {
+          ok: true,
+          body: {
+            data: [INVOICE, ARABIC],
+            pagination: { page: 1, perPage: 25, total: 2, totalPages: 1 },
+            view: { key: 'all', ou_id: null, collection_id: null },
+            sort: { field: null, direction: 'desc' },
+          },
+        }
+      );
+    }
+    return answer({ ok: false, status: 404, body: { error: `unrouted ${method} ${url}` } });
+  });
+}
+
+/** The most recent GET /api/v1/documents URL — what a sort assertion is about. */
+function lastListUrl(): string {
+  const listCalls = calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/v1/documents?'));
+  return listCalls[listCalls.length - 1]?.url ?? '';
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  window.localStorage.clear();
+  installApi();
+});
+
+// ── 1. the empty states stay distinguishable ───────────────────────────────
+
+/**
+ * Asserted against the pure resolver rather than through five renders: the
+ * property under test is that the five causes produce five DIFFERENT sentences,
+ * and that is a statement about the function, not about the DOM.
+ */
+describe('the several ways a page can have no rows', () => {
+  const t = ((_key: string, fallback: string) => fallback) as never;
+
+  const base = {
+    viewKey: 'all',
+    collection: null,
+    starredCollectionExists: false,
+    searchApplied: false,
+    total: 0,
+  };
+
+  it('never gives two different causes the same sentence', () => {
+    const cases = [
+      base,
+      { ...base, searchApplied: true },
+      { ...base, viewKey: 'starred' },
+      { ...base, viewKey: 'collection', collection: { ...Q3, item_count: 0 } },
+      { ...base, viewKey: 'collection', collection: Q3 },
+      { ...base, total: 40 },
+    ];
+
+    const titles = cases.map((input) => libraryEmptyState(t, input).title);
+
+    expect(new Set(titles).size).toBe(cases.length);
+  });
+
+  it('does not claim the folder is empty when it is the SEARCH that matched nothing', () => {
+    const searched = libraryEmptyState(t, { ...base, searchApplied: true });
+
+    // The folder may be full. "No documents in this folder" would simply be
+    // false, and it is the sentence the reader would act on.
+    expect(searched.title).not.toMatch(/no documents in this folder/i);
+    expect(searched.title.toLowerCase()).toContain('search');
+  });
+
+  /**
+   * The one an empty page cannot express on its own. `item_count` counts FILED
+   * rows and reading through a collection re-applies visibility, so a positive
+   * count with zero rows means the documents are still filed and no longer
+   * readable — not that the collection emptied itself.
+   */
+  it('distinguishes a collection nothing was filed in from one whose filings became unreadable', () => {
+    const nothingFiled = libraryEmptyState(t, {
+      ...base,
+      viewKey: 'collection',
+      collection: { ...Q3, item_count: 0 },
+    });
+    const filedButHidden = libraryEmptyState(t, {
+      ...base,
+      viewKey: 'collection',
+      collection: Q3,
+    });
+
+    expect(nothingFiled.title).not.toBe(filedButHidden.title);
+    // And the second says nothing was removed, because nothing was.
+    expect(filedButHidden.description.toLowerCase()).toContain('nothing has been removed');
+  });
+
+  it('reports a page past the end instead of calling it an empty folder', () => {
+    const stale = libraryEmptyState(t, { ...base, total: 40 });
+
+    expect(stale.pastTheEnd).toBe(true);
+    expect(libraryEmptyState(t, base).pastTheEnd).toBeUndefined();
+  });
+});
+
+// ── 2. sorting is the server's ─────────────────────────────────────────────
+
+describe('sorting', () => {
+  it('asks the SERVER to sort, and sends no direction until one is chosen', async () => {
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    // The default order names no sort at all — the plain list #947 item 1
+    // shipped, byte for byte.
+    expect(lastListUrl()).not.toContain('sort=');
+
+    await userEvent.click(screen.getByRole('combobox', { name: /Sort by/ }));
+    await userEvent.click(screen.getByRole('option', { name: 'Title' }));
+
+    await waitFor(() => expect(lastListUrl()).toContain('sort=title'));
+    // No `direction`: the per-field default belongs to the server (A→Z for text,
+    // newest-first for a date) and holding a copy of that rule here would make
+    // one of the three columns open the wrong way round.
+    expect(lastListUrl()).not.toContain('direction=');
+  });
+
+  it('sends an explicit direction once the caller reverses the one that was applied', async () => {
+    installApi({
+      documents: (url) => ({
+        ok: true,
+        body: {
+          data: [INVOICE],
+          pagination: { page: 1, perPage: 25, total: 1, totalPages: 1 },
+          view: { key: 'all', ou_id: null, collection_id: null },
+          // The server reports what it APPLIED. Ascending, for a title.
+          sort: { field: url.includes('sort=title') ? 'title' : null, direction: url.includes('sort=title') ? 'asc' : 'desc' },
+        },
+      }),
+    });
+
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('combobox', { name: /Sort by/ }));
+    await userEvent.click(screen.getByRole('option', { name: 'Title' }));
+    await waitFor(() => expect(lastListUrl()).toContain('sort=title'));
+
+    // The toggle reverses the direction the SERVER reported, not a guess: the
+    // echo is the only thing that knows ascending was applied.
+    await userEvent.click(screen.getByRole('button', { name: /Ascending/ }));
+
+    await waitFor(() => expect(lastListUrl()).toContain('direction=desc'));
+  });
+
+  /**
+   * The header must NOT be a sorting control. In server-pagination mode
+   * TanStack's sorter would reorder the twenty five rows it was handed and
+   * present that as a sorted library — and page 2 would re-sort a different
+   * twenty five.
+   */
+  it('leaves the column headers non-sortable so no page is sorted in isolation', async () => {
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    const before = lastListUrl();
+    await userEvent.click(screen.getByRole('columnheader', { name: 'Title' }));
+
+    expect(lastListUrl()).toBe(before);
+  });
+});
+
+// ── 3. list and grid ───────────────────────────────────────────────────────
+
+describe('the layout switch', () => {
+  it('shows the same documents in both layouts and remembers the choice', async () => {
+    const { unmount } = render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByRole('table', { name: 'Documents' })).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Grid' }));
+
+    // Not a table any more, but the same rows — including the star, which is
+    // the affordance a second layout most easily drops.
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const grid = screen.getByRole('list', { name: 'Documents' });
+    expect(within(grid).getByText('Invoice 42')).toBeInTheDocument();
+    expect(within(grid).getByText('تقرير الربع الثالث')).toBeInTheDocument();
+    expect(within(grid).getAllByRole('button', { name: /Star this document/ })).toHaveLength(2);
+
+    // Remembered — per browser, which is what localStorage is, and what the
+    // types say this is.
+    expect(window.localStorage.getItem('wc:document-library:layout')).toBe('grid');
+
+    unmount();
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Documents' })).toBeInTheDocument());
+  });
+
+  it('opens as a list when the stored value is unreadable rather than failing to render', async () => {
+    window.localStorage.setItem('wc:document-library:layout', 'carousel');
+
+    render(<DocumentLibraryPage />);
+
+    await waitFor(() => expect(screen.getByRole('table', { name: 'Documents' })).toBeInTheDocument());
+  });
+});
+
+// ── 4. bidi ────────────────────────────────────────────────────────────────
+
+it('wraps every piece of tenant text in a bidi isolate', async () => {
+  render(<DocumentLibraryPage />);
+
+  // A title is text in an unknown script inside an interface with its own
+  // direction. Without dir="auto" its punctuation and digits render at the
+  // wrong end.
+  await waitFor(() =>
+    expect(screen.getByText('تقرير الربع الثالث').closest('[dir="auto"]')).not.toBeNull()
+  );
+  expect(screen.getByText('Invoice 42').closest('[dir="auto"]')).not.toBeNull();
+  expect(screen.getAllByText('Invoice template')[0].closest('[dir="auto"]')).not.toBeNull();
+});
+
+// ── 5. a denied action is disabled with its reason ─────────────────────────
+
+describe('controls the caller cannot use', () => {
+  it('offers rename and delete on the built-in starred folder, disabled, saying why', async () => {
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /^Starred$/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'This collection' }));
+
+    // Present, not hidden: hiding them would make "this one is built in", "you
+    // lack a permission" and "the feature was removed" pixel-identical (#951).
+    const rename = screen.getByRole('menuitem', { name: /Rename/ });
+    expect(rename).toHaveAttribute('data-disabled');
+    expect(rename).toHaveTextContent(/built in/i);
+    expect(screen.getByRole('menuitem', { name: /Delete this collection/ })).toHaveAttribute(
+      'data-disabled'
+    );
+  });
+
+  it('disables creating and filing — with the reason — when the collection list could not be read', async () => {
+    installApi({ collections: { ok: false, status: 500, body: { error: 'boom' } } });
+
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    const create = screen.getByRole('button', { name: /New collection/ });
+    expect(create).toBeDisabled();
+    // Visible text, not only a title attribute — hover is touch-inaccessible.
+    expect(screen.getByText(/Failed to load your collections/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Document actions' })[0]);
+    const fileInto = screen.getByRole('menuitem', { name: /Add to collection/ });
+    expect(fileInto).toHaveAttribute('data-disabled');
+    expect(fileInto).toHaveTextContent(/Failed to load your collections/);
+  });
+
+  it('will not toggle a star the list did not report, instead of guessing "not starred"', async () => {
+    installApi({
+      documents: () => ({
+        ok: true,
+        body: {
+          // `starred` absent — the shape the render route returns. A hollow star
+          // here would assert something the server never said.
+          data: [{ ...INVOICE, starred: undefined, collection_ids: undefined }],
+          pagination: { page: 1, perPage: 25, total: 1, totalPages: 1 },
+          view: { key: 'all', ou_id: null, collection_id: null },
+          sort: { field: null, direction: 'desc' },
+        },
+      }),
+    });
+
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    expect(screen.getByRole('button', { name: /did not report whether you starred/ })).toBeDisabled();
+  });
+
+  it('disables the direction toggle on the default order and says what would enable it', async () => {
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    const toggle = screen.getByRole('button', { name: /Descending/ });
+    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAttribute('title', expect.stringMatching(/no direction to reverse/i));
+  });
+});
+
+// ── 6. collections management ──────────────────────────────────────────────
+
+describe('managing a collection', () => {
+  it('renames one through the API the rail reads back', async () => {
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /Q3 audit/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'This collection' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /Rename/ }));
+
+    const field = screen.getByLabelText('Name');
+    await userEvent.clear(field);
+    await userEvent.type(field, 'Q4 audit');
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/api/v1/document-collections/5', method: 'PATCH' })
+    );
+  });
+
+  it('files a document into a collection, and shows what it is already filed in', async () => {
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('تقرير الربع الثالث')).toBeInTheDocument());
+
+    // The Arabic document is already in Q3 audit (collection_ids: [5]).
+    await userEvent.click(screen.getAllByRole('button', { name: 'Document actions' })[1]);
+    await userEvent.click(screen.getByRole('menuitem', { name: /Add to collection/ }));
+
+    const already = screen.getByRole('checkbox');
+    expect(already).toBeChecked();
+
+    // Unchecking un-files it. Idempotent, and written per toggle so a failure
+    // lands next to the click that caused it.
+    await userEvent.click(already);
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        url: '/api/v1/document-collections/5/documents/2',
+        method: 'DELETE',
+      })
+    );
+  });
+
+  it('says there is nowhere to file rather than showing an empty checkbox list', async () => {
+    installApi({ collections: { ok: true, body: { data: [STARRED] } } });
+
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Document actions' })[0]);
+    await userEvent.click(screen.getByRole('menuitem', { name: /Add to collection/ }));
+
+    // The starred collection is deliberately not offered here — the star on the
+    // row already addresses it, and one thing with two controls can disagree.
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByText(/You have no collections yet/)).toBeInTheDocument();
+  });
+
+  it('offers removal from a collection only while one is open', async () => {
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Document actions' })[0]);
+    expect(screen.queryByRole('menuitem', { name: /Remove from this collection/ })).toBeNull();
+    await userEvent.keyboard('{Escape}');
+
+    await userEvent.click(screen.getByRole('button', { name: /Q3 audit/ }));
+    await waitFor(() => expect(lastListUrl()).toContain('collection_id=5'));
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Document actions' })[0]);
+    expect(screen.getByRole('menuitem', { name: /Remove from this collection/ })).toBeInTheDocument();
+  });
+});
+
+// ── 7. the server's own refusal survives to the screen ─────────────────────
+
+it("shows the server's reason for a folder this caller cannot anchor, not a generic failure", async () => {
+  const reason = 'You do not belong to an organizational unit. Select one to use this folder.';
+  installApi({
+    documents: (url) =>
+      url.includes('raised-by-my-unit')
+        ? { ok: false, status: 422, body: { error: reason } }
+        : {
+            ok: true,
+            body: {
+              data: [INVOICE],
+              pagination: { page: 1, perPage: 25, total: 1, totalPages: 1 },
+              view: { key: 'all', ou_id: null, collection_id: null },
+              sort: { field: null, direction: 'desc' },
+            },
+          },
+  });
+
+  render(<DocumentLibraryPage />);
+  await waitFor(() => expect(screen.getByText('Invoice 42')).toBeInTheDocument());
+
+  await userEvent.click(screen.getByRole('button', { name: /Raised by my unit/ }));
+
+  await waitFor(() => expect(screen.getByText(reason)).toBeInTheDocument());
+});

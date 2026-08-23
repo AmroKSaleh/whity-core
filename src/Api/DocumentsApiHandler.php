@@ -16,6 +16,8 @@ use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Organizer\CoreDocumentViews;
+use Whity\Core\Document\Organizer\DocumentOrder;
+use Whity\Core\Document\Organizer\DocumentSortField;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentViewContext;
 use Whity\Core\Document\Organizer\DocumentViewPresenter;
@@ -237,9 +239,18 @@ final class DocumentsApiHandler
             self::stringParam($query, 'q')
         );
 
+        // Parsed AFTER the view resolves so a bad `sort` on an unanchorable
+        // folder still reports the folder's reason: the caller's first problem
+        // is the one worth telling them about, and 422-then-400 would have them
+        // fix a sort they cannot use yet.
+        $order = self::order($query);
+        if ($order instanceof Response) {
+            return $order;
+        }
+
         $p = PaginationParams::fromPath($request->getPath());
         $total = $this->documents->countForCriteria($tenantId, $criteria);
-        $rows = $this->documents->listForCriteria($tenantId, $criteria, $p->perPage, $p->offset);
+        $rows = $this->documents->listForCriteria($tenantId, $criteria, $p->perPage, $p->offset, $order);
 
         // The artifact list is fetched per document rather than in one join:
         // the join returns a document once per artifact and has to be
@@ -277,6 +288,16 @@ final class DocumentsApiHandler
                 'key' => $view->key,
                 'ou_id' => $viewContext->effectiveOuId(),
                 'collection_id' => $collectionId,
+            ],
+            // The order APPLIED, not the order asked for. `direction` has a
+            // per-field default (A→Z for text, newest-first for a date), so a
+            // client that assumed one would be right half the time and would
+            // draw its arrow the wrong way round the rest. `field: null` is the
+            // recorded order — see DocumentRepository::orderSql() for why that
+            // is not `created_at` under another name.
+            'sort' => [
+                'field' => $order?->field->value,
+                'direction' => $order === null ? 'desc' : $order->direction(),
             ],
         ]);
     }
@@ -637,6 +658,69 @@ final class DocumentsApiHandler
         $value = trim($query[$name] ?? '');
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * The order the caller asked for, null for the recorded default, or a 400.
+     *
+     * WHY AN UNKNOWN `sort` IS REFUSED RATHER THAN IGNORED
+     * ---------------------------------------------------
+     * Ignoring it returns 200 with a page ordered by something else, and the
+     * client draws a sort indicator on a column the rows are not sorted by. The
+     * reader then trusts a claim the response did not make: "these are the
+     * oldest", when they are the most recently recorded. A typo in a hand-built
+     * URL, or a client written against a later build that has a fourth sortable
+     * column, both land there — and neither leaves a trace anybody can find.
+     * So an unknown field is a 400 that NAMES the vocabulary, which is also the
+     * only way a caller can discover it: the openapi spec enumerates it, but an
+     * error a human reads should not require fetching a schema.
+     *
+     * WHY `direction` ALONE IS ALSO A 400
+     * ----------------------------------
+     * `?direction=asc` with no field asks to reverse the default order, and the
+     * default is `id DESC` — a surrogate key this vocabulary deliberately does
+     * not expose ({@see DocumentSortField}). Honouring it would publish `id` as
+     * a sortable column through the back door; ignoring it would silently return
+     * newest-first to somebody who asked for oldest-first.
+     *
+     * @param array<string, string> $query
+     */
+    private static function order(array $query): DocumentOrder|Response|null
+    {
+        $field = self::stringParam($query, 'sort');
+        $direction = self::stringParam($query, 'direction');
+
+        if ($field === null) {
+            if ($direction !== null) {
+                return Response::error(
+                    "direction needs a sort: name one of '"
+                    . implode("', '", array_column(DocumentSortField::cases(), 'value'))
+                    . "'",
+                    400
+                );
+            }
+
+            return null;
+        }
+
+        $parsed = DocumentSortField::tryFrom($field);
+        if ($parsed === null) {
+            return Response::error(
+                "Documents cannot be sorted by '{$field}'. Sortable: '"
+                . implode("', '", array_column(DocumentSortField::cases(), 'value'))
+                . "'",
+                400
+            );
+        }
+
+        if ($direction === null) {
+            return DocumentOrder::forField($parsed);
+        }
+        if ($direction !== 'asc' && $direction !== 'desc') {
+            return Response::error("direction must be 'asc' or 'desc'", 400);
+        }
+
+        return new DocumentOrder($parsed, $direction === 'desc');
     }
 
     /**
