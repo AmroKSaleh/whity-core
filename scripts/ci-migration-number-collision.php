@@ -58,6 +58,40 @@ declare(strict_types=1);
  * migration landed. Only a shared number under DIFFERENT filenames is two
  * authors having independently claimed it.
  *
+ * THE TWO EVENT SHAPES, WHICH ARE NOT THE SAME TREE
+ * -------------------------------------------------
+ * On `push` the working tree is the branch tip: develop's rival migration is
+ * absent, and the collision is visible only by diffing against develop.
+ *
+ * On `pull_request` — the event this workflow actually runs on — GitHub checks
+ * out the MERGE COMMIT, so develop's migrations are ALREADY in the working tree
+ * and a collision appears there as two files sharing one prefix.
+ *
+ * Both must produce the same finding, and pointedly the same REMEDIATION. An
+ * earlier revision reported the pull_request case as "this branch gives two
+ * migrations the same number", listing develop's file as though the author had
+ * added it and advising them to "renumber all but one" — which could be
+ * followed by renumbering DEVELOP's migration, the one file that must not move.
+ * So every check below works on the set difference against develop rather than
+ * on the raw directory listing: what this branch INTRODUCES is the same set
+ * under either event, and that is what a message may name.
+ *
+ * WHAT THIS CANNOT SEE: TWO IN-FLIGHT BRANCHES
+ * --------------------------------------------
+ * Comparison is against develop, so two open branches that each claim 108 both
+ * pass — neither is on develop yet, and neither can see the other. The
+ * collision surfaces when the second one updates its branch after the first
+ * merges, at which point this guard fires with the right message.
+ *
+ * That is the same horizontal/vertical boundary #873 drew for SDK versions, and
+ * it is deliberate rather than an oversight. Closing it would mean enumerating
+ * open pull requests, which turns a guard that needs nothing but a git checkout
+ * into one that needs an API token, network, and permissions — and which fails
+ * differently when any of the three is missing. Strict branch protection
+ * already forces the second branch to update before it can merge, so the gap is
+ * a delay in reporting rather than a hole in coverage. Stated here so the next
+ * reader knows the boundary instead of inferring cover that is not there.
+ *
  * WHY IT FAILS CLOSED WHEN IT CANNOT SEE HISTORY
  * ----------------------------------------------
  * Same reasoning as the SDK guard, and the same failure it prevents. A shallow
@@ -211,41 +245,7 @@ if ($branchFiles === false) {
 $branch = byPrefix($branchFiles);
 
 // ---------------------------------------------------------------------------
-// 2. A number claimed twice WITHIN this branch
-// ---------------------------------------------------------------------------
-//
-// Cheap, needs no history, and catches one author making the mistake twice —
-// which the cross-branch check below cannot see, because both files arrive
-// together.
-
-$internal = [];
-foreach ($branch as $prefix => $filenames) {
-    if (count($filenames) > 1) {
-        $internal[$prefix] = $filenames;
-    }
-}
-
-if ($internal !== []) {
-    $detail = '';
-    foreach ($internal as $prefix => $filenames) {
-        sort($filenames);
-        $detail .= sprintf("  %s is claimed by %d files:\n", $prefix, count($filenames));
-        foreach ($filenames as $filename) {
-            $detail .= '      ' . $migrationDirRelative . '/' . $filename . "\n";
-        }
-    }
-
-    fail(
-        'this branch gives two migrations the same number.',
-        rtrim($detail),
-        "The prefix is the apply order, so two files sharing one are ordered by whatever their\n"
-        . "descriptions happen to sort to — which is not an order anybody chose. Renumber all but\n"
-        . "one of them.\n"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// 3. A number this branch and develop each claim, for different files
+// 2. Numbers this branch introduces, checked against develop and each other
 // ---------------------------------------------------------------------------
 
 [$status, $output] = git($projectRoot, ['rev-parse', '--git-dir']);
@@ -332,26 +332,46 @@ if ($status !== 0) {
 
 $base = byPrefix($output);
 
-$collisions = [];
+$againstBase = [];
+$withinBranch = [];
+
 foreach ($branch as $prefix => $branchNames) {
     $baseNames = $base[$prefix] ?? [];
-    if ($baseNames === []) {
-        continue;
-    }
 
-    // Same number AND same filename is this branch carrying a migration it
-    // inherited — every branch cut after that migration landed does this.
+    // What this branch INTRODUCES, which is the only thing a message may name.
+    // Under `pull_request` the working tree is the merge commit, so develop's
+    // files are present here too; subtracting them makes the two event shapes
+    // yield the same set and therefore the same advice.
     $newNames = array_values(array_diff($branchNames, $baseNames));
     if ($newNames === []) {
         continue;
     }
 
-    $collisions[$prefix] = ['branch' => $newNames, 'base' => $baseNames];
+    if ($baseNames !== []) {
+        // develop already spends this number on something else.
+        $againstBase[$prefix] = ['branch' => $newNames, 'base' => $baseNames];
+    } elseif (count($newNames) > 1) {
+        // Nobody else has it; this branch simply used it twice.
+        $withinBranch[$prefix] = $newNames;
+    }
 }
 
-if ($collisions !== []) {
+$next = suggestNext(...array_merge(array_keys($branch), array_keys($base)));
+
+$renameHint = sprintf(
+    "Renumber this branch's migration(s), starting at %s, and rename the class to match:\n\n"
+    . "    git mv %s/106_example.php %s/%s_example.php\n\n"
+    . "The class name is derived from the filename with the prefix stripped, so a rename that\n"
+    . "keeps the description keeps the class.\n",
+    $next,
+    $migrationDirRelative,
+    $migrationDirRelative,
+    $next
+);
+
+if ($againstBase !== []) {
     $detail = '';
-    foreach ($collisions as $prefix => $sides) {
+    foreach ($againstBase as $prefix => $sides) {
         $detail .= sprintf("  %s is already used on %s:\n", $prefix, BASE_BRANCH);
         foreach ($sides['base'] as $filename) {
             $detail .= '      ' . BASE_BRANCH . ':  ' . $migrationDirRelative . '/' . $filename . "\n";
@@ -361,26 +381,34 @@ if ($collisions !== []) {
         }
     }
 
-    $next = suggestNext(
-        ...array_merge(array_keys($branch), array_keys($base))
-    );
-
     fail(
         'this branch claims a migration number develop already uses.',
         rtrim($detail),
-        sprintf(
-            "Both files would land — git does not conflict on different filenames, and the runner\n"
-            . "records each under its own name — leaving one number with two meanings and an apply\n"
-            . "order decided by how the descriptions sort.\n\n"
-            . "Renumber this branch's migration(s), starting at %s, and rename the class to match:\n\n"
-            . "    git mv %s/106_example.php %s/%s_example.php\n\n"
-            . "The class name is derived from the filename with the prefix stripped, so a rename that\n"
-            . "keeps the description keeps the class.\n",
-            $next,
-            $migrationDirRelative,
-            $migrationDirRelative,
-            $next
-        )
+        "Both files would land — git does not conflict on different filenames, and the runner\n"
+        . "records each under its own name — leaving one number with two meanings and an apply\n"
+        . "order decided by how the descriptions sort.\n\n"
+        . "Move THIS branch's file. develop's is already merged and renumbering it would rewrite\n"
+        . "a migration other deployments have recorded.\n\n"
+        . $renameHint
+    );
+}
+
+if ($withinBranch !== []) {
+    $detail = '';
+    foreach ($withinBranch as $prefix => $filenames) {
+        sort($filenames);
+        $detail .= sprintf("  %s is claimed by %d files this branch adds:\n", $prefix, count($filenames));
+        foreach ($filenames as $filename) {
+            $detail .= '      ' . $migrationDirRelative . '/' . $filename . "\n";
+        }
+    }
+
+    fail(
+        'this branch gives two of its own migrations the same number.',
+        rtrim($detail),
+        "The prefix is the apply order, so two files sharing one are ordered by whatever their\n"
+        . "descriptions happen to sort to — which is not an order anybody chose.\n\n"
+        . $renameHint
     );
 }
 
