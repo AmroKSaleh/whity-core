@@ -531,10 +531,11 @@ final class BlockValidatorTest extends TestCase
         // SP1 display types + SP2 data-bound types + SP3 interactive types
         // (WC-233) + SP4 chart type (WC-240) + workflow types and the OU scope
         // picker (#868) + the record blocks (#883) + the access gate (#909)
+        // + the graph block (#950)
         $expected = [
             'accessGate', 'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataRecord', 'dataStat', 'dataTable', 'dateInput', 'divider', 'drawer',
-            'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'inbox', 'keyValue', 'list', 'markdown', 'math',
+            'fieldArray', 'fileInput', 'flow', 'form', 'grid', 'heading', 'icon', 'inbox', 'keyValue', 'list', 'markdown', 'math',
             'modal', 'numberInput', 'ouScopePicker', 'recordFields', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput', 'timeline',
         ];
@@ -3051,5 +3052,185 @@ final class BlockValidatorTest extends TestCase
         $rule = BlockContract::rulesFor('ouScopePicker');
         $this->assertIsArray($rule);
         $this->assertArrayNotHasKey('source', $rule['props']);
+    }
+    // ==================== #950: the graph block ====================
+
+    /**
+     * The minimum a `flow` needs: a source, and how to read a node out of a row.
+     *
+     * @param array<string, mixed> $overrides
+     * @return list<array<string, mixed>>
+     */
+    private static function minimalFlow(array $overrides = []): array
+    {
+        return [array_merge([
+            'type' => 'flow',
+            'source' => '/api/acme/steps',
+            'nodeIdField' => 'id',
+            'nodeLabelField' => 'name',
+        ], $overrides)];
+    }
+
+    public function testFlowIsInTheWhitelistAndIsALeaf(): void
+    {
+        $this->assertContains('flow', BlockContract::types());
+        $this->assertFalse(BlockContract::isContainer('flow'));
+    }
+
+    /**
+     * No edge fields at all is the COMMON case, not a degenerate one: an ordered
+     * list of steps is a linear sequence in payload order, and modelling that as
+     * edges would be work every such plugin repeats identically.
+     */
+    public function testFlowWithNoEdgeFieldsIsValid(): void
+    {
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate(self::minimalFlow()));
+    }
+
+    public function testFlowWithEveryOptionalPropIsValid(): void
+    {
+        $result = BlockValidator::validate(self::minimalFlow([
+            'nodeSubtitleField' => 'owner',
+            'edgeFromField' => 'previousId',
+            'edgeToField' => 'nextId',
+            'orientation' => 'vertical',
+            'nodeActions' => [['label' => 'Edit', 'open' => 'step-editor']],
+            'maxNodes' => 40,
+            'emptyText' => 'No steps configured.',
+            'params' => [['param' => 'routeId', 'from' => 'route-picker']],
+        ]));
+
+        $this->assertTrue($result['ok'], implode(' | ', $result['errors']));
+    }
+
+    public function testFlowRequiresASourceAndTheTwoNodeFields(): void
+    {
+        $result = BlockValidator::validate([['type' => 'flow']]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('source', $joined);
+        $this->assertStringContainsString('nodeIdField', $joined);
+        $this->assertStringContainsString('nodeLabelField', $joined);
+    }
+
+    /**
+     * `flow.source` is an ordinary `apiPath`, which is what puts it under the
+     * loader's ownership check without the loader needing to know the type
+     * exists — it derives the source-bearing types from the contract.
+     */
+    public function testFlowSourceIsAnOwnershipCheckableApiPath(): void
+    {
+        $rule = BlockContract::rulesFor('flow');
+        $this->assertIsArray($rule);
+        $this->assertSame('apiPath', $rule['props']['source']['type']);
+
+        $result = BlockValidator::validate(self::minimalFlow(['source' => 'https://evil.example/steps']));
+        $this->assertFalse($result['ok']);
+    }
+
+    public function testFlowOrientationIsAClosedSet(): void
+    {
+        $this->assertTrue(BlockValidator::validate(self::minimalFlow(['orientation' => 'horizontal']))['ok']);
+        $this->assertTrue(BlockValidator::validate(self::minimalFlow(['orientation' => 'vertical']))['ok']);
+
+        $result = BlockValidator::validate(self::minimalFlow(['orientation' => 'radial']));
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'flow.orientation'", implode(' | ', $result['errors']));
+    }
+
+    /**
+     * A node's actions are a ROW's actions. The same rule kind means the same
+     * validator: one of href / endpoint+method / open, never two, never none.
+     */
+    public function testFlowNodeActionsReuseTheRowActionContract(): void
+    {
+        $rule = BlockContract::rulesFor('flow');
+        $this->assertIsArray($rule);
+        $this->assertSame('rowActionList', $rule['props']['nodeActions']['type']);
+
+        $result = BlockValidator::validate(self::minimalFlow([
+            'nodeActions' => [['label' => 'Both', 'href' => '/steps/{id}', 'open' => 'step-editor']],
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString(
+            "must carry exactly one of 'href', 'endpoint', or 'open'",
+            implode(' | ', $result['errors'])
+        );
+    }
+
+    /**
+     * The #192 inheritance, carried in the contract rather than discovered in a
+     * deployment. A plugin may lower the ceiling for its own graph.
+     */
+    public function testFlowMaxNodesMayLowerTheCeiling(): void
+    {
+        $this->assertTrue(BlockValidator::validate(self::minimalFlow(['maxNodes' => 1]))['ok']);
+        $this->assertTrue(
+            BlockValidator::validate(self::minimalFlow(['maxNodes' => BlockContract::FLOW_MAX_NODES]))['ok']
+        );
+    }
+
+    public function testFlowMaxNodesAboveTheCeilingIsRejectedRatherThanClamped(): void
+    {
+        $result = BlockValidator::validate(
+            self::minimalFlow(['maxNodes' => BlockContract::FLOW_MAX_NODES + 1])
+        );
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString(
+            "'flow.maxNodes' must be between 1 and " . BlockContract::FLOW_MAX_NODES,
+            implode(' | ', $result['errors'])
+        );
+    }
+
+    public function testFlowMaxNodesBelowOneIsRejected(): void
+    {
+        $result = BlockValidator::validate(self::minimalFlow(['maxNodes' => 0]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'flow.maxNodes'", implode(' | ', $result['errors']));
+    }
+
+    /**
+     * One field read as both predecessor and successor draws a mutual pair for
+     * every row and never a sequence — an author error whose output looks
+     * plausible, which is the kind worth refusing.
+     */
+    public function testFlowEdgeFieldsNamingTheSameFieldAreRejected(): void
+    {
+        $result = BlockValidator::validate(self::minimalFlow([
+            'edgeFromField' => 'linkedId',
+            'edgeToField' => 'linkedId',
+        ]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('name the same field', implode(' | ', $result['errors']));
+    }
+
+    public function testFlowWithOnlyOneEdgeFieldIsValid(): void
+    {
+        $this->assertTrue(BlockValidator::validate(self::minimalFlow(['edgeFromField' => 'parentId']))['ok']);
+        $this->assertTrue(BlockValidator::validate(self::minimalFlow(['edgeToField' => 'nextId']))['ok']);
+    }
+
+    /**
+     * `flow` declares no endpoint and no verb, so read-only is a property of the
+     * contract rather than a convention a renderer is trusted to keep. Asserted
+     * against the RULE so a prop added later has to face this test.
+     */
+    public function testFlowDeclaresNoWriteSurfaceOfItsOwn(): void
+    {
+        $rule = BlockContract::rulesFor('flow');
+        $this->assertIsArray($rule);
+
+        foreach (['submit', 'action', 'endpoint', 'method', 'actions'] as $writeProp) {
+            $this->assertArrayNotHasKey(
+                $writeProp,
+                $rule['props'],
+                "'flow' must not grow a write surface of its own — editing is a form opened from a node"
+            );
+        }
     }
 }

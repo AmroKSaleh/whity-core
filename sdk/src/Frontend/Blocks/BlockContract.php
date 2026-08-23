@@ -75,6 +75,35 @@ final class BlockContract
     public const MAX_NODES = 500;
 
     /**
+     * The most graph nodes a `flow` block will ever draw (#950, inheriting #192).
+     *
+     * This is a READABILITY ceiling, not a payload one, and it is in the
+     * contract rather than in a renderer because the two answers differ. #192 is
+     * open against the OU and relations graph views for exactly this: a canvas
+     * of several hundred boxes — most of them with no edges at all — is not a
+     * hard-to-read diagram, it is a diagram that has stopped conveying anything,
+     * and every renderer built on the same library inherits that the moment the
+     * data grows. Discovering it in a plugin's production deployment is the
+     * outcome this constant exists to prevent.
+     *
+     * So the ceiling is DECLARED and the behaviour above it is DEFINED: a
+     * renderer draws the first `maxNodes` nodes in payload order — the plugin's
+     * own ordering, so the truncation cuts where the author would cut — together
+     * with the edges among them, and SAYS SO on screen. Silently dropping the
+     * tail would make a partial graph indistinguishable from a complete one,
+     * which is worse than the tangle: a reader cannot see what is missing.
+     *
+     * A block may LOWER it via `flow.maxNodes` and may not raise it. That
+     * direction is deliberate. A plugin knows things this contract does not —
+     * that its steps carry long labels, that a phone renders it — and lowering
+     * is that knowledge being applied. Raising is a plugin asserting that its
+     * 400-node graph is legible, on every platform and screen this tree may
+     * render on, which it cannot know; a dataset that large wants `dataTable`
+     * beside the diagram, not a bigger diagram.
+     */
+    public const FLOW_MAX_NODES = 150;
+
+    /**
      * Props EVERY block type carries, merged into each rule by {@see rules()}.
      *
      * `visibleWhen` used to be declared type by type — on `section`, `card` and
@@ -444,6 +473,77 @@ final class BlockContract
                 'pageSize'       => ['type' => 'int',            'required' => false],
                 'emptyText'      => ['type' => 'string',         'required' => false],
                 'params'         => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+
+            // ---- graph block (#950) ----
+            // A SET OF NODES AND THE EDGES BETWEEN THEM — the one shape the
+            // other 47 types cannot express. `dataTable` lists a process's
+            // steps, `form`/`fieldArray` edit them, `timeline` shows what has
+            // already happened to one; none of them draws the picture, and for
+            // an ordered or branching process the picture is usually the thing
+            // that makes it legible to the person who is not going to read a
+            // table. So every product with a workflow either shipped a bespoke
+            // React screen or shipped no diagram.
+            //
+            // This exposes the renderer core already runs rather than adding
+            // one: `@xyflow/react` is an in-tree dependency with two working
+            // consumers (the OU hub's hierarchy view and the relations family
+            // graph), and both of those are the same composition — selectable
+            // node cards, a per-node action menu, connecting disabled.
+            //
+            // ONE FETCH, ROWS THAT ARE NODES. Data-bound exactly like
+            // `dataTable`: one ownership-checked `source` returning a
+            // collection, then per-field mappings. A row IS a node; there is no
+            // second endpoint for edges, because a block that needed two
+            // sources would need two ownership checks, two loading states and a
+            // join the renderer would have to invent. The edges come off the
+            // node rows instead, as references to OTHER nodes' ids:
+            //
+            //   - `edgeFromField` — the field holding the id(s) this node is
+            //     reached FROM. A parent pointer: `'edgeFromField' => 'parentId'`
+            //     is the OU hierarchy, unchanged.
+            //   - `edgeToField` — the field holding the id(s) this node leads
+            //     TO. A next pointer: `'edgeToField' => 'nextStepId'` is an
+            //     ordered process, and this is the shape #947's routing steps
+            //     already have.
+            //   - Either field's value may be a LIST, which is how a step
+            //     branches to more than one successor without a second source.
+            //   - NEITHER declared: the nodes are a LINEAR SEQUENCE in payload
+            //     order. The common case — an ordered list of steps — costs the
+            //     plugin no edge modelling at all.
+            //
+            // A reference to an id no row declared is DROPPED rather than
+            // materialised as a node. The alternative is a graph containing
+            // boxes the plugin never described, labelled with a raw id.
+            //
+            // READ-ONLY, and read-only by construction: no endpoint, no verb,
+            // nothing for a renderer to submit — the same property `timeline`
+            // has. Editing is a form opened FROM a node, which is why the
+            // affordance is `nodeActions` of the SAME `rowActionList` kind
+            // `dataTable.rowActions` uses, resolved by the same validator and
+            // rendered through the same code path. A node's actions are a row's
+            // actions; declaring them twice in two shapes is how the two
+            // spellings drift. Clicking the node itself runs its first `open`
+            // action, if it has one — a diagram whose only affordance is a
+            // dropdown is a diagram nobody clicks, and "click the node, get the
+            // detail" is what both existing consumers already do.
+            //
+            // `maxNodes` is the #192 inheritance, carried deliberately: see
+            // {@see self::FLOW_MAX_NODES} for the ceiling, why it may only be
+            // lowered, and what a renderer must do above it.
+            'flow' => ['container' => false, 'props' => [
+                'source'            => ['type' => 'apiPath',       'required' => true],
+                'nodeIdField'       => ['type' => 'string',        'required' => true],
+                'nodeLabelField'    => ['type' => 'string',        'required' => true],
+                'nodeSubtitleField' => ['type' => 'string',        'required' => false],
+                'edgeFromField'     => ['type' => 'string',        'required' => false],
+                'edgeToField'       => ['type' => 'string',        'required' => false],
+                'orientation'       => ['type' => 'enum',          'required' => false,
+                    'values' => ['horizontal', 'vertical']],
+                'nodeActions'       => ['type' => 'rowActionList', 'required' => false],
+                'maxNodes'          => ['type' => 'int',           'required' => false],
+                'emptyText'         => ['type' => 'string',        'required' => false],
+                'params'            => ['type' => 'sourceParamList', 'required' => false],
             ]],
 
             // ---- record blocks (#883) ----

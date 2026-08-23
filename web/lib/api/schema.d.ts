@@ -2774,6 +2774,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/uikit/demo/flow-steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Demo process steps for the flow block example */
+        get: operations["get_api_v1_uikit_demo_flow_steps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uikit/demo/metric": {
         parameters: {
             query?: never;
@@ -4788,6 +4805,15 @@ export interface components {
         };
         UiKitDemoEventsResponse: {
             data: components["schemas"]["UiKitDemoEvent"][];
+        };
+        UiKitDemoFlowStep: {
+            id: string;
+            name: string;
+            owner: string;
+            next: string[];
+        };
+        UiKitDemoFlowStepsResponse: {
+            data: components["schemas"]["UiKitDemoFlowStep"][];
         };
         UiKitDemoMetricResponse: {
             data: {
@@ -21754,6 +21780,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UiKitDemoEventsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_uikit_demo_flow_steps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoFlowStepsResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoFlowStepsResponse"];
                 };
             };
             /** @description Unauthorized */
