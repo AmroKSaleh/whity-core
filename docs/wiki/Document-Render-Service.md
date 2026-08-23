@@ -113,12 +113,11 @@ docker compose --profile render up -d --build
 
 ---
 
-## Sizing the host — the memory cost of a render
+## Sizing the host, and what a large export actually costs
 
-**This is the part that surprises operators.** Chromium's retained memory
-scales with the number of rendered pages held in the document at once, and the
-service keeps one browser alive across requests (relaunching per request would
-be far too slow for the bursty batch export this tier exists for).
+**This is the part that surprises operators**, and it surprises them twice: the
+memory is not where you would look for it, and the thing that actually stops a
+large export is not memory at all.
 
 A render's page count is `dataRows × template.pages` — one batch row of a
 three-page template is three pages, and 500 rows of it is 1500.
