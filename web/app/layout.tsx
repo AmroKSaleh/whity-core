@@ -9,7 +9,7 @@ import { DirectionProvider } from "@/lib/direction-context";
 import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
 import { CapabilitiesProvider } from "@/lib/capabilities-context";
 import { ToastContainerMount } from "@/components/ui/toast-container-mount";
-import "@/lib/plugin-screens";
+import { PluginScreenRegistrations } from "@/lib/plugin-screens";
 import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 import { getThemeOverrides } from "@/lib/theme";
@@ -90,6 +90,16 @@ export default async function RootLayout({
         own markup below <body>.
       */}
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        {/*
+          #964: the app-owned plugin screen overrides, registered in the
+          BROWSER. This used to be a bare `import "@/lib/plugin-screens"` at
+          the top of this SERVER component, which ran the registrations in the
+          server's module graph only — leaving the client-side registry (the
+          one `/admin/x/[featureId]` actually consults) empty on every render,
+          so no override ever rendered. Rendering the client module here is
+          what puts it in the shell's client bundle.
+        */}
+        <PluginScreenRegistrations />
         {/* React 19 hoists <style> into <head> regardless of nesting position. */}
         {overrideCss !== "" && <style>{`:root{${overrideCss}}`}</style>}
         <BrandingProvider initial={branding}>
