@@ -304,9 +304,9 @@ silent substitution of the current version.
 **Renderer rules.** Fetch the record, then the chosen artifact's bytes, with the caller's
 session; frame the bytes from a same-origin blob (an API response cannot be framed — core
 sends `frame-ancestors 'none'` on every one). State the version on every render. Never draw
-an empty frame: a browser that cannot display a PDF inline, a document that is missing or
-invisible, a record with no stored file, and a failed storage read are four different
-sentences. There is no prop to hide the version history or the download, and none for height
+an empty frame: a browser that cannot display a PDF inline, an artifact whose media type no
+frame can draw, a document that is missing or invisible, a record with no stored file, and a
+failed storage read are five different sentences. There is no prop to hide the version history or the download, and none for height
 or zoom.
 
 **Preview is not view.** The designer previews an unsaved template. This views a persisted

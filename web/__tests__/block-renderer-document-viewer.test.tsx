@@ -445,6 +445,29 @@ describe('a browser with no inline PDF support', () => {
   });
 });
 
+describe('an artifact that is not a PDF', () => {
+  it('says what it is and offers it, rather than framing bytes nothing can draw', async () => {
+    // `document_artifacts.content_type` is a column, not a constant. Today the
+    // renderer only ever writes application/pdf; the schema does not promise it
+    // forever, and a frame handed a spreadsheet draws nothing at all.
+    const record = documentWith(1);
+    record.artifacts[0].content_type = 'application/vnd.ms-excel';
+    serve(record);
+    renderTree(viewerTree(), '7');
+
+    expect(
+      await screen.findByText('This file cannot be displayed in the page.')
+    ).toBeInTheDocument();
+    expect(screen.getByText('It was issued as application/vnd.ms-excel.')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="document-viewer-frame"]')).toBeNull();
+
+    // And it is still saveable, under an extension that is not a lie.
+    const link = document.querySelector('[data-slot="document-viewer-download"]');
+    expect(link).not.toBeNull();
+    expect((link as HTMLAnchorElement).getAttribute('download')).toBe('purchase-order-4412-v1.bin');
+  });
+});
+
 // =========================================================================
 // Housekeeping
 // =========================================================================

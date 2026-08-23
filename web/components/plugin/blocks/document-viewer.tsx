@@ -131,9 +131,9 @@ export interface DocumentRecord {
 /**
  * Why the viewer cannot show a document. Each value is a DIFFERENT sentence to
  * the reader, which is the whole reason they are separate values: "not yours",
- * "not there yet" and "the storage backend is having a moment" are three
- * different things to do next, and collapsing them into one "failed to load"
- * is how a reader ends up retrying something that will never succeed.
+ * "not there", "not right now" and "not that one" are four different things to
+ * do next, and collapsing them into one "failed to load" is how a reader ends
+ * up retrying something that will never succeed.
  */
 type ViewerFailure =
   /** 404 from core: removed, or not visible to this caller — core answers both alike on purpose. */
@@ -173,6 +173,24 @@ const DOCUMENTS_PATH = '/api/v1/documents';
 function browserShowsPdfInline(): boolean {
   const supported = (navigator as Navigator & { pdfViewerEnabled?: boolean }).pdfViewerEnabled;
   return supported !== false;
+}
+
+/**
+ * Whether this artifact is something a browser frame can render at all.
+ *
+ * `document_artifacts.content_type` is a column, not a constant: everything the
+ * renderer issues today is `application/pdf`, and the schema does not promise
+ * that forever. A frame handed bytes it cannot draw is the blank rectangle this
+ * component exists not to produce, so the type is CHECKED rather than assumed —
+ * the alternative is a reader concluding that a spreadsheet is an empty
+ * document.
+ *
+ * Parameters are tolerated (`application/pdf; charset=binary`): the media type
+ * is the part that decides, and a stricter equality would refuse a header that
+ * is entirely correct.
+ */
+function isFramablePdf(contentType: string): boolean {
+  return contentType.split(';')[0].trim().toLowerCase() === 'application/pdf';
 }
 
 /**
@@ -561,7 +579,11 @@ function ArtifactFrame({
     };
   }, [artifact.content_url, requestKey]);
 
-  const filename = `${slugify(document.title)}-v${version}.pdf`;
+  // The extension follows the artifact's own declared type rather than a
+  // hard-coded `.pdf`, so a file saved from here opens in the right application
+  // even if what was issued is not what this component expects to frame.
+  const extension = isFramablePdf(artifact.content_type) ? 'pdf' : 'bin';
+  const filename = `${slugify(document.title)}-v${version}.${extension}`;
 
   if (settled === null || settled.key !== requestKey) {
     return <Skeleton className="h-[36rem] w-full rounded-lg" data-slot="document-viewer-content-loading" />;
@@ -597,11 +619,29 @@ function ArtifactFrame({
     </Button>
   );
 
+  if (!isFramablePdf(artifact.content_type)) {
+    // Never a blank frame (#951, #756), reason one: these bytes are not a PDF,
+    // so no frame is going to draw them.
+    return (
+      <EmptyState
+        data-slot="document-viewer-not-framable"
+        icon={<IconFileText />}
+        title={t(
+          'blocks.documentViewer.notFramable',
+          'This file cannot be displayed in the page.'
+        )}
+        description={t('blocks.documentViewer.notFramableHint', 'It was issued as {type}.', {
+          type: artifact.content_type,
+        })}
+        action={download}
+      />
+    );
+  }
+
   if (!content.inlineSupported) {
-    // Never a blank frame (#951, #756): this browser has told us it will not
-    // render a PDF, so the viewer says that and hands over the file instead of
-    // drawing an empty rectangle and letting the reader conclude the document
-    // is empty.
+    // Reason two: this browser has told us it will not render a PDF, so the
+    // viewer says that and hands over the file instead of drawing an empty
+    // rectangle and letting the reader conclude the document is empty.
     return (
       <EmptyState
         data-slot="document-viewer-no-inline"

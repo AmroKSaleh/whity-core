@@ -32,6 +32,8 @@
         "blocks.documentViewer.noInlineHint": "The document is available — open it with your PDF reader.",
         "blocks.documentViewer.noSelection": "No document selected.",
         "blocks.documentViewer.noSelectionHint": "This viewer shows an issued document once something on this page names one.",
+        "blocks.documentViewer.notFramable": "This file cannot be displayed in the page.",
+        "blocks.documentViewer.notFramableHint": "It was issued as {type}.",
         "blocks.documentViewer.pickVersion": "Choose a version",
         "blocks.documentViewer.pinnedHint": "This page opened a specific version of this document.",
         "blocks.documentViewer.pinnedMissing": "That version of this document is not available.",
