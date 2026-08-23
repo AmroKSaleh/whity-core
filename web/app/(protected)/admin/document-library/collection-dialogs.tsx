@@ -205,14 +205,15 @@ export function DeleteCollectionDialog({
  * disagree on screen — the same reason the rail does not repeat it as a pile.
  */
 export function FileIntoCollectionDialog({
-  document,
+  documentRow,
   onClose,
   collections,
   busy,
   onToggle,
   onCreateNew,
 }: {
-  document: DocumentRow | null;
+  /** Named `documentRow`, not `document`: shadowing the global would be a trap for the next editor. */
+  documentRow: DocumentRow | null;
   onClose: () => void;
   collections: DocumentCollection[];
   busy: boolean;
@@ -223,10 +224,10 @@ export function FileIntoCollectionDialog({
 
   // Keyed collections are excluded: see the note above.
   const own = collections.filter((collection) => collection.system_key === null);
-  const filedIn = document?.collection_ids ?? [];
+  const filedIn = documentRow?.collection_ids ?? [];
 
   return (
-    <Dialog open={document !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={documentRow !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t('organizer.file.title', 'Add to a collection')}</DialogTitle>
@@ -240,9 +241,9 @@ export function FileIntoCollectionDialog({
 
         {/* The document being filed, named in a bidi isolate — it is tenant text
             in an unknown script. */}
-        {document && (
+        {documentRow && (
           <p dir="auto" className="truncate text-sm font-medium">
-            {document.title}
+            {documentRow.title}
           </p>
         )}
 

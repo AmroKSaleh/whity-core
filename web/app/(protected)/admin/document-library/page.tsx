@@ -688,7 +688,7 @@ export default function DocumentLibraryPage() {
         // Re-read from the freshly fetched page rather than held: filing writes
         // and then refetches, so the row in state is the state BEFORE the write
         // and its checkboxes would not move.
-        document={
+        documentRow={
           filingDocument === null
             ? null
             : (rows.find((row) => row.id === filingDocument.id) ?? filingDocument)
