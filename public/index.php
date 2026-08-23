@@ -1767,6 +1767,35 @@ $router->register('GET', '/api/tenants/{id:\d+}/subscription', [$subscriptionHan
 $router->register('PUT', '/api/tenants/{id:\d+}/subscription', [$subscriptionHandler, 'setForTenant'], null, null, CorePermissions::SUBSCRIPTIONS_MANAGE);
 $router->register('GET', '/api/subscription',                  [$subscriptionHandler, 'getSelf'],      null, null, CorePermissions::SETTINGS_READ);
 
+// 13a-storage. The platform STORAGE DRIVER, built once and shared.
+//
+// Selected from global instance settings (local by default; S3 when the operator
+// sets storage.driver='s3' + the storage.s3.* config, secret from the
+// STORAGE_S3_SECRET_KEY env). Wrapped in the per-tenant routing driver
+// (WC-storage): a tenant that BOTH holds the storage.custom_backend entitlement
+// AND has a tenant_storage_config row uses its own object-storage backend; every
+// other tenant transparently uses the platform default. Routing keys off the
+// tenant segment in the storage key (tenants/{id}/...), so it also works on the
+// PUBLIC, context-less branding asset path.
+//
+// This USED to be constructed further down, immediately above the branding
+// handler that was its only consumer. It moved up here (#947 item 1) because
+// persisted documents are a second consumer and are registered above branding —
+// PHP has no hoisting for these, so leaving it in place would have meant either
+// a null driver at document-wiring time (a boot-time fatal on every request, not
+// a test failure) or a SECOND driver built from the same settings, which is the
+// split-backend hazard StorageDriverFactory's own docblock warns about. One
+// driver, built before anything that needs it.
+$storageRoot = getenv('STORAGE_ROOT') ?: (__DIR__ . '/../storage');
+$defaultStorageDriver = \Whity\Storage\StorageDriverFactory::fromSettings($settingsService, $_ENV, $storageRoot);
+$storageResolver = new \Whity\Storage\TenantStorageResolver(
+    $defaultStorageDriver,
+    new \Whity\Storage\TenantStorageConfigRepository($db->getPdo()),
+    $entitlementService,
+    $secretStore
+);
+$storageDriver = new \Whity\Storage\TenantRoutingStorageDriver($defaultStorageDriver, $storageResolver);
+
 // 13a-sexies. Document/label designer templates API (WC-docdesigner). Tenant-
 // scoped, RBAC-gated CRUD. The route permission (documents:read on GET,
 // documents:write on writes) is the baseline; the handler ADDITIONALLY row-
@@ -1814,11 +1843,13 @@ $router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHan
 // are deployment config (like JWT_SECRET), not settings — an unset/short secret
 // makes the client report itself unusable and every render 503s cleanly rather
 // than calling out with no auth.
-$documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
-    $documentTemplateRepository,
+//
+// #947 item 1 split the render MECHANICS out into DocumentRenderer (ceilings,
+// dataRows normalisation, blockInstance resolution, the internal call) so the
+// re-render route below runs the same code rather than a second copy of it, and
+// added the optional `persist` flag that turns a render into a document record.
+$documentRenderer = new \Whity\Core\Document\Render\DocumentRenderer(
     $documentBlockRepository,
-    $documentAccessPolicy,
-    $roleChecker,
     $settingsService,
     new \Whity\Core\Document\Render\RenderServiceClient(
         (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
@@ -1826,7 +1857,54 @@ $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
         (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
     )
 );
+$documentRepository = new \Whity\Core\Document\DocumentRepository($db->getPdo());
+$documentArtifactRepository = new \Whity\Core\Document\DocumentArtifactRepository($db->getPdo());
+// The SAME per-tenant routing driver branding uses (built in 13a-storage above):
+// an entitled tenant's documents land in its own bucket, everyone else's on the
+// platform default, and there is exactly one storage story to keep correct.
+$documentArtifactStore = new \Whity\Core\Document\DocumentArtifactStore($storageDriver);
+$documentIssuer = new \Whity\Core\Document\DocumentIssuer(
+    $db->getPdo(),
+    $documentRepository,
+    $documentArtifactRepository,
+    $documentArtifactStore
+);
+$documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
+    $documentTemplateRepository,
+    $documentAccessPolicy,
+    $roleChecker,
+    $settingsService,
+    $documentRenderer,
+    $documentIssuer
+);
 $router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentRenderHandler, 'render'], null, null, CorePermissions::DOCUMENTS_RENDER);
+
+// 13a-nonies-bis. ISSUED DOCUMENTS (#947 item 1) — the records a persisted
+// render creates, and their immutable artifacts. Reads are gated on
+// documents:read at the route and row-filtered by DocumentVisibilityPolicy on
+// top (you raised it, or you hold documents:read:all); the re-render is gated on
+// documents:render and APPENDS an artifact rather than replacing one, so an
+// artifact URL handed out today still resolves to those bytes after a
+// correction. Item 3 (routing) keys off documents.id; item 5 (the browser)
+// derives its folders from these rows rather than from a stored tree, which is
+// why there is no folder surface here.
+$documentsHandler = new \Whity\Api\DocumentsApiHandler(
+    $documentRepository,
+    $documentArtifactRepository,
+    $documentArtifactStore,
+    new \Whity\Core\Document\DocumentVisibilityPolicy(),
+    $documentTemplateRepository,
+    $documentAccessPolicy,
+    $documentRenderer,
+    $documentIssuer,
+    $roleChecker,
+    $settingsService
+);
+$router->register('GET',  '/api/documents',                                            [$documentsHandler, 'list'],            null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/documents/{id:\d+}',                                   [$documentsHandler, 'show'],            null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/documents/{id:\d+}/content',                           [$documentsHandler, 'content'],         null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/documents/{id:\d+}/artifacts/{artifactId:\d+}/content', [$documentsHandler, 'artifactContent'], null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST', '/api/documents/{id:\d+}/render',                            [$documentsHandler, 'rerender'],        null, null, CorePermissions::DOCUMENTS_RENDER);
 
 // 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3):
 // a brand-new tenant should never open the designer to an empty library. The
@@ -2101,24 +2179,10 @@ $router->register('POST', '/api/settings/mail/test',         [$mailSettingsHandl
 // by settings:write or settings:manage. The handler issues NO SQL — all access
 // goes through BrandingService and its repositories; the tenant always comes
 // from TenantContext (for write paths) or host resolution (for public read).
-// Storage backend selected from global instance settings (local by default; S3
-// when the operator sets storage.driver='s3' + the storage.s3.* config, secret
-// from STORAGE_S3_SECRET_KEY env). Built once and shared by the branding paths.
-$storageRoot = getenv('STORAGE_ROOT') ?: (__DIR__ . '/../storage');
-$defaultStorageDriver = \Whity\Storage\StorageDriverFactory::fromSettings($settingsService, $_ENV, $storageRoot);
-// Per-tenant storage routing (WC-storage): a tenant that BOTH holds the
-// storage.custom_backend entitlement AND has a tenant_storage_config row uses its
-// own object-storage backend; every other tenant transparently uses the platform
-// default built above. Routing keys off the tenant segment in the storage key
-// (tenants/{id}/...), so it also works on the PUBLIC, context-less asset path.
-// Behaviour-preserving until a tenant is both entitled and configured.
-$storageResolver = new \Whity\Storage\TenantStorageResolver(
-    $defaultStorageDriver,
-    new \Whity\Storage\TenantStorageConfigRepository($db->getPdo()),
-    $entitlementService,
-    $secretStore
-);
-$storageDriver = new \Whity\Storage\TenantRoutingStorageDriver($defaultStorageDriver, $storageResolver);
+// $storageDriver is built EARLIER, in section 13a-storage: branding was its only
+// consumer until persisted documents became a second one, and those are wired
+// above this point. It is the same per-tenant routing driver described there —
+// shared, never rebuilt, so reads and writes can never split across backends.
 $brandingService = new \Whity\Core\Branding\BrandingService(
     $settingsService,
     $storageDriver,

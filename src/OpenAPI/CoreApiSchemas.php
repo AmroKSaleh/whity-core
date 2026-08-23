@@ -110,6 +110,7 @@ final class CoreApiSchemas
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
             self::documentBlockRoutes(),
+            self::documentRecordRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
             self::tagRoutes(),
@@ -2961,7 +2962,65 @@ final class CoreApiSchemas
             // freeform (mirror the client's DocElement-adjacent JSON shapes
             // rather than a rigid schema, same "verbatim client JSON" posture
             // as DocumentTemplate.data itself).
+            //
+            // `persist` (#947 item 1) turns the render into a DOCUMENT RECORD:
+            // the response becomes a DocumentResponse (201) instead of PDF
+            // bytes. It defaults to FALSE because the dominant caller is the
+            // designer's preview, which must not write to storage — see
+            // DocumentRenderApiHandler. `title` names the record and is ignored
+            // when not persisting.
             'DocumentRenderRequest' => self::object([
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+                'persist' => ['type' => 'boolean', 'default' => false],
+                'title' => self::str(true),
+            ], []),
+
+            // ── Issued documents (#947 item 1) ────────────────────────────────
+            // A document is the RECORD; its artifacts are the immutable files
+            // that were issued from it. `content_url` is the durable reference —
+            // an API path, not a storage key (which is never on the wire) and
+            // not a signed URL (the local driver cannot produce one).
+            // `document_template_id` is nullable because the template may be
+            // deleted after the fact; `template_name` is the snapshot that keeps
+            // the record legible when it is.
+            'DocumentArtifact' => self::object([
+                'id' => self::int(),
+                'document_id' => self::int(),
+                'content_type' => self::str(),
+                'byte_size' => self::int(),
+                // Lowercase hex SHA-256 of the stored bytes: what lets a
+                // consumer prove the file it downloaded is the file that was
+                // issued.
+                'checksum_sha256' => self::str(),
+                'rendered_by' => self::int(true),
+                'rendered_at' => self::str(),
+                'content_url' => self::str(),
+            ], ['id', 'document_id', 'content_type', 'byte_size', 'checksum_sha256', 'rendered_at', 'content_url']),
+            'Document' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'document_template_id' => self::int(true),
+                'template_name' => self::str(),
+                'title' => self::str(),
+                'origin_ou_id' => self::int(true),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                // The CURRENT artifact's bytes; null only for a record whose
+                // artifact rows are gone (a partial restore), since the issuer
+                // never commits a document without one.
+                'content_url' => self::str(true),
+                // Newest first. More than one entry means the document has been
+                // re-rendered: every earlier artifact is still fetchable at its
+                // own content_url.
+                'artifacts' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentArtifact')],
+            ], ['id', 'tenant_id', 'template_name', 'title', 'created_at', 'artifacts']),
+            'DocumentListResponse' => self::paginatedListEnvelope('Document'),
+            'DocumentResponse' => self::dataEnvelope(SchemaBuilder::ref('Document')),
+            // The re-render body. Same render inputs as DocumentRenderRequest
+            // minus `persist`/`title`: this route ALWAYS persists (that is what
+            // it is for) and never renames the record it appends to.
+            'DocumentRerenderRequest' => self::object([
                 'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
                 'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
             ], []),
@@ -5622,6 +5681,79 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Template not found or not visible to the caller'),
                     422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
                     503 => self::errorResponse('Rendering is disabled on this instance, or the render service is unavailable'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Issued-document routes (#947 item 1). Tenant-scoped; reads are gated on
+     * documents:read at the route and row-filtered on top (you raised it, or
+     * you hold documents:read:all), so a caller who may not see a document is
+     * told it does not exist rather than that it is forbidden.
+     *
+     * The re-render APPENDS an artifact. Every earlier one stays fetchable at
+     * its own `content_url` — that permanence is the observable form of the
+     * immutability guarantee, which is why the artifact-level content route
+     * exists alongside the document-level one.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentRecordRoutes(): array
+    {
+        $pdfResponse = [
+            'description' => 'The stored artifact bytes',
+            'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]],
+        ];
+
+        return [
+            self::permissionRoute('GET', '/api/documents', 'documents:read', [
+                'summary' => 'List issued documents visible to the caller (newest first, paginated)',
+                'tags' => ['documents'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The documents the caller may see, with pagination', 'DocumentListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}', 'documents:read', [
+                'summary' => 'Get an issued document and its full artifact history',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The document', 'DocumentResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/content', 'documents:read', [
+                'summary' => 'Download the current artifact of a document',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => $pdfResponse,
+                    404 => self::errorResponse('Document not found, not visible, or has no stored content'),
+                    503 => self::errorResponse('The stored artifact could not be read from storage'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/artifacts/{artifactId:\\d+}/content', 'documents:read', [
+                'summary' => 'Download one specific artifact, superseded or not',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => $pdfResponse,
+                    404 => self::errorResponse('Document or artifact not found, or not visible to the caller'),
+                    503 => self::errorResponse('The stored artifact could not be read from storage'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/documents/{id:\\d+}/render', 'documents:render', [
+                'summary' => 'Re-render the document and APPEND a new artifact (never replaces one)',
+                'tags' => ['documents'],
+                'request' => 'DocumentRerenderRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The document with the new artifact at the head of its history', 'DocumentResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    409 => self::errorResponse('The template this document was issued from is no longer available'),
+                    422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
+                    503 => self::errorResponse('Rendering or persistence is disabled, or the render service is unavailable'),
                 ] + self::authErrors(),
             ]),
         ];

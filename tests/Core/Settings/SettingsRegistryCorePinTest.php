@@ -88,6 +88,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_rows',
             'documents.render_max_pages',
             'documents.render_max_template_bytes',
+            'documents.persist_enabled',
             'data_types.bulk_max_ids',
             'error_tracking.enabled',
             'error_tracking.provider',
@@ -187,6 +188,12 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_rows' => '500',
             'documents.render_max_pages' => '2000',
             'documents.render_max_template_bytes' => '2000000',
+            // #947 item 1. Opt-OUT where documents.render_enabled is opt-in:
+            // the master switch is already off by default, so a deployment that
+            // reaches this key has turned the render tier on deliberately, and
+            // a second off-by-default gate would 503 a correctly-configured
+            // `persist: true`.
+            'documents.persist_enabled' => 'true',
             'data_types.bulk_max_ids' => '500',
             'error_tracking.enabled' => 'false',
             'error_tracking.provider' => 'internal',

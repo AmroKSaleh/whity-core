@@ -119,6 +119,19 @@ final class TenantOwnedTables
         'document_templates' => '059_create_document_designer_tables.php',
         'document_blocks'    => '059_create_document_designer_tables.php',
 
+        // #947 item 1 — issued documents and their stored render output
+        // (migration 106). `documents` is the record; `document_artifacts` is
+        // the append-only set of immutable rendered files, with the tenant
+        // DENORMALISED from the parent document so the predicate guard polices
+        // an artifact read directly instead of trusting a join — the same trade
+        // `notification_deliveries`, `event_outbox` and `entity_tags` above
+        // already make. Every read and write on both binds tenant_id, and the
+        // handler additionally row-filters by
+        // {@see \Whity\Core\Document\DocumentVisibilityPolicy} (creator, or the
+        // tenant-wide documents:read:all grant).
+        'documents'          => '106_create_documents.php',
+        'document_artifacts' => '106_create_documents.php',
+
         // WC-525 — admin-enforced 2FA policy registry (migration 061): tenant/OU/
         // user-scoped rows an admin sets to require 2FA enrollment. Every query
         // binds tenant_id so a policy can never leak across tenants.

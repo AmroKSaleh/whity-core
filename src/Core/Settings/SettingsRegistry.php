@@ -206,6 +206,26 @@ final class SettingsRegistry
     public const DOCUMENTS_RENDER_MAX_PAGES = 'documents.render_max_pages';
     public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
 
+    // Whether a render may be PERSISTED as a document record + a stored
+    // artifact (#947 item 1). Distinct from DOCUMENTS_RENDER_ENABLED above,
+    // which asks whether the render CONTAINER exists at all; this asks whether
+    // the output may be written to the tenant's storage, which is the part that
+    // consumes space without bound.
+    //
+    // Tenant-overridable, unlike the master switch, and for the same reason the
+    // render ceilings are: on a multi-tenant instance one tenant can be issuing
+    // documents while another is only previewing labels, and an operator should
+    // be able to hold back the second without turning off the first.
+    //
+    // Default TRUE — deliberately opt-OUT where the master switch is opt-in.
+    // Rendering is already off by default, so an instance that reaches this key
+    // has explicitly turned the subsystem on; a second off-by-default gate
+    // would make a correctly-documented `persist: true` answer 503 on a
+    // correctly-configured deployment, discoverable only by reading this file.
+    // That is precisely the complaint #947 records about the master switch
+    // being silently global-only, and it should not be reproduced one key down.
+    public const DOCUMENTS_PERSIST_ENABLED = 'documents.persist_enabled';
+
     // Bulk data-type lifecycle batch ceiling (WC-746). The largest number of ids
     // `POST /api/data-types/{type}/bulk` accepts in one request. An unbounded id
     // list is a denial-of-service with a polite name: every id costs a
@@ -366,6 +386,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_PASSWORD_RESET,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
+        self::DOCUMENTS_PERSIST_ENABLED,
         self::I18N_ENABLED,
     ];
 
@@ -525,6 +546,8 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
+        // Opt-OUT, not opt-in — see the constant's own note.
+        self::DOCUMENTS_PERSIST_ENABLED => 'true',
         // 500 ids per bulk lifecycle request. Chosen to cover the motivating
         // screens — "empty the trash", "retire this selection" — in a single
         // call, while still bounding the work one request can commission. Each
@@ -817,6 +840,7 @@ final class SettingsRegistry
             self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
             self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
+            self::DOCUMENTS_PERSIST_ENABLED => self::validateBoolean($value, self::DOCUMENTS_PERSIST_ENABLED),
             self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
             // Error tracking. These five were declared with defaults, types,
             // enum options and a global-only marking, but never given a

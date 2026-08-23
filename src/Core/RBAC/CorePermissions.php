@@ -166,6 +166,17 @@ final class CorePermissions
     public const DOCUMENTS_PUBLISH = 'documents:publish';
     public const DOCUMENTS_RENDER = 'documents:render';
 
+    // Issued DOCUMENTS, as opposed to the templates above (#947 item 1,
+    // migration 107). The four permissions above are the designer's; a document
+    // that has been rendered and stored is an ordinary business record, and the
+    // baseline rule for one is "you see what you raised". `documents:read:all`
+    // is the tenant-wide override — the auditor/administrator grant — evaluated
+    // by {@see \Whity\Core\Document\DocumentVisibilityPolicy}. Reusing
+    // DOCUMENTS_READ for issued documents would have handed every template
+    // author the tenant's whole output as a side effect of a capability they
+    // already held.
+    public const DOCUMENTS_READ_ALL = 'documents:read:all';
+
     // Admin-enforced 2FA policy (WC-525): tenant/OU/user-scoped rows an admin
     // sets to require 2FA enrollment. Tenant-scoped.
     public const SECURITY_MANAGE = 'security:manage';
@@ -280,6 +291,7 @@ final class CorePermissions
             self::DOCUMENTS_WRITE,
             self::DOCUMENTS_PUBLISH,
             self::DOCUMENTS_RENDER,
+            self::DOCUMENTS_READ_ALL,
             self::SECURITY_MANAGE,
             self::TAGS_READ,
             self::TAGS_MANAGE,
