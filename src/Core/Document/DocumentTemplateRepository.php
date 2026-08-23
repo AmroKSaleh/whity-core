@@ -153,9 +153,30 @@ final class DocumentTemplateRepository
 
     /**
      * Delete a template, scoped to the tenant. Returns rows affected.
+     *
+     * DOCUMENTS ISSUED FROM IT ARE DETACHED, NOT DELETED (#947 item 1). The
+     * whole point of storing a rendered document is that it survives the
+     * template it came from — `documents.document_template_id` is therefore
+     * `ON DELETE SET NULL` (migration 108) and `documents.template_name` holds
+     * the snapshot that keeps the record legible afterwards.
+     *
+     * The detach is done EXPLICITLY here rather than left to the constraint,
+     * for the reason migration 102 records for `organizational_units.ou_type_id`:
+     * SQLite honours `ON DELETE` only under `PRAGMA foreign_keys = ON`, which is
+     * off by default, so on the offline/desktop engine the column would keep
+     * pointing at a template that no longer exists. Doing it in SQL here means
+     * both engines finish in the same state and the CI tenant-predicate scanner
+     * can see the statement is scoped. The constraint stays as the backstop for
+     * anything that deletes a template by another route.
      */
     public function delete(int $id, int $tenantId): int
     {
+        $detach = $this->db->prepare(
+            'UPDATE documents SET document_template_id = NULL
+              WHERE document_template_id = :id AND tenant_id = :tenant_id'
+        );
+        $detach->execute([':id' => $id, ':tenant_id' => $tenantId]);
+
         $stmt = $this->db->prepare(
             'DELETE FROM document_templates WHERE id = :id AND tenant_id = :tenant_id'
         );

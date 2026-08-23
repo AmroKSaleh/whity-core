@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use Whity\Auth\RoleChecker;
-use Whity\Core\Document\BlockReferenceScanner;
 use Whity\Core\Document\DocumentAccessPolicy;
-use Whity\Core\Document\DocumentBlockRepository;
+use Whity\Core\Document\DocumentIssuer;
+use Whity\Core\Document\DocumentPresenter;
 use Whity\Core\Document\DocumentTemplateRepository;
-use Whity\Core\Document\Render\RenderServiceClientInterface;
+use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Document\Render\DocumentRenderRejectedException;
 use Whity\Core\Document\Render\RenderServiceUnavailableException;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -17,28 +18,53 @@ use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
+use Whity\Storage\StorageException;
 
 /**
  * Server-side document/label render endpoint (ADR 0012 / WC-docdesigner
- * Track 2):
+ * Track 2, extended by #947 item 1):
  *
  *   POST /api/document-templates/{id}/render  (documents:render)
  *
  * Resolves the template TENANT-SCOPED + RBAC (same visibility policy as
  * {@see DocumentTemplatesApiHandler::show()} — a caller who may not see the
- * template gets a 404, never a 403 that would confirm its existence),
- * assembles `{template, dataRows, sheet, blocks}` (resolving any
- * `blockInstance` references to their live block elements — the render
- * service has no database access of its own) and calls the separate
- * `whity_render` Docker service over internal HTTP, streaming the returned
- * PDF back with `Content-Type: application/pdf`.
+ * template gets a 404, never a 403 that would confirm its existence), hands it
+ * to {@see DocumentRenderer}, and either streams the PDF straight back or
+ * persists it as a document record.
  *
- * Checks, in order (all four must pass; the flag check runs FIRST so a
- * disabled instance never attempts the internal HTTP call at all):
+ * TWO OUTCOMES, AND WHY THE DEFAULT IS THE EPHEMERAL ONE
+ * ------------------------------------------------------
+ *   `persist` absent or false (THE DEFAULT) — exactly the behaviour that
+ *      shipped: `application/pdf` bytes, nothing written, no row, no id.
+ *   `persist: true` — a `documents` record and an immutable artifact are
+ *      created, and the response is JSON carrying the document, its artifact
+ *      and a durable `content_url`.
+ *
+ * Persisting is opt-in rather than opt-out, and the reason is the caller mix
+ * rather than caution. The overwhelmingly common render is the DESIGNER'S
+ * PREVIEW — one per meaningful edit, dozens per session, none of them a
+ * document anyone means to issue. Defaulting to persist would fill a tenant's
+ * storage with drafts, give every one of them an id that a browser then has to
+ * list, and do it as a silent behaviour change for every client already calling
+ * this route. The cost of the opposite default is one boolean in the request
+ * body of the calls that genuinely issue something, which is where the
+ * intention actually lives.
+ *
+ * A persisted render also returns JSON rather than bytes-plus-a-header. An
+ * `X-Document-Id` on a binary body is invisible to a browser download, absent
+ * from the generated client's types, and undiscoverable in the spec; the
+ * artifact is durably fetchable at `content_url` precisely so the response does
+ * not have to be both things at once.
+ *
+ * Checks, in order (the flag check runs FIRST so a disabled instance never
+ * attempts the internal HTTP call at all):
  *   1. `documents.render_enabled` (global setting) — 503 when off.
  *   2. RBAC — enforced by the route's `documents:render` permission gate.
  *   3. Tenant ownership + row visibility — via the repository + access policy.
  *   4. Template exists — 404 otherwise.
+ *   5. When persisting: `documents.persist_enabled` (tenant-overridable) — 503
+ *      when off, checked BEFORE the render so a refused persist does not first
+ *      burn a Chromium render it is going to discard.
  *
  * Batch limits (max dataset rows / max total render units / max template
  * size) are tenant-overridable settings, not hardcoded (WC "no hardcoded
@@ -53,11 +79,11 @@ final class DocumentRenderApiHandler
 {
     public function __construct(
         private readonly DocumentTemplateRepository $templates,
-        private readonly DocumentBlockRepository $blocks,
         private readonly DocumentAccessPolicy $policy,
         private readonly RoleChecker $roleChecker,
         private readonly SettingsService $settings,
-        private readonly RenderServiceClientInterface $renderService,
+        private readonly DocumentRenderer $renderer,
+        private readonly DocumentIssuer $issuer,
     ) {
     }
 
@@ -84,55 +110,27 @@ final class DocumentRenderApiHandler
         }
 
         $body = JsonBody::parsed($request);
+        $persist = ($body['persist'] ?? false) === true;
+
+        if ($persist) {
+            // Before the render, not after: refusing a persist that has already
+            // cost a headless-Chromium page is a wasted half-gigabyte and a
+            // slow 503.
+            if (($effective[SettingsRegistry::DOCUMENTS_PERSIST_ENABLED] ?? 'true') !== 'true') {
+                return Response::error('Persisting rendered documents is disabled on this instance', 503);
+            }
+        }
 
         $templateData = $row['data'];
         if (!is_array($templateData)) {
             $templateData = [];
         }
-        $templateBytes = strlen((string) json_encode($templateData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-        $maxTemplateBytes = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES] ?? SettingsRegistry::defaultFor(SettingsRegistry::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES));
-        if ($templateBytes > $maxTemplateBytes) {
-            return Response::error("Template exceeds the maximum render size ({$maxTemplateBytes} bytes)", 422);
-        }
-
-        $dataRows = $this->normalizeDataRows($body['dataRows'] ?? null, $templateData);
-        if ($dataRows === null) {
-            return Response::error('dataRows must be a list of flat string maps', 422);
-        }
-
-        $maxRows = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_ROWS] ?? SettingsRegistry::defaultFor(SettingsRegistry::DOCUMENTS_RENDER_MAX_ROWS));
-        if (count($dataRows) > $maxRows) {
-            return Response::error("Too many dataset rows (max {$maxRows})", 422);
-        }
-
-        $pagesPerRow = max(1, count($templateData['pages'] ?? []));
-        $totalUnits = count($dataRows) * $pagesPerRow;
-        $maxUnits = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_PAGES] ?? SettingsRegistry::defaultFor(SettingsRegistry::DOCUMENTS_RENDER_MAX_PAGES));
-        if ($totalUnits > $maxUnits) {
-            return Response::error("Render would produce too many pages ({$totalUnits}, max {$maxUnits})", 422);
-        }
-
-        $sheet = $this->normalizeSheet($body['sheet'] ?? null);
-
-        $payload = [
-            'template'  => $templateData,
-            // A row with no placeholders at all (e.g. a template that binds
-            // none) normalises to an EMPTY PHP array, which json_encode()
-            // serialises as `[]` — a JSON ARRAY, not the `{}` object the
-            // render harness's `Record<string, string>` row shape needs.
-            // Casting only the empty ones to stdClass keeps every non-empty
-            // row (which already has string keys and encodes as an object
-            // regardless) untouched.
-            'dataRows'  => array_map(
-                static fn (array $r): array|\stdClass => $r === [] ? new \stdClass() : $r,
-                $dataRows
-            ),
-            'sheet'     => $sheet,
-            'blocks'    => $this->resolveBlocks($templateData, $tenantId),
-        ];
 
         try {
-            $pdf = $this->renderService->render($payload);
+            $pdf = $this->renderer->render($tenantId, $templateData, $body['dataRows'] ?? null, $body['sheet'] ?? null);
+        } catch (DocumentRenderRejectedException $e) {
+            // ->clientMessage, never ->getMessage(): see the exception's docblock.
+            return Response::error($e->clientMessage, 422);
         } catch (RenderServiceUnavailableException $e) {
             error_log('[DocumentRenderApiHandler] render failed: ' . $e->getMessage());
             return Response::error('Document rendering is temporarily unavailable', 503);
@@ -141,7 +139,11 @@ final class DocumentRenderApiHandler
             return Response::error('Document rendering is temporarily unavailable', 503);
         }
 
-        $filename = $this->slugify((string) $row['name']) . '.pdf';
+        if ($persist) {
+            return $this->persist($tenantId, $callerId, $row, $body, $pdf);
+        }
+
+        $filename = DocumentPresenter::slugify((string) $row['name']) . '.pdf';
 
         return new Response(200, $pdf, [
             'Content-Type' => 'application/pdf',
@@ -150,151 +152,40 @@ final class DocumentRenderApiHandler
     }
 
     /**
-     * Resolve every `blockInstance`-referenced block (anywhere in the template
-     * tree) to its live elements, tenant-scoped. A reference to a deleted/
-     * foreign-tenant block is simply omitted from the map — the render harness
-     * (mirroring `BlockInstanceContent`'s client-side behaviour) renders a
-     * missing block as empty rather than failing the whole render.
+     * Turn the rendered bytes into a document record + a stored artifact.
      *
-     * @param array<string, mixed> $templateData
-     * @return array<int|string, array{id: string, elements: mixed}> Keyed by
-     *         the block id — PHP coerces an all-digit string array key to int.
-     *         Harmless for the render harness either way: whether
-     *         json_encode() serialises this as a JSON object or (only
-     *         possible for the contiguous-from-zero edge case) an array, the
-     *         harness only ever does a direct `blocks[el.blockId]` lookup,
-     *         which resolves the same on a JS object OR array.
-     */
-    private function resolveBlocks(array $templateData, int $tenantId): array
-    {
-        $ids = BlockReferenceScanner::collectBlockIds($templateData);
-        $out = [];
-        foreach ($ids as $id) {
-            if (!ctype_digit($id)) {
-                continue;
-            }
-            $block = $this->blocks->findById((int) $id, $tenantId);
-            if ($block !== null) {
-                $out[$id] = ['id' => $id, 'elements' => $block['data']];
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * Validate + normalise the request's `dataRows`: a list of flat
-     * string=>string maps. Absent/empty defaults to a single row built from
-     * the template's placeholder samples (mirrors the designer's own
-     * `sampleDataOf()` preview default — a render with no explicit batch still
-     * produces one sensible page rather than an empty one).
+     * A storage failure is a 503 rather than a 500: the render succeeded and the
+     * caller's request is not at fault, so this is the same "try again shortly"
+     * shape the render-service failure above already has. Nothing is recorded
+     * when it happens — {@see DocumentIssuer} rolls the record back rather than
+     * leave one promising bytes that are not there.
      *
-     * @param array<string, mixed> $templateData
-     * @return list<array<string, string>>|null Null on a validation failure.
+     * @param array<string, mixed> $template
+     * @param array<string, mixed> $body
      */
-    private function normalizeDataRows(mixed $raw, array $templateData): ?array
+    private function persist(int $tenantId, int $callerId, array $template, array $body, string $pdf): Response
     {
-        if ($raw === null) {
-            return [$this->sampleDataOf($templateData)];
-        }
-        if (!is_array($raw) || !array_is_list($raw)) {
-            return null;
-        }
-        if ($raw === []) {
-            return [$this->sampleDataOf($templateData)];
-        }
+        // A caller-supplied title is what a routed document is recognised by in
+        // an inbox; falling back to the template name keeps every record named
+        // something, which is what the browser lists.
+        $title = is_string($body['title'] ?? null) && trim($body['title']) !== ''
+            ? trim((string) $body['title'])
+            : (string) $template['name'];
 
-        $rows = [];
-        foreach ($raw as $row) {
-            if (!is_array($row)) {
-                return null;
-            }
-            $normalized = [];
-            foreach ($row as $key => $value) {
-                if (!is_string($key) || !is_scalar($value)) {
-                    return null;
-                }
-                $normalized[$key] = (string) $value;
-            }
-            $rows[] = $normalized;
+        try {
+            $issued = $this->issuer->issue($tenantId, $callerId, $template, mb_substr($title, 0, 255), $pdf);
+        } catch (StorageException $e) {
+            error_log('[DocumentRenderApiHandler] persisting the render failed: ' . $e->getMessage());
+            return Response::error('Storing the rendered document is temporarily unavailable', 503);
+        } catch (\Throwable $e) {
+            error_log('[DocumentRenderApiHandler] unexpected persist failure: ' . $e->getMessage());
+            return Response::error('Storing the rendered document is temporarily unavailable', 503);
         }
 
-        return $rows;
-    }
-
-    /**
-     * The sample-data map built from a template's placeholders (key -> sample),
-     * mirroring `web/lib/documents/storage.ts`'s `sampleDataOf()`.
-     *
-     * @param array<string, mixed> $templateData
-     * @return array<string, string>
-     */
-    private function sampleDataOf(array $templateData): array
-    {
-        $out = [];
-        $placeholders = $templateData['placeholders'] ?? [];
-        if (is_array($placeholders)) {
-            foreach ($placeholders as $p) {
-                if (is_array($p) && is_string($p['key'] ?? null)) {
-                    $out[$p['key']] = (string) ($p['sample'] ?? '');
-                }
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * Validate + coerce the optional `sheet` (N-up label-sheet layout) request
-     * field to the shape the render harness expects (mirrors `SheetSpec` in
-     * `packages/ui/src/documents/sheet.ts`). Returns null when absent/invalid —
-     * an invalid sheet degrades to "no tiling" rather than failing the render.
-     *
-     * @return array<string, bool|float>|null
-     */
-    private function normalizeSheet(mixed $raw): ?array
-    {
-        if (!is_array($raw)) {
-            return null;
-        }
-        $numeric = static fn (mixed $v): ?float => is_numeric($v) ? (float) $v : null;
-
-        $cols = $numeric($raw['cols'] ?? null);
-        $rows = $numeric($raw['rows'] ?? null);
-        $sheetWidthMm = $numeric($raw['sheetWidthMm'] ?? null);
-        $sheetHeightMm = $numeric($raw['sheetHeightMm'] ?? null);
-        $marginXMm = $numeric($raw['marginXMm'] ?? null);
-        $marginYMm = $numeric($raw['marginYMm'] ?? null);
-        $gutterXMm = $numeric($raw['gutterXMm'] ?? null);
-        $gutterYMm = $numeric($raw['gutterYMm'] ?? null);
-        if ($cols === null || $rows === null || $sheetWidthMm === null || $sheetHeightMm === null
-            || $marginXMm === null || $marginYMm === null || $gutterXMm === null || $gutterYMm === null) {
-            return null;
-        }
-
-        return [
-            // @db-bool-ignore: $raw is the render request's `sheet` object from the
-            // JSON body (normalizeSheet is called on $body['sheet']), not a row —
-            // there is no `sheet` table and no BOOLEAN column behind this.
-            'enabled' => (bool) ($raw['enabled'] ?? false),
-            'cols' => $cols,
-            'rows' => $rows,
-            'sheetWidthMm' => $sheetWidthMm,
-            'sheetHeightMm' => $sheetHeightMm,
-            'marginXMm' => $marginXMm,
-            'marginYMm' => $marginYMm,
-            'gutterXMm' => $gutterXMm,
-            'gutterYMm' => $gutterYMm,
-        ];
-    }
-
-    private function slugify(string $name): string
-    {
-        $slug = strtolower(trim($name));
-        $slug = preg_replace('/[^a-z0-9]+/', '-', $slug) ?? '';
-        $slug = trim($slug, '-');
-
-        return $slug !== '' ? $slug : 'document';
+        return Response::json(
+            ['data' => DocumentPresenter::document($issued['document'], [$issued['artifact']])],
+            201
+        );
     }
 
     /**

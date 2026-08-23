@@ -38,6 +38,10 @@ final class SettingsRegistryTest extends TestCase
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
+             // #947 item 1: may a render be STORED as a document record? Gates
+             // the storage cost, not the render container, so unlike the master
+             // switch above it is tenant-overridable.
+             'documents.persist_enabled',
              // WC-746: the bulk data-type lifecycle batch ceiling.
              'data_types.bulk_max_ids',
              // WC-error-tracking. The DSN is deliberately absent: it is a
@@ -84,12 +88,18 @@ final class SettingsRegistryTest extends TestCase
         // the three render batch limits (ADR 0012 — a per-tenant ceiling is
         // meaningful, unlike the render_enabled master switch itself), the
         // bulk lifecycle batch ceiling (WC-746, per-tenant for the same reason)
-        // and the invitation TTL (WHIT-417 — how long an invite stays valid is
-        // a tenant's own onboarding policy, not a platform constant).
+        // the invitation TTL (WHIT-417 — how long an invite stays valid is
+        // a tenant's own onboarding policy, not a platform constant) and
+        // documents.persist_enabled (#947 item 1 — whether a render may be
+        // stored is about the storage this tenant consumes, so one tenant can
+        // be issuing documents while another only previews labels).
         self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
         self::assertContains('data_types.bulk_max_ids', SettingsRegistry::tenantTextKeys());
         self::assertFalse(SettingsRegistry::isGlobalOnly('data_types.bulk_max_ids'));
-        self::assertCount(11, SettingsRegistry::tenantTextKeys());
+        self::assertContains('documents.persist_enabled', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.persist_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('documents.render_enabled'));
+        self::assertCount(12, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -212,7 +222,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(53, $describe);
+        self::assertCount(54, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
