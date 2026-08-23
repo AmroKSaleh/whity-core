@@ -100,8 +100,20 @@ export function DocumentGrid({
     <div>
       {/* A list of documents IS a list, so it is marked up as one: a grid of
           divs gives assistive technology no count and no way to step between
-          items. `grid` on a <ul> keeps both. */}
-      <ul aria-label={ariaLabel} className="grid list-none grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          items. `grid` on a <ul> keeps both.
+
+          `role="list"` is written out even though <ul> already has it, because
+          `list-none` removes it again: Safari/VoiceOver drop the list semantics
+          from any list whose `list-style` is `none`, so the count and the
+          "2 of 12" stepping this markup exists to provide would be missing on
+          exactly the pairing that needs them most. The redundancy is the fix,
+          and it is invisible in Chromium — which is what both the jest and the
+          Playwright assertion run on, so neither would have caught it. */}
+      <ul
+        role="list"
+        aria-label={ariaLabel}
+        className="grid list-none grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
+      >
         {rows.map((row) => (
           <li key={row.id} className="rounded-lg border border-border p-3">
             <div className="flex items-start gap-2">
