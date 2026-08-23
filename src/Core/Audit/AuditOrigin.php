@@ -56,7 +56,12 @@ final class AuditOrigin
     public const METADATA_KEY = '_origin';
 
     /**
-     * The metadata key the command name is stored under.
+     * The metadata key the specific unit of work is stored under: the command
+     * word for {@see self::CHANNEL_CLI}, the job name for {@see self::CHANNEL_JOB}.
+     *
+     * One key rather than two, because both answer the reader's same follow-up
+     * question — "which one?" — and a single key is what a future
+     * `metadata->>'_origin_command'` index wants.
      *
      * Two FLAT keys rather than one nested object, which is what this would
      * naturally be. Both readers of this data want scalars: the admin screen
@@ -68,10 +73,26 @@ final class AuditOrigin
     public const COMMAND_METADATA_KEY = '_origin_command';
 
     /**
-     * A command-line invocation: `bin/whity-cli …` or `php public/index.php …`,
-     * including the `queue:work` worker, which is the same kind of process.
+     * A command-line invocation: `bin/whity-cli …` or `php public/index.php …`.
+     *
+     * The `queue:work` worker is started this way but does NOT use this channel:
+     * what it does is not the operator's command, it is whatever the queue held
+     * (#935). See {@see self::CHANNEL_JOB}.
      */
     public const CHANNEL_CLI = 'cli';
+
+    /**
+     * Work performed by the background worker on behalf of a queued job (#935).
+     *
+     * Distinct from {@see self::CHANNEL_CLI} even though `queue:work` is itself a
+     * command, because the two answer different questions. `cli` says an operator
+     * typed something; `job` says the platform ran work somebody enqueued
+     * earlier — possibly a different person, possibly a schedule, and nobody was
+     * present when it happened. A reader chasing "who changed this" needs those
+     * apart: `cli` points at a shell history, `job` points at whatever enqueued
+     * the work.
+     */
+    public const CHANNEL_JOB = 'job';
 
     /**
      * What a recorded command name may look like: a lower-case verb, optionally
@@ -83,7 +104,7 @@ final class AuditOrigin
      * trail is not the place to find out what happens when a 4KB string reaches
      * a JSONB column.
      */
-    private const COMMAND_PATTERN = '/^[a-z][a-z0-9:_-]{0,31}$/';
+    private const COMMAND_PATTERN = '/^[a-z][a-z0-9:._-]{0,63}$/';
 
     /**
      * @param string      $channel How the process was invoked ({@see self::CHANNEL_CLI}).
@@ -113,6 +134,40 @@ final class AuditOrigin
     public static function cli(?string $command = null): self
     {
         return new self(self::CHANNEL_CLI, self::normalizeCommand($command));
+    }
+
+    /**
+     * The origin of work run by the background worker (#935).
+     *
+     * Carries no name, deliberately. One worker process runs many different jobs
+     * in sequence, so WHICH job wrote a row is a per-unit-of-work fact and not a
+     * bootstrap one — and this object is immutable and process-scoped precisely
+     * so an {@see AuditLogger} that owns one stays stateless. The job name
+     * travels on {@see AuditContext} instead, which is already set and cleared
+     * around each job by {@see \Whity\Core\Queue\JobRunner}, and is stamped
+     * into {@see self::COMMAND_METADATA_KEY} by the logger.
+     *
+     * @return self
+     */
+    public static function job(): self
+    {
+        return new self(self::CHANNEL_JOB, null);
+    }
+
+    /**
+     * Whether a name is safe to record as the specific unit of work.
+     *
+     * Exposed so the logger can apply the SAME rule to a job name that
+     * {@see self::cli()} applies to a command word — one pattern, one place.
+     * Job names are registry keys (`core.notifications.deliver`, `acme:sync`),
+     * so they pass; anything that does not is dropped rather than cleaned up.
+     *
+     * @param string|null $name The raw candidate.
+     * @return string|null The name, or null when it is not usable.
+     */
+    public static function normalizeUnitName(?string $name): ?string
+    {
+        return self::normalizeCommand($name);
     }
 
     /**
