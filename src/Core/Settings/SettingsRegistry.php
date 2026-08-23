@@ -249,6 +249,25 @@ final class SettingsRegistry
     public const DOCUMENTS_ROUTING_MAX_STEPS = 'documents.routing_max_steps';
     public const DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP = 'documents.routing_max_recipients_per_step';
 
+    // How many people a USER GROUP preview SHOWS (#999). Not a ceiling on
+    // resolution — the count a preview reports is always exact — but the size of
+    // the sample beside it.
+    //
+    // A preview answers "does this rule mean who I think it means" with a number
+    // and a handful of faces: "resolves to 1,043 people right now, including
+    // these ten". It deliberately CANNOT be paged. A surface that renders 1,043
+    // rows has rebuilt the thousand-node problem the whole design exists to
+    // avoid, and offering `?page=2` over a group's members would be exactly that
+    // surface with a scrollbar. A client that needs a person-by-person list is
+    // asking a different question — "who holds this role" — and the users API
+    // already answers it, filtered and paginated, with its own permission on it.
+    //
+    // Tenant-overridable rather than global-only, for the reason the render and
+    // routing ceilings are: ten faces is enough to recognise a departmental group
+    // and not enough to recognise a faculty-wide one, and an operator running
+    // both should be able to raise one without raising the other.
+    public const GROUPS_PREVIEW_SAMPLE_SIZE = 'groups.preview_sample_size';
+
     // Bulk data-type lifecycle batch ceiling (WC-746). The largest number of ids
     // `POST /api/data-types/{type}/bulk` accepts in one request. An unbounded id
     // list is a denial-of-service with a polite name: every id costs a
@@ -581,6 +600,11 @@ final class SettingsRegistry
         // being a plausible reading of a single step, and an author who really
         // means to reach a thousand people should say so by raising the limit.
         self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => '500',
+        // Ten faces. Enough to recognise a group at a glance — "yes, those are
+        // the instructors" — and small enough that nobody mistakes the sample
+        // for the list. The COUNT beside it is exact and unbounded, which is
+        // where the real information is.
+        self::GROUPS_PREVIEW_SAMPLE_SIZE => '10',
         // 500 ids per bulk lifecycle request. Chosen to cover the motivating
         // screens — "empty the trash", "retire this selection" — in a single
         // call, while still bounding the work one request can commission. Each
@@ -876,6 +900,7 @@ final class SettingsRegistry
             self::DOCUMENTS_PERSIST_ENABLED => self::validateBoolean($value, self::DOCUMENTS_PERSIST_ENABLED),
             self::DOCUMENTS_ROUTING_MAX_STEPS => self::validateRoutingMaxSteps($value),
             self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => self::validateRoutingMaxRecipients($value),
+            self::GROUPS_PREVIEW_SAMPLE_SIZE => self::validateGroupsPreviewSampleSize($value),
             self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
             // Error tracking. These five were declared with defaults, types,
             // enum options and a global-only marking, but never given a
@@ -1162,6 +1187,37 @@ final class SettingsRegistry
      * Max people one step may resolve to: a whole number, at least 1, capped at
      * 100000 (a sanity ceiling on the admin-set value itself).
      */
+    /**
+     * How many people a group preview SHOWS: a whole number, at least 1, capped
+     * at 100.
+     *
+     * Zero is refused. A preview whose sample is empty says "1,043 people" and
+     * shows nobody, which is the one thing a sanity check must not do — the
+     * number is the part an author cannot verify, and the faces are how they
+     * verify it.
+     *
+     * 100 is the upper bound on the ADMIN-SET value, not a page size to be
+     * raised later. Past a hundred rows a sample has stopped being a sample and
+     * has become the member list the whole rule-not-list design exists to avoid
+     * rendering, and the cost is paid on a screen somebody opens to answer a
+     * yes/no question.
+     */
+    private static function validateGroupsPreviewSampleSize(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'groups.preview_sample_size must be a whole number.';
+        }
+        $size = (int) $value;
+        if ($size < 1) {
+            return 'groups.preview_sample_size must be at least 1.';
+        }
+        if ($size > 100) {
+            return 'groups.preview_sample_size must be 100 or fewer.';
+        }
+
+        return null;
+    }
+
     private static function validateRoutingMaxRecipients(string $value): ?string
     {
         if (preg_match('/^\d+$/', $value) !== 1) {

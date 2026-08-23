@@ -114,6 +114,7 @@ final class CoreApiSchemas
             self::documentRecordRoutes(),
             self::documentRoutingRoutes(),
             self::meInboxRoutes(),
+            self::userGroupRoutes(),
             self::documentCollectionRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
@@ -3280,6 +3281,119 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
                 'item_count' => self::int(),
             ], ['id', 'tenant_id', 'profile_id', 'name', 'created_at']),
+            // ── Named user groups (#999) ──────────────────────────────────────
+            // A group is a NAMED RULE, not a list of people. The shape says so:
+            // there is no `members` field, no `member_count`, and no
+            // `member_ids`, because a group's membership is not a property of the
+            // group — it is a question asked of the organisation at a moment in
+            // time, relative to whoever asks, and `/preview` is where it is
+            // answered.
+            //
+            // `rule_kind` + `rule_config` are the pair #989 shipped for route
+            // steps, deliberately spelled the same: a group and a route step are
+            // the same expression, one stored under a name for reuse and one
+            // stored inline for a single circulation. `rule_config` is freeform
+            // for the same reason it is freeform there — core cannot know what an
+            // `acme:committee` rule needs to be told, and only the resolver the
+            // plugin registered does.
+            'UserGroup' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'name' => self::str(),
+                // Optional prose. A name cannot carry intent — "Instructors"
+                // does not say whether visiting lecturers count — and a group
+                // many people will address documents to needs somewhere to say.
+                'description' => self::str(true),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+                // Null once the person who defined it has been deleted. The group
+                // survives them: "instructors" is the institution's definition,
+                // not that person's private filing, which is why migration 116
+                // makes this SET NULL where `document_collections.profile_id`
+                // cascades.
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'name', 'rule_kind', 'rule_config', 'created_at', 'updated_at']),
+            'UserGroupListResponse' => self::paginatedListEnvelope('UserGroup'),
+            'UserGroupResponse' => self::dataEnvelope(SchemaBuilder::ref('UserGroup')),
+            'UserGroupCreateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['name', 'rule_kind']),
+            // PATCH: omitted fields keep their value. `rule_kind` and
+            // `rule_config` must be sent TOGETHER or not at all — a config
+            // written for `role` means nothing to `explicit`, and pairing a new
+            // kind with the old config silently would store a rule the resolver
+            // will later refuse.
+            'UserGroupUpdateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+            ], []),
+            'UserGroupPreviewRequest' => self::object([
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['rule_kind']),
+            'UserGroupDeleteResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'deleted' => self::bool(),
+            ], ['id', 'deleted'])),
+            // The rule kinds a GROUP DEFINITION may name — a subset of
+            // `/api/routing-rules`, excluding `group` itself and any plugin kind
+            // that needs the document it is routed with. Same row shape as
+            // `RoutingRule` and deliberately a separate component: a client draws
+            // one picker from one list, rather than filtering a list by a rule it
+            // would have to know.
+            'GroupRule' => self::object([
+                'kind' => self::str(),
+                'label' => self::str(),
+                'source' => self::str(),
+            ], ['kind', 'label', 'source']),
+            'GroupRuleListResponse' => self::listEnvelope('GroupRule'),
+            // One sampled person. `display_name` is null when the caller does not
+            // hold `users:read` — the COUNT is a fact about the rule, a name is a
+            // fact about a person, and `users:read` is the platform's existing
+            // answer to who may read those. Nullable rather than omitted so
+            // there is ONE payload shape and a client renders an id when there is
+            // no name instead of branching on which flavour it received.
+            'UserGroupPreviewMember' => self::object([
+                'profile_id' => self::int(),
+                // The unit the rule reached them THROUGH, or null when the rule
+                // is not unit-scoped. `explicit` is always null: it named people,
+                // through no unit at all.
+                'ou_id' => self::int(true),
+                'display_name' => self::str(true),
+            ], ['profile_id', 'ou_id', 'display_name']),
+            // A COUNT AND A SAMPLE, NEVER A LIST, and there is no page parameter
+            // anywhere on this shape. `total` is exact; `sample` holds at most
+            // `sample_size` people (the `groups.preview_sample_size` setting),
+            // lowest profile id first so two previews of an unchanged group show
+            // the same faces. A surface that rendered 1,043 rows would have
+            // rebuilt the thousand-nodes problem the whole design avoids; a
+            // caller who wants a person-by-person list is asking `/api/users` a
+            // question about roles.
+            //
+            // `resolved_for` is on every preview, not only the actor-relative
+            // kinds. `role_below_actor` resolves to a different set for a dean
+            // than for a faculty officer, so without this two colleagues would
+            // read two different counts off the same screen with nothing to
+            // explain the difference — and whether a kind is relative is the
+            // resolver's business, not something core can ask it.
+            'UserGroupPreviewResponse' => self::dataEnvelope(self::object([
+                'total' => self::int(),
+                'truncated' => self::bool(),
+                'sample_size' => self::int(),
+                'sample' => ['type' => 'array', 'items' => SchemaBuilder::ref('UserGroupPreviewMember')],
+                'resolved_for' => self::object([
+                    'profile_id' => self::int(true),
+                    'ou_id' => self::int(true),
+                ], ['profile_id', 'ou_id']),
+            ], ['total', 'truncated', 'sample_size', 'sample', 'resolved_for'])),
+
             'DocumentCollectionListResponse' => self::listEnvelope('DocumentCollection'),
             'DocumentCollectionResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentCollection')),
             'DocumentCollectionCreateRequest' => self::object([
@@ -6223,6 +6337,142 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+        ];
+    }
+
+    /**
+     * Named user groups (#999).
+     *
+     * A group is a named, reusable RULE over the tenant's people — "everyone
+     * holding the instructor role" stored once and referenced from many places,
+     * starting with routing's `group` step kind. One node saying "instructors",
+     * not a thousand nodes for a thousand instructors.
+     *
+     * TWO ABSENCES ON THIS SURFACE ARE DELIBERATE, NOT GAPS
+     * ----------------------------------------------------
+     *  - NO MEMBER LIST ROUTE. `/preview` answers with a count and a bounded
+     *    sample and has no `page` parameter, and one is not coming. A screen that
+     *    renders 1,043 people has rebuilt the problem the design exists to avoid.
+     *    Somebody who wants a person-by-person list is asking `/api/users` a
+     *    question about roles, which it already answers with its own filtering,
+     *    paging and permission.
+     *  - NO MEMBER COUNTS ON THE LIST. Resolution is live and uncached (a cache
+     *    is the rejected stored list with a timestamp on it), so a count per row
+     *    would resolve every rule on every render — forty groups, forty fan-out
+     *    queries, to decorate a screen nobody asked a membership question on.
+     *
+     * TWO CATALOGUES OVER ONE REGISTRY. `/api/group-rules` is the subset of
+     * `/api/routing-rules` that can answer without a document: it excludes
+     * `group` itself (which is what makes a group-of-groups impossible rather
+     * than merely discouraged) and any plugin kind that reads the document it is
+     * routed with.
+     *
+     * PERMISSIONS. Reads are `groups:read`; writes and the DRAFT preview are
+     * `groups:write`. The draft preview is the tighter of the two on purpose — it
+     * resolves an arbitrary rule the caller composed, so a reader who may only
+     * see existing definitions cannot probe the organisation by inventing new
+     * ones. Both slugs are granted by migration 116 to a nameable audience, so
+     * neither is a catalogue row nobody holds.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function userGroupRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/group-rules', 'groups:read', [
+                'summary' => "List the rule kinds a user group's definition may name on this instance",
+                'tags' => ['user-groups'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        "The subset of routing rule kinds that can answer without a document",
+                        'GroupRuleListResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/user-groups', 'groups:read', [
+                'summary' => "This tenant's user group DEFINITIONS, by name (paginated, no member counts)",
+                'tags' => ['user-groups'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s groups with pagination', 'UserGroupListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/user-groups/preview', 'groups:write', [
+                'summary' => 'Preview an UNSAVED rule: how many people it resolves to right now, plus a sample',
+                'tags' => ['user-groups'],
+                'request' => 'UserGroupPreviewRequest',
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The count, a bounded sample, and the actor it was resolved against',
+                        'UserGroupPreviewResponse'
+                    ),
+                    422 => self::errorResponse(
+                        'A malformed kind, a kind nothing provides, a kind that needs a document, '
+                        . 'or a config the rule refused'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/user-groups', 'groups:write', [
+                'summary' => 'Define a user group: a name plus the rule that says who is in it',
+                'tags' => ['user-groups'],
+                'request' => 'UserGroupCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created group', 'UserGroupResponse'),
+                    409 => self::errorResponse('A group with that name already exists in this tenant'),
+                    422 => self::errorResponse(
+                        'A missing or over-long name, a malformed kind, a kind nothing provides, '
+                        . 'a kind that needs a document, or a config the rule refused'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/user-groups/{id:\\d+}/preview', 'groups:read', [
+                'summary' => 'How many people this group resolves to RIGHT NOW, plus a bounded sample',
+                'tags' => ['user-groups'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The count, a bounded sample, and the actor it was resolved against',
+                        'UserGroupPreviewResponse'
+                    ),
+                    404 => self::errorResponse('Group not found in this tenant'),
+                    422 => self::errorResponse(
+                        "The group's rule can no longer be resolved on this instance — for example the "
+                        . 'plugin that supplied its kind was removed'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/user-groups/{id:\\d+}', 'groups:read', [
+                'summary' => "One group's definition (no membership — see /preview)",
+                'tags' => ['user-groups'],
+                'responses' => [
+                    200 => self::jsonResponse('The group', 'UserGroupResponse'),
+                    404 => self::errorResponse('Group not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/user-groups/{id:\\d+}', 'groups:write', [
+                'summary' => 'Rename or redefine a group. Takes effect immediately, including for routes in flight',
+                'tags' => ['user-groups'],
+                'request' => 'UserGroupUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated group', 'UserGroupResponse'),
+                    404 => self::errorResponse('Group not found in this tenant'),
+                    409 => self::errorResponse('Another group in this tenant already has that name'),
+                    422 => self::errorResponse(
+                        "'rule_kind' sent without 'rule_config' (or the reverse), an over-long name, "
+                        . 'or a config the rule refused'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/user-groups/{id:\\d+}', 'groups:write', [
+                'summary' => 'Delete a group. Route steps naming it then fail LOUDLY by name, never silently',
+                'tags' => ['user-groups'],
+                'responses' => [
+                    200 => self::jsonResponse('The deleted group id', 'UserGroupDeleteResponse'),
+                    404 => self::errorResponse('Group not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 

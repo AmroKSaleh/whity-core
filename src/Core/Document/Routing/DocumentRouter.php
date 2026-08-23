@@ -7,6 +7,7 @@ namespace Whity\Core\Document\Routing;
 use InvalidArgumentException;
 use PDO;
 use Throwable;
+use Whity\Core\Audience\ActiveMemberFilter;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Ou\PrimaryMembershipOu;
 use Whity\Core\Settings\SettingsRegistry;
@@ -67,11 +68,16 @@ use Whity\Sdk\Routing\RoutingRuleContext;
  * A RESOLVER CANNOT ESCAPE ITS TENANT
  * -----------------------------------
  * A resolver — core's or a plugin's — returns {@see ResolvedRecipient} objects
- * and writes nothing. {@see filterToTenantMembers()} then intersects that
+ * and writes nothing. {@see ActiveMemberFilter::apply()} then intersects that
  * answer with the ACTIVE MEMBERSHIPS of the route's own tenant before a single
  * row is inserted. So a buggy or hostile resolver cannot place a document in
- * another tenant's inbox, and the check lives here rather than being a rule
- * every resolver author has to remember.
+ * another tenant's inbox, and the check lives in the HOST rather than being a
+ * rule every resolver author has to remember.
+ *
+ * That filter was private to this class until #999, which gave it a second
+ * caller — a named user group resolving the same kinds outside routing. It moved
+ * out rather than being written twice: a security boundary with two copies has
+ * one copy nobody is watching.
  *
  * CEILINGS ARE SETTINGS, AND EXCEEDING ONE IS A REFUSAL
  * ----------------------------------------------------
@@ -501,7 +507,14 @@ final class DocumentRouter
         }
 
         $resolved = $this->resolveStep($tenantId, $documentId, $routeId, $step, $position, $actorId, $actorOuId);
-        $members = $this->filterToTenantMembers($tenantId, $resolved);
+        // The security boundary for plugin-supplied rules, and it lives in
+        // {@see ActiveMemberFilter} rather than here since #999 — a named user
+        // group resolving its own rule needs the identical check, and two copies
+        // of a security boundary are two things to update when the membership
+        // model changes, with the missed one being the copy nobody was looking
+        // at. The behaviour is unchanged: de-duplicate by profile, keep only
+        // active members of THIS tenant, drop the rest rather than failing.
+        $members = ActiveMemberFilter::apply($this->db, $tenantId, $resolved);
 
         $ceiling = $this->maxRecipientsPerStep($tenantId);
         if (count($members) > $ceiling) {
@@ -637,73 +650,6 @@ final class DocumentRouter
                 $kind,
             ));
         }
-    }
-
-    /**
-     * Intersect a resolver's answer with the tenant's ACTIVE membership list.
-     *
-     * The security boundary for plugin-supplied rules: a resolver returns
-     * suggestions, and nothing it returns becomes a row until it has been
-     * checked against the tenant the route belongs to. A profile from another
-     * tenant, a deleted profile, or a suspended member is dropped.
-     *
-     * Dropping rather than failing, deliberately. "This person has left" is an
-     * ordinary answer, and refusing the whole distribution over one departed
-     * member would strand everybody else on the step — a barrier created by an
-     * error path, defeating semantic 2 from the side.
-     *
-     * De-duplicates by profile: a person may be returned twice by a rule (two
-     * memberships holding the same role) and once is what the inbox means. The
-     * first `ouId` seen wins, which is stable because the caller's ordering is.
-     *
-     * @param list<ResolvedRecipient> $resolved
-     * @return list<ResolvedRecipient>
-     */
-    private function filterToTenantMembers(int $tenantId, array $resolved): array
-    {
-        /** @var array<int, ResolvedRecipient> $byProfile */
-        $byProfile = [];
-        foreach ($resolved as $recipient) {
-            if ($recipient->profileId > 0 && !isset($byProfile[$recipient->profileId])) {
-                $byProfile[$recipient->profileId] = $recipient;
-            }
-        }
-        if ($byProfile === []) {
-            return [];
-        }
-
-        // Placeholders are generated positionally because the candidate list has
-        // no fixed width; every value is an int already coerced above, and the
-        // statement carries a literal tenant predicate so
-        // scripts/ci-tenant-predicate-guard.php can verify it by reading this
-        // file.
-        $placeholders = [];
-        $params = [':tenant_id' => $tenantId];
-        foreach (array_keys($byProfile) as $i => $profileId) {
-            $name = ':p' . $i;
-            $placeholders[] = $name;
-            $params[$name] = $profileId;
-        }
-
-        $stmt = $this->db->prepare(
-            "SELECT DISTINCT profile_id FROM memberships
-              WHERE tenant_id = :tenant_id
-                AND status = 'active'
-                AND profile_id IN (" . implode(', ', $placeholders) . ')'
-        );
-        $stmt->execute($params);
-
-        $out = [];
-        /** @var list<array<string, mixed>> $rows */
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        foreach ($rows as $row) {
-            $profileId = (int) $row['profile_id'];
-            if (isset($byProfile[$profileId])) {
-                $out[] = $byProfile[$profileId];
-            }
-        }
-
-        return $out;
     }
 
     /**

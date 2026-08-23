@@ -242,9 +242,27 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.37.0',
+            '1.38.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.37 adds DOCUMENT ROUTING RULES: PluginRoutingRulesInterface joins the optional '
+            'SDK 1.38 GENERALISES THE RULE VOCABULARY OUT OF ROUTING: AudienceRuleContext and '
+            . 'AudienceRuleResolverInterface. #999 adds NAMED USER GROUPS, and a group is not a '
+            . 'membership table — it is one of these same rule expressions given a name and stored '
+            . 'once, so that "the instructors" is ONE node referenced from many places rather than a '
+            . 'thousand nodes for a thousand instructors. A stored list goes stale the first time '
+            . 'somebody is hired: it omits them, still renders, and still reports success. A rule '
+            . 'includes them because they exist. THE GENERALISATION IS A SUBTYPE, NOT A WIDENING — '
+            . 'RoutingRuleContext now extends AudienceRuleContext, so every property a 1.37 resolver '
+            . 'reads is still present with the same type (nothing became nullable) and every call '
+            . 'site still compiles. A resolver that never touches the document, the route or the '
+            . 'step declares resolve(AudienceRuleContext), which satisfies BOTH interfaces from one '
+            . 'body, and its kind then becomes usable as a group definition. The two alternatives '
+            . 'were rejected for one reason: making the routing fields nullable changes the type '
+            . 'under plugin code already shipped, and passing zeros in them is a lie the type system '
+            . 'would endorse. ONE REGISTRY STILL — PluginRoutingRulesInterface is unchanged and '
+            . 'remains the only way to contribute a kind, because a rule that can name a set of '
+            . 'people can name the recipients of a step. Additive; every tree that validated under '
+            . '1.37 still validates. '
+            . 'SDK 1.37 adds DOCUMENT ROUTING RULES: PluginRoutingRulesInterface joins the optional '
             . 'capability interfaces, with RoutingRuleResolverInterface, RoutingRuleContext and '
             . 'ResolvedRecipient as its contract. #947 item 3 puts a document routing engine in core, '
             . 'and the load-bearing decision is that a route STEP NAMES A RULE, NEVER A PERSON: the '

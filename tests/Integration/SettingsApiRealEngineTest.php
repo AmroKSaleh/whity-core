@@ -98,7 +98,12 @@ final class SettingsApiRealEngineTest extends TestCase
         // 14 since #947 item 3 added documents.routing_max_steps and
         // documents.routing_max_recipients_per_step - both per-tenant
         // overridable, for the same reason the render ceilings are.
-        self::assertCount(14, $data['registry']);
+        // 15 since #999 added groups.preview_sample_size - how many people a
+        // USER GROUP preview SHOWS beside its exact count. Per-tenant because
+        // ten faces is enough to recognise a departmental group and not enough
+        // to recognise a faculty-wide one, and an operator running both should be
+        // able to raise one without raising the other.
+        self::assertCount(15, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

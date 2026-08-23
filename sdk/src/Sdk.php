@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.37).
+ * SDK identity (v1.38).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -565,13 +565,37 @@ namespace Whity\Sdk;
  * — so a step already stored naming `role` cannot be re-pointed by installing a
  * plugin, which matters more here than in most catalogues because the step
  * decides who receives a document.
- * Additive; every tree that validated under 1.36 still validates)
+ * Additive; every tree that validated under 1.36 still validates) ->
+ * 1.38 (THE RULE VOCABULARY, GENERALISED OUT OF ROUTING:
+ * {@see \Whity\Sdk\Audience\AudienceRuleContext} and
+ * {@see \Whity\Sdk\Audience\AudienceRuleResolverInterface}.
+ * #999 adds NAMED USER GROUPS, and a group is not a membership table — it is
+ * one of these same rule expressions given a name and stored once, so that
+ * "the instructors" is ONE node referenced from many places rather than a
+ * thousand rows re-listed per place. A stored list goes stale the first time
+ * somebody is hired: it omits them, still renders, and still reports success.
+ * A rule includes them because they exist.
+ * The generalisation is a SUBTYPE, not a widening.
+ * `RoutingRuleContext extends AudienceRuleContext`, so every property a 1.37
+ * resolver reads is still present with the same type — nothing became nullable —
+ * and every call site still compiles. A resolver that never touches the
+ * document, the route or the step declares `resolve(AudienceRuleContext)`,
+ * which satisfies BOTH interfaces from one body, and its kind then becomes
+ * usable as a group definition.
+ * The two alternatives were rejected for the same reason: making the routing
+ * fields nullable changes the type under plugin code already shipped, and
+ * passing zeros in them is a lie the type system would endorse.
+ * ONE REGISTRY STILL. {@see \Whity\Sdk\Routing\PluginRoutingRulesInterface} is
+ * unchanged and remains the only way to contribute a kind; there is no
+ * audience-only declaration, because a rule that can name a set of people can
+ * name the recipients of a step.
+ * Additive; every tree that validated under 1.37 still validates)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.37.0';
+    public const VERSION = '1.38.0';
 
     /**
      * Static identity only — never instantiated.

@@ -153,9 +153,22 @@ abstract class BaseCommand
         // this repo has already paid for twice (#717, #724), which is why the
         // core resolvers are registered identically in both.
         $routingRuleRegistry = new \Whity\Core\Document\Routing\RoutingRuleRegistry($hookManager);
+        // #999: the `group` kind dereferences a stored user group, so its
+        // resolver needs the group repository — and the group resolver needs the
+        // REGISTRY, to resolve whatever kind the group is defined as. The cycle
+        // is broken with a closure rather than a setter, so a plugin kind
+        // registered later is still visible to it.
+        $userGroupRepository = new \Whity\Core\Group\UserGroupRepository($db->getPdo());
+        $groupResolver = new \Whity\Core\Group\GroupResolver(
+            $db->getPdo(),
+            $userGroupRepository,
+            static fn (): \Whity\Core\Document\Routing\RoutingRuleRegistry => $routingRuleRegistry
+        );
         $routingRuleRegistry->registerCoreRoutingRules(
             new \Whity\Core\Document\Routing\RoleRuleResolver($db->getPdo()),
-            new \Whity\Core\Document\Routing\RoleBelowActorRuleResolver($db->getPdo())
+            new \Whity\Core\Document\Routing\RoleBelowActorRuleResolver($db->getPdo()),
+            new \Whity\Core\Audience\ExplicitRuleResolver(),
+            new \Whity\Core\Group\GroupRuleResolver($groupResolver)
         );
         \Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry);
 

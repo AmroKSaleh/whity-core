@@ -6,7 +6,11 @@ namespace Tests\Core\Document\Routing;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Whity\Core\Audience\ExplicitRuleResolver;
 use Whity\Core\Container\HostWiredService;
+use Whity\Core\Group\GroupResolver;
+use Whity\Core\Group\GroupRuleResolver;
+use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Document\Routing\InvalidRoutingRuleException;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
 use Whity\Core\Document\Routing\RoleRuleResolver;
@@ -26,13 +30,18 @@ use Whity\Sdk\Routing\RoutingRuleResolverInterface;
  */
 final class RoutingRuleRegistryTest extends TestCase
 {
-    public function testCoreOwnsExactlyTwoKindsAndBothAreBare(): void
+    public function testCoreOwnsExactlyFourKindsAndAllAreBare(): void
     {
         $registry = $this->withCoreRules();
 
         self::assertTrue($registry->has(RoutingRuleRegistry::KIND_ROLE));
         self::assertTrue($registry->has(RoutingRuleRegistry::KIND_ROLE_BELOW_ACTOR));
-        self::assertSame(['role', 'role_below_actor'], array_column($registry->catalogue(), 'kind'));
+        self::assertTrue($registry->has(RoutingRuleRegistry::KIND_EXPLICIT));
+        self::assertTrue($registry->has(RoutingRuleRegistry::KIND_GROUP));
+        self::assertSame(
+            ['explicit', 'group', 'role', 'role_below_actor'],
+            array_column($registry->catalogue(), 'kind')
+        );
 
         foreach ($registry->catalogue() as $entry) {
             self::assertStringNotContainsString(
@@ -44,6 +53,58 @@ final class RoutingRuleRegistryTest extends TestCase
             self::assertSame('core', $entry['source']);
             self::assertNotSame('', $entry['label'], 'a kind a person must pick from needs a label');
         }
+    }
+
+    /**
+     * The audience catalogue is the ROUTING catalogue minus `group` (#999).
+     *
+     * This is the assertion that makes a group-of-groups impossible rather than
+     * merely discouraged. `group` is registered — a route step may name it — and
+     * it must never appear in the list a group's own definition is chosen from,
+     * because it is the only thing standing between the design and a reference
+     * cycle nothing detects.
+     */
+    public function testTheAudienceCatalogueExcludesTheGroupKindItself(): void
+    {
+        $registry = $this->withCoreRules();
+
+        $audience = array_column($registry->audienceCatalogue(), 'kind');
+
+        self::assertSame(['explicit', 'role', 'role_below_actor'], $audience);
+        self::assertNotContains(
+            RoutingRuleRegistry::KIND_GROUP,
+            $audience,
+            'a user group must not be definable as another user group — nesting is prevented '
+            . 'structurally here, which is why no cycle detection exists anywhere in the group code'
+        );
+        self::assertNull(
+            $registry->audienceResolver(RoutingRuleRegistry::KIND_GROUP),
+            'the accessor agrees with the catalogue'
+        );
+        self::assertNotNull(
+            $registry->get(RoutingRuleRegistry::KIND_GROUP),
+            'and `group` is still perfectly usable as a route step'
+        );
+    }
+
+    /**
+     * A plugin kind that implements only the ROUTING interface is offered to
+     * routing and withheld from groups (#999).
+     *
+     * The honest outcome rather than an error: a rule that reads the document it
+     * is being routed with cannot answer a question that has no document in it.
+     */
+    public function testARoutingOnlyPluginKindIsNotOfferedAsAGroupDefinition(): void
+    {
+        $registry = $this->withCoreRules();
+        $registry->register('Acme Widgets', ['committee' => $this->stubResolver()]);
+
+        self::assertContains('acme_widgets:committee', array_column($registry->catalogue(), 'kind'));
+        self::assertNotContains(
+            'acme_widgets:committee',
+            array_column($registry->audienceCatalogue(), 'kind')
+        );
+        self::assertNull($registry->audienceResolver('acme_widgets:committee'));
     }
 
     public function testAPluginKindIsStampedWithThePluginsOwnNamespace(): void
@@ -188,10 +249,7 @@ final class RoutingRuleRegistryTest extends TestCase
         $registry = $this->withCoreRules();
         $before = $registry->catalogue();
 
-        $registry->registerCoreRoutingRules(
-            new RoleRuleResolver(new PDO('sqlite::memory:')),
-            new RoleBelowActorRuleResolver(new PDO('sqlite::memory:'))
-        );
+        self::applyCoreRules($registry);
 
         self::assertSame($before, $registry->catalogue(), 'bootstrap-safe: a second call changes nothing');
     }
@@ -243,14 +301,36 @@ final class RoutingRuleRegistryTest extends TestCase
     private function withCoreRules(): RoutingRuleRegistry
     {
         $registry = new RoutingRuleRegistry();
-        // Core's resolvers query, so they take a PDO. An in-memory handle is
-        // enough: nothing here resolves, only registers.
-        $registry->registerCoreRoutingRules(
-            new RoleRuleResolver(new PDO('sqlite::memory:')),
-            new RoleBelowActorRuleResolver(new PDO('sqlite::memory:'))
-        );
+        self::applyCoreRules($registry);
 
         return $registry;
+    }
+
+    /**
+     * Register core's four kinds on a registry.
+     *
+     * Core's resolvers query, so they take a PDO. An in-memory handle is enough:
+     * nothing here resolves, only registers.
+     *
+     * The `group` resolver needs a group resolver which needs THIS REGISTRY —
+     * the cycle public/index.php breaks with a closure. Reproduced here rather
+     * than stubbed, because a stub would let this suite agree with a wiring
+     * production does not have.
+     */
+    private static function applyCoreRules(RoutingRuleRegistry $registry): void
+    {
+        $pdo = new PDO('sqlite::memory:');
+
+        $registry->registerCoreRoutingRules(
+            new RoleRuleResolver($pdo),
+            new RoleBelowActorRuleResolver($pdo),
+            new ExplicitRuleResolver(),
+            new GroupRuleResolver(new GroupResolver(
+                $pdo,
+                new UserGroupRepository($pdo),
+                static fn (): RoutingRuleRegistry => $registry
+            ))
+        );
     }
 
     private function stubResolver(): RoutingRuleResolverInterface

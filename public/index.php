@@ -395,10 +395,31 @@ $ouTypeRegistry->registerCoreOuTypes();
 // they are the only routing rules core ships, and anything narrower than "holders
 // of a role, optionally within my subtree" is a particular organisation's idea of
 // "the next people" and belongs in a plugin.
+//
+// #999 adds two more core kinds and one shared catalogue. `explicit` is the
+// enumerated case expressed as a RULE, so a hand-picked set and a computed set
+// are the same object and an admin need not decide up front which they are
+// making. `group` dereferences a NAMED USER GROUP — the whole point of the
+// feature: one node saying "instructors", not a thousand nodes for a thousand
+// instructors.
+//
+// The construction order below is forced by a genuine cycle: the `group`
+// resolver needs the group resolver, which needs THIS REGISTRY to resolve
+// whatever kind the group is defined as. It is broken with a closure rather than
+// a setter, so a kind a plugin registers later (below, in the loader) is still
+// visible to a group defined against it.
 $routingRuleRegistry = new \Whity\Core\Document\Routing\RoutingRuleRegistry($hookManager);
+$userGroupRepository = new \Whity\Core\Group\UserGroupRepository($db->getPdo());
+$groupResolver = new \Whity\Core\Group\GroupResolver(
+    $db->getPdo(),
+    $userGroupRepository,
+    static fn (): \Whity\Core\Document\Routing\RoutingRuleRegistry => $routingRuleRegistry
+);
 $routingRuleRegistry->registerCoreRoutingRules(
     new \Whity\Core\Document\Routing\RoleRuleResolver($db->getPdo()),
-    new \Whity\Core\Document\Routing\RoleBelowActorRuleResolver($db->getPdo())
+    new \Whity\Core\Document\Routing\RoleBelowActorRuleResolver($db->getPdo()),
+    new \Whity\Core\Audience\ExplicitRuleResolver(),
+    new \Whity\Core\Group\GroupRuleResolver($groupResolver)
 );
 \Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry); // @phpstan-ignore-line
 
@@ -2132,6 +2153,52 @@ $router->register('GET',  '/api/documents/{id:\d+}/recipients',                 
 // to somebody who then cannot answer it, leaving the item open forever with no
 // way for them to discover why. Same posture as /api/me/notifications.
 $router->register('POST', '/api/documents/{id:\d+}/routes/{routeId:\d+}/actions',      [$documentRoutingHandler, 'act'],        null);
+
+// 13a-nonies-quater. NAMED USER GROUPS (#999). A group is a named, reusable RULE
+// over the tenant's people, stored once and referenced from many places —
+// starting with routing's `group` kind above.
+//
+// Two things about this surface are deliberate absences rather than gaps:
+//
+//  - THERE IS NO MEMBER LIST ROUTE. `/preview` answers with a count and a
+//    bounded sample and has no page parameter. A screen that renders 1,043
+//    people has rebuilt the thousand-nodes problem the design exists to avoid;
+//    somebody who wants a person-by-person list is asking `/api/users` a
+//    question about roles, which it already answers with its own permission.
+//  - THE LIST CARRIES NO MEMBER COUNTS. Resolution is live and uncached
+//    (GroupResolver argues why a cache is the rejected stored list with a
+//    timestamp on it), so a count per row would resolve every rule on every
+//    render. It is one explicit request, for one group, where somebody asked.
+//
+// `/api/group-rules` is a SUBSET of `/api/routing-rules`: the kinds that can
+// answer without a document. Two endpoints over one registry rather than one
+// endpoint with a flag, so each picker reads the list it should draw.
+//
+// The preview of an UNSAVED rule is gated on `groups:write`, tighter than the
+// rest of the reads: it resolves an arbitrary rule the caller composed, so a
+// reader who may only see existing definitions cannot probe the organisation by
+// inventing new ones. Registered BEFORE `/{id}` so the literal path wins — the
+// router matches in registration order — though `preview` could not match
+// `{id:\d+}` in any case.
+$userGroupsHandler = new \Whity\Api\UserGroupsApiHandler(
+    $db->getPdo(),
+    $userGroupRepository,
+    $groupResolver,
+    $routingRuleRegistry,
+    $settingsService,
+    $roleChecker,
+    // Only the DELETE is audited, and only because its consequence surfaces
+    // later and elsewhere — see the handler's `destroy()`.
+    $auditLogger
+);
+$router->register('GET',    '/api/group-rules',                    [$userGroupsHandler, 'rules'],         null, null, CorePermissions::GROUPS_READ);
+$router->register('GET',    '/api/user-groups',                    [$userGroupsHandler, 'index'],         null, null, CorePermissions::GROUPS_READ);
+$router->register('POST',   '/api/user-groups/preview',            [$userGroupsHandler, 'previewDraft'],  null, null, CorePermissions::GROUPS_WRITE);
+$router->register('POST',   '/api/user-groups',                    [$userGroupsHandler, 'create'],        null, null, CorePermissions::GROUPS_WRITE);
+$router->register('GET',    '/api/user-groups/{id:\d+}/preview',   [$userGroupsHandler, 'preview'],       null, null, CorePermissions::GROUPS_READ);
+$router->register('GET',    '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'show'],          null, null, CorePermissions::GROUPS_READ);
+$router->register('PATCH',  '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'update'],        null, null, CorePermissions::GROUPS_WRITE);
+$router->register('DELETE', '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'destroy'],       null, null, CorePermissions::GROUPS_WRITE);
 
 // 13a-nonies-quater. Routing's recipients registered as an #881 INBOX SOURCE —
 // not a surface of their own. The `document_route_recipients` table IS an inbox,
