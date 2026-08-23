@@ -2524,6 +2524,26 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "The asset bytes. The TYPE is decided by magic bytes, not by filename or Content-Type: `logo_wide` and `logo_square` accept PNG, WebP or SVG (max 2 MiB, SVG stored sanitized), `favicon` accepts ICO or PNG (max 1 MiB). Anything else is a 422."
+                                    }
+                                },
+                                "required": [
+                                    "file"
+                                ]
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "The updated effective branding",
@@ -2714,6 +2734,26 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "The asset bytes. The TYPE is decided by magic bytes, not by filename or Content-Type: `logo_wide` and `logo_square` accept PNG, WebP or SVG (max 2 MiB, SVG stored sanitized), `favicon` accepts ICO or PNG (max 1 MiB). Anything else is a 422."
+                                    }
+                                },
+                                "required": [
+                                    "file"
+                                ]
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "The updated effective branding",
@@ -6312,6 +6352,7 @@
                 "tags": [
                     "taxonomy"
                 ],
+                "description": "The cleanup hook a plugin calls from its own record-delete path. entity_tags carries no FK to the tagged record, so associations outlive it \u2014 and a later record reusing the same entity_id would silently inherit them. Returns the number of associations removed; 0 is a successful no-op.",
                 "parameters": [
                     {
                         "name": "entity_type",
@@ -10766,6 +10807,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "Returned in rank order (`sort_order`, then key): a campus outranks a faculty outranks a department, and that ordering is data rather than presentation.",
                 "responses": {
                     "200": {
                         "description": "The tenant's OU type vocabulary",
@@ -10956,6 +10998,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "Core and plugin declarations. A plugin's keys are namespaced under the plugin (`acme:clinic`); adopting one with POST /api/ou-types copies its declared label and rank in as the tenant's starting values.",
                 "responses": {
                     "200": {
                         "description": "The declared catalogue",
@@ -11032,6 +11075,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "Refused while any unit still carries the type, since deleting it would untype them and make them invisible to every `?type=` rule that used to match. Repeat with `?force=true` to untype them explicitly.",
                 "parameters": [
                     {
                         "name": "id",
@@ -11212,6 +11256,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "The `key` is immutable \u2014 a routing rule binds to it, so editing it in place would silently repoint every such rule at a type that no longer exists.",
                 "parameters": [
                     {
                         "name": "id",
@@ -11328,6 +11373,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "Paginated. A client that needs the whole hierarchy (to build a tree) must follow the `pagination` envelope to the last page \u2014 `per_page` is capped at 100, so no single request is guaranteed to return every unit.",
                 "parameters": [
                     {
                         "name": "page",
@@ -14010,6 +14056,7 @@
                 "tags": [
                     "platform-ops"
                 ],
+                "description": "Downloads a plugin package from a store host that MUST be on the operator `plugins.store_allowed_hosts` allowlist (SSRF control; empty \u21d2 disabled), and requires the `plugins.store_enabled` master switch (default true) to also be on, then validates and stages it through the same hardened installer as an upload.",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -14212,6 +14259,7 @@
                 "tags": [
                     "platform-ops"
                 ],
+                "description": "Returns the operator `plugins.store_allowed_hosts` allowlist and whether installing from a store is enabled (both the allowlist AND the `plugins.store_enabled` master switch must be on). Read-only; makes no outbound request.",
                 "responses": {
                     "200": {
                         "description": "Allowed store hosts",
@@ -14288,6 +14336,7 @@
                 "tags": [
                     "platform-ops"
                 ],
+                "description": "Server-side proxy to a store's public catalogue for the admin UI. Query: `store_url` (a bare https origin that MUST be on the allowlist) and optional `q` (case-insensitive substring over slug/name/description/author/tags). The browser never contacts the store directly.",
                 "parameters": [
                     {
                         "name": "store_url",
@@ -15393,6 +15442,7 @@
                 "tags": [
                     "rbac"
                 ],
+                "description": "Returns both grant shapes: a null `profile_id` is the \"everyone at this resource\" grant, a set `profile_id` grants to that one profile. Always scoped to the caller's tenant, so a resource belonging to another tenant yields an empty list rather than an error.",
                 "parameters": [
                     {
                         "name": "resource_type",
@@ -15497,6 +15547,7 @@
                 "tags": [
                     "rbac"
                 ],
+                "description": "Granting a role that is already granted at that resource is a SUCCESS (200 with `created: false` and the existing grant id), not a conflict \u2014 mirroring POST /api/users/{id}/memberships. A grant WIDENS authority at one resource and is never a substitute for tenant membership: resolution still requires an active membership in the tenant.",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -15613,6 +15664,7 @@
                 "tags": [
                     "rbac"
                 ],
+                "description": "The cleanup an owner runs when it deletes the record itself. `resource_id` carries no foreign key, so core is never told a record disappeared and its grants outlive it \u2014 a later record reusing that id would silently inherit them. Takes the SAME parameters as the list route, so a caller can GET exactly what this removes. Returns the number of grants revoked; 0 is a successful no-op, never a 404, so the call is safe to make unconditionally from a delete path and safe to retry. Unlike the create route this does NOT ask the owning plugin to vouch for the resource: by cleanup time the record is usually already deleted, so a fails-closed check would refuse exactly the calls that matter. The tenant predicate still confines it to the caller's own grants.",
                 "parameters": [
                     {
                         "name": "resource_type",
@@ -15719,6 +15771,7 @@
                 "tags": [
                     "rbac"
                 ],
+                "description": "By id rather than by (resource, role, profile): over HTTP an omitted `profile_id` and an explicit null are indistinguishable, so a tuple-addressed revoke would let a dropped parameter silently revoke the everyone-grant instead of one profile's. The ids come from the list route.",
                 "parameters": [
                     {
                         "name": "id",
@@ -17912,6 +17965,7 @@
                 "tags": [
                     "taxonomy"
                 ],
+                "description": "Refuses with 409 while any entity association still references one of the group's tags, reporting the affected counts, because the FK cascade would otherwise silently destroy associations belonging to other plugins. Pass force=true to delete them as well; a forced delete is recorded in the audit log.",
                 "parameters": [
                     {
                         "name": "id",
@@ -18429,6 +18483,7 @@
                 "tags": [
                     "taxonomy"
                 ],
+                "description": "Refuses with 409 while entity associations still reference the tag, reporting the affected count. Pass force=true to delete them as well; a forced delete is recorded in the audit log.",
                 "parameters": [
                     {
                         "name": "id",
@@ -20161,6 +20216,7 @@
                 "tags": [
                     "languages"
                 ],
+                "description": "What still needs translating. Missing keys have no rows, so a plain listing can only ever show work already done; this reports the gap between each language and the source language, per domain.",
                 "responses": {
                     "200": {
                         "description": "Per-language, per-domain coverage counts",

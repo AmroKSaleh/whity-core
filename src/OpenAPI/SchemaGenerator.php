@@ -356,6 +356,16 @@ class SchemaGenerator
                 : [$this->getTag($path)],
         ];
 
+        // The long-form prose that sits beside `summary` in OpenAPI 3.0. Sixteen
+        // catalogue entries had been writing one for as long as they have
+        // existed — the OU pagination note, the store-allowlist caveat, the
+        // 409-while-referenced warnings — and none of it was ever emitted,
+        // because nothing here read the key (#954). Same class of loss as the
+        // branding request body: declared, merged, and silently discarded.
+        if (is_string($schema['description'] ?? null) && $schema['description'] !== '') {
+            $operation['description'] = $schema['description'];
+        }
+
         // RFC 8594 / OpenAPI 3.0 deprecation flag.
         if (!empty($schema['deprecated'])) {
             $operation['deprecated'] = true;

@@ -916,7 +916,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Detach every tag from one entity */
+        /**
+         * Detach every tag from one entity
+         * @description The cleanup hook a plugin calls from its own record-delete path. entity_tags carries no FK to the tagged record, so associations outlive it — and a later record reusing the same entity_id would silently inherit them. Returns the number of associations removed; 0 is a successful no-op.
+         */
         delete: operations["delete_api_v1_entity_tags_all"];
         options?: never;
         head?: never;
@@ -1621,7 +1624,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the tenant's organizational unit types */
+        /**
+         * List the tenant's organizational unit types
+         * @description Returned in rank order (`sort_order`, then key): a campus outranks a faculty outranks a department, and that ordering is data rather than presentation.
+         */
         get: operations["get_api_v1_ou_types"];
         put?: never;
         /** Author a new OU type, or adopt a declared one */
@@ -1639,7 +1645,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the OU types declared in code, with this tenant's adoption state */
+        /**
+         * List the OU types declared in code, with this tenant's adoption state
+         * @description Core and plugin declarations. A plugin's keys are namespaced under the plugin (`acme:clinic`); adopting one with POST /api/ou-types copies its declared label and rank in as the tenant's starting values.
+         */
         get: operations["get_api_v1_ou_types_catalog"];
         put?: never;
         post?: never;
@@ -1660,11 +1669,17 @@ export interface paths {
         get: operations["get_api_v1_ou_types_id"];
         put?: never;
         post?: never;
-        /** Delete an OU type */
+        /**
+         * Delete an OU type
+         * @description Refused while any unit still carries the type, since deleting it would untype them and make them invisible to every `?type=` rule that used to match. Repeat with `?force=true` to untype them explicitly.
+         */
         delete: operations["delete_api_v1_ou_types_id"];
         options?: never;
         head?: never;
-        /** Relabel or re-rank an OU type */
+        /**
+         * Relabel or re-rank an OU type
+         * @description The `key` is immutable — a routing rule binds to it, so editing it in place would silently repoint every such rule at a type that no longer exists.
+         */
         patch: operations["patch_api_v1_ou_types_id"];
         trace?: never;
     };
@@ -1675,7 +1690,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the tenant's organizational units */
+        /**
+         * List the tenant's organizational units
+         * @description Paginated. A client that needs the whole hierarchy (to build a tree) must follow the `pagination` envelope to the last page — `per_page` is capped at 100, so no single request is guaranteed to return every unit.
+         */
         get: operations["get_api_v1_ous"];
         put?: never;
         /** Create an organizational unit */
@@ -2010,7 +2028,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Fetch a package from a trusted plugin store and stage it (lands disabled) */
+        /**
+         * Fetch a package from a trusted plugin store and stage it (lands disabled)
+         * @description Downloads a plugin package from a store host that MUST be on the operator `plugins.store_allowed_hosts` allowlist (SSRF control; empty ⇒ disabled), and requires the `plugins.store_enabled` master switch (default true) to also be on, then validates and stages it through the same hardened installer as an upload.
+         */
         post: operations["post_api_v1_plugins_install_from_store"];
         delete?: never;
         options?: never;
@@ -2042,7 +2063,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the trusted store hosts (for the store-browser UI) */
+        /**
+         * List the trusted store hosts (for the store-browser UI)
+         * @description Returns the operator `plugins.store_allowed_hosts` allowlist and whether installing from a store is enabled (both the allowlist AND the `plugins.store_enabled` master switch must be on). Read-only; makes no outbound request.
+         */
         get: operations["get_api_v1_plugins_store_allowed"];
         put?: never;
         post?: never;
@@ -2059,7 +2083,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Browse (and search) a trusted store's public catalogue */
+        /**
+         * Browse (and search) a trusted store's public catalogue
+         * @description Server-side proxy to a store's public catalogue for the admin UI. Query: `store_url` (a bare https origin that MUST be on the allowlist) and optional `q` (case-insensitive substring over slug/name/description/author/tags). The browser never contacts the store directly.
+         */
         get: operations["get_api_v1_plugins_store_catalog"];
         put?: never;
         post?: never;
@@ -2230,10 +2257,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the role grants addressed at one resource */
+        /**
+         * List the role grants addressed at one resource
+         * @description Returns both grant shapes: a null `profile_id` is the "everyone at this resource" grant, a set `profile_id` grants to that one profile. Always scoped to the caller's tenant, so a resource belonging to another tenant yields an empty list rather than an error.
+         */
         get: operations["get_api_v1_resource_role_grants"];
         put?: never;
-        /** Grant a role at one resource (idempotent) */
+        /**
+         * Grant a role at one resource (idempotent)
+         * @description Granting a role that is already granted at that resource is a SUCCESS (200 with `created: false` and the existing grant id), not a conflict — mirroring POST /api/users/{id}/memberships. A grant WIDENS authority at one resource and is never a substitute for tenant membership: resolution still requires an active membership in the tenant.
+         */
         post: operations["post_api_v1_resource_role_grants"];
         delete?: never;
         options?: never;
@@ -2251,7 +2284,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke every role grant at one resource */
+        /**
+         * Revoke every role grant at one resource
+         * @description The cleanup an owner runs when it deletes the record itself. `resource_id` carries no foreign key, so core is never told a record disappeared and its grants outlive it — a later record reusing that id would silently inherit them. Takes the SAME parameters as the list route, so a caller can GET exactly what this removes. Returns the number of grants revoked; 0 is a successful no-op, never a 404, so the call is safe to make unconditionally from a delete path and safe to retry. Unlike the create route this does NOT ask the owning plugin to vouch for the resource: by cleanup time the record is usually already deleted, so a fails-closed check would refuse exactly the calls that matter. The tenant predicate still confines it to the caller's own grants.
+         */
         delete: operations["delete_api_v1_resource_role_grants_all"];
         options?: never;
         head?: never;
@@ -2268,7 +2304,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke one resource role grant by its id */
+        /**
+         * Revoke one resource role grant by its id
+         * @description By id rather than by (resource, role, profile): over HTTP an omitted `profile_id` and an explicit null are indistinguishable, so a tuple-addressed revoke would let a dropped parameter silently revoke the everyone-grant instead of one profile's. The ids come from the list route.
+         */
         delete: operations["delete_api_v1_resource_role_grants_id"];
         options?: never;
         head?: never;
@@ -2484,7 +2523,10 @@ export interface paths {
         get: operations["get_api_v1_tag_groups_id"];
         put?: never;
         post?: never;
-        /** Delete a tag group (its tags cascade) */
+        /**
+         * Delete a tag group (its tags cascade)
+         * @description Refuses with 409 while any entity association still references one of the group's tags, reporting the affected counts, because the FK cascade would otherwise silently destroy associations belonging to other plugins. Pass force=true to delete them as well; a forced delete is recorded in the audit log.
+         */
         delete: operations["delete_api_v1_tag_groups_id"];
         options?: never;
         head?: never;
@@ -2521,7 +2563,10 @@ export interface paths {
         get: operations["get_api_v1_tags_id"];
         put?: never;
         post?: never;
-        /** Delete a tag (its associations cascade) */
+        /**
+         * Delete a tag (its associations cascade)
+         * @description Refuses with 409 while entity associations still reference the tag, reporting the affected count. Pass force=true to delete them as well; a forced delete is recorded in the audit log.
+         */
         delete: operations["delete_api_v1_tags_id"];
         options?: never;
         head?: never;
@@ -2678,7 +2723,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Translation coverage per language and domain (admin) */
+        /**
+         * Translation coverage per language and domain (admin)
+         * @description What still needs translating. Missing keys have no rows, so a plain listing can only ever show work already done; this reports the gap between each language and the source language, per domain.
+         */
         get: operations["get_api_v1_translations_coverage"];
         put?: never;
         post?: never;
@@ -6909,7 +6957,17 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The asset bytes. The TYPE is decided by magic bytes, not by filename or Content-Type: `logo_wide` and `logo_square` accept PNG, WebP or SVG (max 2 MiB, SVG stored sanitized), `favicon` accepts ICO or PNG (max 1 MiB). Anything else is a 422.
+                     */
+                    file: string;
+                };
+            };
+        };
         responses: {
             /** @description The updated effective branding */
             200: {
@@ -7061,7 +7119,17 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The asset bytes. The TYPE is decided by magic bytes, not by filename or Content-Type: `logo_wide` and `logo_square` accept PNG, WebP or SVG (max 2 MiB, SVG stored sanitized), `favicon` accepts ICO or PNG (max 1 MiB). Anything else is a 422.
+                     */
+                    file: string;
+                };
+            };
+        };
         responses: {
             /** @description The updated effective branding */
             200: {

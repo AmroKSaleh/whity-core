@@ -172,6 +172,55 @@ final class RequestSchemaContractTest extends TestCase
     }
 
     /**
+     * Every key a catalogue entry declares has to be a key
+     * {@see SchemaGenerator::addOperation()} actually reads.
+     *
+     * This is the gate for the defect #954 turned out to be. The two branding
+     * uploads DID declare their multipart body — under `requestBody`, the OpenAPI
+     * spelling — and the generator reads `request`. Nothing warned: the array was
+     * built, merged into the route, carried through generation and dropped on the
+     * floor, so both operations published with no request body while the source
+     * read as though they had one. Sixteen operations were losing a hand-written
+     * `description` the same way.
+     *
+     * A misspelt key is the one failure mode this whole file cannot otherwise
+     * see, because every OTHER assertion here starts from what the generator
+     * emitted — and a dropped key emits nothing to notice.
+     */
+    public function testEveryDeclaredSchemaKeyIsOneTheGeneratorReads(): void
+    {
+        // Exactly the keys addOperation() branches on. Extend BOTH together.
+        $honoured = [
+            'components',
+            'deprecated',
+            'description',
+            'operationId',
+            'parameters',
+            'request',
+            'responses',
+            'summary',
+            'tags',
+        ];
+
+        $ignored = [];
+        foreach (CoreApiSchemas::routes() as $route) {
+            foreach (array_keys($route['schema']) as $key) {
+                if (!in_array($key, $honoured, true)) {
+                    $ignored[] = $route['method'] . ' ' . $route['path'] . ": '{$key}'";
+                }
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $ignored,
+            "These declarations use a key the generator never reads, so they are silently discarded:\n"
+            . implode("\n", $ignored)
+            . "\n(a request body is declared as 'request', not 'requestBody')"
+        );
+    }
+
+    /**
      * A route declaring a request body must not ALSO declare a body-less shape:
      * the resolved schema has to have properties, or a client learns nothing.
      * This is what the downstream report counted as "present-but-empty".
