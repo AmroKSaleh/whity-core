@@ -310,7 +310,12 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
   const trailWorthFetching = trailAccess.state === 'editable';
 
   // ── the trail ───────────────────────────────────────────────────────────
-  const trail = useRecordResource<TrailPage | 'forbidden'>(
+  // `<TrailPage>`, not `<TrailPage | 'forbidden'>`: the hook takes
+  // `() => Promise<T | 'forbidden'>` and turns that sentinel into its own
+  // `{status: 'forbidden'}`, so `'forbidden'` can never reach `value`. Naming it
+  // in `T` would have made every read site narrow against a state that does not
+  // exist — and would have quietly typed the real one as possibly-a-string.
+  const trail = useRecordResource<TrailPage>(
     async () => {
       if (!trailWorthFetching) {
         // `'forbidden'` is the record slice's "this panel is absent", which is
@@ -334,7 +339,7 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
   );
 
   // ── the recipients ──────────────────────────────────────────────────────
-  const recipients = useRecordResource<RouteRecipient[] | 'forbidden'>(
+  const recipients = useRecordResource<RouteRecipient[]>(
     async () => {
       if (!recipientsVisible) {
         return 'forbidden';
@@ -454,14 +459,14 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
 
   // ── the regions ─────────────────────────────────────────────────────────
 
-  const trailEvents: readonly TrailEvent[] =
-    trail.status === 'ready' && trail.value !== 'forbidden' ? trail.value.data : [];
+  // `status === 'ready'` is the only check needed: the hook has already turned
+  // its `'forbidden'` sentinel into a status of its own, so a ready resource
+  // carries real rows or the screen never gets here.
+  const trailEvents: readonly TrailEvent[] = trail.status === 'ready' ? trail.value.data : [];
   const trailPagination: TrailPagination | null =
-    trail.status === 'ready' && trail.value !== 'forbidden' ? trail.value.pagination : null;
-  const recipientsSettled = recipients.status === 'ready' && recipients.value !== 'forbidden';
-  const recipientRows: readonly RouteRecipient[] = recipientsSettled
-    ? (recipients.value as RouteRecipient[])
-    : [];
+    trail.status === 'ready' ? trail.value.pagination : null;
+  const recipientsSettled = recipients.status === 'ready';
+  const recipientRows: readonly RouteRecipient[] = recipientsSettled ? recipients.value : [];
 
   const fields: DocumentRecordFields = {
     title: record.title,
