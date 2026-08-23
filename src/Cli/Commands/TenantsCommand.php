@@ -49,7 +49,12 @@ class TenantsCommand extends BaseCommand
                 $tenant['name'],
                 $tenant['slug'],
                 $tenant['userCount'] ?? 0,
-                $tenant['created_at'],
+                // The API shapes this row into the PUBLIC contract, which is
+                // camelCase (WC-122's toPublicTenant). This read stayed
+                // snake_case and emitted an undefined-key warning with a blank
+                // column — invisible for as long as #928 made the command
+                // unreachable, and visible on the first run after it was fixed.
+                $tenant['createdAt'] ?? $tenant['created_at'] ?? 'N/A',
             ];
         }, $tenants);
 

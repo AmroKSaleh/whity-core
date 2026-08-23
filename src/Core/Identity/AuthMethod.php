@@ -75,18 +75,43 @@ final class AuthMethod
     /** An external identity linked AND a local credential. */
     public const BOTH = 'both';
 
+    /**
+     * A principal that exists for AUTHORIZATION and can never become a login (#928).
+     *
+     * The CLI service principal is the case this was added for: `RbacMiddleware`
+     * checks roles against the authoritative store, so the CLI needs a real
+     * profile holding `admin` in the system tenant — and a real profile holding
+     * deployment-wide authority must not be one an administrator can hand a
+     * password to.
+     *
+     * TERMINAL. Every transition out of it is refused, including the
+     * `$override` path that legitimately moves an IdP-backed account to 'both',
+     * and including the link/unlink recomputation. Without that, linking an
+     * external identity would walk the principal to 'idp' and an override would
+     * then walk it to 'both' — a two-step escalation into a deployment-wide
+     * login, assembled entirely from operations that are each individually
+     * legitimate.
+     *
+     * Distinct from a stranded 'local' (no credential, no identity) on purpose:
+     * that records which credentials exist, this records whether the account may
+     * ever authenticate at all, and inferring the second from the first is the
+     * defect migration 104 was written to remove.
+     */
+    public const SERVICE = 'service';
+
     public function __construct(private readonly PDO $db)
     {
     }
 
     /**
-     * The three permitted values, in the order migration 104's CHECK lists them.
+     * The permitted values, in the order the CHECK constraint lists them
+     * (migration 104, widened by 106).
      *
      * @return list<string>
      */
     public static function all(): array
     {
-        return [self::LOCAL, self::IDP, self::BOTH];
+        return [self::LOCAL, self::IDP, self::BOTH, self::SERVICE];
     }
 
     /**
@@ -103,6 +128,10 @@ final class AuthMethod
      */
     public static function compose(bool $hasLocalCredential, bool $hasExternalIdentity): string
     {
+        // Never returns SERVICE: that value is not derivable from the two
+        // credential booleans, which is precisely why it is held rather than
+        // computed. Callers that could be looking at a service principal must
+        // consult the stored value, not recompose one.
         if (!$hasExternalIdentity) {
             return self::LOCAL;
         }
@@ -126,6 +155,12 @@ final class AuthMethod
     public static function holdsLocalCredential(string $authMethod): bool
     {
         return $authMethod === self::LOCAL || $authMethod === self::BOTH;
+    }
+
+    /** Whether nothing may ever authenticate as this account (#928). */
+    public static function isService(string $authMethod): bool
+    {
+        return $authMethod === self::SERVICE;
     }
 
     /**
@@ -163,7 +198,13 @@ final class AuthMethod
      */
     public function refusesLocalPassword(int $profileId): bool
     {
-        return $this->of($profileId) === self::IDP;
+        $authMethod = $this->of($profileId);
+
+        // SERVICE refuses for a different reason than IDP, and more firmly: IDP
+        // refuses because another authority governs the account and an operator
+        // may override that; SERVICE refuses because the account is not a login
+        // and no override exists (#928).
+        return $authMethod === self::IDP || $authMethod === self::SERVICE;
     }
 
     /**
@@ -189,7 +230,15 @@ final class AuthMethod
      */
     public function setPasswordHash(int $profileId, string $passwordHash, bool $override = false): void
     {
-        $refusal = $override ? '' : ' AND auth_method <> :refused';
+        // The service refusal is OUTSIDE the override branch on purpose: an
+        // override may promote an IdP-backed account to 'both', but nothing may
+        // give a service principal a credential (#928). Leaving it inside would
+        // make `$override = true` the one call that turns the CLI's
+        // system-tenant admin into a login.
+        $refusal = ' AND auth_method <> :service';
+        if (!$override) {
+            $refusal .= ' AND auth_method <> :refused';
+        }
 
         // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
         $stmt = $this->db->prepare(
@@ -202,10 +251,11 @@ final class AuthMethod
         );
 
         $params = [
-            ':hash' => $passwordHash,
-            ':idp'  => self::IDP,
-            ':both' => self::BOTH,
-            ':id'   => $profileId,
+            ':hash'    => $passwordHash,
+            ':idp'     => self::IDP,
+            ':both'    => self::BOTH,
+            ':id'      => $profileId,
+            ':service' => self::SERVICE,
         ];
         if (!$override) {
             $params[':refused'] = self::IDP;
@@ -243,13 +293,15 @@ final class AuthMethod
                         ELSE :idp
                     END,
                     updated_at = NOW()
-              WHERE id = :id'
+              WHERE id = :id
+                AND auth_method <> :service'
         )->execute([
-            ':local'  => self::LOCAL,
-            ':bothIn' => self::BOTH,
-            ':both'   => self::BOTH,
-            ':idp'    => self::IDP,
-            ':id'     => $profileId,
+            ':local'   => self::LOCAL,
+            ':bothIn'  => self::BOTH,
+            ':both'    => self::BOTH,
+            ':idp'     => self::IDP,
+            ':id'      => $profileId,
+            ':service' => self::SERVICE,
         ]);
     }
 
@@ -274,12 +326,14 @@ final class AuthMethod
                 SET auth_method = :local, updated_at = NOW()
               WHERE id = :id
                 AND auth_method <> :localCmp
+                AND auth_method <> :service
                 AND NOT EXISTS (
                     SELECT 1 FROM external_identities ei WHERE ei.profile_id = profiles.id
                 )'
         )->execute([
             ':local'    => self::LOCAL,
             ':localCmp' => self::LOCAL,
+            ':service'  => self::SERVICE,
             ':id'       => $profileId,
         ]);
     }
