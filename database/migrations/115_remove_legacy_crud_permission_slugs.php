@@ -7,7 +7,7 @@ namespace Database\Migrations;
 use Whity\Database\Database;
 
 /**
- * RemoveLegacyCrudPermissionSlugs — forward migration (#990, migration 114).
+ * RemoveLegacyCrudPermissionSlugs — forward migration (#990, migration 115).
  *
  * Removes eight permission slugs that nothing consults and nothing can act on.
  *
