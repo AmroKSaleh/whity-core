@@ -30,6 +30,14 @@ use Whity\Sdk\Sql\SequenceAllocator;
  * inert on the SERVER (core owns them until the cutover) and is the sole provider
  * on the OFFLINE host, where no core Document Designer exists.
  *
+ * That inertness reaches the frontend too (#969): the block screens below are
+ * refused by whity-core`s loader, and -- measured, not assumed -- the rule that
+ * refuses them is the core-permission OWNERSHIP rule, which fires before (and
+ * independently of) the route collisions. The device host applies neither rule,
+ * which is why the screens render there.
+ * `scripts/ci-plugin-frontend-features.php` records that expectation and fails if
+ * the reason ever changes.
+ *
  * SLICE (this): sync + the BLOCK UI -- {@see getFrontendFeatures()} declares two
  * `screen: 'blocks'` screens (Templates, Blocks) with list + create + delete. There
  * is no in-UI edit: renaming and content editing belong to the canvas designer
