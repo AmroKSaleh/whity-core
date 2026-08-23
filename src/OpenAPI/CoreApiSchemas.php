@@ -1949,13 +1949,36 @@ final class CoreApiSchemas
      */
     private static function brandingRoutes(): array
     {
+        // #954: this body was written under the key `requestBody`, which
+        // SchemaGenerator::addOperation() does not read — it reads `request`.
+        // The declaration was therefore built, merged, and dropped on the floor:
+        // both upload operations published with NO request body at all, so a
+        // generated client could see the endpoint and had no way to learn the
+        // part is called `file`. The key is the whole fix; the shape below was
+        // already right.
+        //
+        // A complete OpenAPI requestBody object (it carries `content`), so the
+        // generator passes it through verbatim rather than re-wrapping it as
+        // application/json — the same path POST /api/plugins/upload takes.
         $multipartBody = [
-            'requestBody' => [
+            'request' => [
                 'required' => true,
                 'content' => [
                     'multipart/form-data' => [
                         'schema' => self::object([
-                            'file' => ['type' => 'string', 'format' => 'binary'],
+                            // BrandingApiHandler::readUploadedFile() reads exactly
+                            // one part, named `file`, via getUploadedFiles(); there
+                            // is no other field and no JSON alternative (FrankenPHP
+                            // drains php://input, so a raw-body path cannot work).
+                            // Absent, the handler answers 400.
+                            'file' => [
+                                'type' => 'string',
+                                'format' => 'binary',
+                                'description' => 'The asset bytes. The TYPE is decided by magic bytes, not by '
+                                    . 'filename or Content-Type: `logo_wide` and `logo_square` accept PNG, WebP '
+                                    . 'or SVG (max 2 MiB, SVG stored sanitized), `favicon` accepts ICO or PNG '
+                                    . '(max 1 MiB). Anything else is a 422.',
+                            ],
                         ], ['file']),
                     ],
                 ],

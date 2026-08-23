@@ -36,15 +36,20 @@ class SchemaBuilder
      *
      * @param string $title API title
      * @param string $version API version
+     * @param string|null $description Document-level prose for `info.description`
+     *        (the conventions a reader needs before reading any operation).
+     *        Omitted when null, so the built document is unchanged for callers
+     *        that do not supply one.
      */
-    public function __construct(string $title, string $version)
+    public function __construct(string $title, string $version, ?string $description = null)
     {
         $this->spec = [
             'openapi' => '3.0.0',
             'info' => [
                 'title' => $title,
                 'version' => $version,
-            ],
+            ]
+            + ($description !== null && $description !== '' ? ['description' => $description] : []),
             'servers' => [
                 [
                     'url' => 'http://localhost:8000',
