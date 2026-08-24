@@ -242,9 +242,14 @@ final class DocumentCreateApiRealEngineTest extends TestCase
             'dataRows' => [['reference' => 'FAC-001-CORRECTED', 'date' => '2026-01-02']],
         ]);
 
+        // A LITERAL index, and the count asserted separately. Deriving the index
+        // from how many times the code under test called the renderer would make
+        // this blind to the create rendering zero times or twice — the count is
+        // part of what is being tested, so it cannot also be the yardstick.
+        self::assertCount(2, $this->fakeRender->calls, 'one render for the raising, one for the correction');
         self::assertVariableData(
             [['reference' => 'FAC-001-CORRECTED', 'date' => '2026-01-02']],
-            $this->renderedRows(count($this->fakeRender->calls) - 1)
+            $this->renderedRows(1)
         );
 
         $row = $this->documents->findById($documentId, self::TENANT);
@@ -316,10 +321,16 @@ final class DocumentCreateApiRealEngineTest extends TestCase
      * A template the caller cannot SEE cannot be raised from — and the refusal
      * is a 404, so the route does not confirm the template exists.
      *
-     * The template here is filed at unit 7 and tagged with a permission the
-     * secretary does not hold, which is the shape migration 117 exists for. It
-     * is checked with the DESIGNER's policy, not the document one: creating from
-     * a gated template must not be a way to read a gated template.
+     * The template here is filed at unit 7 AND tagged with a permission the
+     * caller does not hold, so it is refused twice over. That makes it a fair
+     * test of "cannot see means cannot raise" and a POOR test of either gate on
+     * its own — placement alone already refuses this caller, so the tag is
+     * inert here. The two gates are isolated separately, one variable at a time:
+     * placement by {@see testTheSamePlacedTemplateIsRaisableFromInsideTheUnit},
+     * the permission tag by {@see testAnUnplacedTemplatesPermissionTagIsTheOnlyVariable}.
+     *
+     * It is checked with the DESIGNER's policy, not the document one: creating
+     * from a gated template must not be a way to read a gated template.
      */
     public function testATemplateTheCallerCannotSeeCannotBeRaisedFrom(): void
     {
@@ -377,6 +388,50 @@ final class DocumentCreateApiRealEngineTest extends TestCase
             $this->create(self::SECRETARY, ['document_template_id' => $templateId])->getStatusCode(),
             'a caller standing AT the unit does'
         );
+    }
+
+    /**
+     * An UNPLACED template's `required_permission` is the only variable: the
+     * caller who holds it raises, the caller who does not gets a 404.
+     *
+     * `DocumentAccessPolicy` asks two orthogonal questions — WHERE the row is
+     * filed and WHAT KIND OF PERSON may see it — and the tests above vary
+     * placement. This one holds placement fixed at NOTHING (`owner_ou_id` null,
+     * so reach cannot refuse anybody) and varies only the tag, which is the only
+     * arrangement in which a create that ignored `required_permission` entirely
+     * would go red.
+     *
+     * The two callers are chosen so the tag is genuinely all that differs: the
+     * registry officer holds `documents:render` and stands nowhere, the
+     * secretary stands at a unit and does not hold it. Neither authored the
+     * template, so the author-always-reaches-their-own-row shortcut cannot be
+     * what makes either answer come out.
+     */
+    public function testAnUnplacedTemplatesPermissionTagIsTheOnlyVariable(): void
+    {
+        $templateId = $this->templates->create(self::TENANT, [
+            'name' => 'Render-tagged circular',
+            'data' => $this->templateData('Render-tagged circular'),
+            'scope' => 'tenant',
+            'required_permission' => CorePermissions::DOCUMENTS_RENDER,
+            // No placement at all — reach is not the question here.
+            'owner_ou_id' => null,
+            'created_by' => self::RAISER,
+        ]);
+
+        self::assertSame(
+            404,
+            $this->create(self::SECRETARY, ['document_template_id' => $templateId])->getStatusCode(),
+            'a caller who does not hold the tag cannot raise from a tagged template'
+        );
+        self::assertSame(0, $this->countDocuments(), 'and nothing is written for them');
+
+        self::assertSame(
+            201,
+            $this->create(self::REGISTRY_OFFICER, ['document_template_id' => $templateId])->getStatusCode(),
+            'a caller who holds it can — otherwise this passes against a policy that refuses everything'
+        );
+        self::assertSame(1, $this->countDocuments());
     }
 
     /** A template in another tenant is not reachable by id. */
@@ -468,6 +523,11 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         $res = $this->create(self::RAISER, ['document_template_id' => $templateId, 'title' => '   ']);
 
         self::assertSame('Faculty circular', self::data($res)['title']);
+        // Read back, because a response carrying the right title over a row that
+        // stored the literal '   ' is exactly the bug this guards.
+        $row = $this->documents->findById((int) self::data($res)['id'], self::TENANT);
+        self::assertNotNull($row);
+        self::assertSame('Faculty circular', $row['title']);
     }
 
     // ── the render decision ──────────────────────────────────────────────────
@@ -540,6 +600,36 @@ final class DocumentCreateApiRealEngineTest extends TestCase
 
         self::assertSame(503, $res->getStatusCode());
         self::assertSame(0, $this->countDocuments());
+    }
+
+    /**
+     * `render: true` on an instance that CAN render succeeds and stores.
+     *
+     * Without this, the 503 above is the only test in the suite that sends
+     * `render: true` at all — and a handler that answered 503 to every
+     * `render: true`, capable instance or not, would pass it. The default-path
+     * test omits the key entirely, so it exercises "absent → render if you can",
+     * a different branch.
+     */
+    public function testRequiringARenderOnACapableInstanceSucceedsAndStores(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
+        $this->fakeRender->pdfBytes = "%PDF-1.4\nrequired\n%%EOF";
+        $templateId = $this->createTemplate(self::RAISER, 'Faculty circular');
+
+        $res = $this->create(self::RAISER, ['document_template_id' => $templateId, 'render' => true]);
+
+        self::assertSame(201, $res->getStatusCode());
+        self::assertSame(
+            ['attempted' => true, 'stored' => true, 'reason' => null],
+            self::decode($res)['render']
+        );
+        $documentId = (int) self::data($res)['id'];
+        self::assertCount(1, $this->artifacts->listForDocument($documentId, self::TENANT));
+        self::assertSame(
+            "%PDF-1.4\nrequired\n%%EOF",
+            $this->call('content', self::RAISER, ['id' => (string) $documentId])->getBody()
+        );
     }
 
     /** Persistence off is reported as its own reason, not as "disabled". */
@@ -643,6 +733,14 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         $res = $this->create(self::RAISER, ['document_template_id' => (string) $templateId]);
 
         self::assertSame(201, $res->getStatusCode());
+        // A 201 alone would also be returned by a coercion that resolved "5" to
+        // a DIFFERENT visible template, or that wrote no row at all. The row is
+        // the evidence: it names the template the caller actually asked for.
+        self::assertSame(1, $this->countDocuments());
+        $row = $this->documents->findById((int) self::data($res)['id'], self::TENANT);
+        self::assertNotNull($row);
+        self::assertSame($templateId, (int) $row['document_template_id']);
+        self::assertSame('Faculty circular', $row['template_name']);
     }
 
     // ── the created document is a first-class one ────────────────────────────
@@ -791,10 +889,18 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         self::assertCount(count($expected), $actual, $message);
         foreach ($expected as $i => $row) {
             self::assertArrayHasKey($i, $actual, $message);
-            // assertEquals, not assertSame: PHP's `==` on arrays compares
-            // key/value pairs and ignores their order, which is precisely the
-            // comparison this data deserves.
-            self::assertEquals($row, $actual[$i], $message);
+            // Both sides are key-SORTED and then compared with assertSame, which
+            // buys the key-order-insensitivity this data deserves without also
+            // buying loose VALUE comparison. `assertEquals` would give both: PHP
+            // compares two numeric strings numerically, so an expected '1' would
+            // be satisfied by an actual '01' — harmless against today's
+            // non-numeric fixtures and a silent hole the first time a reference
+            // number is bare digits.
+            $actualRow = $actual[$i];
+            self::assertIsArray($actualRow, $message);
+            ksort($row);
+            ksort($actualRow);
+            self::assertSame($row, $actualRow, $message);
         }
     }
 

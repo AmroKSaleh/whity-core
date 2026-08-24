@@ -96,12 +96,24 @@ async function chooseTemplate(name: string) {
   await waitFor(() => expect(screen.queryByRole('option', { name })).not.toBeInTheDocument());
 }
 
-/** The JSON body of the POST the dialog issued. */
+/** Every POST to the create route the dialog issued, in order. */
+function submissions(): RequestInit[] {
+  return mockApiClient.mock.calls
+    .filter(([url, init]) => url === '/api/v1/documents' && (init as RequestInit | undefined)?.method === 'POST')
+    .map(([, init]) => init as RequestInit);
+}
+
+/**
+ * The JSON body of the POST the dialog issued.
+ *
+ * Takes the LAST match, which is why {@see submissions} exists beside it: every
+ * call resolves to the same mocked response, so one POST and five are otherwise
+ * indistinguishable here — and there is no `DELETE /api/documents/{id}`, so a
+ * double submit is an unrecoverable duplicate rather than a tidy-up. At least
+ * one test below therefore asserts the COUNT rather than only the payload.
+ */
 function submitted(): Record<string, unknown> | undefined {
-  const call = [...mockApiClient.mock.calls]
-    .reverse()
-    .find(([url, init]) => url === '/api/v1/documents' && (init as RequestInit | undefined)?.method === 'POST');
-  const body = (call?.[1] as RequestInit | undefined)?.body;
+  const body = submissions().at(-1)?.body;
   return typeof body === 'string' ? (JSON.parse(body) as Record<string, unknown>) : undefined;
 }
 
@@ -134,6 +146,9 @@ describe('what the dialog sends', () => {
     // perfectly good document into a 503 on every install with the render tier
     // off, which is the default.
     expect(body).not.toHaveProperty('render');
+    // Exactly ONE. The submit button is disabled off `busy`, and nothing else in
+    // this file could fail if that guard were removed.
+    expect(submissions()).toHaveLength(1);
   });
 
   it('omits a blank title so the server names the document after its template', async () => {
@@ -255,7 +270,12 @@ describe('after the document exists', () => {
     await userEvent.click(screen.getByRole('button', { name: /create document/i }));
 
     expect(await screen.findByText('Semester circular')).toBeInTheDocument();
-    expect(screen.queryByText(/switched off|could not be reached|without a PDF/i)).not.toBeInTheDocument();
+    // Every sentence renderNote() can return opens with one of these two
+    // phrases (disabled/persist_disabled with the first, unavailable,
+    // storage_unavailable, rejected and the fallback with the second), so this
+    // is the complete set rather than a hand-copied subset that would miss the
+    // "too large to render" case.
+    expect(screen.queryByText(/No PDF was produced|The document was saved/i)).not.toBeInTheDocument();
   });
 
   it('hands off to routing, and only for somebody who may route', async () => {
