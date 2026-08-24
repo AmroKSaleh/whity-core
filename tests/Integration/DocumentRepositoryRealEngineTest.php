@@ -195,7 +195,11 @@ final class DocumentRepositoryRealEngineTest extends TestCase
     {
         $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]);
 
-        self::assertSame([], $this->templates->referencingTemplates($blockId, self::TENANT_A));
+        // assertCount, not assertSame([], …): PHPStan's PHPUnit extension takes an
+        // assertSame against a literal `[]` as narrowing the METHOD's return type
+        // to array{} for the rest of the scope, which then reports the honest
+        // agreement check further down as a comparison that can never be true.
+        self::assertCount(0, $this->templates->referencingTemplates($blockId, self::TENANT_A));
         self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_A));
 
         $this->templates->create(self::TENANT_A, ['name' => 'Invoice', 'data' => $this->treeReferencing($blockId)]);
@@ -209,12 +213,17 @@ final class DocumentRepositoryRealEngineTest extends TestCase
         sort($names);
         self::assertSame(['Invoice', 'Works order'], $names);
 
-        // The two methods agree.
-        self::assertTrue($this->templates->referencesBlock($blockId, self::TENANT_A));
-        self::assertSame($rows !== [], $this->templates->referencesBlock($blockId, self::TENANT_A));
+        // The list and the boolean guard must never disagree — they carry separate
+        // jsonpath/PHP-walk implementations, and a drift shows up as a management
+        // screen saying "nothing uses this" over a delete the server then refuses.
+        self::assertSame(
+            $rows !== [],
+            $this->templates->referencesBlock($blockId, self::TENANT_A),
+            'referencingTemplates() and referencesBlock() answered differently'
+        );
 
         // Tenant-scoped, exactly like the boolean guard.
-        self::assertSame([], $this->templates->referencingTemplates($blockId, self::TENANT_B));
+        self::assertCount(0, $this->templates->referencingTemplates($blockId, self::TENANT_B));
     }
 
     /**
