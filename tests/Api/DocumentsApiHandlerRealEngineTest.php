@@ -368,9 +368,16 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
 
         $doc = self::data($this->call('show', self::OWNER, ['id' => (string) $documentId]));
 
-        self::assertSame("/api/documents/{$documentId}/content", $doc['content_url']);
+        // "Durable" means a client can actually fetch them, so both carry the
+        // '/v1' the router serves these routes at. Both expectations here used
+        // to be unversioned and both passed throughout the entire period the
+        // viewer showed an error box for every document (#1016): asserting the
+        // presenter's output against a second copy of the presenter's own idea
+        // of the path can only ever agree with it. What makes a reference
+        // durable is that it RESOLVES — see Tests\Core\Document\DocumentContentUrlTest.
+        self::assertSame("/api/v1/documents/{$documentId}/content", $doc['content_url']);
         self::assertSame(
-            "/api/documents/{$documentId}/artifacts/{$doc['artifacts'][0]['id']}/content",
+            "/api/v1/documents/{$documentId}/artifacts/{$doc['artifacts'][0]['id']}/content",
             $doc['artifacts'][0]['content_url']
         );
     }

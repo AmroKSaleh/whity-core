@@ -416,8 +416,15 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
         self::assertSame('application/pdf', $artifact['content_type']);
         self::assertSame(hash('sha256', $this->fakeRender->pdfBytes), $artifact['checksum_sha256']);
         self::assertSame(strlen($this->fakeRender->pdfBytes), $artifact['byte_size']);
+        // VERSIONED, because this is a URL a browser fetches and the router
+        // serves these bytes at '/api/v1/...'. This assertion used to expect the
+        // unversioned form and passed for exactly as long as the viewer was
+        // broken (#1016) — it compared the presenter against itself rather than
+        // against the route table, so it could only ever agree with whatever the
+        // presenter happened to emit. Tests\Core\Document\DocumentContentUrlTest
+        // is the one that actually resolves these against the live routes.
         self::assertSame(
-            "/api/documents/{$doc['id']}/artifacts/{$artifact['id']}/content",
+            "/api/v1/documents/{$doc['id']}/artifacts/{$artifact['id']}/content",
             $artifact['content_url']
         );
 

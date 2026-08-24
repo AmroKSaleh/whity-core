@@ -162,6 +162,32 @@ class Router
     }
 
     /**
+     * The client-callable form of an unversioned path.
+     *
+     * The PUBLIC counterpart of {@see versionPrefix()}, for code that EMITS a
+     * URL a browser will fetch rather than registering a route to serve one.
+     *
+     * Route paths are written unversioned throughout this codebase and gain the
+     * prefix at registration, so anything handing a path back to a client has to
+     * apply the same transformation or it emits an address nothing serves. That
+     * is not hypothetical: `content_url` returned '/api/documents/{id}/content'
+     * while the router served '/api/v1/documents/{id}/content', and every
+     * document in the viewer showed an error box instead of its file.
+     *
+     * {@see \Whity\Core\PluginLoader} does this for plugin-declared paths and
+     * {@see \Whity\OpenAPI\CoreApiSchemas} for `x-whity-reference` resources;
+     * both predate this method and still carry their own inlined copy of the
+     * arithmetic. New emitters should call this instead of adding a seventh.
+     *
+     * @param string $path The bare path (e.g. '/api/documents/6/content')
+     * @return string The prefixed path (e.g. '/api/v1/documents/6/content')
+     */
+    public function versionedPath(string $path): string
+    {
+        return $this->versionPrefix !== '' ? $this->versionPrefix($path) : $path;
+    }
+
+    /**
      * Inject the version prefix into a path after its first path segment.
      *
      * The version prefix is inserted after the first slash-delimited segment so
