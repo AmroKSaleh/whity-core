@@ -3070,7 +3070,7 @@ final class CoreApiSchemas
             // should still be able to raise a document from it.
             //
             // `dataRows` is the SAME shape the render routes take, deliberately,
-            // and is what the values are STORED as (migration 116,
+            // and is what the values are STORED as (migration 118,
             // `documents.variable_data`) rather than a second authoring format
             // that would have to be converted before it could be rendered. Keys
             // are the template's own placeholder keys; a key the template does

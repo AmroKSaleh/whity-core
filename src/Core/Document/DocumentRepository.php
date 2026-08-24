@@ -120,7 +120,7 @@ final class DocumentRepository
      * whose origin was retired should still be able to say what it was.
      *
      * `variable_data` is a snapshot for the same reason and a stronger one: it
-     * is the only surviving record of the values a person typed. Migration 116
+     * is the only surviving record of the values a person typed. Migration 118
      * argues the case in full; what matters here is that NULL and `[]` are
      * DIFFERENT and both are writable. NULL means nothing was recorded (every
      * row written before the column existed, and every row a caller raised

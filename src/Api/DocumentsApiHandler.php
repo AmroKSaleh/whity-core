@@ -119,7 +119,7 @@ use Whity\Storage\StorageException;
  *     (refuse to create anything without bytes) would make this route dead on
  *     every fresh install.
  *
- *  3. THE VALUES ARE PERSISTED, on the row, by migration 116. They are the only
+ *  3. THE VALUES ARE PERSISTED, on the row, by migration 118. They are the only
  *     content an unrendered document has, and without them a correction months
  *     later would silently reissue the document with the template's SAMPLE text
  *     where the real reference number was.
@@ -802,7 +802,7 @@ final class DocumentsApiHandler
         $templateData = is_array($template['data']) ? $template['data'] : [];
 
         // THE VALUES THE DOCUMENT WAS RAISED WITH, when the request supplies
-        // none. Before migration 116 there was nothing to fall back to and the
+        // none. Before migration 118 there was nothing to fall back to and the
         // renderer used the template's placeholder SAMPLES instead — so
         // correcting a six-week-old circular from a client that had not kept the
         // original values reissued it reading `Ref: DEMO-0001`, and the

@@ -41,7 +41,7 @@ use Whity\Storage\StorageException;
  *   own a document is to run an optional headless-Chromium service — and the
  *   value of a document in this system is that it has an identity to route,
  *   which needs no PDF. The values it was raised with are recorded on the row
- *   (migration 116), so the document has CONTENT even when it has no rendering,
+ *   (migration 118), so the document has CONTENT even when it has no rendering,
  *   and `POST /api/documents/{id}/render` can mint the artifact later from
  *   exactly those values.
  *
@@ -239,7 +239,7 @@ final class DocumentIssuer
             'origin_ou_id'         => $actorId !== null ? $this->originOuFor($tenantId, $actorId) : null,
             'created_by'           => $actorId,
             // The values a person typed, and the only place they survive when
-            // there is no artifact to bake them into. Migration 116.
+            // there is no artifact to bake them into. Migration 118.
             'variable_data'        => $variableData,
         ]);
     }

@@ -71,7 +71,7 @@ final class DocumentRenderer
 
         // Delegated to VariableData since `POST /api/documents` has to apply the
         // IDENTICAL reading to values it PERSISTS without rendering them
-        // (migration 116). Two normalisers would let a document store values
+        // (migration 118). Two normalisers would let a document store values
         // this renderer would then refuse — a document that cannot be rendered,
         // discovered weeks later with nothing pointing at the two spellings.
         // Idempotent, so a caller that already normalised loses nothing here.

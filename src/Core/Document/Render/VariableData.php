@@ -16,7 +16,7 @@ namespace Whity\Core\Document\Render;
  *   - `POST /api/documents` needs them to PERSIST, before and independently of
  *     any render — `documents.render_enabled` defaults to false, so a document
  *     is routinely created on an instance that will never render it (migration
- *     116 says why that is the supported case rather than a degraded one).
+ *     118 says why that is the supported case rather than a degraded one).
  *
  * These methods were private to {@see DocumentRenderer}. They are here because
  * the create path has to validate and store the same values the renderer would
@@ -125,27 +125,5 @@ final class VariableData
     public static function keysOf(array $templateData): array
     {
         return array_keys(self::samplesOf($templateData));
-    }
-
-    /**
-     * Whether a normalised row set carries any value at all.
-     *
-     * `[]` and `[[]]` both mean "no values", and a template with no
-     * placeholders legitimately produces the second. Distinguishing them
-     * matters exactly once — deciding whether there is anything worth
-     * recording on the document row (migration 116: NULL means "nothing was
-     * recorded", which is not the same claim as "recorded as empty").
-     *
-     * @param list<array<string, string>> $rows
-     */
-    public static function isEmpty(array $rows): bool
-    {
-        foreach ($rows as $row) {
-            if ($row !== []) {
-                return false;
-            }
-        }
-
-        return true;
     }
 }
