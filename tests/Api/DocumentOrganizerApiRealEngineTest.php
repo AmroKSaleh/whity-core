@@ -24,6 +24,7 @@ use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
 use Whity\Core\Document\Routing\RoleRuleResolver;
 use Whity\Core\Document\Routing\RouteAction;
+use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
@@ -203,6 +204,7 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             new RouteStepRepository($this->pdo),
             new RouteEventRepository($this->pdo),
             $recipientRepo,
+            new RouteEdgeRepository($this->pdo),
             $rules,
             $settings,
             null
@@ -279,7 +281,7 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
 
     /**
      * The keystone. The rail offers the folders this installation can actually
-     * compute — which, on a schema built from every migration, is all nine.
+     * compute — which, on a schema built from every migration, is all of them.
      */
     public function testTheRailOffersEveryComputableFolderAndNamesWhatIsMissing(): void
     {
@@ -294,6 +296,8 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
                 CoreDocumentViews::BELOW_MY_UNIT,
                 CoreDocumentViews::AWAITING_ME,
                 CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::APPROVED_BY_ME,
+                CoreDocumentViews::REJECTED_BY_ME,
                 CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
                 CoreDocumentViews::STARRED,
                 CoreDocumentViews::COLLECTION,
@@ -368,11 +372,14 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         // here" gets an answer instead of a shorter list (#951).
         $missing = self::asRows($body['unavailable_substrates']);
         self::assertEqualsCanonicalizing(
-            ['routing.recipients', 'routing.trail'],
+            ['routing.recipients', 'routing.trail', 'routing.verdict'],
             array_map(static fn (array $s): string => (string) $s['key'], $missing)
         );
+        // Each names the migration that supplies it, and they do not all name
+        // the same one — #1014's verdict arrived in 118, and an operator sent to
+        // run 112 for it would run a migration they already have.
         foreach ($missing as $substrate) {
-            self::assertStringContainsString('migration 112', (string) $substrate['provenance']);
+            self::assertMatchesRegularExpression('/migration 11[29]/', (string) $substrate['provenance']);
         }
 
         // And requesting one is a 404: from outside, it does not exist.
@@ -380,6 +387,8 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             [
                 CoreDocumentViews::AWAITING_ME,
                 CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::APPROVED_BY_ME,
+                CoreDocumentViews::REJECTED_BY_ME,
                 CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
             ] as $key
         ) {

@@ -79,6 +79,31 @@ use Whity\Sdk\Routing\RoutingRuleContext;
  * out rather than being written twice: a security boundary with two copies has
  * one copy nobody is watching.
  *
+ * APPROVAL IS A DISTINCT ACT (#1014)
+ * ----------------------------------
+ * A step may be a GATE. On one, the only answer is `acknowledged` carrying a
+ * VERDICT ({@see RouteVerdict}), and where the document goes next is derived
+ * here — from the verdict, the step's edges and the QUORUM — rather than chosen
+ * by the person answering. Three things are worth stating against the code:
+ *
+ *  a. THE VERDICT IS A SECOND COLUMN, NOT TWO MORE VERBS. Migration 119 carries
+ *     the full argument; the short form is that under a quorum the same verdict
+ *     has different routing effects, so it cannot be a member of a vocabulary
+ *     whose defining property is that the verb determines the effect.
+ *
+ *  b. REJECTION DOES NOT INHERIT APPROVAL'S DESTINATION. {@see nextForVerdict()}
+ *     is the whole of #1014: an approval with no edge continues to the next
+ *     ordinal, a rejection with no edge goes NOWHERE, and no code path anywhere
+ *     lets a rejection fall through to the step an approval would have opened.
+ *
+ *  c. THE QUORUM IS A BARRIER, AND IT IS THE ONLY ONE. Migration 112 refuses
+ *     step-level completion state and argues at length against barriers, which is
+ *     right for CIRCULATION and is exactly what SIGN-OFF is. The reconciliation
+ *     is that nothing is stored: {@see decide()} counts the cohort out of the
+ *     append-only trail and the recipient rows at the moment of each act, so
+ *     there is still no counter, no `steps.completed_at` and no aggregate any
+ *     chain could be held by. Two chains reaching one step decide separately.
+ *
  * CEILINGS ARE SETTINGS, AND EXCEEDING ONE IS A REFUSAL
  * ----------------------------------------------------
  * `documents.routing_max_steps` and `documents.routing_max_recipients_per_step`
@@ -95,6 +120,7 @@ final class DocumentRouter
         private readonly RouteStepRepository $steps,
         private readonly RouteEventRepository $events,
         private readonly RouteRecipientRepository $recipients,
+        private readonly RouteEdgeRepository $edges,
         private readonly RoutingRuleRegistry $rules,
         private readonly SettingsService $settings,
         private readonly ?HookManager $hooks = null,
@@ -116,10 +142,14 @@ final class DocumentRouter
      *
      * @param array<string, mixed>       $document A normalized `documents` row.
      * @param list<array<string, mixed>> $steps    Declared steps in order:
-     *        `rule_kind`, optional `rule_config`, optional `label`.
+     *        `rule_kind`, optional `rule_config`, optional `label`, and #1014's
+     *        optional `decision` / `decision_quorum` / `on_approved` /
+     *        `on_rejected`. The last two name a target by its 1-BASED POSITION in
+     *        this list, because ids do not exist until the steps are written and
+     *        a position is the only handle an author has while composing.
      *
      * @return array{route: array<string, mixed>, steps: list<array<string, mixed>>,
-     *               resolved: int, delivered: int}
+     *               edges: list<array<string, mixed>>, resolved: int, delivered: int}
      *
      * @throws RoutingRejectedException When the request is not acceptable (422).
      */
@@ -152,7 +182,25 @@ final class DocumentRouter
                     $step['rule_kind'],
                     $step['rule_config'],
                     $step['label'],
+                    $step['decision'],
+                    $step['decision_quorum'],
                 );
+            }
+
+            // EDGES AFTER STEPS, because an edge names two step ids and neither
+            // exists until its step is written. The author declared them by
+            // POSITION — the only handle they have while composing, since ids are
+            // minted here — and this is the one place the two spellings are
+            // translated. {@see validateSteps()} has already checked every target
+            // is in range, so an out-of-range index cannot reach this loop.
+            foreach ($declared as $i => $step) {
+                foreach (RouteVerdict::all() as $verdict) {
+                    $target = $step['edges'][$verdict] ?? null;
+                    if ($target === null) {
+                        continue;
+                    }
+                    $this->edges->create($tenantId, $routeId, $stepIds[$i], $stepIds[$target - 1], $verdict);
+                }
             }
 
             // RESOLVE FIRST, then append, then open the rows. Three steps in
@@ -181,6 +229,9 @@ final class DocumentRouter
                 'from_ou_id' => $actorOuId,
                 'to_ou_id' => $plan['destinationOuId'],
                 'note' => null,
+                // An `issued` is the engine's own act, not a person's answer, so
+                // it never carries one.
+                'verdict' => null,
             ]);
 
             $outcome = $this->openInboxRows(
@@ -195,6 +246,7 @@ final class DocumentRouter
 
             $route = $this->routes->findById($routeId, $tenantId);
             $written = $this->steps->listForRoute($routeId, $tenantId);
+            $writtenEdges = $this->edges->listForRoute($routeId, $tenantId);
 
             if ($ownTransaction) {
                 $this->db->commit();
@@ -224,6 +276,10 @@ final class DocumentRouter
         return [
             'route' => $route,
             'steps' => $written,
+            // Read back rather than echoed from the request, so the caller sees
+            // the edges as IDS - which is how they will read on every subsequent
+            // GET, and how an editor addresses them.
+            'edges' => $writtenEdges,
             // Both counts, deliberately. `resolved` is what the rule answered;
             // `delivered` is how many rows that became after de-duplication
             // against chains that already reached those people. Reporting only
@@ -244,19 +300,40 @@ final class DocumentRouter
      * because being a recipient IS the authorization (migration 113): the route
      * named a rule, the rule resolved to them, and the engine wrote the row.
      *
-     * @param array<string, mixed> $route A normalized `document_routes` row.
+     * A DECISION STEP (#1014) narrows what is available here, and the narrowing
+     * is the feature. See {@see assertActMatchesStep()}: on a gate the only
+     * answer is `acknowledged` CARRYING A VERDICT, `forwarded` is refused
+     * outright, and where the document goes next is derived from the verdict, the
+     * step's edges and the quorum rather than chosen by the person answering.
      *
-     * @return array{event: array<string, mixed>, resolved: int, delivered: int}
+     * @param array<string, mixed> $route   A normalized `document_routes` row.
+     * @param string|null          $verdict `approved` / `rejected` on a decision
+     *        step, null everywhere else. {@see RouteVerdict}.
+     *
+     * @return array{event: array<string, mixed>, resolved: int, delivered: int, decided: ?string}
      *
      * @throws RoutingRejectedException When the act is not available to this
      *         caller on this route (422).
      */
-    public function act(int $tenantId, int $actorId, array $route, string $action, ?string $note): array
-    {
+    public function act(
+        int $tenantId,
+        int $actorId,
+        array $route,
+        string $action,
+        ?string $note,
+        ?string $verdict = null,
+    ): array {
         $routeId = (int) $route['id'];
         $documentId = (int) $route['document_id'];
 
         if ($action === RouteAction::NOTED) {
+            if ($verdict !== null) {
+                throw RoutingRejectedException::because(
+                    'A note carries no verdict. A remark on the trail decides nothing and moves nothing - '
+                    . 'answer the step itself to approve or reject it.'
+                );
+            }
+
             return $this->appendNote($tenantId, $actorId, $routeId, $documentId, $note);
         }
 
@@ -283,8 +360,14 @@ final class DocumentRouter
             throw new \RuntimeException('Recipient row names a step that could not be read.');
         }
 
+        $this->assertActMatchesStep($step, $action, $verdict);
+
         $next = null;
         $returnTo = null;
+        // The verdict that RESOLVED this step's cohort, if this act resolved it.
+        // Distinct from `$verdict`, which is only what THIS person said: under a
+        // quorum of `all` the first two of three approvals decide nothing.
+        $decided = null;
 
         if ($action === RouteAction::FORWARDED) {
             $next = $this->steps->findNext($routeId, $tenantId, (int) $step['position']);
@@ -293,6 +376,19 @@ final class DocumentRouter
                     'This is the last step of the route, so there is nothing to forward to. '
                     . 'Acknowledge it instead.'
                 );
+            }
+        }
+
+        if ($verdict !== null) {
+            // Counted BEFORE anything is written, with this person's answer
+            // overlaid arithmetically onto their still-open row. That keeps the
+            // whole computation a pure read, which is what lets the event be
+            // appended already carrying its destination - the property that makes
+            // the trail need no update path (see issue()).
+            $decided = $this->decide($tenantId, $step, $recipient, $verdict);
+
+            if ($decided !== null) {
+                $next = $this->nextForVerdict($tenantId, $routeId, $step, $decided);
             }
         }
 
@@ -353,9 +449,29 @@ final class DocumentRouter
                 // or null when they span more than one.
                 'to_ou_id' => $returnTo !== null ? $returnTo['ou_id'] : $plan['destinationOuId'],
                 'note' => $note,
+                // What this person DECIDED, which is not the same fact as what
+                // the engine then did about it. Null on every act that decided
+                // nothing. {@see RouteVerdict}.
+                'verdict' => $verdict,
             ]);
 
             $this->recipients->close($tenantId, (int) $recipient['id'], $eventId);
+
+            if ($decided !== null) {
+                // The step is settled, so the people still holding it are being
+                // asked a question that now has an answer. Closing their rows
+                // here is what stops a second approval firing the same edge and
+                // opening the next step twice - and it takes finished work out of
+                // an inbox that would otherwise never empty. They appear nowhere
+                // in the trail as actors, because they did not act.
+                $this->recipients->closeOutstandingCohort(
+                    $tenantId,
+                    $routeId,
+                    (int) $step['id'],
+                    (int) $recipient['created_by_event_id'],
+                    $eventId,
+                );
+            }
 
             $outcome = ['resolved' => 0, 'delivered' => 0];
 
@@ -411,12 +527,309 @@ final class DocumentRouter
             'actor_profile_id' => $actorId,
             'step_id' => (int) $step['id'],
             'delivered' => $outcome['delivered'],
+            // Both, because they answer different questions and a listener has to
+            // tell them apart: `verdict` is what this person said, `decided` is
+            // what the STEP concluded - null while a quorum is still short. A
+            // notifier watching only the first would announce a decision on the
+            // first of three required approvals.
+            'verdict' => $verdict,
+            'decided' => $decided,
         ]);
 
-        return ['event' => $event, 'resolved' => $outcome['resolved'], 'delivered' => $outcome['delivered']];
+        return [
+            'event' => $event,
+            'resolved' => $outcome['resolved'],
+            'delivered' => $outcome['delivered'],
+            'decided' => $decided,
+        ];
     }
 
     // -- internals ----------------------------------------------------------
+
+    /**
+     * Refuse an act that does not match the KIND of step it is being made on
+     * (#1014).
+     *
+     * Every refusal here is loud, and each one exists because the silent version
+     * is worse:
+     *
+     *  - `forwarded` ON A DECISION STEP is refused because `forwarded` means the
+     *    ACTOR chose where the document goes, which is the one thing a gate
+     *    exists to take away from them. Allowing it would give every approver a
+     *    one-click path past the verdict, and the route would look like it had
+     *    been approved because the document plainly moved on.
+     *
+     *  - A VERDICT ON A CIRCULATION STEP is refused rather than ignored. A stored
+     *    verdict nothing routes on is a stored intention that silently does
+     *    nothing, which is the failure class this whole subsystem is written
+     *    against — somebody would read the trail later and conclude a document
+     *    had been authorised.
+     *
+     *  - A DECISION STEP ANSWERED WITHOUT A VERDICT is refused because an
+     *    approval step that can be closed by "I saw it" is not an approval step.
+     *
+     * `returned` stays available on a gate, and carries no verdict. It is the
+     * escape — "I am not the person to decide this, take it back" — and it
+     * already has a destination of its own (the predecessor's own row), so a
+     * verdict on top would give one act two destinations. It also takes the row
+     * OUT of the cohort rather than counting against it; see {@see decide()}.
+     *
+     * @param array<string, mixed> $step
+     *
+     * @throws RoutingRejectedException
+     */
+    private function assertActMatchesStep(array $step, string $action, ?string $verdict): void
+    {
+        $position = (int) $step['position'];
+        $isDecision = ($step['decision'] ?? false) === true;
+
+        if ($verdict !== null && !RouteVerdict::isValid($verdict)) {
+            throw RoutingRejectedException::because(sprintf(
+                "'%s' is not a verdict; expected one of: %s.",
+                $verdict,
+                implode(', ', RouteVerdict::all()),
+            ));
+        }
+
+        if ($verdict !== null && $action !== RouteVerdict::carriedBy()) {
+            throw RoutingRejectedException::because(sprintf(
+                "A verdict is given by acknowledging the step, not by '%s'. Post action '%s' with your "
+                . 'verdict instead.',
+                $action,
+                RouteVerdict::carriedBy(),
+            ));
+        }
+
+        if (!$isDecision) {
+            if ($verdict !== null) {
+                throw RoutingRejectedException::because(sprintf(
+                    'Step %d is a circulation step, so it takes no verdict — nothing in the route would '
+                    . 'act on one, and a recorded approval that changed nothing would read later as an '
+                    . 'authorisation that was never asked for.',
+                    $position,
+                ));
+            }
+
+            return;
+        }
+
+        if ($action === RouteAction::FORWARDED) {
+            throw RoutingRejectedException::because(sprintf(
+                'Step %d is a decision step: it is answered with %s plus a verdict, and where the document '
+                . 'goes next follows from that verdict. Forwarding would let you choose the destination the '
+                . 'step exists to decide.',
+                $position,
+                RouteVerdict::carriedBy(),
+            ));
+        }
+
+        if ($action === RouteVerdict::carriedBy() && $verdict === null) {
+            throw RoutingRejectedException::because(sprintf(
+                'Step %d is a decision step, so answering it needs a verdict: one of %s.',
+                $position,
+                implode(', ', RouteVerdict::all()),
+            ));
+        }
+    }
+
+    /**
+     * Has this act settled the step, and with which verdict?
+     *
+     * Returns the verdict the STEP concluded with, or null while the answer is
+     * still open — which is not the same as the verdict the caller just gave.
+     * Under a quorum of `all`, the first two of three approvals conclude nothing.
+     *
+     * A PURE READ, WITH THE PENDING ANSWER OVERLAID ARITHMETICALLY. Nothing is
+     * written before this runs, so the trail event can be appended already
+     * carrying its destination — the property that lets the trail have no update
+     * path at all (see {@see issue()}).
+     *
+     * WHAT IS COUNTED
+     * ---------------
+     * The COHORT: the rows one act opened at this step, identified by
+     * `created_by_event_id` ({@see RouteRecipientRepository::listCohort()}).
+     * Chains stay independent — two chains reaching the same step each decide for
+     * themselves — so migration 112's "distribution fans out, it does not block"
+     * survives a feature that is, by its nature, a barrier.
+     *
+     * Three groups make up the denominator, and one group does not:
+     *
+     *   approvals   rows closed by an `approved` verdict, plus this act if it is one
+     *   rejections  rows closed by a `rejected` verdict, plus this act if it is one
+     *   still able   rows still OPEN whose holder is still an active member
+     *   ─ excluded ─ rows closed WITHOUT a verdict — a `returned`. That person
+     *                left the step rather than deciding at it, and the document
+     *                has already gone back to their predecessor; counting them
+     *                against a unanimity would make one person's "not mine to
+     *                decide" a permanent veto.
+     *
+     * WHY DEPARTURES SHRINK THE DENOMINATOR AND ARRIVALS DO NOT
+     * ---------------------------------------------------------
+     * A user group (#999/#1003) resolves LIVE and deliberately stores no
+     * membership list, so the set a rule answers with can change between the
+     * moment a step was reached and the moment it is decided. This counts the
+     * ROWS, which freezes the set at the instant the question was put — so an
+     * instructor hired afterwards was never asked, holds no item, and cannot
+     * silently raise the bar on a decision already under way.
+     *
+     * The one live input is the other direction. An open row whose holder is no
+     * longer an active member is dropped from the count by
+     * {@see ActiveMemberFilter}, which is the single definition of that predicate
+     * in the codebase rather than a second copy of it here. Without that, `all`
+     * plus one suspended account is a route stuck for ever with no remedy an
+     * operator could apply — migration 112's barrier hazard arriving by the back
+     * door. A departure never counts as an approval: their row is closed as
+     * undecided, and the trail records only the approvals actually given.
+     *
+     * @param array<string, mixed> $step
+     * @param array<string, mixed> $recipient The acting person's own open row.
+     *
+     * @return string|null The verdict the step concluded with, or null.
+     */
+    private function decide(int $tenantId, array $step, array $recipient, string $verdict): ?string
+    {
+        $rows = $this->recipients->listCohort(
+            $tenantId,
+            (int) $recipient['route_id'],
+            (int) $step['id'],
+            (int) $recipient['created_by_event_id'],
+        );
+
+        $approvals = 0;
+        $rejections = 0;
+        /** @var list<ResolvedRecipient> $stillOpen */
+        $stillOpen = [];
+
+        foreach ($rows as $row) {
+            if ((int) $row['id'] === (int) $recipient['id']) {
+                // This act, not yet written. Overlaid here rather than after the
+                // insert so the whole computation stays a read.
+                if ($verdict === RouteVerdict::APPROVED) {
+                    $approvals++;
+                } else {
+                    $rejections++;
+                }
+                continue;
+            }
+
+            if ($row['closed_by_event_id'] === null) {
+                $stillOpen[] = new ResolvedRecipient((int) $row['profile_id'], $row['ou_id']);
+                continue;
+            }
+
+            if ($row['closing_verdict'] === RouteVerdict::APPROVED) {
+                $approvals++;
+                continue;
+            }
+
+            if ($row['closing_verdict'] === RouteVerdict::REJECTED) {
+                $rejections++;
+            }
+
+            // Closed with no verdict: a `returned`. Out of the cohort entirely.
+        }
+
+        $stillAble = count(ActiveMemberFilter::apply($this->db, $tenantId, $stillOpen));
+        $cohortSize = $approvals + $rejections + $stillAble;
+        $quorum = $this->approvalQuorum($tenantId, $step);
+
+        if (RouteQuorum::approvalCarried($quorum, $approvals, $stillAble, $cohortSize)) {
+            return RouteVerdict::APPROVED;
+        }
+
+        if (RouteQuorum::approvalImpossible($quorum, $approvals, $stillAble, $cohortSize)) {
+            return RouteVerdict::REJECTED;
+        }
+
+        return null;
+    }
+
+    /**
+     * Where a settled verdict sends the document — and this is the method #1014
+     * exists for.
+     *
+     * The two verdicts are deliberately NOT symmetric when the author drew no
+     * edge:
+     *
+     *   APPROVED with no edge -> the next authoring ordinal. #1014's own words
+     *       are "the route continues to the next step", and it is what makes a
+     *       gate usable in an ordinary linear route: mark a step as a decision
+     *       and it becomes an approval, with no graph to author.
+     *
+     *   REJECTED with no edge -> NOWHERE. The chain ends, the act is recorded,
+     *       and nothing further opens.
+     *
+     * The fallback a rejection must NEVER get is the ordinal successor. That is
+     * precisely the failure #1014 is written against: "a rejection that merely
+     * records dissent and lets the document proceed is not approval". It is also
+     * the failure that is invisible — the trail says `rejected`, the document
+     * moves on exactly as an approved one would, and every screen looks correct.
+     * {@see \Tests\Core\Document\Routing\DocumentRouterVerdictRealEngineTest}
+     * asserts it directly rather than trusting this comment.
+     *
+     * @param array<string, mixed> $step
+     * @return array<string, mixed>|null
+     */
+    private function nextForVerdict(int $tenantId, int $routeId, array $step, string $decided): ?array
+    {
+        $edge = $this->edges->findTarget($tenantId, (int) $step['id'], $decided);
+
+        if ($edge !== null) {
+            $target = $this->steps->findById((int) $edge['to_step_id'], $tenantId);
+            if ($target === null) {
+                // Both rows are written in one transaction and the FK cascades
+                // together, so this is unreachable short of the row vanishing
+                // between two reads.
+                throw new \RuntimeException('A route edge names a step that could not be read.');
+            }
+
+            return $target;
+        }
+
+        if ($decided === RouteVerdict::REJECTED) {
+            return null;
+        }
+
+        return $this->steps->findNext($routeId, $tenantId, (int) $step['position']);
+    }
+
+    /**
+     * The quorum in force for a step: step override, then per-tenant, then
+     * global, then the registry default.
+     *
+     * Four layers rather than the usual three, and the extra one is on TOP: a
+     * step may name its own rule, and a step that names none defers to the
+     * ordinary settings chain. That is what lets a deployment which never
+     * configures anything work from the registry default, and a tenant that
+     * changes its mind change every step at once without a single row being
+     * rewritten.
+     *
+     * A stored value outside the vocabulary falls back rather than being obeyed,
+     * and it falls back TOWARDS THE STRICTEST rule. The value has already passed
+     * a CHECK constraint and a settings validator to get here, so a foreign
+     * string means something upstream is broken — and the safe reading of a
+     * broken approval rule is never the most permissive one. See
+     * {@see RouteQuorum} for why the default is `all`.
+     *
+     * @param array<string, mixed> $step
+     */
+    private function approvalQuorum(int $tenantId, array $step): string
+    {
+        $onStep = $step['decision_quorum'] ?? null;
+        if (is_string($onStep) && RouteQuorum::isValid($onStep)) {
+            return $onStep;
+        }
+
+        $effective = $this->settings->effective($tenantId);
+        $configured = $effective[SettingsRegistry::DOCUMENTS_ROUTING_APPROVAL_QUORUM] ?? null;
+        if (is_string($configured) && RouteQuorum::isValid($configured)) {
+            return $configured;
+        }
+
+        $default = SettingsRegistry::defaults()[SettingsRegistry::DOCUMENTS_ROUTING_APPROVAL_QUORUM] ?? null;
+
+        return is_string($default) && RouteQuorum::isValid($default) ? $default : RouteQuorum::ALL;
+    }
 
     /**
      * Append a `noted` event. Closes nothing, opens nothing.
@@ -426,7 +839,7 @@ final class DocumentRouter
      * beside it. Both rows survive, which is more useful as well as safer —
      * "this was corrected on the 14th" is itself a fact somebody may need.
      *
-     * @return array{event: array<string, mixed>, resolved: int, delivered: int}
+     * @return array{event: array<string, mixed>, resolved: int, delivered: int, decided: null}
      */
     private function appendNote(
         int $tenantId,
@@ -457,6 +870,7 @@ final class DocumentRouter
             'from_ou_id' => $fromOuId,
             'to_ou_id' => null,
             'note' => $note,
+            'verdict' => null,
         ]);
 
         $event = $this->events->findById($eventId, $tenantId);
@@ -472,7 +886,7 @@ final class DocumentRouter
             'delivered' => 0,
         ]);
 
-        return ['event' => $event, 'resolved' => 0, 'delivered' => 0];
+        return ['event' => $event, 'resolved' => 0, 'delivered' => 0, 'decided' => null];
     }
 
     /**
@@ -661,8 +1075,14 @@ final class DocumentRouter
      * verbatim — see {@see RoutingRejectedException} for why that text needs a
      * field of its own rather than travelling as a throwable message.
      *
+     * #1014 adds three more things a step may declare, and each one is REFUSED
+     * rather than ignored when it cannot mean anything — see the checks below.
+     * An ignored declaration is a stored intention that silently does nothing,
+     * which is the failure this whole subsystem is written against.
+     *
      * @param list<array<string, mixed>> $steps
-     * @return list<array{rule_kind: string, rule_config: array<string, mixed>, label: ?string}>
+     * @return list<array{rule_kind: string, rule_config: array<string, mixed>, label: ?string,
+     *                    decision: bool, decision_quorum: ?string, edges: array<string, int>}>
      */
     private function validateSteps(int $tenantId, array $steps): array
     {
@@ -726,11 +1146,83 @@ final class DocumentRouter
                 throw RoutingRejectedException::because("Step {$position}: 'label' must be a string when present.");
             }
 
+            $decision = $step['decision'] ?? false;
+            if (!is_bool($decision)) {
+                throw RoutingRejectedException::because(
+                    "Step {$position}: 'decision' must be true or false when present."
+                );
+            }
+
+            $quorum = $step['decision_quorum'] ?? null;
+            if ($quorum !== null) {
+                if (!is_string($quorum) || !RouteQuorum::isValid($quorum)) {
+                    throw RoutingRejectedException::because(sprintf(
+                        "Step %d: 'decision_quorum' must be one of: %s.",
+                        $position,
+                        implode(', ', RouteQuorum::all()),
+                    ));
+                }
+                if (!$decision) {
+                    // Refused, not ignored. A quorum on a step that demands no
+                    // verdict is a number nothing ever reads, and the author
+                    // believes they have configured an approval.
+                    throw RoutingRejectedException::because(
+                        "Step {$position}: 'decision_quorum' only means something on a decision step. "
+                        . "Set 'decision' to true, or drop the quorum."
+                    );
+                }
+            }
+
+            $edges = [];
+            foreach (RouteVerdict::all() as $verdict) {
+                $key = 'on_' . $verdict;
+                $target = $step[$key] ?? null;
+                if ($target === null) {
+                    continue;
+                }
+                if (!$decision) {
+                    throw RoutingRejectedException::because(
+                        "Step {$position}: '{$key}' only means something on a decision step, because nothing "
+                        . 'else can produce a verdict to follow it. Set \'decision\' to true, or drop the edge.'
+                    );
+                }
+                if (!is_int($target)) {
+                    throw RoutingRejectedException::because(
+                        "Step {$position}: '{$key}' must be the 1-based position of another step in this route."
+                    );
+                }
+                if ($target < 1 || $target > count($steps)) {
+                    throw RoutingRejectedException::because(sprintf(
+                        "Step %d: '%s' points at position %d, which this route does not have "
+                        . '(it declares %d steps).',
+                        $position,
+                        $key,
+                        $target,
+                        count($steps),
+                    ));
+                }
+                if ($target === $position) {
+                    // A self-edge is the one graph shape with no reading at all:
+                    // the step would re-open itself for the people who just
+                    // decided it, for ever, with no act able to leave it. Edges
+                    // pointing BACKWARDS are legal and intended — 'rejected goes
+                    // back to the author for correction' is the main reason this
+                    // table exists.
+                    throw RoutingRejectedException::because(
+                        "Step {$position}: '{$key}' cannot point at the step itself."
+                    );
+                }
+                $edges[$verdict] = $target;
+            }
+
             /** @var array<string, mixed> $config */
             $out[] = [
                 'rule_kind' => $kind,
                 'rule_config' => $config,
                 'label' => is_string($label) && trim($label) !== '' ? trim($label) : null,
+                'decision' => $decision,
+                'decision_quorum' => is_string($quorum) ? $quorum : null,
+                'edges' => $edges,
             ];
         }
 

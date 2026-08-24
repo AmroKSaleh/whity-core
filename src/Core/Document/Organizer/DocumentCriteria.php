@@ -82,6 +82,20 @@ final class DocumentCriteria
      *                                          inverse — a document may be both awaiting you and
      *                                          already acted on by you, because a return puts back
      *                                          in your inbox something you once forwarded.
+     * @param int|null       $verdictByProfileId View filter: documents whose trail records this
+     *                                          profile as having reached a VERDICT (#1014). Paired
+     *                                          with {@see $verdict}; both or neither.
+     * @param string|null    $verdict           Which verdict the slot above is asking about —
+     *                                          `approved` or `rejected`.
+     *
+     *                                          TWO SLOTS RATHER THAN TWO BOOLEANS, so that the
+     *                                          predicate is one indexed EXISTS either way and a
+     *                                          third verdict (should one ever exist) needs no new
+     *                                          field. And deliberately NOT a narrowing of
+     *                                          {@see $actedOnByProfileId}: "acted on by me" keeps
+     *                                          meaning every act, notes included, because a folder
+     *                                          of "things you did, except the kind we decided did
+     *                                          not count" is a folder people stop trusting.
      * @param list<int>|null $routedThroughOuIds View filter: documents whose trail records an event
      *                                          leaving OR arriving at one of these units. Null means
      *                                          no constraint; an EMPTY list means nothing matches,
@@ -107,6 +121,8 @@ final class DocumentCriteria
         public readonly ?int $inCollectionId = null,
         public readonly ?int $awaitingProfileId = null,
         public readonly ?int $actedOnByProfileId = null,
+        public readonly ?int $verdictByProfileId = null,
+        public readonly ?string $verdict = null,
         public readonly ?array $routedThroughOuIds = null,
         public readonly ?string $search = null,
         public readonly bool $matchesNothing = false,
@@ -149,6 +165,8 @@ final class DocumentCriteria
             inCollectionId: $this->inCollectionId,
             awaitingProfileId: $this->awaitingProfileId,
             actedOnByProfileId: $this->actedOnByProfileId,
+            verdictByProfileId: $this->verdictByProfileId,
+            verdict: $this->verdict,
             routedThroughOuIds: $this->routedThroughOuIds,
             search: $search,
             matchesNothing: $this->matchesNothing,

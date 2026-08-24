@@ -92,6 +92,7 @@ final class DocumentRoutingInboxSource implements InboxSourceInterface
     private static function toItem(array $row): InboxItem
     {
         $arrivedBy = (string) ($row['arrived_by'] ?? RouteAction::ISSUED);
+        $decision = ($row['step_decision'] ?? false) === true;
 
         return new InboxItem(
             // A string, because the aggregate will eventually mix sources whose
@@ -105,7 +106,7 @@ final class DocumentRoutingInboxSource implements InboxSourceInterface
             // which one.
             subtitle: (string) $row['document_template_name'],
             timestamp: (string) $row['created_at'],
-            status: self::statusFor($arrivedBy, $row['closed_by_event_id'] !== null),
+            status: self::statusFor($arrivedBy, $row['closed_by_event_id'] !== null, $decision),
             resourceType: ResourceTypeRegistry::TYPE_DOCUMENT,
             resourceId: (string) $row['document_id'],
             meta: [
@@ -121,6 +122,13 @@ final class DocumentRoutingInboxSource implements InboxSourceInterface
                 'arrived_by' => $arrivedBy,
                 'arrived_from_profile_id' => $row['arrived_from'] ?? null,
                 'ou_id' => $row['ou_id'] ?? null,
+                // #1014: whether this item is a DECISION. A client needs it
+                // before it renders anything, because the acts available differ —
+                // a gate takes a verdict and refuses a forward. Without it the
+                // inbox offers the wrong buttons and the person discovers the
+                // difference from a 422 after clicking, which is the worst place
+                // to learn what kind of thing you are holding.
+                'decision' => $decision,
             ],
         );
     }
@@ -132,11 +140,22 @@ final class DocumentRoutingInboxSource implements InboxSourceInterface
      * have acted, "forwarded to you" is no longer the useful fact. The words are
      * chosen from the reader's side — the trail's verb is what HAPPENED, and this
      * is what happened TO THEM.
+     *
+     * A DECISION ITEM SAYS SO (#1014), and says it in place of how it arrived
+     * rather than beside it. "Forwarded to you" and "awaiting your approval"
+     * compete for the same one line, and only the second changes what the person
+     * has to do — an approval that reads identically to a circulation is one
+     * people clear at the same speed as a circulation, which is the entire
+     * failure a sign-off step exists to prevent.
      */
-    private static function statusFor(string $arrivedBy, bool $closed): string
+    private static function statusFor(string $arrivedBy, bool $closed, bool $decision): string
     {
         if ($closed) {
             return 'Done';
+        }
+
+        if ($decision) {
+            return 'Awaiting your decision';
         }
 
         return match ($arrivedBy) {

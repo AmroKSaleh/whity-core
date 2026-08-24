@@ -391,6 +391,24 @@ final class DocumentRepository
             $bindings[':acted_on_by'] = $criteria->actedOnByProfileId;
         }
 
+        // "Approved by me" / "rejected by me" — #1014's two verdict folders.
+        //
+        // BOTH slots or neither. A verdict with no profile would ask "was this
+        // ever approved by anybody", which is a different folder nobody asked
+        // for, and a profile with no verdict is already "acted on by me".
+        // Requiring the pair here rather than trusting the views means a caller
+        // that sets one by mistake gets no filter narrowing rather than a
+        // half-applied one that silently widens to the whole tenant.
+        if ($criteria->verdictByProfileId !== null && $criteria->verdict !== null) {
+            $sql .= ' AND EXISTS (SELECT 1 FROM document_route_events ve
+                                   WHERE ve.tenant_id = :tenant_id
+                                     AND ve.document_id = documents.id
+                                     AND ve.actor_profile_id = :verdict_by
+                                     AND ve.verdict = :verdict)';
+            $bindings[':verdict_by'] = $criteria->verdictByProfileId;
+            $bindings[':verdict'] = $criteria->verdict;
+        }
+
         // "Passed through my unit" — the trail, keyed on either end of a
         // transition. The unit set is the anchor's SUBTREE, resolved by the view
         // before it reaches here; this fragment only knows it was given units.

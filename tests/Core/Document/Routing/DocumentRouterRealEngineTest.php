@@ -13,6 +13,7 @@ use Whity\Core\Group\GroupResolver;
 use Whity\Core\Group\GroupRuleResolver;
 use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Document\Routing\RouteAction;
+use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
@@ -99,6 +100,7 @@ final class DocumentRouterRealEngineTest extends TestCase
     private RouteStepRepository $steps;
     private RouteEventRepository $events;
     private RouteRecipientRepository $recipients;
+    private RouteEdgeRepository $edges;
     private RoutingRuleRegistry $rules;
     private SettingsService $settings;
 
@@ -109,6 +111,7 @@ final class DocumentRouterRealEngineTest extends TestCase
         $this->steps = new RouteStepRepository($this->pdo);
         $this->events = new RouteEventRepository($this->pdo);
         $this->recipients = new RouteRecipientRepository($this->pdo);
+        $this->edges = new RouteEdgeRepository($this->pdo);
         $this->settings = new SettingsService(
             new GlobalSettingsRepository($this->pdo),
             new TenantSettingsRepository($this->pdo)
@@ -135,6 +138,7 @@ final class DocumentRouterRealEngineTest extends TestCase
             $this->steps,
             $this->events,
             $this->recipients,
+            $this->edges,
             $this->rules,
             $this->settings,
             // No HookManager: the spine emission is a side effect asserted
@@ -766,6 +770,7 @@ final class DocumentRouterRealEngineTest extends TestCase
             $this->steps,
             $this->events,
             $this->recipients,
+            $this->edges,
             $this->rules,
             $this->settings,
             $hooks

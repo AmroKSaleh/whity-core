@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Settings;
 
 use DateTimeZone;
+use Whity\Core\Document\Routing\RouteQuorum;
 use Whity\Core\Identity\InvitationService;
 
 /**
@@ -248,6 +249,30 @@ final class SettingsRegistry
     // three-person approvals want genuinely different numbers.
     public const DOCUMENTS_ROUTING_MAX_STEPS = 'documents.routing_max_steps';
     public const DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP = 'documents.routing_max_recipients_per_step';
+
+    // What "this node approved" MEANS when the node resolves to a thousand
+    // people (#1014). A route step names a RULE, never a person, so an approval
+    // step can fan out — and the rule for how many of them have to say yes is
+    // the single most consequential value in the feature, because getting it
+    // wrong is INVISIBLE: a document approved by one instructor out of a
+    // thousand looks in every screen and in the trail exactly like a document
+    // that was properly authorised.
+    //
+    // So it is explicit rather than an implicit "any", and it resolves through
+    // the ordinary chain with one extra layer on top: the STEP's own override,
+    // then per-tenant, then global, then the default below. A deployment that
+    // configures nothing gets `all`; a tenant that changes its mind changes every
+    // step at once without a row being rewritten.
+    //
+    // {@see \Whity\Core\Document\Routing\RouteQuorum} carries the argument for
+    // the default, in short: the two ways of being wrong are not symmetric. Too
+    // few approvals is a silent authority failure discovered in an audit years
+    // later; too many is a document that visibly stops and a complaint the same
+    // afternoon. A default protects the deployment where nobody thought about
+    // this, so it is the loud one — and for the ordinary single-approver step
+    // (`the dean signs off`) `all` and `any` are the same rule anyway, so the
+    // default only differs from `any` exactly where `any` is dangerous.
+    public const DOCUMENTS_ROUTING_APPROVAL_QUORUM = 'documents.routing_approval_quorum';
 
     // How many people a USER GROUP preview SHOWS (#999). Not a ceiling on
     // resolution — the count a preview reports is always exact — but the size of
@@ -600,6 +625,10 @@ final class SettingsRegistry
         // being a plausible reading of a single step, and an author who really
         // means to reach a thousand people should say so by raising the limit.
         self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => '500',
+        // `all`, and the constant above says why at length. It is not a guess at
+        // what most tenants want; it is the reading that fails loudly when it is
+        // wrong, on a value whose other reading fails silently.
+        self::DOCUMENTS_ROUTING_APPROVAL_QUORUM => 'all',
         // Ten faces. Enough to recognise a group at a glance — "yes, those are
         // the instructors" — and small enough that nobody mistakes the sample
         // for the list. The COUNT beside it is exact and unbounded, which is
@@ -900,6 +929,7 @@ final class SettingsRegistry
             self::DOCUMENTS_PERSIST_ENABLED => self::validateBoolean($value, self::DOCUMENTS_PERSIST_ENABLED),
             self::DOCUMENTS_ROUTING_MAX_STEPS => self::validateRoutingMaxSteps($value),
             self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => self::validateRoutingMaxRecipients($value),
+            self::DOCUMENTS_ROUTING_APPROVAL_QUORUM => self::validateRoutingApprovalQuorum($value),
             self::GROUPS_PREVIEW_SAMPLE_SIZE => self::validateGroupsPreviewSampleSize($value),
             self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
             // Error tracking. These five were declared with defaults, types,
@@ -1213,6 +1243,29 @@ final class SettingsRegistry
         }
         if ($size > 100) {
             return 'groups.preview_sample_size must be 100 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * What an approval step's fan-out means: one of the closed quorum vocabulary
+     * (#1014).
+     *
+     * Validated against {@see \Whity\Core\Document\Routing\RouteQuorum} rather
+     * than against a list written out here, so the setting, the CHECK constraint
+     * migration 119 puts on `document_route_steps.decision_quorum` and the engine
+     * cannot drift into admitting three different sets — the failure the routing
+     * ACTION vocabulary already has a dedicated test for.
+     *
+     * There is deliberately no "off" value. A step that should not gate is a step
+     * with `decision` false; a quorum that meant "nobody has to approve" would be
+     * an approval step that approves itself.
+     */
+    private static function validateRoutingApprovalQuorum(string $value): ?string
+    {
+        if (!RouteQuorum::isValid($value)) {
+            return 'documents.routing_approval_quorum must be one of: ' . implode(', ', RouteQuorum::all()) . '.';
         }
 
         return null;

@@ -94,6 +94,20 @@ final class CoreDocumentSubstrates
      */
     public const ROUTING_TRAIL = 'routing.trail';
 
+    /**
+     * The trail records a VERDICT as well as an act (#1014, migration 119). The
+     * substrate behind "approved by me" and "rejected by me".
+     *
+     * Declared SEPARATELY from {@see ROUTING_TRAIL} rather than folded into it,
+     * and the reason is the one that folder already states about the OU tree: a
+     * deployment that has migration 112 but not 118 has a perfectly working
+     * trail, and "acted on by me" and "passed through my unit" must keep
+     * resolving there. Adding `verdict` to the trail substrate would make those
+     * two folders disappear for a reason that has nothing to do with them, and
+     * would name the wrong missing thing in the operator-facing diagnostic.
+     */
+    public const ROUTING_VERDICT = 'routing.verdict';
+
     private function __construct()
     {
     }
@@ -153,6 +167,13 @@ final class CoreDocumentSubstrates
                 'document_route_events.to_ou_id',
             ],
             '#947 item 3 (migration 112)',
+        ));
+
+        $registry->register(new DocumentSubstrate(
+            self::ROUTING_VERDICT,
+            'Routing records whether an act approved or rejected the document, not only that it happened.',
+            ['document_route_events.verdict'],
+            '#1014 (migration 119)',
         ));
 
         // The downward walk reads `parent_id`, so that is what is measured. A

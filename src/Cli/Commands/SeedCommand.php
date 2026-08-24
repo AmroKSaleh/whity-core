@@ -17,6 +17,7 @@ use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
 use Whity\Core\Document\Routing\RoleRuleResolver;
+use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
@@ -273,6 +274,7 @@ class SeedCommand
                 new RouteStepRepository($pdo),
                 new RouteEventRepository($pdo),
                 new RouteRecipientRepository($pdo),
+                new RouteEdgeRepository($pdo),
                 $rules,
                 $settings,
                 // No HookManager, deliberately. The router's only use for one is

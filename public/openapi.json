@@ -27204,6 +27204,12 @@
                         "items": {
                             "$ref": "#/components/schemas/DocumentRouteStep"
                         }
+                    },
+                    "edges": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentRouteEdge"
+                        }
                     }
                 },
                 "required": [
@@ -27211,7 +27217,8 @@
                     "document_id",
                     "title",
                     "created_at",
-                    "steps"
+                    "steps",
+                    "edges"
                 ]
             },
             "DocumentRouteActionRequest": {
@@ -27228,6 +27235,14 @@
                     },
                     "note": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "verdict": {
+                        "type": "string",
+                        "enum": [
+                            "approved",
+                            "rejected"
+                        ],
                         "nullable": true
                     }
                 },
@@ -27246,6 +27261,14 @@
                     },
                     "delivered": {
                         "type": "integer"
+                    },
+                    "decided": {
+                        "type": "string",
+                        "enum": [
+                            "approved",
+                            "rejected"
+                        ],
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -27276,6 +27299,27 @@
                                 "label": {
                                     "type": "string",
                                     "nullable": true
+                                },
+                                "decision": {
+                                    "type": "boolean",
+                                    "nullable": true
+                                },
+                                "decision_quorum": {
+                                    "type": "string",
+                                    "enum": [
+                                        "all",
+                                        "any",
+                                        "majority"
+                                    ],
+                                    "nullable": true
+                                },
+                                "on_approved": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "on_rejected": {
+                                    "type": "integer",
+                                    "nullable": true
                                 }
                             },
                             "required": [
@@ -27286,6 +27330,37 @@
                 },
                 "required": [
                     "steps"
+                ]
+            },
+            "DocumentRouteEdge": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "route_id": {
+                        "type": "integer"
+                    },
+                    "from_step_id": {
+                        "type": "integer"
+                    },
+                    "to_step_id": {
+                        "type": "integer"
+                    },
+                    "verdict": {
+                        "type": "string",
+                        "enum": [
+                            "approved",
+                            "rejected"
+                        ]
+                    }
+                },
+                "required": [
+                    "id",
+                    "route_id",
+                    "from_step_id",
+                    "to_step_id",
+                    "verdict"
                 ]
             },
             "DocumentRouteListResponse": {
@@ -27405,13 +27480,26 @@
                     "label": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "decision": {
+                        "type": "boolean"
+                    },
+                    "decision_quorum": {
+                        "type": "string",
+                        "enum": [
+                            "all",
+                            "any",
+                            "majority"
+                        ],
+                        "nullable": true
                     }
                 },
                 "required": [
                     "id",
                     "position",
                     "rule_kind",
-                    "rule_config"
+                    "rule_config",
+                    "decision"
                 ]
             },
             "DocumentStarResponse": {
@@ -27644,6 +27732,14 @@
                     },
                     "note": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "verdict": {
+                        "type": "string",
+                        "enum": [
+                            "approved",
+                            "rejected"
+                        ],
                         "nullable": true
                     },
                     "occurred_at": {

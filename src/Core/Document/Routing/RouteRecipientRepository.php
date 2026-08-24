@@ -6,6 +6,7 @@ namespace Whity\Core\Document\Routing;
 
 use PDO;
 use PDOException;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access for `document_route_recipients` (#947 item 3) — THE INBOX.
@@ -208,6 +209,128 @@ final class RouteRecipientRepository
     }
 
     /**
+     * THE COHORT: the rows one act opened at one step, with how each was closed.
+     *
+     * #1014's quorum is counted over exactly this set, and the set is identified
+     * by `created_by_event_id` — the pointer migration 112 already made NOT NULL.
+     * No new column, and, more importantly, no aggregate: two chains that reach
+     * the same step each opened their own rows from their own event, so each
+     * decides for itself and neither can hold the other up. That is migration
+     * 112's semantic 2 preserved rather than traded away for approval.
+     *
+     * WHY THE COHORT IS FROZEN AND A USER GROUP IS NOT
+     * ------------------------------------------------
+     * A group (#999/#1003) resolves LIVE and has deliberately no membership
+     * table, because a stored list goes stale the moment somebody is hired. So
+     * the set a step reached can differ from the set the same rule would answer
+     * with a minute later, and a quorum has to say which one it is counting.
+     *
+     * It counts THESE ROWS. Migration 112 already describes this table as the
+     * projection of "which people a rule actually resolved to, and when, which
+     * the trail cannot re-derive afterwards", and that is precisely the set a
+     * decision was put to. An instructor hired after the step was reached was
+     * never asked, has no open item, and cannot answer — counting them would
+     * silently RAISE the bar on a decision already under way, under `all` to a
+     * height that can never be met. Additions therefore cannot change a running
+     * decision at all.
+     *
+     * DEPARTURES are the one live input, and they are applied by the caller
+     * rather than here: {@see DocumentRouter} passes the still-open rows through
+     * {@see \Whity\Core\Audience\ActiveMemberFilter}, which is the single
+     * definition of "an active member of this tenant" in the codebase. So the
+     * bar can only ever FALL, and only by removing people who are no longer able
+     * to answer — never by counting a departure as an approval, which is why the
+     * closing pointer on their row still records that nobody decided.
+     *
+     * `closing_action` and `closing_verdict` are read THROUGH `closed_by_event_id`
+     * rather than stored beside it. The row holds no state of its own; that is
+     * the whole construction this table is built on.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listCohort(int $tenantId, int $routeId, int $stepId, int $cohortEventId): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT r.id, r.tenant_id, r.document_id, r.route_id, r.step_id, r.profile_id, r.ou_id,
+                    r.parent_recipient_id, r.created_by_event_id, r.closed_by_event_id, r.created_at,
+                    ce.action AS closing_action, ce.verdict AS closing_verdict
+               FROM document_route_recipients r
+               LEFT JOIN document_route_events ce
+                 ON ce.id = r.closed_by_event_id AND ce.tenant_id = :tenant_id
+              WHERE r.tenant_id = :tenant_id
+                AND r.route_id = :route_id
+                AND r.step_id = :step_id
+                AND r.created_by_event_id = :cohort_event_id
+              ORDER BY r.id ASC"
+        );
+        $stmt->execute([
+            ':tenant_id' => $tenantId,
+            ':route_id' => $routeId,
+            ':step_id' => $stepId,
+            ':cohort_event_id' => $cohortEventId,
+        ]);
+
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(
+            static fn (array $row): array => self::normalize($row) + [
+                'closing_action' => isset($row['closing_action']) && $row['closing_action'] !== null
+                    ? (string) $row['closing_action']
+                    : null,
+                'closing_verdict' => isset($row['closing_verdict']) && $row['closing_verdict'] !== null
+                    ? (string) $row['closing_verdict']
+                    : null,
+            ],
+            $rows
+        );
+    }
+
+    /**
+     * Close every still-open row in a cohort, naming the event that decided it.
+     *
+     * Called ONLY when a decision step has resolved — the quorum was met, or
+     * meeting it became impossible. Once that is true the remaining items are
+     * asking a question that has been answered, and leaving them open would make
+     * "awaiting me" list work nobody can usefully do and, worse, let a second
+     * approval fire the same edge again and open the next step twice.
+     *
+     * This is not a hole in anything. It writes `closed_by_event_id`, the single
+     * mutable column in the four routing tables (migration 112), and it sets it
+     * to a REAL trail row id — so it cannot make a claim the trail does not
+     * already make. What the trail then says about those people is exactly
+     * right: they appear nowhere as actors, because they did not act.
+     *
+     * @return int How many rows were closed.
+     */
+    public function closeOutstandingCohort(
+        int $tenantId,
+        int $routeId,
+        int $stepId,
+        int $cohortEventId,
+        int $eventId,
+    ): int {
+        $stmt = $this->db->prepare(
+            'UPDATE document_route_recipients
+                SET closed_by_event_id = :event_id
+              WHERE tenant_id = :tenant_id
+                AND route_id = :route_id
+                AND step_id = :step_id
+                AND created_by_event_id = :cohort_event_id
+                AND closed_by_event_id IS NULL'
+        );
+        $stmt->execute([
+            ':event_id' => $eventId,
+            ':tenant_id' => $tenantId,
+            ':route_id' => $routeId,
+            ':step_id' => $stepId,
+            ':cohort_event_id' => $cohortEventId,
+        ]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
      * Every recipient row on a document, oldest first — who a route reached and
      * what became of it.
      *
@@ -263,12 +386,15 @@ final class RouteRecipientRepository
                 'SELECT r.id, r.tenant_id, r.document_id, r.route_id, r.step_id, r.profile_id, r.ou_id,
                         r.parent_recipient_id, r.created_by_event_id, r.closed_by_event_id, r.created_at,
                         d.title AS document_title, d.template_name AS document_template_name,
-                        e.action AS arrived_by, e.actor_profile_id AS arrived_from
+                        e.action AS arrived_by, e.actor_profile_id AS arrived_from,
+                        s.decision AS step_decision
                    FROM document_route_recipients r
                    JOIN documents d
                      ON d.id = r.document_id AND d.tenant_id = :tenant_id
                    JOIN document_route_events e
                      ON e.id = r.created_by_event_id AND e.tenant_id = :tenant_id
+                   JOIN document_route_steps s
+                     ON s.id = r.step_id AND s.tenant_id = :tenant_id
                   WHERE r.tenant_id = :tenant_id
                     AND r.profile_id = :profile_id
                     AND r.closed_by_event_id IS NULL
@@ -280,12 +406,15 @@ final class RouteRecipientRepository
                 'SELECT r.id, r.tenant_id, r.document_id, r.route_id, r.step_id, r.profile_id, r.ou_id,
                         r.parent_recipient_id, r.created_by_event_id, r.closed_by_event_id, r.created_at,
                         d.title AS document_title, d.template_name AS document_template_name,
-                        e.action AS arrived_by, e.actor_profile_id AS arrived_from
+                        e.action AS arrived_by, e.actor_profile_id AS arrived_from,
+                        s.decision AS step_decision
                    FROM document_route_recipients r
                    JOIN documents d
                      ON d.id = r.document_id AND d.tenant_id = :tenant_id
                    JOIN document_route_events e
                      ON e.id = r.created_by_event_id AND e.tenant_id = :tenant_id
+                   JOIN document_route_steps s
+                     ON s.id = r.step_id AND s.tenant_id = :tenant_id
                   WHERE r.tenant_id = :tenant_id
                     AND r.profile_id = :profile_id
                   ORDER BY r.id DESC
@@ -434,6 +563,12 @@ final class RouteRecipientRepository
             // never disagree with the trail.
             'arrived_by' => (string) $row['arrived_by'],
             'arrived_from' => $row['arrived_from'] !== null ? (int) $row['arrived_from'] : null,
+            // #1014: whether the STEP this item sits on demands a verdict.
+            // Joined rather than stored, for the same reason `arrived_by` is —
+            // and carried here because an inbox that cannot tell an approval
+            // apart from a circulation offers the wrong buttons, and the person
+            // then discovers the difference from a 422 after clicking.
+            'step_decision' => DbBool::of($row['step_decision'] ?? false),
         ];
     }
 }
