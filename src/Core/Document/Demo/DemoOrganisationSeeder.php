@@ -244,7 +244,67 @@ final class DemoOrganisationSeeder
     }
 
     /**
-     * The four demo roles and their permission grants.
+     * The directory reads EVERY demo role gets, on top of its own `documents:*`.
+     *
+     * Not document permissions, and that is precisely why they were missed. The
+     * document screens store units, people and roles as FOREIGN KEYS and resolve
+     * the labels through three separate list endpoints:
+     *
+     *   `ous:read`   → `GET /api/v1/ous`   — the organizer's "raised from"
+     *                  column and its unit filter, and the units either side of
+     *                  a trail event's `from_ou_id → to_ou_id`;
+     *   `users:read` → `GET /api/v1/users` — who acted, and who an open
+     *                  recipient row is waiting on;
+     *   `roles:read` → `GET /api/v1/roles` — which role a fanned-out step
+     *                  resolved through.
+     *
+     * Without them every one of those renders an id: `Unit #2`, `Account #10`,
+     * `Role #5`, under an honest banner explaining which permission is missing.
+     * The product's degradation is right and stays exactly as it is — what was
+     * wrong is a DATASET whose entire subject is an OU hierarchy shaping what
+     * people see, presenting that hierarchy as three integers. A reader cannot
+     * check "the two secretaries see different sets" against a screen that will
+     * not tell them which secretary they are logged in as.
+     *
+     * ALL FIVE ROLES, INCLUDING THE TECHNICIAN
+     * ----------------------------------------
+     * Every persona lands on the organizer, the record page and the routing
+     * screen — those are the only three screens the demo has — so a role left
+     * without these reads is a persona whose demo is illegible, not a persona
+     * demonstrating something extra.
+     *
+     * The technician is the case worth stating, because it is the one where
+     * withholding them looks tempting: a technician IS the least-privileged
+     * persona. It is still wrong, and for a reason specific to this fixture. The
+     * technician's whole job here is to differ from the department secretary
+     * beside her in ONE respect — a template gated on `documents:write` (see
+     * {@see DocumentDemoSeeder::seedTemplates()}). Withhold the directory reads
+     * from her alone and the two screens differ in two respects at once, the
+     * loud one being banners about missing permissions; the intended comparison
+     * would then be the quiet difference in a list the reader has stopped
+     * looking at. One variable, or the demonstration is worthless.
+     *
+     * A persona for the degraded state was considered and rejected: the value of
+     * seeing it is real but small, it is already covered by tests that assert
+     * the fallbacks, and the cost is that one of five demo logins looks broken
+     * to somebody who does not yet know the product well enough to tell the
+     * difference — which is the entire audience.
+     *
+     * These grants cannot flatten what the fixture discriminates on, and that is
+     * checked rather than asserted here: no designer row is gated on a
+     * permission every demo role holds
+     * ({@see \Tests\Core\Document\Demo\DocumentDemoSeederRealEngineTest}).
+     *
+     * @var list<string>
+     */
+    private const DIRECTORY_PERMISSIONS = [
+        CorePermissions::OUS_READ,
+        CorePermissions::USERS_READ,
+        CorePermissions::ROLES_READ,
+    ];
+
+    /**
+     * The five demo roles and their permission grants.
      *
      * The grants are what make the fixture browsable: a demo person who cannot
      * read a document list has nothing to show. `documents:read:all` is granted
@@ -252,6 +312,11 @@ final class DemoOrganisationSeeder
      * visible regardless of routing, and handing it to the dean would hide the
      * fact that the other six people see only what reached them, which is
      * {@see \Whity\Core\Document\DocumentVisibilityPolicy}'s whole point.
+     *
+     * Each role's `permissions` list is what MAKES that role different from its
+     * neighbours; {@see DIRECTORY_PERMISSIONS} is added to all five and is
+     * therefore, by construction, incapable of telling any two of them apart.
+     * The split is what keeps the second list safe to extend.
      *
      * @return array<string, int>
      */
@@ -308,7 +373,7 @@ final class DemoOrganisationSeeder
         $roleIds = [];
         foreach ($declared as $name => $spec) {
             $roleId = $this->upsertRole($tenantId, $name, $spec['description']);
-            foreach ($spec['permissions'] as $permission) {
+            foreach ([...$spec['permissions'], ...self::DIRECTORY_PERMISSIONS] as $permission) {
                 $this->grant($roleId, $permission);
             }
             $roleIds[$name] = $roleId;
