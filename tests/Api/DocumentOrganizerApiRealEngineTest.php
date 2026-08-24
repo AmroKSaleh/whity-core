@@ -34,6 +34,7 @@ use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Organizer\PdoSchemaPresence;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
 use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\RBAC\CorePermissions;
@@ -221,6 +222,7 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
                 $substrates,
                 $this->collectionRepo,
                 $this->pdo,
+                new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
             );
         };
         $this->documents = ($this->makeDocuments)();
@@ -238,7 +240,8 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             $roleChecker,
             $settings,
             $renderer,
-            $issuer
+            $issuer,
+            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
         );
 
         $settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');

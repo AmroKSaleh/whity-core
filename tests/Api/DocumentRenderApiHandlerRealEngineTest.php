@@ -18,7 +18,10 @@ use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
+use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Request;
 use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Core\Settings\SettingsRegistry;
@@ -112,7 +115,8 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
                 $documents,
                 $artifacts,
                 new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot))
-            )
+            ),
+            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
         );
     }
 

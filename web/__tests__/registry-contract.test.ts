@@ -81,6 +81,18 @@ function analyse(item: RegistryItem) {
     let m: RegExpExecArray | null;
     while ((m = re.exec(src)) !== null) {
       const spec = m[1];
+      // The regex reads RAW source, comments included, and "from" followed by
+      // a quoted phrase is ordinary English: app-sidebar.tsx explains that a
+      // hidden nav item is distinguishable from the quoted phrase "RBAC
+      // removed this link for this role", which parsed as an import and failed
+      // this gate with a sentence where a package name belongs.
+      //
+      // No real module specifier
+      // contains whitespace, so rejecting those can only ever discard a match
+      // that could not have been an import — it cannot hide one and weaken
+      // the check. app-sidebar.tsx is itself the fixture: that prose is still
+      // in it, so this stays exercised by the per-item cases below.
+      if (/\s/.test(spec)) continue;
       if (spec.startsWith('.')) {
         const sib = resolveSibling(abs, spec);
         if (sib && sib !== item.name) siblings.add(`@whity/${sib}`);

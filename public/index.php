@@ -517,7 +517,28 @@ $queueService = new \Whity\Core\Queue\QueueService(
 $auditLogger = new AuditLogger($db->getPdo(), $logger);
 $auditLogger->subscribe($hookManager);
 
-// Register core navigation items
+// Register core navigation items.
+//
+// GROUPING (#1007): every item carries a `group` and an `order`, and the two
+// answer different questions.
+//
+//  - `group` is WHICH bucket the page belongs to, and it is the server's call
+//    because it follows the subsystem the page belongs to: overview, access,
+//    documents, records, extend, system.
+//  - `order` is where the item sits WITHIN its bucket, restarting at 1 per
+//    group. Nothing reads it across groups, so there is no global sequence to
+//    keep consistent when a page is added.
+//  - which group comes FIRST is deliberately NOT here. That is a layout
+//    question with a per-client answer (`NAV_GROUP_ORDER` in
+//    web/components/sidebar.tsx; a Flutter nav rail may want another), so the
+//    shell decides it and an unrecognised group still renders, last.
+//
+// Before this, all 22 items shared one group ('admin') and their `order`
+// values collided — seven items were `order => 9` — so the sidebar was one
+// undifferentiated list whose internal sequence came down to registration
+// order and a stable sort. An item with no `group` (the account `settings`
+// link) renders last, without a heading, and is never hidden by group
+// disclosure.
 $hookManager->listen('navigation.register', function ($data, $context) {
     $items = $data['items'] ?? [];
     $items[] = [
@@ -525,7 +546,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Dashboard',
         'href' => '/admin',
         'icon' => 'dashboard',
-        'group' => 'admin',
+        'group' => 'overview',
         'order' => 1,
         // WC-175 (#191): mirrors the dashboard's primary API (GET /api/admin/stats),
         // which is gated on the 'admin' ROLE — so the nav item gates on the role.
@@ -536,8 +557,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Users',
         'href' => '/admin/users',
         'icon' => 'users',
-        'group' => 'admin',
-        'order' => 2,
+        'group' => 'access',
+        'order' => 1,
         // WC-203: mirrors GET /api/users, now gated on users:read permission
         // (migration 022 grants this to admin). requiredRole is cleared so the
         // nav item is visible to any user who holds the permission, not just
@@ -549,8 +570,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Roles',
         'href' => '/admin/roles',
         'icon' => 'lock',
-        'group' => 'admin',
-        'order' => 3,
+        'group' => 'access',
+        'order' => 2,
         // WC-175 (#191): mirrors GET /api/roles, gated on the 'admin' ROLE.
         'requiredRole' => 'admin',
     ];
@@ -559,8 +580,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Organizational Units',
         'href' => '/admin/ous',
         'icon' => 'building-community',
-        'group' => 'admin',
-        'order' => 4,
+        'group' => 'access',
+        'order' => 3,
         // Mirrors GET /api/ous, now gated on ous:read. requiredRole is cleared so
         // the item follows the route it mirrors rather than drifting from it —
         // that drift is what left the ous:* grants vestigial in the first place.
@@ -573,8 +594,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Delegations',
         'href' => '/admin/delegations',
         'icon' => 'share',
-        'group' => 'admin',
-        'order' => 6,
+        'group' => 'access',
+        'order' => 4,
         // WC-34: the delegations admin area is gated on the delegation:manage
         // permission. The nav item carries the requirement so a
         // permission-aware client/consumer can hide it; the page also enforces
@@ -586,8 +607,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Family Relations',
         'href' => '/admin/relations',
         'icon' => 'users-group',
-        'group' => 'admin',
-        'order' => 7,
+        'group' => 'records',
+        'order' => 1,
         // WC-65: the relations admin area is gated on relations:read. The nav
         // item carries the requirement so a permission-aware client can hide it;
         // the page also enforces it server-side via the RBAC-protected API (a 403
@@ -599,8 +620,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Tag Groups',
         'href' => '/admin/tag-groups',
         'icon' => 'tags',
-        'group' => 'admin',
-        'order' => 8,
+        'group' => 'records',
+        'order' => 2,
         // WC-621: the taxonomy admin. The nav item carries tags:read so a
         // permission-aware client hides it; the schema-driven CrudScreen also
         // fails closed (a 403 on the list renders the access-denied state).
@@ -611,8 +632,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Tags',
         'href' => '/admin/tags',
         'icon' => 'tag',
-        'group' => 'admin',
-        'order' => 9,
+        'group' => 'records',
+        'order' => 3,
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TAGS_READ,
     ];
     $items[] = [
@@ -620,7 +641,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Tenants',
         'href' => '/admin/tenants',
         'icon' => 'building',
-        'group' => 'admin',
+        'group' => 'access',
         'order' => 5,
         // WC-175 (#191): mirrors GET /api/tenants, gated on the 'admin' ROLE.
         'requiredRole' => 'admin',
@@ -630,8 +651,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Audit Logs',
         'href' => '/admin/audit-logs',
         'icon' => 'history',
-        'group' => 'admin',
-        'order' => 6,
+        'group' => 'system',
+        'order' => 4,
         // WC-175 (#191): mirrors GET /api/audit-logs, gated on the audit:read
         // permission — so the nav item gates on the same permission.
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::AUDIT_READ,
@@ -641,8 +662,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Errors',
         'href' => '/admin/errors',
         'icon' => 'alert-triangle',
-        'group' => 'admin',
-        'order' => 7,
+        'group' => 'system',
+        'order' => 5,
         // WC-error-tracking: mirrors GET /api/errors, which is operator-only
         // (settings:manage + system tenant, enforced in the handler) — so the
         // nav item gates on the same permission. A tenant admin never sees it.
@@ -653,8 +674,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Plugins',
         'href' => '/admin/plugins',
         'icon' => 'plug',
-        'group' => 'admin',
-        'order' => 8,
+        'group' => 'extend',
+        'order' => 1,
         // WC-218: mirrors GET /api/plugins, gated on the plugins:read
         // permission. The nav item carries the requirement so a permission-aware
         // client can hide it; the page also enforces it server-side via the
@@ -666,8 +687,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Plugin Store',
         'href' => '/admin/plugins/store',
         'icon' => 'building-store',
-        'group' => 'admin',
-        'order' => 9,
+        'group' => 'extend',
+        'order' => 2,
         // Browse + install from a trusted store. Mirrors GET
         // /api/plugins/store/catalog (gated plugins:read); the install action on
         // the page is separately gated plugins:upload server-side.
@@ -678,8 +699,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Website Settings',
         'href' => '/admin/settings',
         'icon' => 'settings',
-        'group' => 'admin',
-        'order' => 9,
+        'group' => 'system',
+        'order' => 1,
         // Website Settings: mirrors GET /api/v1/settings, gated on the
         // settings:read permission (migration grants all three settings perms to
         // admin). The nav item carries the requirement so a permission-aware
@@ -693,10 +714,10 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Inbox',
         'href' => '/admin/inbox',
         'icon' => 'inbox',
-        'group' => 'admin',
+        'group' => 'overview',
         // Near the top on purpose: this is the surface a person opens daily,
         // where the entries below it are things they go looking for.
-        'order' => 1.5,
+        'order' => 2,
         // #978, consuming #881. DELIBERATELY UNGATED — no requiredPermission and
         // no requiredRole.
         //
@@ -720,8 +741,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Document Designer',
         'href' => '/admin/documents',
         'icon' => 'file-text',
-        'group' => 'admin',
-        'order' => 9.2,
+        'group' => 'documents',
+        'order' => 2,
         // WC-docdesigner: the document/label template designer. Mirrors GET
         // /api/document-templates (DocumentTemplatesApiHandler), gated on
         // documents:read. The nav item carries the requirement so a
@@ -734,8 +755,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Documents',
         'href' => '/admin/document-library',
         'icon' => 'folders',
-        'group' => 'admin',
-        'order' => 9.3,
+        'group' => 'documents',
+        'order' => 1,
         // #978 (#947 item 5): the ORGANIZER, which browses issued documents —
         // as distinct from the entry above it, which is the template DESIGNER.
         // Two entries rather than one screen with tabs: designing a template and
@@ -754,8 +775,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Approval Gating',
         'href' => '/admin/registrations',
         'icon' => 'user-check',
-        'group' => 'admin',
-        'order' => 9.5,
+        'group' => 'documents',
+        'order' => 3,
         // WC-password-reset-2fa-recovery: unified admin page (tabs: Signup /
         // Password reset / 2FA auth reset — see web/app/(protected)/admin/
         // approval-gating/). The first tab, at this href, is the WC-235
@@ -774,8 +795,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'AI Principals',
         'href' => '/admin/ai-principals',
         'icon' => 'robot',
-        'group' => 'admin',
-        'order' => 10,
+        'group' => 'extend',
+        'order' => 3,
         // WC-0208ce4d: mirrors GET /api/v1/admin/mcp/tokens, gated on the
         // mcp:tokens:manage permission. Nav item carries the same requirement so
         // permission-aware clients can hide it; the page enforces it server-side.
@@ -786,8 +807,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'MCP Tools',
         'href' => '/admin/mcp-tools',
         'icon' => 'tools',
-        'group' => 'admin',
-        'order' => 11,
+        'group' => 'extend',
+        'order' => 4,
         // WC-0208ce4d: read-only view of MCP tools available in this tenant.
         // Gated on mcp:tokens:manage so only admins who manage AI credentials
         // can see which tools those credentials expose.
@@ -798,8 +819,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Languages',
         'href' => '/admin/languages',
         'icon' => 'language',
-        'group' => 'admin',
-        'order' => 9.6,
+        'group' => 'system',
+        'order' => 2,
         // WC-583: languages are a GLOBAL catalogue (no tenant_id column at
         // all) — create/update/enable/disable is a SYSTEM-TENANT-ONLY
         // PLATFORM capability (mirrors the Feature Flags/Email/Storage
@@ -813,8 +834,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Translations',
         'href' => '/admin/translations',
         'icon' => 'world',
-        'group' => 'admin',
-        'order' => 9.7,
+        'group' => 'system',
+        'order' => 3,
         // WC-583: translation rows ARE tenant-scoped (system default vs a
         // tenant's own override) — unlike Languages above, every tenant
         // holding translations:manage may reach this page to edit its own
@@ -1935,6 +1956,18 @@ $storageResolver = new \Whity\Storage\TenantStorageResolver(
 );
 $storageDriver = new \Whity\Storage\TenantRoutingStorageDriver($defaultStorageDriver, $storageResolver);
 
+// The single access path for `resource_role_assignments` (migration 088).
+// Built HERE, above its first consumer, because PHP does not hoist and three
+// separate features downstream now read the same table: the designer's
+// OU-reach resolver (below), the issued-document visibility policy, and the
+// grants API. ONE instance, so the tenant-predicate guard has one query
+// surface to police rather than one per consumer.
+$resourceRoleAssignmentRepository = new \Whity\Core\RBAC\ResourceRoleAssignmentRepository(
+    $db->getPdo(),
+    $resourceTypeRegistry,
+    $logger
+);
+
 // 13a-sexies. Document/label designer templates API (WC-docdesigner). Tenant-
 // scoped, RBAC-gated CRUD. The route permission (documents:read on GET,
 // documents:write on writes) is the baseline; the handler ADDITIONALLY row-
@@ -1942,10 +1975,18 @@ $storageDriver = new \Whity\Storage\TenantRoutingStorageDriver($defaultStorageDr
 // receives templates it may see) and gates publishing on documents:publish.
 $documentTemplateRepository = new \Whity\Core\Document\DocumentTemplateRepository($db->getPdo());
 $documentAccessPolicy = new \Whity\Core\Document\DocumentAccessPolicy();
+// The WHERE half of designer visibility (migration 117): which units a
+// caller has standing at, so a dean's secretary and a department head's
+// secretary holding the SAME documents:write see different template sets.
+// REQUIRED by both handlers rather than nullable — an unwired reach
+// predicate answers 'yes' everywhere and republishes every placed row to
+// the whole tenant, silently.
+$ouReachResolver = new \Whity\Core\Ou\OuReachResolver($db->getPdo(), $resourceRoleAssignmentRepository);
 $documentTemplatesHandler = new \Whity\Api\DocumentTemplatesApiHandler(
     $documentTemplateRepository,
     $documentAccessPolicy,
-    $roleChecker
+    $roleChecker,
+    $ouReachResolver
 );
 $router->register('GET',    '/api/document-templates',          [$documentTemplatesHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-templates',          [$documentTemplatesHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
@@ -1964,7 +2005,8 @@ $documentBlocksHandler = new \Whity\Api\DocumentBlocksApiHandler(
     $documentBlockRepository,
     $documentTemplateRepository,
     $documentAccessPolicy,
-    $roleChecker
+    $roleChecker,
+    $ouReachResolver
 );
 $router->register('GET',    '/api/document-blocks',          [$documentBlocksHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-blocks',          [$documentBlocksHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
@@ -2014,7 +2056,12 @@ $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
     $roleChecker,
     $settingsService,
     $documentRenderer,
-    $documentIssuer
+    $documentIssuer,
+    // The designer's OU-reach predicate (migration 117). Withholding a placed
+    // template HERE too is what stops this path being a way around the
+    // designer's own list: a 404 in one place and a render in another would
+    // be the client hiding what the server hands out.
+    $ouReachResolver
 );
 $router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentRenderHandler, 'render'], null, null, CorePermissions::DOCUMENTS_RENDER);
 
@@ -2038,18 +2085,14 @@ $routeEventRepository = new \Whity\Core\Document\Routing\RouteEventRepository($d
 $routeRecipientRepository = new \Whity\Core\Document\Routing\RouteRecipientRepository($db->getPdo());
 
 // Resource-scoped role grants. Built HERE rather than inline at the grants
-// handler further down, because #947 item 3's visibility disjunct needs it and
+// handler further down (and now above the DESIGNER handlers too, because the
+// OU-reach resolver they need is built from it), because #947 item 3's
+// visibility disjunct needs it and
 // PHP does not hoist: leaving it where it was would mean either a null at
 // document-wiring time — a boot-time fatal on every request, not a test failure
 // — or a second instance built from the same PDO, which is two query surfaces
 // the tenant-predicate guard has to police separately for no gain. The same move
 // migration 108's PR made with the storage driver, for the same reason.
-$resourceRoleAssignmentRepository = new \Whity\Core\RBAC\ResourceRoleAssignmentRepository(
-    $db->getPdo(),
-    $resourceTypeRegistry,
-    $logger
-);
-
 // #947 item 3 widens document visibility with two disjuncts item 1 left a home
 // for: a route reached you, or a role was granted to you on the document. Both
 // collaborators are REQUIRED rather than nullable — an unwired policy would
@@ -2128,7 +2171,25 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     // rather than duplicated — an earlier draft of this branch carried its own
     // instance-cached copies of both, which is precisely the drift those two
     // classes exist to prevent.
-    $db->getPdo()
+    $db->getPdo(),
+    // The designer's OU-reach predicate (migration 117): the ISSUE path reads
+    // a template, and must withhold one filed at a unit the caller has no
+    // standing at exactly as the designer's list does.
+    $ouReachResolver,
+    // #993: the document RECORD PAGE gates its regions separately — who may
+    // re-issue the document, who may add to its trail, and whether it is
+    // currently awaiting this caller are three different questions — and the
+    // server answers all three. Without this resolver `GET /api/documents/{id}`
+    // carries no `sections` key and the client fails closed on the missing map,
+    // which is the same shape #910 gave the roles record page.
+    new \Whity\Core\RBAC\RecordSectionResolver($roleChecker),
+    // The two routing reads the record-scoped predicates need. The SAME
+    // instances the routing handler below is given, not fresh ones: a second
+    // repository over the same table is a second place the "open recipient"
+    // rule could be spelled, and migration 112's partial unique index is the
+    // only definition of open there should ever be.
+    $routeEventRepository,
+    $routeRecipientRepository
 );
 // `/api/documents/views` is registered BEFORE the `{id:\d+}` routes and cannot
 // collide with them: the id constraint is digits-only, so `views` was never a

@@ -2940,24 +2940,31 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
                 'is_system' => self::bool(),
                 'created_by' => self::int(true),
+                // Where in the organisation the row is filed (migration 117). null = tenant-wide,
+                // which is what every row was before it and what an unplaced row still is.
+                'owner_ou_id' => self::int(true),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
             'DocumentTemplateListResponse' => self::listEnvelope('DocumentTemplate'),
             'DocumentTemplateResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentTemplate')),
-            // scope/required_permission are optional; setting a shared scope or a
-            // permission tag requires documents:publish (403 otherwise).
+            // scope/required_permission/owner_ou_id are all optional; setting a
+            // shared scope, a permission tag, or a placement requires
+            // documents:publish (403 otherwise). owner_ou_id must be a unit of the
+            // caller's own tenant (422 otherwise); null files the row tenant-wide.
             'DocumentTemplateCreateRequest' => self::object([
                 'name' => self::str(),
                 'data' => ['type' => 'object', 'additionalProperties' => true],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
                 'required_permission' => self::str(true),
+                'owner_ou_id' => self::int(true),
             ], ['name', 'data']),
             'DocumentTemplateUpdateRequest' => self::object([
                 'name' => self::str(),
                 'data' => ['type' => 'object', 'additionalProperties' => true],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
                 'required_permission' => self::str(true),
+                'owner_ou_id' => self::int(true),
             ], []),
 
             // Server-side render (ADR 0012 / WC-docdesigner Track 2). `dataRows`
@@ -3026,6 +3033,21 @@ final class CoreApiSchemas
                 // claim nobody made. Neither is in `required` for that reason.
                 'collection_ids' => ['type' => 'array', 'items' => self::int()],
                 'starred' => self::bool(),
+                // #993: the record page's per-region verdicts, keyed by region
+                // (`document`, `trail`, `recipients`). Sent by `GET /{id}` only
+                // — the LIST omits it, for the same reason the filing keys above
+                // are optional: a verdict is an answer about one record and one
+                // caller, and 25 of them per page would gate nothing.
+                //
+                // A region the caller may not see is ABSENT from the map. There
+                // is no `hidden` state on the wire and there must not be: a
+                // `{"state": "hidden"}` entry would tell a caller the exact
+                // thing withholding the region was for. See
+                // RecordSectionResolver.
+                'sections' => [
+                    'type' => 'object',
+                    'additionalProperties' => SchemaBuilder::ref('RecordSectionVerdict'),
+                ],
             ], ['id', 'tenant_id', 'template_name', 'title', 'created_at', 'artifacts']),
             // Not paginatedListEnvelope: the organizer echoes back WHICH view it
             // ran and what anchor it resolved to, so a client rendering a rail
@@ -3432,24 +3454,31 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
                 'is_system' => self::bool(),
                 'created_by' => self::int(true),
+                // Where in the organisation the row is filed (migration 117). null = tenant-wide,
+                // which is what every row was before it and what an unplaced row still is.
+                'owner_ou_id' => self::int(true),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
             'DocumentBlockListResponse' => self::listEnvelope('DocumentBlock'),
             'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
-            // scope/required_permission are optional; setting a shared scope or a
-            // permission tag requires documents:publish (403 otherwise).
+            // scope/required_permission/owner_ou_id are all optional; setting a
+            // shared scope, a permission tag, or a placement requires
+            // documents:publish (403 otherwise). owner_ou_id must be a unit of the
+            // caller's own tenant (422 otherwise); null files the row tenant-wide.
             'DocumentBlockCreateRequest' => self::object([
                 'name' => self::str(),
                 'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
                 'required_permission' => self::str(true),
+                'owner_ou_id' => self::int(true),
             ], ['name', 'data']),
             'DocumentBlockUpdateRequest' => self::object([
                 'name' => self::str(),
                 'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
                 'required_permission' => self::str(true),
+                'owner_ou_id' => self::int(true),
             ], []),
 
             // ── Resource-scoped role grants (WC-712 §3) ───────────────────────

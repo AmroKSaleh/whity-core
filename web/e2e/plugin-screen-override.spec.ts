@@ -42,6 +42,9 @@ test.describe('Plugin screen override: DemoCatalog (#964)', () => {
     adminPage,
     page,
   }) => {
+    // The `plugins` group is closed unless the current page is in it
+    // (#1007), so open the groups before asserting the link is reachable.
+    await adminPage.shell.expandAllNavGroups();
     const link = adminPage.shell.navLink(FEATURE_LABEL);
     await expect(link).toBeVisible();
 
