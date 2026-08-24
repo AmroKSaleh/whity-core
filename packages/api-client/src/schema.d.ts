@@ -781,6 +781,26 @@ export interface paths {
         patch: operations["patch_api_v1_document_blocks_id"];
         trace?: never;
     };
+    "/api/v1/document-blocks/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What would break if this block changed: the templates that instance it
+         * @description A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to every template that instances it — and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. `templates` is row-filtered to what the caller may see; `total` counts EVERY referencing template in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated.
+         */
+        get: operations["get_api_v1_document_blocks_id_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-collections": {
         parameters: {
             query?: never;
@@ -3680,6 +3700,24 @@ export interface components {
             scope?: "personal" | "tenant" | "global" | "system";
             required_permission?: string | null;
             owner_ou_id?: number | null;
+        };
+        DocumentBlockUsage: {
+            block_id: number;
+            total: number;
+            hidden: number;
+            templates: {
+                id: number;
+                name: string;
+                /** @enum {string} */
+                scope: "personal" | "tenant" | "global" | "system";
+                required_permission?: string | null;
+                owner_ou_id?: number | null;
+                is_system: boolean;
+                updated_at: string;
+            }[];
+        };
+        DocumentBlockUsageResponse: {
+            data: components["schemas"]["DocumentBlockUsage"];
         };
         DocumentCollection: {
             id: number;
@@ -9584,6 +9622,73 @@ export interface operations {
             };
             /** @description Validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_blocks_id_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The referencing templates, plus the unfiltered total */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentBlockUsageResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Block not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
