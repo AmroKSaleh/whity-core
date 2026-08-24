@@ -2176,6 +2176,23 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
 // equally fine and would be a bug the day the constraint is loosened.
 $router->register('GET',  '/api/documents/views',                                      [$documentsHandler, 'views'],           null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents',                                            [$documentsHandler, 'list'],            null, null, CorePermissions::DOCUMENTS_READ);
+// CREATING a document: gated on DOCUMENTS_RENDER, and deliberately not on a new
+// slug of its own. Migration 113 already settled who may bring a document into
+// existence when it chose the audience for `documents:route` — "`documents:render`
+// is what gates `persist: true` on the render routes, so a role holding it is
+// precisely a role that can bring a document into existence". A `documents:create`
+// minted here would be a second answer to that question and, on every install
+// that already exists, a permission NOBODY HOLDS: the route would 403 for the
+// admin role, the demo dean and the registry officer alike until somebody wrote
+// a grant migration. The slug chosen is one the seeded `admin` role holds
+// (migration 060) and one four of the five demo roles hold, so the gate is a
+// gate rather than a lockout.
+//
+// Note this route does NOT require the render TIER to be running — the
+// permission and the `documents.render_enabled` setting answer different
+// questions, and the handler renders opportunistically. See
+// DocumentsApiHandler::create().
+$router->register('POST', '/api/documents',                                            [$documentsHandler, 'create'],          null, null, CorePermissions::DOCUMENTS_RENDER);
 $router->register('GET',  '/api/documents/{id:\d+}',                                   [$documentsHandler, 'show'],            null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/content',                           [$documentsHandler, 'content'],         null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/artifacts/{artifactId:\d+}/content', [$documentsHandler, 'artifactContent'], null, null, CorePermissions::DOCUMENTS_READ);

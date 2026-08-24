@@ -12,12 +12,38 @@ use Whity\Storage\StorageException;
  * Issues a document: the one place where a rendered payload becomes a durable
  * record plus an immutable artifact (#947 item 1).
  *
- * Two entry points, and the difference between them is the whole point of the
- * two-table schema:
+ * Three entry points, and the differences between them are the whole point of
+ * the two-table schema:
  *
- *   {@see issue()}          — a NEW record. New id, new artifact.
+ *   {@see raise()}          — a NEW record and NOTHING ELSE. New id, no bytes.
+ *   {@see issue()}          — a NEW record. New id, new artifact, one transaction.
  *   {@see appendArtifact()} — a correction. SAME id, one more artifact; the
  *                             previous one is untouched and still fetchable.
+ *
+ * WHY `raise()` EXISTS, GIVEN THIS CLASS'S OWN RULE ABOUT MISSING BYTES
+ * ---------------------------------------------------------------------
+ * The order-of-operations note below says a record must never promise bytes
+ * that are not there, and `raise()` writes a record with no bytes at all. Those
+ * are not in conflict, and the distinction is the whole reason `POST
+ * /api/documents` can exist:
+ *
+ *   A record whose artifact row says there are bytes, and there are not, is a
+ *   LIE — a viewer, a route step and an audit query all believe it and it 500s
+ *   when anyone opens it. That is what the ordering below prevents, and
+ *   `raise()` does not produce it: no artifact row is written, so nothing claims
+ *   anything, and `DocumentPresenter` reports `content_url: null` — a shape the
+ *   read path has always handled.
+ *
+ *   A record with no artifact is an ORDINARY state of this system, not a
+ *   degraded one. `documents.render_enabled` defaults to FALSE, so on a fresh
+ *   install the render container does not exist and no document can ever have
+ *   an artifact. Requiring bytes to create a record would mean the only way to
+ *   own a document is to run an optional headless-Chromium service — and the
+ *   value of a document in this system is that it has an identity to route,
+ *   which needs no PDF. The values it was raised with are recorded on the row
+ *   (migration 116), so the document has CONTENT even when it has no rendering,
+ *   and `POST /api/documents/{id}/render` can mint the artifact later from
+ *   exactly those values.
  *
  * ORDER OF OPERATIONS, AND WHICH FAILURE IS THE ACCEPTABLE ONE
  * ------------------------------------------------------------
@@ -62,8 +88,14 @@ final class DocumentIssuer
     /**
      * Create a document record from a template and store its first artifact.
      *
-     * @param array<string, mixed> $template A normalized `document_templates` row.
-     * @param string               $bytes    The rendered payload.
+     * @param array<string, mixed>              $template     A normalized `document_templates` row.
+     * @param string                            $bytes        The rendered payload.
+     * @param list<array<string, string>>|null   $variableData The values the document is raised with,
+     *                                                        already normalized by
+     *                                                        {@see \Whity\Core\Document\Render\VariableData}.
+     *                                                        Null records nothing — see
+     *                                                        {@see DocumentRepository::create()} for why that
+     *                                                        is not the same as `[]`.
      *
      * @return array{document: array<string, mixed>, artifact: array<string, mixed>}
      *
@@ -77,6 +109,7 @@ final class DocumentIssuer
         string $bytes,
         string $contentType = 'application/pdf',
         string $extension = 'pdf',
+        ?array $variableData = null,
     ): array {
         $ownTransaction = !$this->db->inTransaction();
         if ($ownTransaction) {
@@ -84,16 +117,7 @@ final class DocumentIssuer
         }
 
         try {
-            $documentId = $this->documents->create($tenantId, [
-                'document_template_id' => isset($template['id']) ? (int) $template['id'] : null,
-                // Snapshot, not a join — the template may be renamed or deleted
-                // (ON DELETE SET NULL), and the record still has to be able to
-                // say what it came from.
-                'template_name'        => (string) ($template['name'] ?? ''),
-                'title'                => $title,
-                'origin_ou_id'         => $actorId !== null ? $this->originOuFor($tenantId, $actorId) : null,
-                'created_by'           => $actorId,
-            ]);
+            $documentId = $this->insertRecord($tenantId, $actorId, $template, $title, $variableData);
 
             $artifactId = $this->storeArtifact($tenantId, $documentId, $actorId, $bytes, $contentType, $extension);
 
@@ -118,6 +142,106 @@ final class DocumentIssuer
         }
 
         return ['document' => $document, 'artifact' => $artifact];
+    }
+
+    /**
+     * Raise a document record with no artifact.
+     *
+     * The entry point `POST /api/documents` uses, and the only one that can run
+     * on an instance where the render tier is off — which is every fresh
+     * install, because `documents.render_enabled` defaults to false.
+     *
+     * ONE TRANSACTION, AND IT IS COMMITTED BEFORE ANY RENDER IS ATTEMPTED. The
+     * create route renders AFTER this returns and appends through
+     * {@see appendArtifact()}, rather than going through {@see issue()}. That
+     * ordering is chosen, and the failure it prefers is the opposite of
+     * `issue()`'s:
+     *
+     *   `issue()` is for a caller who asked for BYTES and got them — the
+     *   persisted render. If the write fails there is nothing worth keeping, so
+     *   it rolls the record back.
+     *
+     *   A create is for a caller who asked for a DOCUMENT. The values they typed
+     *   are on the row and the id is what routing needs. Rolling that back
+     *   because an optional headless-Chromium service is restarting would
+     *   discard a person's work over a component the system is designed to run
+     *   without — and it would do it on exactly the deployments where that
+     *   service is least reliable. So the record survives, the response says the
+     *   artifact was not stored and why, and `POST /api/documents/{id}/render`
+     *   is the retry.
+     *
+     * @param array<string, mixed>             $template     A normalized `document_templates` row.
+     * @param list<array<string, string>>|null $variableData Already normalized; see {@see issue()}.
+     *
+     * @return array<string, mixed> The document row.
+     */
+    public function raise(
+        int $tenantId,
+        ?int $actorId,
+        array $template,
+        string $title,
+        ?array $variableData = null,
+    ): array {
+        $ownTransaction = !$this->db->inTransaction();
+        if ($ownTransaction) {
+            $this->db->beginTransaction();
+        }
+
+        try {
+            $documentId = $this->insertRecord($tenantId, $actorId, $template, $title, $variableData);
+            $document = $this->documents->findById($documentId, $tenantId);
+
+            if ($ownTransaction) {
+                $this->db->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+
+        if ($document === null) {
+            throw new \RuntimeException('Document was raised but could not be read back.');
+        }
+
+        return $document;
+    }
+
+    /**
+     * The record insert, written ONCE and shared by {@see raise()} and
+     * {@see issue()}.
+     *
+     * Two copies of this would be two readings of a document's provenance: which
+     * fields are snapshots, which are derived from the actor's membership, and
+     * what an actor with no unit produces. A create route that stamped
+     * `origin_ou_id` differently from the persisted-render route would make the
+     * organizer's "raised by my unit" folder answer differently depending on
+     * which button the document came from, with nothing on the row to say so.
+     *
+     * @param array<string, mixed>             $template
+     * @param list<array<string, string>>|null $variableData
+     */
+    private function insertRecord(
+        int $tenantId,
+        ?int $actorId,
+        array $template,
+        string $title,
+        ?array $variableData,
+    ): int {
+        return $this->documents->create($tenantId, [
+            'document_template_id' => isset($template['id']) ? (int) $template['id'] : null,
+            // Snapshot, not a join — the template may be renamed or deleted
+            // (ON DELETE SET NULL), and the record still has to be able to
+            // say what it came from.
+            'template_name'        => (string) ($template['name'] ?? ''),
+            'title'                => $title,
+            'origin_ou_id'         => $actorId !== null ? $this->originOuFor($tenantId, $actorId) : null,
+            'created_by'           => $actorId,
+            // The values a person typed, and the only place they survive when
+            // there is no artifact to bake them into. Migration 116.
+            'variable_data'        => $variableData,
+        ]);
     }
 
     /**

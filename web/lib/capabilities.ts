@@ -87,6 +87,34 @@ export const TRANSLATIONS_MANAGE = 'translations:manage';
 export const DOCUMENTS_ROUTE = 'documents:route';
 
 /**
+ * Bringing a document into existence — `POST /api/v1/documents` (#947 item 1).
+ *
+ * NO `documents:create` WAS MINTED, and that is the decision worth recording
+ * where the constant lives, because the obvious-looking alternative is a
+ * lockout. Migration 113 already answered "who may raise a document" when it
+ * chose the audience for `documents:route`: *"`documents:render` is what gates
+ * `persist: true` on the render routes, so a role holding it is precisely a role
+ * that can bring a document into existence"*. A new slug would be a second
+ * answer to that question — and on every install that already exists it would
+ * be a permission NOBODY HOLDS, so the New button would be hidden for the
+ * seeded `admin` role until somebody wrote a grant migration. A catalogue row is
+ * not a holder.
+ *
+ * IT IS HELD. Migration 060 grants `documents:render` to the seeded `admin`
+ * role; four of the five roles in the document demo fixture hold it (the
+ * exception, `demo-secretary`, is the deliberate negative case). Checked against
+ * a freshly migrated schema before this button was gated on it.
+ *
+ * IT DOES NOT MEAN THE RENDER TIER IS RUNNING. The permission and the
+ * `documents.render_enabled` setting answer different questions: this is "may
+ * you raise a document", that is "can this instance produce a PDF". A holder can
+ * create documents on an instance with no render container at all — the record
+ * is the deliverable and the artifact is opportunistic. So do NOT try to infer
+ * one from the other.
+ */
+export const DOCUMENTS_RENDER = 'documents:render';
+
+/**
  * Narrow an unknown `/api/me/capabilities` payload to its permission slugs.
  *
  * Returns `[]` for any shape that does not match `{ data: { permissions:

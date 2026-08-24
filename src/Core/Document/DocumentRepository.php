@@ -119,15 +119,30 @@ final class DocumentRepository
      * NULL, deliberately — see migration 108), and a browser listing a document
      * whose origin was retired should still be able to say what it was.
      *
+     * `variable_data` is a snapshot for the same reason and a stronger one: it
+     * is the only surviving record of the values a person typed. Migration 116
+     * argues the case in full; what matters here is that NULL and `[]` are
+     * DIFFERENT and both are writable. NULL means nothing was recorded (every
+     * row written before the column existed, and every row a caller raised
+     * without supplying values), and the re-render path reads it as "fall back
+     * to the template's samples, exactly as before this column". `[]`/`[{}]` is
+     * a positive claim that the document was raised with no values, which a
+     * template carrying no placeholders legitimately is.
+     *
      * @param array{document_template_id?: ?int, template_name: string, title: string,
-     *              origin_ou_id?: ?int, created_by?: ?int} $rec
+     *              origin_ou_id?: ?int, created_by?: ?int,
+     *              variable_data?: ?list<array<string, string>>} $rec
      */
     public function create(int $tenantId, array $rec): int
     {
+        $variableData = $rec['variable_data'] ?? null;
+
         $stmt = $this->db->prepare(
             'INSERT INTO documents
-                 (tenant_id, document_template_id, template_name, title, origin_ou_id, created_by, created_at)
-             VALUES (:tenant_id, :document_template_id, :template_name, :title, :origin_ou_id, :created_by, NOW())'
+                 (tenant_id, document_template_id, template_name, title, origin_ou_id, created_by,
+                  variable_data, created_at)
+             VALUES (:tenant_id, :document_template_id, :template_name, :title, :origin_ou_id, :created_by,
+                     :variable_data, NOW())'
         );
         $stmt->execute([
             ':tenant_id'            => $tenantId,
@@ -136,6 +151,14 @@ final class DocumentRepository
             ':title'                => $rec['title'],
             ':origin_ou_id'         => $rec['origin_ou_id'] ?? null,
             ':created_by'           => $rec['created_by'] ?? null,
+            // JSON_UNESCAPED_UNICODE, not the default: an Arabic reference or an
+            // Arabic recipient name would otherwise be stored as escape
+            // sequences. They decode back correctly, but the column stops being
+            // readable by the operator running a query against it - and Arabic
+            // content is a first-class requirement here, not an edge case.
+            ':variable_data'        => $variableData === null
+                ? null
+                : json_encode($variableData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         ]);
 
         return (int) $this->db->lastInsertId();
@@ -149,8 +172,17 @@ final class DocumentRepository
      */
     public function findById(int $id, int $tenantId): ?array
     {
+        // `variable_data` is selected HERE and deliberately NOT in the two list
+        // statements below. It is read for exactly one purpose - re-rendering
+        // THIS document with the values it was raised with - and a label sheet's
+        // worth of it (up to documents.render_max_rows, default in the hundreds)
+        // multiplied by a page of 25 documents is a payload no list consumer
+        // reads. The absent key is meaningful, and is the same posture
+        // DocumentPresenter takes for `sections` and `collection_ids`: absent
+        // means "not fetched by this read", never "empty".
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, document_template_id, template_name, title, origin_ou_id, created_by, created_at
+            'SELECT id, tenant_id, document_template_id, template_name, title, origin_ou_id, created_by,
+                    variable_data, created_at
              FROM documents WHERE id = :id AND tenant_id = :tenant_id'
         );
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
@@ -423,6 +455,60 @@ final class DocumentRepository
             'origin_ou_id'         => $row['origin_ou_id'] !== null ? (int) $row['origin_ou_id'] : null,
             'created_by'           => $row['created_by'] !== null ? (int) $row['created_by'] : null,
             'created_at'           => (string) $row['created_at'],
-        ];
+        ] + (
+            // Present only on the single-document read - see findById(). The key
+            // is added rather than defaulted so a consumer can tell "this read
+            // did not fetch it" from "this document has none".
+            array_key_exists('variable_data', $row)
+                ? ['variable_data' => self::decodeVariableData($row['variable_data'])]
+                : []
+        );
+    }
+
+    /**
+     * Decode the stored `variable_data` back to the list shape the render path
+     * accepts, or null.
+     *
+     * FAILS TO NULL, NEVER TO `[]`. A blob that will not decode, or decodes to
+     * something that is not a list of flat string maps, is a blob this class
+     * cannot honestly report - and reporting it as `[]` would be a positive
+     * claim ("raised with no values") that would make a re-render silently
+     * issue the document with every placeholder blanked. Null is the claim the
+     * re-render path already knows how to handle: fall back to the template's
+     * own samples, which is what it did before this column existed.
+     *
+     * PostgreSQL hands JSONB back as a string and the SQLite test engine stores
+     * the column as TEXT and does the same, so the string branch is the real
+     * one; an already-decoded array is accepted rather than re-decoded so a
+     * driver that behaves differently does not silently return null.
+     *
+     * @return list<array<string, string>>|null
+     */
+    private static function decodeVariableData(mixed $raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+        if (!is_array($decoded) || !array_is_list($decoded)) {
+            return null;
+        }
+
+        $rows = [];
+        foreach ($decoded as $row) {
+            if (!is_array($row)) {
+                return null;
+            }
+            $normalized = [];
+            foreach ($row as $key => $value) {
+                if (!is_string($key) || !is_scalar($value)) {
+                    return null;
+                }
+                $normalized[$key] = (string) $value;
+            }
+            $rows[] = $normalized;
+        }
+
+        return $rows;
     }
 }
