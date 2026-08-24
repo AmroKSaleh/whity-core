@@ -10,6 +10,7 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Api\DocumentCollectionsApiHandler;
 use Whity\Api\DocumentsApiHandler;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Audience\ExplicitRuleResolver;
 use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
@@ -34,6 +35,9 @@ use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Organizer\PdoSchemaPresence;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Group\GroupResolver;
+use Whity\Core\Group\GroupRuleResolver;
+use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
 use Whity\Core\RBAC\ResourceTypeRegistry;
@@ -172,10 +176,26 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         // inbox must not do. In particular, closing a recipient row is
         // DocumentRouter::act()'s business, and that transition is the assertion
         // that matters most here.
+        //
+        // All FOUR core kinds are registered, not just the two this file's
+        // routes exercise (#999). This test's standing rule is that the engine
+        // is wired the way public/index.php wires it — a registry missing two
+        // kinds would let a folder pass here against an engine production does
+        // not have. The `group` kind's construction order is forced by a real
+        // cycle (the resolver needs the registry that resolves whatever kind the
+        // group is defined as), broken with the same closure index.php uses.
         $rules = new RoutingRuleRegistry();
+        $groupRepository = new UserGroupRepository($this->pdo);
+        $groupResolver = new GroupResolver(
+            $this->pdo,
+            $groupRepository,
+            static fn (): RoutingRuleRegistry => $rules
+        );
         $rules->registerCoreRoutingRules(
             new RoleRuleResolver($this->pdo),
-            new RoleBelowActorRuleResolver($this->pdo)
+            new RoleBelowActorRuleResolver($this->pdo),
+            new ExplicitRuleResolver(),
+            new GroupRuleResolver($groupResolver)
         );
         $this->router = new DocumentRouter(
             $this->pdo,

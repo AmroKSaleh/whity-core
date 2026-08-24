@@ -3,6 +3,7 @@
 namespace Whity\Cli\Commands;
 
 use PDO;
+use Whity\Core\Audience\ExplicitRuleResolver;
 use Whity\Core\Document\Demo\DemoOrganisationSeeder;
 use Whity\Core\Document\Demo\DocumentDemoSeeder;
 use Whity\Core\Document\DocumentArtifactRepository;
@@ -21,6 +22,9 @@ use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
 use Whity\Core\Document\Routing\RouteStepRepository;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
+use Whity\Core\Group\GroupResolver;
+use Whity\Core\Group\GroupRuleResolver;
+use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Core\Settings\SettingsService;
@@ -227,10 +231,24 @@ class SeedCommand
         $blocks = new DocumentBlockRepository($pdo);
         $documents = new DocumentRepository($pdo);
 
+        // All four core kinds, the same set and the same construction order
+        // BaseCommand uses (#999) — the `group` resolver needs the group
+        // repository, and the group resolver needs THIS registry to resolve
+        // whatever kind a group is defined as, so the cycle is broken with a
+        // closure. A seeder registering a narrower registry than the app runs
+        // would produce demo data the app cannot re-derive.
         $rules = new RoutingRuleRegistry();
+        $groupRepository = new UserGroupRepository($pdo);
+        $groupResolver = new GroupResolver(
+            $pdo,
+            $groupRepository,
+            static fn (): RoutingRuleRegistry => $rules
+        );
         $rules->registerCoreRoutingRules(
             new RoleRuleResolver($pdo),
-            new RoleBelowActorRuleResolver($pdo)
+            new RoleBelowActorRuleResolver($pdo),
+            new ExplicitRuleResolver(),
+            new GroupRuleResolver($groupResolver)
         );
 
         $seeder = new DocumentDemoSeeder(

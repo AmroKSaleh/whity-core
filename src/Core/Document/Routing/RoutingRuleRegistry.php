@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Whity\Core\Document\Routing;
 
+use Whity\Core\Audience\ExplicitRuleResolver;
 use Whity\Core\Container\HostWiredService;
+use Whity\Core\Group\GroupRuleResolver;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Support\SourceSlug;
+use Whity\Sdk\Audience\AudienceRuleResolverInterface;
 use Whity\Sdk\Routing\RoutingRuleResolverInterface;
 
 /**
@@ -24,13 +27,39 @@ use Whity\Sdk\Routing\RoutingRuleResolverInterface;
  * has thirteen instances of rather than inventing a fourteenth idea of what
  * "registered" means.
  *
- * WHAT CORE OWNS, AND WHY EXACTLY TWO
+ * ONE CATALOGUE, TWO CONSUMERS (#999)
+ * -----------------------------------
+ * The class name records where this was born, not who may read it. #999 added
+ * named USER GROUPS, and a group is one of these same rule expressions given a
+ * name and stored once — so it reads this registry too, through
+ * {@see audienceResolver()} and {@see audienceCatalogue()}, which expose the
+ * SUBSET of kinds that can answer without a document.
+ *
+ * A second registry for "the same vocabulary, for the other caller" was the
+ * alternative and is exactly what #714 warns against: two catalogues free to
+ * disagree about what a plugin contributed, and two places a plugin author has
+ * to declare the same kind. Renaming this class to match its widened audience
+ * was considered and rejected as churn — it is resolved from the container by
+ * class name and consulted by a merged, shipped endpoint, and the rename would
+ * touch #989's wiring to change nothing about behaviour.
+ *
+ * WHAT CORE OWNS, AND WHY EXACTLY FOUR
  * -----------------------------------
  * {@see RoleRuleResolver} (`role`) and {@see RoleBelowActorRuleResolver}
  * (`role_below_actor`). Both are generic in the strong sense: every deployment
  * has roles, and every deployment has a unit tree, so both resolve correctly
  * against a schema core already owns without knowing anything about the
  * organisation using it.
+ *
+ * {@see ExplicitRuleResolver} (`explicit`) — exactly these named people. It is a
+ * KIND rather than an exception to kinds so that a hand-picked set and a computed
+ * set are the same object with different innards: one code path downstream, and
+ * an admin who need not decide up front which sort they are making.
+ *
+ * {@see GroupRuleResolver} (`group`) — everyone in a named user group. The
+ * reference kind, and the only one of the four that is routing-only: it does not
+ * implement the audience interface, which is what makes a group-of-groups
+ * impossible rather than merely discouraged.
  *
  * Nothing narrower belongs here. A `supervisor` rule sounds generic and is not —
  * core has no notion of a supervisor, and the three deployments that want one
@@ -118,6 +147,37 @@ final class RoutingRuleRegistry implements HostWiredService
     public const KIND_ROLE_BELOW_ACTOR = 'role_below_actor';
 
     /**
+     * Exactly these named people, and nobody else (#999).
+     *
+     * The enumerated case, expressed as a RULE rather than as an exception to
+     * rules. It is here so that a hand-picked set and a computed set are the same
+     * kind of object — one code path for preview, routing, permissions and
+     * deletion, and an admin who does not have to decide up front which sort of
+     * thing they are making.
+     *
+     * {@see \Whity\Core\Audience\ExplicitRuleResolver} argues why a list in a
+     * single opaque JSONB value is not the membership table migration 116
+     * rejects.
+     */
+    public const KIND_EXPLICIT = 'explicit';
+
+    /**
+     * Everyone in a named USER GROUP (#999).
+     *
+     * The reference kind: `{"group_id": 7}`. This is what makes a group REUSABLE
+     * rather than merely named — one stored definition, dereferenced from every
+     * step that names it, so "the instructors" keeps meaning what the institution
+     * currently means by it.
+     *
+     * DELIBERATELY NOT AN AUDIENCE KIND. {@see \Whity\Core\Group\GroupRuleResolver}
+     * implements only {@see RoutingRuleResolverInterface}, so `group` never
+     * appears in {@see audienceCatalogue()} and a group can therefore not be
+     * defined as another group. Nesting is impossible rather than guarded, which
+     * is why there is no cycle detection anywhere in the group code.
+     */
+    public const KIND_GROUP = 'group';
+
+    /**
      * Widest kind `document_route_steps.rule_kind` holds (migration 112).
      *
      * Validated here as well as by the column so an over-long kind is refused at
@@ -192,11 +252,17 @@ final class RoutingRuleRegistry implements HostWiredService
      *
      * @return array<string, RoutingRuleResolverInterface>
      */
-    public static function coreRoutingRules(RoleRuleResolver $role, RoleBelowActorRuleResolver $below): array
-    {
+    public static function coreRoutingRules(
+        RoleRuleResolver $role,
+        RoleBelowActorRuleResolver $below,
+        ExplicitRuleResolver $explicit,
+        GroupRuleResolver $group,
+    ): array {
         return [
             self::KIND_ROLE => $role,
             self::KIND_ROLE_BELOW_ACTOR => $below,
+            self::KIND_EXPLICIT => $explicit,
+            self::KIND_GROUP => $group,
         ];
     }
 
@@ -211,8 +277,12 @@ final class RoutingRuleRegistry implements HostWiredService
      * the wiring is explicit and the {@see HostWiredService} marker makes an
      * unwired container throw rather than improvise.
      */
-    public function registerCoreRoutingRules(RoleRuleResolver $role, RoleBelowActorRuleResolver $below): void
-    {
+    public function registerCoreRoutingRules(
+        RoleRuleResolver $role,
+        RoleBelowActorRuleResolver $below,
+        ExplicitRuleResolver $explicit,
+        GroupRuleResolver $group,
+    ): void {
         if ($this->coreRegistered) {
             return;
         }
@@ -221,7 +291,31 @@ final class RoutingRuleRegistry implements HostWiredService
         // registration (the same guard PermissionRegistry, ResourceTypeRegistry
         // and OuTypeRegistry use).
         $this->coreRegistered = true;
-        $this->store(self::CORE_SOURCE, null, self::coreRoutingRules($role, $below));
+        $this->store(self::CORE_SOURCE, null, self::coreRoutingRules($role, $below, $explicit, $group));
+    }
+
+    /**
+     * The resolver for a kind IF it can answer without a document, or null.
+     *
+     * The accessor a named USER GROUP reads (#999). A group is one of these same
+     * rule expressions given a name and stored once, and it is resolved with no
+     * document, route or step in the question — so only a kind that promised it
+     * needs none of those may define one. The promise is
+     * {@see AudienceRuleResolverInterface}, and this method is where it is
+     * checked, once, rather than at every call site.
+     *
+     * Null has three causes and every caller distinguishes them, because they
+     * need three different fixes: nothing registered the kind, something did but
+     * it is routing-only, or the kind is `group` itself (which is routing-only ON
+     * PURPOSE — see {@see KIND_GROUP} — and is why nesting is impossible rather
+     * than guarded). {@see \Whity\Core\Group\GroupResolver} does that
+     * discrimination and writes the message.
+     */
+    public function audienceResolver(string $kind): ?AudienceRuleResolverInterface
+    {
+        $resolver = $this->resolvers[$kind] ?? null;
+
+        return $resolver instanceof AudienceRuleResolverInterface ? $resolver : null;
     }
 
     /**
@@ -259,6 +353,46 @@ final class RoutingRuleRegistry implements HostWiredService
     public function catalogue(): array
     {
         $kinds = array_keys($this->resolvers);
+        sort($kinds);
+
+        return array_map(
+            fn (string $kind): array => [
+                'kind' => $kind,
+                'label' => $this->resolvers[$kind]->label(),
+                'source' => $this->sourceByKind[$kind] ?? self::CORE_SOURCE,
+            ],
+            $kinds
+        );
+    }
+
+    /**
+     * Every registered kind that can DEFINE A USER GROUP, ordered by kind.
+     *
+     * What `GET /api/group-rules` renders (#999) — the list of things a group's
+     * definition may name, which is a SUBSET of what a route step may name. Two
+     * endpoints over one registry rather than one endpoint with a flag: a client
+     * asking "what can I put in this picker" gets an answer it can render
+     * without filtering, and the difference between the two lists is a fact about
+     * the kinds rather than something the client has to know.
+     *
+     * The subset is not arbitrary. It excludes `group` itself (deliberately — see
+     * {@see KIND_GROUP}) and any kind whose resolver needs the document it is
+     * being routed with, because such a kind genuinely cannot answer the question
+     * a group asks.
+     *
+     * Ordering is presentational and stable so a picker does not reshuffle
+     * between requests served by different workers.
+     *
+     * @return list<array{kind: string, label: string, source: string}>
+     */
+    public function audienceCatalogue(): array
+    {
+        $kinds = [];
+        foreach (array_keys($this->resolvers) as $kind) {
+            if ($this->resolvers[$kind] instanceof AudienceRuleResolverInterface) {
+                $kinds[] = $kind;
+            }
+        }
         sort($kinds);
 
         return array_map(

@@ -26,6 +26,25 @@ use InvalidArgumentException;
  * so the new unit is included because it exists, not because somebody
  * remembered to add it.
  *
+ * THE SAME RULE, USABLE OUTSIDE ROUTING (#999)
+ * --------------------------------------------
+ * A named USER GROUP is this same expression given a name and stored once, so
+ * that "the instructors" is one thing referenced from many places rather than a
+ * thousand rows re-listed per place. It asks the identical question with no
+ * document, route or step in it.
+ *
+ * A resolver that never reads those three — which is most of them, and both of
+ * core's — makes itself usable as a group definition by ALSO implementing
+ * {@see \Whity\Sdk\Audience\AudienceRuleResolverInterface} and widening its
+ * parameter to {@see \Whity\Sdk\Audience\AudienceRuleContext}. That is legal
+ * here (a widened parameter is contravariant) and needs no second method body,
+ * because {@see RoutingRuleContext} IS an `AudienceRuleContext`.
+ *
+ * This interface is UNCHANGED by #999. A resolver that genuinely needs the
+ * document keeps the narrow parameter and is simply not offered as a group
+ * definition — the honest outcome, since such a rule cannot answer a question
+ * that has no document in it.
+ *
  * TWO METHODS, AND THEY RUN AT DIFFERENT TIMES
  * --------------------------------------------
  * {@see validate()} runs when a route is AUTHORED — synchronously, in the

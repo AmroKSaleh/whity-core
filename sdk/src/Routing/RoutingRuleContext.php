@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Sdk\Routing;
 
+use Whity\Sdk\Audience\AudienceRuleContext;
+
 /**
  * Everything a routing rule is told when it is asked to resolve (#947 item 3).
  *
@@ -38,9 +40,27 @@ namespace Whity\Sdk\Routing;
  * plugin-supplied rules is that they only ever RETURN a suggestion the host
  * validates.
  *
+ * A SUBTYPE OF {@see AudienceRuleContext}, AND WHY THAT DIRECTION
+ * ---------------------------------------------------------------
+ * #999 needed the same rule kinds to answer "which people?" with no document,
+ * route or step in the question — a named USER GROUP is exactly that. The four
+ * routing fields below are what this class ADDS to the general context; the
+ * tenant, the actor and the config are inherited, unchanged and in the same
+ * constructor positions they have always occupied.
+ *
+ * This is source-compatible in both directions that matter. Every property a
+ * resolver merged against #989 reads is still here with the same type — nothing
+ * became nullable — and every call site, positional or named, still compiles.
+ * What it buys is that a resolver needing only the general facts may declare
+ * `resolve(AudienceRuleContext $context)`, which satisfies BOTH
+ * {@see RoutingRuleResolverInterface} (a widened parameter is legal) and
+ * {@see \Whity\Sdk\Audience\AudienceRuleResolverInterface} from one body. Core's
+ * `role` and `role_below_actor` do precisely that: neither ever read the
+ * document, the route or the step.
+ *
  * Immutable value object.
  */
-final class RoutingRuleContext
+final class RoutingRuleContext extends AudienceRuleContext
 {
     /**
      * @param int                  $tenantId        The tenant the route belongs to. A resolver
@@ -60,14 +80,18 @@ final class RoutingRuleContext
      *                                              accepted it.
      */
     public function __construct(
-        public readonly int $tenantId,
+        int $tenantId,
         public readonly int $documentId,
         public readonly int $routeId,
         public readonly int $stepId,
         public readonly int $position,
-        public readonly ?int $actorProfileId,
-        public readonly ?int $actorOuId,
-        public readonly array $config,
+        ?int $actorProfileId,
+        ?int $actorOuId,
+        array $config,
     ) {
+        // The four inherited facts are handed up rather than re-promoted here:
+        // promoting them again would DECLARE new properties shadowing the
+        // parent's, and the shadowed pair would be free to disagree.
+        parent::__construct($tenantId, $actorProfileId, $actorOuId, $config);
     }
 }

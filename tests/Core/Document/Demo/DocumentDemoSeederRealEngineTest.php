@@ -8,6 +8,7 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Audience\ExplicitRuleResolver;
 use Whity\Core\Document\Demo\DemoOrganisationSeeder;
 use Whity\Core\Document\Demo\DemoPdf;
 use Whity\Core\Document\Demo\DocumentDemoSeeder;
@@ -28,6 +29,9 @@ use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
 use Whity\Core\Document\Routing\RouteStepRepository;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
+use Whity\Core\Group\GroupResolver;
+use Whity\Core\Group\GroupRuleResolver;
+use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -120,10 +124,22 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
             new TenantSettingsRepository($this->pdo)
         );
 
+        // All four core kinds, wired the way SeedCommand wires them (#999) — the
+        // seeder under test must be handed the registry the CLI hands it, or a
+        // demo that only the test's narrower registry can produce passes here
+        // and fails on `php public/index.php seed`.
         $rules = new RoutingRuleRegistry();
+        $groupRepository = new UserGroupRepository($this->pdo);
+        $groupResolver = new GroupResolver(
+            $this->pdo,
+            $groupRepository,
+            static fn (): RoutingRuleRegistry => $rules
+        );
         $rules->registerCoreRoutingRules(
             new RoleRuleResolver($this->pdo),
-            new RoleBelowActorRuleResolver($this->pdo)
+            new RoleBelowActorRuleResolver($this->pdo),
+            new ExplicitRuleResolver(),
+            new GroupRuleResolver($groupResolver)
         );
 
         $this->seeder = new DocumentDemoSeeder(
