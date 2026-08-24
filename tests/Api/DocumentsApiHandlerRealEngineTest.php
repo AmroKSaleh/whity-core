@@ -27,6 +27,7 @@ use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Organizer\PdoSchemaPresence;
 use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
+use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -141,7 +142,8 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
             $views,
             $substrates,
             new DocumentCollectionRepository($this->pdo),
-            $this->pdo
+            $this->pdo,
+            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
         );
 
         // Documents are created the way production creates them — through the
@@ -153,7 +155,8 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
             $roleChecker,
             $this->settingsService,
             $renderer,
-            $issuer
+            $issuer,
+            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry()))
         );
 
         $this->settingsService->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');

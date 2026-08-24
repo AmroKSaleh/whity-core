@@ -25720,6 +25720,10 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "owner_ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
                     "created_at": {
                         "type": "string"
                     },
@@ -25762,6 +25766,10 @@
                     },
                     "required_permission": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
                         "nullable": true
                     }
                 },
@@ -25819,6 +25827,10 @@
                     },
                     "required_permission": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
                         "nullable": true
                     }
                 }
@@ -26337,6 +26349,10 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "owner_ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
                     "created_at": {
                         "type": "string"
                     },
@@ -26376,6 +26392,10 @@
                     },
                     "required_permission": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
                         "nullable": true
                     }
                 },
@@ -26430,6 +26450,10 @@
                     },
                     "required_permission": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
                         "nullable": true
                     }
                 }

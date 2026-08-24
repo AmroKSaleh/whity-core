@@ -1914,6 +1914,18 @@ $storageResolver = new \Whity\Storage\TenantStorageResolver(
 );
 $storageDriver = new \Whity\Storage\TenantRoutingStorageDriver($defaultStorageDriver, $storageResolver);
 
+// The single access path for `resource_role_assignments` (migration 088).
+// Built HERE, above its first consumer, because PHP does not hoist and three
+// separate features downstream now read the same table: the designer's
+// OU-reach resolver (below), the issued-document visibility policy, and the
+// grants API. ONE instance, so the tenant-predicate guard has one query
+// surface to police rather than one per consumer.
+$resourceRoleAssignmentRepository = new \Whity\Core\RBAC\ResourceRoleAssignmentRepository(
+    $db->getPdo(),
+    $resourceTypeRegistry,
+    $logger
+);
+
 // 13a-sexies. Document/label designer templates API (WC-docdesigner). Tenant-
 // scoped, RBAC-gated CRUD. The route permission (documents:read on GET,
 // documents:write on writes) is the baseline; the handler ADDITIONALLY row-
@@ -1921,10 +1933,18 @@ $storageDriver = new \Whity\Storage\TenantRoutingStorageDriver($defaultStorageDr
 // receives templates it may see) and gates publishing on documents:publish.
 $documentTemplateRepository = new \Whity\Core\Document\DocumentTemplateRepository($db->getPdo());
 $documentAccessPolicy = new \Whity\Core\Document\DocumentAccessPolicy();
+// The WHERE half of designer visibility (migration 117): which units a
+// caller has standing at, so a dean's secretary and a department head's
+// secretary holding the SAME documents:write see different template sets.
+// REQUIRED by both handlers rather than nullable — an unwired reach
+// predicate answers 'yes' everywhere and republishes every placed row to
+// the whole tenant, silently.
+$ouReachResolver = new \Whity\Core\Ou\OuReachResolver($db->getPdo(), $resourceRoleAssignmentRepository);
 $documentTemplatesHandler = new \Whity\Api\DocumentTemplatesApiHandler(
     $documentTemplateRepository,
     $documentAccessPolicy,
-    $roleChecker
+    $roleChecker,
+    $ouReachResolver
 );
 $router->register('GET',    '/api/document-templates',          [$documentTemplatesHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-templates',          [$documentTemplatesHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
@@ -1943,7 +1963,8 @@ $documentBlocksHandler = new \Whity\Api\DocumentBlocksApiHandler(
     $documentBlockRepository,
     $documentTemplateRepository,
     $documentAccessPolicy,
-    $roleChecker
+    $roleChecker,
+    $ouReachResolver
 );
 $router->register('GET',    '/api/document-blocks',          [$documentBlocksHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-blocks',          [$documentBlocksHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
@@ -1993,7 +2014,12 @@ $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
     $roleChecker,
     $settingsService,
     $documentRenderer,
-    $documentIssuer
+    $documentIssuer,
+    // The designer's OU-reach predicate (migration 117). Withholding a placed
+    // template HERE too is what stops this path being a way around the
+    // designer's own list: a 404 in one place and a render in another would
+    // be the client hiding what the server hands out.
+    $ouReachResolver
 );
 $router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentRenderHandler, 'render'], null, null, CorePermissions::DOCUMENTS_RENDER);
 
@@ -2017,18 +2043,14 @@ $routeEventRepository = new \Whity\Core\Document\Routing\RouteEventRepository($d
 $routeRecipientRepository = new \Whity\Core\Document\Routing\RouteRecipientRepository($db->getPdo());
 
 // Resource-scoped role grants. Built HERE rather than inline at the grants
-// handler further down, because #947 item 3's visibility disjunct needs it and
+// handler further down (and now above the DESIGNER handlers too, because the
+// OU-reach resolver they need is built from it), because #947 item 3's
+// visibility disjunct needs it and
 // PHP does not hoist: leaving it where it was would mean either a null at
 // document-wiring time — a boot-time fatal on every request, not a test failure
 // — or a second instance built from the same PDO, which is two query surfaces
 // the tenant-predicate guard has to police separately for no gain. The same move
 // migration 108's PR made with the storage driver, for the same reason.
-$resourceRoleAssignmentRepository = new \Whity\Core\RBAC\ResourceRoleAssignmentRepository(
-    $db->getPdo(),
-    $resourceTypeRegistry,
-    $logger
-);
-
 // #947 item 3 widens document visibility with two disjuncts item 1 left a home
 // for: a route reached you, or a role was granted to you on the document. Both
 // collaborators are REQUIRED rather than nullable — an unwired policy would
@@ -2107,7 +2129,11 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     // rather than duplicated — an earlier draft of this branch carried its own
     // instance-cached copies of both, which is precisely the drift those two
     // classes exist to prevent.
-    $db->getPdo()
+    $db->getPdo(),
+    // The designer's OU-reach predicate (migration 117): the ISSUE path reads
+    // a template, and must withhold one filed at a unit the caller has no
+    // standing at exactly as the designer's list does.
+    $ouReachResolver
 );
 // `/api/documents/views` is registered BEFORE the `{id:\d+}` routes and cannot
 // collide with them: the id constraint is digits-only, so `views` was never a

@@ -34,6 +34,7 @@ trait DocumentRecordTrait
             'required_permission' => $row['required_permission'] !== null ? (string) $row['required_permission'] : null,
             'is_system'           => self::toBool($row['is_system']),
             'created_by'          => $row['created_by'] !== null ? (int) $row['created_by'] : null,
+            'owner_ou_id'         => ($row['owner_ou_id'] ?? null) !== null ? (int) $row['owner_ou_id'] : null,
             'created_at'          => (string) $row['created_at'],
             'updated_at'          => (string) $row['updated_at'],
         ];
