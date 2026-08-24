@@ -143,6 +143,7 @@ export const DOCUMENTS_PUBLISH = 'documents:publish';
  */
 export const DOCUMENTS_RENDER = 'documents:render';
 
+/**
  * Document ROUTE TEMPLATES (#1027) — the reusable, branching flow designs the
  * node-based editor edits.
  *
@@ -174,6 +175,13 @@ export const ROUTE_TEMPLATES_WRITE = 'route_templates:write';
  * (migrations 116 and 120 grant both to `roles:write` holders). Where they do
  * not, the editor draws the node WITHOUT a count and says why — never a zero,
  * which would read as "this reaches nobody".
+ *
+ * IT IS NOT WHAT A GROUP NODE NEEDS. A stage naming a user group is previewed
+ * through `GET /api/v1/user-groups/{id}/preview`, which is gated on the LOOSER
+ * `groups:read` — the draft endpoint refuses `rule_kind: "group"` outright,
+ * because a group cannot be defined as another group (#999). So the most
+ * important node type in the flow editor is also the one most likely to be able
+ * to show its size. See `audiencePreviewRequest` for the routing.
  */
 export const GROUPS_WRITE = 'groups:write';
 

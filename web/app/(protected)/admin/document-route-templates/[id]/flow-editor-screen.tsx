@@ -580,6 +580,17 @@ function StageInspector({
         </label>
       )}
 
+      {/* COMPOSE, DO NOT DUPLICATE. #1015 is adding `AudienceGroupPicker` to the
+          kit — a presentational control taking `groups`, `value`, `onChange` and
+          a `preview`, which is exactly the shape this screen already has to hand.
+          When that lands, this bare <Select> and its two empty-state branches
+          should be replaced by `@amroksaleh/ui/audience-group-picker`; it also
+          draws the membership snapshot beside the choice, which is the thing a
+          group node most needs and this inline control does not do.
+
+          It is left as a plain select rather than built out here PRECISELY so it
+          is not a second group picker competing with theirs — fifteen lines that
+          are obviously provisional, not a rival component. */}
       {isGroupKind && (
         <label className="block space-y-1">
           <span className="text-sm font-medium">{t('routeTemplates.inspector.group', 'User group')}</span>
