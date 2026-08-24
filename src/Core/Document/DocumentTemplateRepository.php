@@ -247,6 +247,109 @@ final class DocumentTemplateRepository
     }
 
     /**
+     * WHICH templates in the tenant hold a live `blockInstance` pointer at
+     * $blockId — the same question {@see self::referencesBlock()} answers as a
+     * yes/no, answered as a list so a caller can say WHAT would break.
+     *
+     * This exists because "is it referenced?" is the wrong question to put in
+     * front of a person. `referencesBlock()` is enough to REFUSE a delete, but a
+     * block is pointer-referenced with Gutenberg synced-pattern semantics — an
+     * EDIT propagates to every instance and is never refused by anything. So the
+     * genuinely destructive action (editing a block twelve templates depend on)
+     * has no guard at all, and the only way to give one is to be able to name
+     * the twelve.
+     *
+     * `data` is deliberately NOT selected. A usage answer needs identity and the
+     * governance columns the visibility policy reads, not every referencing
+     * template's entire body — the caller of this is rendering a list, and
+     * fetching N full template trees to display N names is how a management
+     * screen becomes the slowest page in the app. The returned rows therefore
+     * carry `data => []`, which is why {@see self::normalizeRow()} is not reused
+     * here.
+     *
+     * Row-level visibility is NOT applied here — this is the tenant-scoped store,
+     * and the policy is the handler's to apply (the same split every other method
+     * on this repository observes). The handler needs the unfiltered total on
+     * purpose: see {@see \Whity\Api\DocumentBlocksApiHandler::usage()}.
+     *
+     * Two engines, one answer — the same split, and for the same reasons, as
+     * {@see self::referencesBlock()}.
+     *
+     * @return list<array<string, mixed>> Newest-updated first, matching listForTenant()'s order.
+     */
+    public function referencingTemplates(int $blockId, int $tenantId): array
+    {
+        if ($this->driver() === 'pgsql') {
+            // ::text cast for the reason given in referencesBlock().
+            $stmt = $this->db->prepare(
+                "SELECT id, tenant_id, name, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
+                   FROM document_templates
+                  WHERE tenant_id = :tenant_id
+                    AND jsonb_path_exists(
+                        data,
+                        '\$.** ? (@.type == \"blockInstance\" && @.blockId == \$bid)',
+                        jsonb_build_object('bid', :block_id::text)
+                    )
+                  ORDER BY updated_at DESC, id DESC"
+            );
+            $stmt->execute([':tenant_id' => $tenantId, ':block_id' => (string) $blockId]);
+            /** @var list<array<string, mixed>> $rows */
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            return array_map(self::normalizeReferenceRow(...), $rows);
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
+             FROM document_templates WHERE tenant_id = :tenant_id ORDER BY updated_at DESC, id DESC'
+        );
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        $needle = (string) $blockId;
+        $out = [];
+        /** @var array<string, mixed> $row */
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $decoded = json_decode((string) $row['data'], true);
+            if (is_array($decoded) && self::treeReferencesBlock($decoded, $needle)) {
+                $out[] = self::normalizeReferenceRow($row);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Map a reference row: identity, the governance columns
+     * {@see DocumentAccessPolicy} reads, and `data => []`.
+     *
+     * Separate from {@see DocumentRecordTrait::normalizeRow()} rather than a flag
+     * on it, because the two answer different questions and share only their
+     * casts. `data` is still keyed (as an empty array) so the shape stays
+     * assignable wherever a template row is expected — a caller that reached for
+     * `$row['data']` would otherwise get an undefined-key warning on a row that
+     * simply was not asked to carry one.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function normalizeReferenceRow(array $row): array
+    {
+        return [
+            'id'                  => (int) $row['id'],
+            'tenant_id'           => (int) $row['tenant_id'],
+            'name'                => (string) $row['name'],
+            'data'                => [],
+            'scope'               => (string) $row['scope'],
+            'required_permission' => $row['required_permission'] !== null ? (string) $row['required_permission'] : null,
+            'is_system'           => DbBool::of($row['is_system']),
+            'created_by'          => $row['created_by'] !== null ? (int) $row['created_by'] : null,
+            'owner_ou_id'         => ($row['owner_ou_id'] ?? null) !== null ? (int) $row['owner_ou_id'] : null,
+            'created_at'          => (string) $row['created_at'],
+            'updated_at'          => (string) $row['updated_at'],
+        ];
+    }
+
+    /**
      * Recursively walk a decoded template JSON tree for a blockInstance element
      * pointing at $needle (the block id, as a string — the client's blockId
      * field is a string, {@see web/lib/documents/types.ts}).

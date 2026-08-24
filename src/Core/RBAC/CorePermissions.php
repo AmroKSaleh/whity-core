@@ -205,6 +205,36 @@ final class CorePermissions
     public const TAGS_READ = 'tags:read';
     public const TAGS_MANAGE = 'tags:manage';
 
+    // Named USER GROUPS (#999, migration 116). A group is a named, reusable RULE
+    // over the tenant's people — "everyone holding the instructor role" stored
+    // once and referenced from many places — not a membership table. Tenant-scoped.
+    //
+    // TWO SLUGS, AND EACH ONE PASSES #987's TEST. That test is: a permission
+    // nobody would revoke separately is a second name for an existing one. Both
+    // survive it in both directions.
+    //
+    //   read  = list the tenant's groups, read one, and PREVIEW what a group
+    //           resolves to (a count plus a small sample, never the full list).
+    //           Grantable WITHOUT write, because a person composing a route must
+    //           be able to see the groups they may name without being able to
+    //           invent one — and withholdable on its own, because the names
+    //           themselves carry information ("Under investigation" is a
+    //           sentence, not a label).
+    //   write = create, rename, redefine and delete a group. Deliberately NOT
+    //           folded into `roles:write`: defining a group is naming a query,
+    //           not granting authority, so a coordinator who curates circulation
+    //           audiences can hold this while being kept out of RBAC entirely,
+    //           and a security administrator who edits RBAC need not hold it.
+    //
+    // There is no `groups:delete`. Unlike users/roles/tenants, deleting a group
+    // destroys a DEFINITION and no person, no history and no document — the
+    // routes it was named in keep running and report the missing group by name.
+    // An operator who would revoke deletion while granting redefinition has not
+    // narrowed anything: redefining a group to resolve to nobody is the same
+    // outcome reached by a different verb.
+    public const GROUPS_READ = 'groups:read';
+    public const GROUPS_WRITE = 'groups:write';
+
     // Generic async-job API (WC-jobs-api). Tenant-scoped submission + status.
     // submit = POST /api/jobs (enqueue an allow-listed job name for this tenant)
     // and read its own jobs; read = GET /api/jobs/{id} status/progress/result.
@@ -312,6 +342,8 @@ final class CorePermissions
             self::SECURITY_MANAGE,
             self::TAGS_READ,
             self::TAGS_MANAGE,
+            self::GROUPS_READ,
+            self::GROUPS_WRITE,
             self::JOBS_SUBMIT,
             self::JOBS_READ,
             self::NOTIFICATIONS_MANAGE,

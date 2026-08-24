@@ -92,6 +92,10 @@ final class SettingsRegistryCorePinTest extends TestCase
             // #947 item 3 — routing ceilings, tenant-overridable like the render ones.
             'documents.routing_max_steps',
             'documents.routing_max_recipients_per_step',
+            // #999 — how many people a USER GROUP preview SHOWS. Not a ceiling
+            // on resolution: the count a preview reports is exact and unbounded,
+            // this is the size of the sample beside it.
+            'groups.preview_sample_size',
             'data_types.bulk_max_ids',
             'error_tracking.enabled',
             'error_tracking.provider',
@@ -204,6 +208,9 @@ final class SettingsRegistryCorePinTest extends TestCase
             // 500, matching the render row ceiling: the point at which "this is
             // a distribution" stops being a plausible reading of one step.
             'documents.routing_max_recipients_per_step' => '500',
+            // Ten faces: enough to recognise a group at a glance, small enough
+            // that nobody mistakes the sample for the list.
+            'groups.preview_sample_size' => '10',
             'data_types.bulk_max_ids' => '500',
             'error_tracking.enabled' => 'false',
             'error_tracking.provider' => 'internal',

@@ -150,6 +150,21 @@ final class TenantOwnedTables
         'document_route_events'      => '112_create_document_routing.php',
         'document_route_recipients'  => '112_create_document_routing.php',
 
+        // #999 — named USER GROUPS (migration 116). One row per group: a name
+        // plus the `rule_kind` + `rule_config` pair that says which people it
+        // contains. There is deliberately NO `user_group_members` table beside
+        // it: a stored membership list omits the instructor hired last week,
+        // still renders, and still reports success, which is the same argument
+        // `document_route_steps` above relies on for having nowhere to put a
+        // person.
+        //
+        // Tenant-owned with an explicit `tenant_id` rather than one inferred
+        // through anything, so the predicate guard polices a group read
+        // DIRECTLY. Every read and write binds it, and a group id from another
+        // tenant is reported as absent rather than forbidden — group ids are
+        // enumerable integers.
+        'user_groups'                => '116_create_user_groups.php',
+
         // WC-525 — admin-enforced 2FA policy registry (migration 061): tenant/OU/
         // user-scoped rows an admin sets to require 2FA enrollment. Every query
         // binds tenant_id so a policy can never leak across tenants.

@@ -113,6 +113,81 @@ final class DocumentBlocksApiHandler
         return Response::json(['data' => $row]);
     }
 
+    /**
+     * GET /api/document-blocks/{id}/usage — WHAT WOULD BREAK if this block
+     * changed or went away.
+     *
+     * A block is POINTER-referenced with Gutenberg synced-pattern semantics, so
+     * editing one propagates to every template that instances it. Delete has a
+     * guard ({@see self::delete()}'s 409); EDIT has none and can have none — it
+     * is a legitimate action whose whole purpose is to propagate. The only
+     * safeguard available is therefore an informed publisher, and that needs a
+     * number and some names BEFORE the edit, not an error after it.
+     *
+     * WHY `total` IS NOT ROW-FILTERED, AND WHY THAT IS THE POINT
+     * ---------------------------------------------------------
+     * `templates` is filtered by {@see DocumentAccessPolicy} — a caller is never
+     * handed the identity of a template it may not see. `total` is NOT: it counts
+     * every referencing template in the tenant, and `hidden` is the difference.
+     *
+     * A visible-only count would be WORSE THAN NO COUNT, which is the reason this
+     * endpoint is shaped this way rather than reusing filterVisible() for both
+     * numbers. A department secretary reaches one department; a block she may
+     * edit can be instanced by templates across the whole faculty. Told "used by
+     * 2 templates" she edits with confidence and silently rewrites seven
+     * documents she cannot see. Told "used by 9, of which you can see 2" she
+     * knows the edit leaves her blast radius.
+     *
+     * The disclosure is a COUNT, scoped to the caller's own tenant, of rows they
+     * already hold documents:read on at the route. No name, no placement, no
+     * permission tag — nothing that narrows down WHICH rows. self::delete()
+     * already discloses strictly more (its 409 proves at least one such row
+     * exists) and has since WC-521; this replaces "something you cannot see says
+     * no" with a number, which is the same fact stated usefully.
+     *
+     * A block the caller may not see 404s, exactly as {@see self::show()} does —
+     * you cannot ask about the usage of a row whose existence is withheld.
+     *
+     * @param array<string, string> $params
+     */
+    public function usage(Request $request, array $params): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+
+        $id = (int) ($params['id'] ?? 0);
+        $block = $this->repo->findById($id, $tenantId);
+        $has = $this->permissionResolver($callerId, $tenantId);
+        $reaches = $this->ouReach->reachFor($tenantId, $callerId);
+        if ($block === null || !$this->policy->canView($block, $callerId, $has, $reaches)) {
+            return Response::error('Block not found', 404);
+        }
+
+        $referencing = $this->templateRepo->referencingTemplates($id, $tenantId);
+        $visible = $this->policy->filterVisible($referencing, $callerId, $has, $reaches);
+
+        return Response::json(['data' => [
+            'block_id'  => $id,
+            'total'     => count($referencing),
+            'hidden'    => count($referencing) - count($visible),
+            'templates' => array_map(
+                static fn (array $row): array => [
+                    'id'                  => $row['id'],
+                    'name'                => $row['name'],
+                    'scope'               => $row['scope'],
+                    'required_permission' => $row['required_permission'],
+                    'owner_ou_id'         => $row['owner_ou_id'],
+                    'is_system'           => $row['is_system'],
+                    'updated_at'          => $row['updated_at'],
+                ],
+                $visible,
+            ),
+        ]]);
+    }
+
     public function create(Request $request): Response
     {
         $ctx = $this->context($request);

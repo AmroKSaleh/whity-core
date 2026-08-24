@@ -7,8 +7,9 @@ namespace Whity\Core\Document\Routing;
 use InvalidArgumentException;
 use PDO;
 use Whity\Core\Ou\OuSubtree;
+use Whity\Sdk\Audience\AudienceRuleContext;
+use Whity\Sdk\Audience\AudienceRuleResolverInterface;
 use Whity\Sdk\Routing\ResolvedRecipient;
-use Whity\Sdk\Routing\RoutingRuleContext;
 use Whity\Sdk\Routing\RoutingRuleResolverInterface;
 
 /**
@@ -61,10 +62,28 @@ use Whity\Sdk\Routing\RoutingRuleResolverInterface;
  * a picker can offer them side by side. See that class for why the id and not
  * the name.
  *
+ * ALSO A GROUP DEFINITION, AND IT IS RELATIVE TO WHOEVER USES IT (#999)
+ * ---------------------------------------------------------------------
+ * This rule never reads the document, the route or the step, so it can define a
+ * named USER GROUP — declared by implementing
+ * {@see AudienceRuleResolverInterface} alongside the routing one and widening the
+ * parameter to {@see AudienceRuleContext}. One body serves both.
+ *
+ * A group defined this way resolves to a DIFFERENT SET FOR EACH PERSON who uses
+ * it, and that is the feature rather than a defect: "the instructors in my own
+ * unit and below" is ONE named rule that every unit head can address a document
+ * to and that means their own unit each time. The alternative — one group per
+ * unit head — is the thousand-nodes problem, restated.
+ *
+ * The consequence is that a PREVIEW of such a group is relative to whoever asked
+ * for it, which is why {@see \Whity\Core\Audience\AudiencePreview} reports the
+ * actor it resolved against. Without that, two colleagues would read two
+ * different counts off the same screen with nothing to explain the difference.
+ *
  * Stateless apart from its PDO handle — worker-safe, and called once per acting
  * recipient within a request.
  */
-final class RoleBelowActorRuleResolver implements RoutingRuleResolverInterface
+final class RoleBelowActorRuleResolver implements RoutingRuleResolverInterface, AudienceRuleResolverInterface
 {
     public function __construct(private readonly PDO $db)
     {
@@ -86,7 +105,7 @@ final class RoleBelowActorRuleResolver implements RoutingRuleResolverInterface
     /**
      * @return list<ResolvedRecipient>
      */
-    public function resolve(RoutingRuleContext $context): array
+    public function resolve(AudienceRuleContext $context): array
     {
         $roleId = self::requireRoleId($context->config);
 

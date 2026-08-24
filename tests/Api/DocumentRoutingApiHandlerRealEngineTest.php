@@ -22,7 +22,11 @@ use Whity\Core\Document\Routing\RouteRepository;
 use Whity\Core\Document\Routing\RouteStepRepository;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
 use Whity\Core\Document\Routing\RoleRuleResolver;
+use Whity\Core\Audience\ExplicitRuleResolver;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
+use Whity\Core\Group\GroupResolver;
+use Whity\Core\Group\GroupRuleResolver;
+use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Inbox\InboxSourceRegistry;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
@@ -93,9 +97,19 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
         $this->recipients = new RouteRecipientRepository($this->pdo);
 
         $rules = new RoutingRuleRegistry();
+        // Wired exactly as public/index.php wires it, including #999's two extra
+        // core kinds and the closure that breaks the group/registry cycle. A
+        // stub here would let a route pass in tests that could not be authored
+        // in production.
         $rules->registerCoreRoutingRules(
             new RoleRuleResolver($this->pdo),
-            new RoleBelowActorRuleResolver($this->pdo)
+            new RoleBelowActorRuleResolver($this->pdo),
+            new ExplicitRuleResolver(),
+            new GroupRuleResolver(new GroupResolver(
+                $this->pdo,
+                new UserGroupRepository($this->pdo),
+                static fn (): RoutingRuleRegistry => $rules
+            ))
         );
 
         $settings = new SettingsService(
@@ -385,7 +399,11 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode());
         $kinds = array_column($this->json($response)['data'], 'kind');
-        self::assertSame(['role', 'role_below_actor'], $kinds);
+        // #999 added two: `explicit` (the enumerated case, as a rule rather than
+        // as an exception to rules) and `group` (dereference a named user group).
+        // A route step may name any of the four. The GROUP catalogue is narrower
+        // — see RoutingRuleRegistryTest — because `group` may not define a group.
+        self::assertSame(['explicit', 'group', 'role', 'role_below_actor'], $kinds);
     }
 
     // -- the inbox (#881) ---------------------------------------------------

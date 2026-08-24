@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Core\Document;
 
+use Whity\Core\Router;
+
 /**
  * The wire shape of a document and its artifacts (#947 item 1).
  *
@@ -158,13 +160,32 @@ final class DocumentPresenter
     /** The durable reference to a document's CURRENT artifact. */
     public static function documentContentUrl(int $documentId): string
     {
-        return "/api/documents/{$documentId}/content";
+        return self::apiPath("/api/documents/{$documentId}/content");
     }
 
     /** The durable reference to ONE artifact, superseded or not. */
     public static function artifactContentUrl(int $documentId, int $artifactId): string
     {
-        return "/api/documents/{$documentId}/artifacts/{$artifactId}/content";
+        return self::apiPath("/api/documents/{$documentId}/artifacts/{$artifactId}/content");
+    }
+
+    /**
+     * The versioned, client-callable form of an unversioned route path.
+     *
+     * Both builders above name their route the way it is REGISTERED — bare, as
+     * every route in this codebase is written — but `content_url` is a URL the
+     * BROWSER fetches, so it has to carry the version prefix the router adds at
+     * registration. It did not, so every content link addressed
+     * '/api/documents/…' while the server served '/api/v1/documents/…', and the
+     * viewer's fetch 404'd on every document that had an artifact to show.
+     *
+     * Derived from the Router's own default rather than written as a literal, so
+     * a version bump moves these links with the routes instead of leaving them
+     * pointing at a version that is no longer served.
+     */
+    private static function apiPath(string $unversionedPath): string
+    {
+        return (new Router())->versionedPath($unversionedPath);
     }
 
     /**

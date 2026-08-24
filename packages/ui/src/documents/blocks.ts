@@ -53,6 +53,54 @@ export function blocksById(list: DocBlock[]): Record<string, DocBlock> {
 }
 
 /**
+ * The distinct block ids a template's `data` tree references via `blockInstance`
+ * elements, in first-seen order.
+ *
+ * The TypeScript twin of PHP's `Whity\Core\Document\BlockReferenceScanner` —
+ * SAME recursive-descent walk, same shape check (`{type: 'blockInstance',
+ * blockId}` at any depth, in any page, under any key), so a client counting a
+ * template's block references and the server answering
+ * `GET /document-blocks/{id}/usage` cannot disagree about what counts as a
+ * reference. A management screen that said "nothing uses this block" over a
+ * delete the server then refuses is precisely the failure this parity avoids.
+ *
+ * Takes `unknown`, not `DocTemplate`, on purpose. The caller is a governance
+ * screen reading raw API rows, and a row whose `data` fails template-shape
+ * validation still has references that matter — `toSavedTemplate` returns null
+ * for such a row, which is right for a canvas and would silently undercount
+ * here. Anything that is not an object tree simply yields no ids.
+ */
+export function collectBlockIds(node: unknown): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  const walk = (value: unknown): void => {
+    if (value === null || typeof value !== 'object') return;
+
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+
+    const rec = value as Record<string, unknown>;
+    if (rec.type === 'blockInstance' && 'blockId' in rec) {
+      // Stringified for the reason the PHP scanner records: the client's
+      // `blockId` field is a string while the backend id is numeric, and the two
+      // meet here.
+      const id = String(rec.blockId);
+      if (!seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+    for (const child of Object.values(rec)) walk(child);
+  };
+
+  walk(node);
+  return ids;
+}
+
+/**
  * Build a block from a set of elements: normalise them to a (0,0) origin and
  * record the bounding-box size. Any block instances in the selection are
  * dropped (no nesting in the MVP). Returns null if nothing usable remains.

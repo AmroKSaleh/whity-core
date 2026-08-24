@@ -7,7 +7,11 @@ namespace Tests\Core\Document\Routing;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Core\Audience\ExplicitRuleResolver;
 use Whity\Core\Document\Routing\DocumentRouter;
+use Whity\Core\Group\GroupResolver;
+use Whity\Core\Group\GroupRuleResolver;
+use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Document\Routing\RouteAction;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
@@ -111,9 +115,18 @@ final class DocumentRouterRealEngineTest extends TestCase
         );
 
         $this->rules = new RoutingRuleRegistry();
+        // Wired exactly as public/index.php wires it, including #999's two extra
+        // core kinds and the closure that breaks the group/registry cycle.
+        $registry = $this->rules;
         $this->rules->registerCoreRoutingRules(
             new RoleRuleResolver($this->pdo),
-            new RoleBelowActorRuleResolver($this->pdo)
+            new RoleBelowActorRuleResolver($this->pdo),
+            new ExplicitRuleResolver(),
+            new GroupRuleResolver(new GroupResolver(
+                $this->pdo,
+                new UserGroupRepository($this->pdo),
+                static fn (): RoutingRuleRegistry => $registry
+            ))
         );
 
         $this->router = new DocumentRouter(

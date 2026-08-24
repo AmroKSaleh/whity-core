@@ -42,6 +42,21 @@ namespace Whity\Sdk\Routing;
  * concatenate the prefix by hand, or a change to the namespacing rule silently
  * breaks every step the plugin has already written.
  *
+ * ONE DECLARATION, TWO USES (#999)
+ * --------------------------------
+ * A kind declared here is also offered as the definition of a named USER GROUP
+ * — "the instructors" as one stored rule rather than a thousand membership rows
+ * — PROVIDED its resolver also implements
+ * {@see \Whity\Sdk\Audience\AudienceRuleResolverInterface}. That interface adds
+ * no behaviour; it promises the resolver needs only the tenant, the actor and
+ * its own config, which is what makes the kind answerable when no document is
+ * being routed. One extra `implements` and a widened parameter, no second class.
+ *
+ * There is no separate group-rule declaration interface, deliberately. One
+ * vocabulary, declared once: a rule that can name a set of people can name the
+ * recipients of a step, and two registries for the same list would be two
+ * catalogues free to disagree about what a plugin contributed.
+ *
  * A DECLARATION IS A CATALOGUE ENTRY, NOT A ROUTE
  * -----------------------------------------------
  * Declaring a kind does not create any route, step or recipient anywhere. It

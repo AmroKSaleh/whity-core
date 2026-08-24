@@ -6,8 +6,9 @@ namespace Whity\Core\Document\Routing;
 
 use InvalidArgumentException;
 use PDO;
+use Whity\Sdk\Audience\AudienceRuleContext;
+use Whity\Sdk\Audience\AudienceRuleResolverInterface;
 use Whity\Sdk\Routing\ResolvedRecipient;
-use Whity\Sdk\Routing\RoutingRuleContext;
 use Whity\Sdk\Routing\RoutingRuleResolverInterface;
 
 /**
@@ -81,10 +82,22 @@ use Whity\Sdk\Routing\RoutingRuleResolverInterface;
  * picked the wrong role finds out in the response rather than in a complaint
  * six weeks later.
  *
+ * ALSO A GROUP DEFINITION (#999)
+ * ------------------------------
+ * This rule never reads the document, the route or the step, so it answers
+ * "which people?" as well as "who receives this step?" — which makes it usable
+ * as the definition of a named USER GROUP. Declared by implementing
+ * {@see AudienceRuleResolverInterface} alongside the routing one and widening
+ * the parameter to {@see AudienceRuleContext}; ONE body serves both, because a
+ * {@see \Whity\Sdk\Routing\RoutingRuleContext} IS an `AudienceRuleContext`.
+ *
+ * `role` is the kind the whole feature was asked for: one node saying
+ * "instructors", not a thousand nodes for a thousand instructors.
+ *
  * Stateless apart from its PDO handle — worker-safe, and called once per acting
  * recipient within a request.
  */
-final class RoleRuleResolver implements RoutingRuleResolverInterface
+final class RoleRuleResolver implements RoutingRuleResolverInterface, AudienceRuleResolverInterface
 {
     public function __construct(private readonly PDO $db)
     {
@@ -106,7 +119,7 @@ final class RoleRuleResolver implements RoutingRuleResolverInterface
     /**
      * @return list<ResolvedRecipient>
      */
-    public function resolve(RoutingRuleContext $context): array
+    public function resolve(AudienceRuleContext $context): array
     {
         $roleId = self::requireRoleId($context->config);
 

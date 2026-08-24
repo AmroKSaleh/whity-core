@@ -87,6 +87,35 @@ export const TRANSLATIONS_MANAGE = 'translations:manage';
 export const DOCUMENTS_ROUTE = 'documents:route';
 
 /**
+ * Managing the designer's saved work: templates and reusable blocks.
+ *
+ * Three slugs because the surface has three genuinely different gates, and
+ * collapsing them would either hide the page from people who belong on it or
+ * dangle controls that 403 on submit:
+ *
+ *  - `DOCUMENTS_WRITE` gates rename and delete. Ordinary editing.
+ *  - `DOCUMENTS_PUBLISH` gates every change to WHO CAN SEE a row — its scope,
+ *    its permission tag, and its placement in the organisation. That is the
+ *    server's own split ({@see DocumentAccessPolicy::needsPublish}), which
+ *    treats filing a row at a unit as a publish action even on a personal row,
+ *    so the client must treat placement as a publish control too or the dialog
+ *    will offer a field whose submit is refused.
+ *  - `DOCUMENTS_READ` gates the page itself, via the nav item.
+ *
+ * ALL THREE ARE HELD, verified against a migrated-and-seeded schema rather than
+ * read off the catalogue (a catalogue row is not a holder — that is how
+ * `roles:read` gated a control nobody could use for months). Migration 060
+ * grants documents:read/write/publish/render to the `admin` role, and the
+ * document-demo dataset confirms the split is real and load-bearing: the dean
+ * holds publish, both secretaries hold read+write and NOT publish. So gating
+ * the scope dialog on publish is what makes the two secretaries' screens
+ * differ from the dean's rather than a decorative check.
+ */
+export const DOCUMENTS_READ = 'documents:read';
+export const DOCUMENTS_WRITE = 'documents:write';
+export const DOCUMENTS_PUBLISH = 'documents:publish';
+
+/**
  * Bringing a document into existence — `POST /api/v1/documents` (#947 item 1).
  *
  * NO `documents:create` WAS MINTED, and that is the decision worth recording
