@@ -114,8 +114,9 @@ php public/index.php migrate run        # run pending migrations
 php public/index.php migrate rollback   # roll back the last migration
 php public/index.php seed               # seed default tenant/roles/bootstrap admin
 php public/index.php seed --with-fixtures  # …plus the *@example.com demo logins
-                                        #   and the document demo dataset
-                                        #   (see docs/wiki/CLI_REFERENCE.md)
+php public/index.php seed --with-document-demo # a faculty + routed documents to
+                                        #   click through; off by default in every
+                                        #   environment (docs/wiki/CLI_REFERENCE.md)
 php public/index.php generate:openapi   # regenerate public/openapi.json
 
 php bin/whity-cli migrate|seed|plugin|tenant # status/manage migrations, seeding, plugins, tenants

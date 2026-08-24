@@ -128,7 +128,7 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
 
         $this->seeder = new DocumentDemoSeeder(
             $this->pdo,
-            new DemoOrganisationSeeder($this->pdo),
+            new DemoOrganisationSeeder($this->pdo, new \Whity\Core\Identity\ProfileProvisioner($this->pdo)),
             new DocumentStarterSeeder($this->templates, $this->blocks),
             $this->templates,
             $this->blocks,

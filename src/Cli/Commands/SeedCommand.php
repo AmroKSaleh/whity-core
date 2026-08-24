@@ -21,6 +21,7 @@ use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
 use Whity\Core\Document\Routing\RouteStepRepository;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
+use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\TenantSettingsRepository;
@@ -43,15 +44,40 @@ use Whity\Storage\StorageDriverFactory;
  * deliberate being the point, since the alternative was every environment
  * getting them by default.
  *
- * THE DOCUMENT DEMO RIDES THE SAME GATE
- * ------------------------------------
- * {@see DocumentDemoSeeder} seeds an invented faculty, seven demo logins and
- * five routed documents so the document system's screens can be looked at
- * instead of guessed at. It runs under exactly the condition the
- * `*@example.com` accounts do and for exactly their reason: a production tenant
- * that quietly acquired a "Demo Faculty of Engineering", seven accounts sharing
- * one password and five fake documents in people's inboxes would be a worse
- * accident than the three known-address logins WC-779 was written to prevent.
+ * THE DOCUMENT DEMO HAS A GATE OF ITS OWN: --with-document-demo
+ * ------------------------------------------------------------
+ * {@see DocumentDemoSeeder} seeds an invented faculty, eight demo logins and six
+ * routed documents so the document system's screens can be looked at instead of
+ * guessed at. It is OFF by default in EVERY environment, development included;
+ * only `--with-document-demo` turns it on.
+ *
+ * It first rode `--with-fixtures`, and the way that was wrong is the argument for
+ * the split. The two flags answer different questions:
+ *
+ *   --with-fixtures       demo ACCOUNTS — infrastructure other things need. The
+ *                         E2E suite runs migrate + seed in a development
+ *                         environment precisely because it must log in as
+ *                         admin@example.com.
+ *   --with-document-demo  demo CONTENT — illustration for a person who wants
+ *                         something to click through. Nothing depends on it.
+ *
+ * Sharing one flag meant the E2E baseline silently acquired the demo dataset, and
+ * it broke specs that had nothing to do with documents: eight demo memberships
+ * pushed admin@example.com off the first page of a users table that paginates at
+ * ten and orders newest-membership-first, so two specs asserting on that one cell
+ * failed. That is the shape of the problem rather than an accident of it — a
+ * shared gate leaves every future change to this seeder able to break an
+ * unrelated spec, and pushes each spec towards carrying knowledge of whatever
+ * the seeder happens to create.
+ *
+ * The gate covers the demo ORGANISATION as well as its documents, and the failure
+ * above is exactly why: the rows that broke E2E were PEOPLE, not documents, so a
+ * flag over only the documents would have fixed nothing.
+ *
+ * Off even in development, deliberately. "Development" is not one audience — it
+ * is a person clicking through a UI, and it is also a CI job booting a stack to
+ * run Playwright against. Only the first wants demo content, and a human asking
+ * for it by name is the only signal that tells them apart.
  *
  * WHY THE SERVICES ARE WIRED HERE AND NOT INSIDE {@see Seeder::seed()}
  * -------------------------------------------------------------------
@@ -71,16 +97,26 @@ use Whity\Storage\StorageDriverFactory;
  *     directly instead, against a throwaway storage root it cleans up.
  *
  * Usage:
- *   php public/index.php seed                  - Seed the database
- *   php public/index.php seed --with-fixtures  - …including the demo accounts
- *   php bin/whity-cli seed                     - Same, via the CLI tool
+ *   php public/index.php seed                       - Seed the database
+ *   php public/index.php seed --with-fixtures       - …including the demo accounts
+ *   php public/index.php seed --with-document-demo  - …including the document demo dataset
+ *   php bin/whity-cli seed                          - Same, via the CLI tool
  */
 class SeedCommand
 {
+    /**
+     * The flag that turns the document demo dataset on.
+     *
+     * A constant because three places name it: the parser below, the usage block
+     * above, and the test that pins the gate.
+     */
+    public const DOCUMENT_DEMO_FLAG = '--with-document-demo';
+
     public function execute(array $argv): int
     {
         try {
             $withFixtures = in_array('--with-fixtures', $argv, true) ? true : null;
+            $withDocumentDemo = self::wantsDocumentDemo($argv);
 
             $db = Database::connect();
 
@@ -107,15 +143,21 @@ class SeedCommand
                 echo "  Passwords are taken from INITIAL_ADMIN_PASSWORD / INITIAL_USER_PASSWORD /\n";
                 echo "  INITIAL_SUPERUSER_PASSWORD; if unset, a random password was generated and\n";
                 echo "  printed above.\n";
-
-                foreach ($this->seedDocumentDemo($db) as $line) {
-                    echo "  - " . $line . "\n";
-                }
             } else {
                 echo "  - Demo accounts (admin@/user@/superuser@example.com) SKIPPED: they are\n";
                 echo "    seeded only under APP_ENV=development. Pass --with-fixtures to seed them\n";
                 echo "    here deliberately.\n";
-                echo "  - Document demo data SKIPPED for the same reason.\n";
+            }
+
+            if ($withDocumentDemo) {
+                foreach ($this->seedDocumentDemo($db) as $line) {
+                    echo "  - " . $line . "\n";
+                }
+            } else {
+                echo "  - Document demo data SKIPPED: pass " . self::DOCUMENT_DEMO_FLAG . " for an\n";
+                echo "    invented faculty, its people and six routed documents. Off by default in\n";
+                echo "    EVERY environment, development included — nothing depends on it, so it is\n";
+                echo "    seeded only because somebody wants something to click through.\n";
             }
             echo "\n";
 
@@ -124,6 +166,26 @@ class SeedCommand
             echo "\033[0;31m✗ Seeding failed: " . $e->getMessage() . "\033[0m\n";
             return 1;
         }
+    }
+
+    /**
+     * Whether this invocation asked for the document demo dataset.
+     *
+     * A named predicate rather than an inline `in_array`, and public rather than
+     * private, so the GATE ITSELF is testable without a database — see
+     * {@see \Whity\Tests\Cli\SeedCommandTest}. The regression it guards is the
+     * one that already happened: demo content riding a flag that exists for
+     * something else, which nothing failed on until an unrelated E2E spec did.
+     *
+     * No environment fallback, deliberately. Unlike the `*@example.com`
+     * accounts, this is never implied by `APP_ENV=development` — see the class
+     * docblock for why "development" is not a single audience.
+     *
+     * @param list<string> $argv
+     */
+    public static function wantsDocumentDemo(array $argv): bool
+    {
+        return in_array(self::DOCUMENT_DEMO_FLAG, $argv, true);
     }
 
     /**
@@ -173,7 +235,10 @@ class SeedCommand
 
         $seeder = new DocumentDemoSeeder(
             $pdo,
-            new DemoOrganisationSeeder($pdo),
+            // The identity seam, not an INSERT of our own: see
+            // DemoOrganisationSeeder for why a hand-rolled profile row is the
+            // same mistake as a hand-rolled recipient row.
+            new DemoOrganisationSeeder($pdo, new ProfileProvisioner($pdo)),
             new DocumentStarterSeeder($templates, $blocks),
             $templates,
             $blocks,
@@ -196,7 +261,7 @@ class SeedCommand
                 // to broadcast each appended trail event onto the durable spine
                 // through dispatchAsync — which enqueues the outbox relay and
                 // runs any registered plugin listener. A seed run must not send
-                // seven people a notification about a circular that does not
+                // eight people a notification about a circular that does not
                 // exist, and there is no plugin bootstrap in the CLI seed path
                 // for those listeners to have come from anyway. The trail itself
                 // is the system of record and is written either way.

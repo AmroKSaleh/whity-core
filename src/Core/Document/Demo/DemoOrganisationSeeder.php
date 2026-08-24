@@ -6,6 +6,7 @@ namespace Whity\Core\Document\Demo;
 
 use PDO;
 use RuntimeException;
+use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Database\InitialPassword;
 
@@ -33,35 +34,53 @@ use Whity\Database\InitialPassword;
  * touching several units records NO single destination (`to_ou_id` null) never
  * fires, and the reader would take the single-unit case for the general one.
  *
- * WHY THIS ONE FILE WRITES SQL DIRECTLY
- * -------------------------------------
- * Everything downstream of here is driven through a real service, deliberately
- * and for the reason {@see DocumentDemoSeeder} records. Units, roles,
- * permission grants, profiles and memberships have NO service to drive: OU
- * creation lives inline in {@see \Whity\Api\OusApiHandler::create()}, which is
- * an HTTP handler — it parses a request, returns a {@see \Whity\Http\Response}
- * and dispatches `ou.creating`/`ou.created` — and there is no `OuRepository`
- * behind it. {@see \Whity\Database\ScaleSeeder\ScaleSeeder} reached the same
- * wall and writes these same five tables directly; so does
- * {@see \Whity\Database\Seeder} for profiles and memberships.
+ * IDENTITIES COME FROM THE REAL SEAM
+ * ----------------------------------
+ * People are created by {@see ProfileProvisioner::findOrCreate()}, not by an
+ * INSERT here, for the same reason the routing states go through
+ * {@see \Whity\Core\Document\Routing\DocumentRouter}: a hand-rolled
+ * `profiles` row can sit in a state the provisioning path would never produce —
+ * an address that is not primary or not verified, a non-zero `token_epoch`, an
+ * `auth_method` claiming a local credential the row does not carry — and then
+ * the demo teaches an identity behaviour the product does not have. It also
+ * means a demo address that somehow already belongs to a real person REUSES
+ * that identity instead of minting a second one, which is what that seam is for.
  *
- * That is acceptable HERE and would not be for a recipient row, and the
- * difference is worth stating because it is the whole reason the split exists.
- * A unit row is an INPUT to the routing resolvers, not an output of them: there
- * is no state a hand-written `organizational_units` row can express that the
- * engine would refuse to produce, because the engine does not produce them at
- * all. A hand-written `document_route_recipients` row is the opposite — it can
- * name a step whose rule resolves to somebody else entirely, and then the demo
- * teaches a routing behaviour the engine does not have.
+ * The visible consequence is the display name: the provisioner derives it from
+ * the address's local part, so the demo people show as `dean`,
+ * `faculty-secretary`, `civil-head` and so on rather than as prose names. That
+ * is a fair trade and arguably the better label — it is the same string as the
+ * login, so a reader comparing two secretaries' screens can tell at a glance
+ * which one they are looking at.
+ *
+ * WHAT IS STILL WRITTEN IN SQL, AND WHY THAT IS DIFFERENT
+ * ------------------------------------------------------
+ * Units, roles, permission grants and memberships. Those genuinely have no
+ * service to drive: OU creation lives inline in
+ * {@see \Whity\Api\OusApiHandler::create()}, which is an HTTP handler — it
+ * parses a request, returns a {@see \Whity\Http\Response} and dispatches
+ * `ou.creating`/`ou.created` — and there is no `OuRepository` behind it.
+ * {@see \Whity\Database\ScaleSeeder\ScaleSeeder} reached the same wall and
+ * writes these same tables directly; so does {@see \Whity\Database\Seeder} for
+ * memberships.
+ *
+ * That is acceptable for these tables and would not be for a recipient row, and
+ * the difference is worth stating because it is the whole reason the split
+ * exists. A unit row is an INPUT to the routing resolvers, not an output of
+ * them: there is no state a hand-written `organizational_units` row can express
+ * that the engine would refuse to produce, because the engine does not produce
+ * them at all. A hand-written `document_route_recipients` row is the opposite —
+ * it can name a step whose rule resolves to somebody else entirely, and then the
+ * demo teaches a routing behaviour the engine does not have.
  *
  * IDEMPOTENT, PER ROW
  * -------------------
- * Every unit is looked up by `(tenant_id, slug)`, every role by
- * `(tenant_id, name)` and every person by their email address before it is
- * written, and every insert additionally carries `ON CONFLICT DO NOTHING` as the
- * backstop. A second run resolves the same ids and writes nothing. The id is
- * re-SELECTed after the insert rather than taken from `RETURNING` or
- * `lastInsertId()`, which is one query more and removes the driver branch the
+ * Every unit is looked up by `(tenant_id, slug)` and every role by
+ * `(tenant_id, name)` before it is written, every insert additionally carries
+ * `ON CONFLICT DO NOTHING` as the backstop, and every person is found-or-created
+ * by address. A second run resolves the same ids and writes nothing. Unit and
+ * role ids are re-SELECTed after the insert rather than taken from `RETURNING`
+ * or `lastInsertId()`, which is one query more and removes the driver branch the
  * two spellings would otherwise need — this is an offline seeder, not a hot
  * path.
  *
@@ -142,12 +161,22 @@ final class DemoOrganisationSeeder
      */
     public const PASSWORD_ENV_VAR = 'DEMO_SEED_PASSWORD';
 
-    public function __construct(private readonly PDO $db)
-    {
+    public function __construct(
+        private readonly PDO $db,
+        private readonly ProfileProvisioner $profiles,
+    ) {
     }
 
     /**
      * Seed (or resolve) the demo organisation in one tenant.
+     *
+     * ONE TRANSACTION, because {@see ProfileProvisioner} requires it: it writes
+     * the profile and its primary email as two statements, and says in as many
+     * words that a profile without its email is a broken identity no later
+     * request can repair. The caller owns the boundary, so this is where it
+     * belongs. Entered only if one is not already open, the same courtesy every
+     * other service in this codebase extends to a caller running a larger unit
+     * of work.
      *
      * @throws RuntimeException When a permission the fixture needs is not in the
      *         database. Loud rather than skipped: a `demo-secretary` without
@@ -156,9 +185,25 @@ final class DemoOrganisationSeeder
      */
     public function seed(int $tenantId): DemoOrganisation
     {
-        $ouIds = $this->seedUnits($tenantId);
-        $roleIds = $this->seedRoles($tenantId);
-        $profileIds = $this->seedPeople($tenantId, $ouIds, $roleIds);
+        $ownTransaction = !$this->db->inTransaction();
+        if ($ownTransaction) {
+            $this->db->beginTransaction();
+        }
+
+        try {
+            $ouIds = $this->seedUnits($tenantId);
+            $roleIds = $this->seedRoles($tenantId);
+            $profileIds = $this->seedPeople($tenantId, $ouIds, $roleIds);
+
+            if ($ownTransaction) {
+                $this->db->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
 
         return new DemoOrganisation($tenantId, $ouIds, $roleIds, $profileIds);
     }
@@ -290,45 +335,37 @@ final class DemoOrganisationSeeder
      */
     private function seedPeople(int $tenantId, array $ouIds, array $roleIds): array
     {
-        /** @var array<string, array{display: string, role: string, ou: ?string}> $people */
+        /** @var array<string, array{role: string, ou: ?string}> $people */
         $people = [
             self::DEAN => [
-                'display' => 'Demo Dean',
                 'role' => self::ROLE_DEAN,
                 'ou' => self::OU_FACULTY,
             ],
             self::FACULTY_SECRETARY => [
-                'display' => "Demo Dean's Secretary",
                 'role' => self::ROLE_SECRETARY,
                 'ou' => self::OU_FACULTY,
             ],
             self::CIVIL_HEAD => [
-                'display' => 'Demo Head of Civil Engineering',
                 'role' => self::ROLE_HEAD,
                 'ou' => self::OU_DEPT_CIVIL,
             ],
             self::CIVIL_SECRETARY => [
-                'display' => 'Demo Civil Department Secretary',
                 'role' => self::ROLE_SECRETARY,
                 'ou' => self::OU_DEPT_CIVIL,
             ],
             self::CIVIL_TECHNICIAN => [
-                'display' => 'Demo Civil Technician',
                 'role' => self::ROLE_TECHNICIAN,
                 'ou' => self::OU_DEPT_CIVIL,
             ],
             self::MECHANICAL_HEAD => [
-                'display' => 'Demo Head of Mechanical Engineering',
                 'role' => self::ROLE_HEAD,
                 'ou' => self::OU_DEPT_MECHANICAL,
             ],
             self::MECHANICAL_TECHNICIAN => [
-                'display' => 'Demo Mechanical Technician',
                 'role' => self::ROLE_TECHNICIAN,
                 'ou' => self::OU_DEPT_MECHANICAL,
             ],
             self::REGISTRY_OFFICER => [
-                'display' => 'Demo Registry Officer',
                 'role' => self::ROLE_REGISTRY_OFFICER,
                 // NULL, not a unit. The membership is active and complete; it
                 // simply names no place, which is what `memberships.ou_id` being
@@ -339,31 +376,48 @@ final class DemoOrganisationSeeder
 
         // Hashed ONCE for the whole set. bcrypt is the only expensive thing this
         // seeder does, and hashing per person would also mean announcing a
-        // generated password seven times for one fixture.
-        $passwordHash = null;
+        // generated password eight times for one fixture. Resolved eagerly
+        // rather than on first miss because the provisioner takes the hash as an
+        // argument and ignores it for a profile that already exists, so there is
+        // no cheaper moment to decide.
+        $passwordHash = password_hash(
+            InitialPassword::resolvePlaintext(
+                self::PASSWORD_ENV_VAR,
+                'the document-demo accounts (all under demo.example.com)'
+            ),
+            PASSWORD_BCRYPT
+        );
 
         $profileIds = [];
         foreach ($people as $email => $person) {
-            $existing = $this->findProfileByEmail($email);
-            if ($existing === null) {
-                $passwordHash ??= password_hash(
-                    InitialPassword::resolvePlaintext(
-                        self::PASSWORD_ENV_VAR,
-                        'the document-demo accounts (all under demo.example.com)'
-                    ),
-                    PASSWORD_BCRYPT
-                );
-                $existing = $this->insertProfile($person['display'], $passwordHash, $email);
-            }
+            // The real identity seam. ProfileProvisioner::findOrCreate() is
+            // find-or-create against the globally UNIQUE profile_emails.email,
+            // and it exists so that callers stop writing their own INSERT — the
+            // same argument that puts the routing states through DocumentRouter.
+            // A hand-rolled profile row can be in a state the provisioning path
+            // would never produce (an unverified or non-primary address, a
+            // token_epoch that is not zero, an auth_method claiming a local
+            // credential the row does not carry), and then the demo teaches an
+            // identity behaviour the product does not have.
+            //
+            // It also means a demo address that somehow already belongs to a
+            // real person REUSES that identity rather than minting a second one,
+            // which is the whole reason the seam exists: two profiles for one
+            // address split that person's credentials and token epoch, so a
+            // password change or a forced logout reaches only one of them.
+            //
+            // The password argument is used ONLY on creation, so a re-run never
+            // rewrites an existing credential — the same posture Seeder takes.
+            $profileId = $this->profiles->findOrCreate(strtolower(trim($email)), $passwordHash);
 
             $this->upsertMembership(
                 $tenantId,
-                $existing,
+                $profileId,
                 $roleIds[$person['role']],
                 $person['ou'] === null ? null : $ouIds[$person['ou']],
             );
 
-            $profileIds[$email] = $existing;
+            $profileIds[$email] = $profileId;
         }
 
         return $profileIds;
@@ -482,57 +536,6 @@ final class DemoOrganisationSeeder
              ON CONFLICT DO NOTHING'
         );
         $stmt->execute([':role_id' => $roleId, ':permission_id' => (int) $permissionId]);
-    }
-
-    /**
-     * Create a profile plus its primary verified address.
-     *
-     * Mirrors {@see \Whity\Database\Seeder}'s column list exactly, including
-     * what it omits: `status`, `auth_method` and `language_code` all carry
-     * database defaults, and naming them here would be a second place for the
-     * defaults to drift from.
-     */
-    private function insertProfile(string $displayName, string $passwordHash, string $email): int
-    {
-        $stmt = $this->db->prepare(
-            'INSERT INTO profiles
-                 (display_name, password_hash, two_factor_enabled, two_factor_secret,
-                  two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (:display_name, :password_hash, :two_factor_enabled, NULL,
-                     0, 0, NOW(), NOW())'
-        );
-        $stmt->execute([
-            ':display_name' => $displayName,
-            ':password_hash' => $passwordHash,
-            ':two_factor_enabled' => 0,
-        ]);
-
-        $profileId = (int) $this->db->lastInsertId();
-
-        $email = strtolower(trim($email));
-        $emailStmt = $this->db->prepare(
-            'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (:profile_id, :email, :verified, :is_primary, NOW())
-             ON CONFLICT (email) DO NOTHING'
-        );
-        $emailStmt->execute([
-            ':profile_id' => $profileId,
-            ':email' => $email,
-            ':verified' => 1,
-            ':is_primary' => 1,
-        ]);
-
-        return $profileId;
-    }
-
-    private function findProfileByEmail(string $email): ?int
-    {
-        // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL table (ADR 0005 section 2)
-        $stmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = :email');
-        $stmt->execute([':email' => strtolower(trim($email))]);
-        $id = $stmt->fetchColumn();
-
-        return $id === false ? null : (int) $id;
     }
 
     private function upsertMembership(int $tenantId, int $profileId, int $roleId, ?int $ouId): void

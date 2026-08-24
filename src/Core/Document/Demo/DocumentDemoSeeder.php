@@ -130,12 +130,27 @@ use Whity\Core\RBAC\CorePermissions;
  * would be looking at folders that are empty for a reason nobody told them
  * about, which is the exact confusion the seed exists to remove.
  *
- * DEV FIXTURES ONLY
- * -----------------
- * Called from {@see \Whity\Cli\Commands\SeedCommand} under the same gate as the
- * `*@example.com` accounts: `APP_ENV=development`, or `--with-fixtures` said
- * deliberately. Seven logins, an invented faculty and five fake documents have
- * no business appearing in a production tenant by accident.
+ * ASKED FOR BY NAME, NEVER IMPLIED
+ * --------------------------------
+ * Called from {@see \Whity\Cli\Commands\SeedCommand} only under
+ * `--with-document-demo`, which is off by default in EVERY environment,
+ * `APP_ENV=development` included. Eight logins, an invented faculty and six fake
+ * documents have no business appearing in a tenant by accident.
+ *
+ * It briefly rode `--with-fixtures` — the demo-ACCOUNTS flag — and that is worth
+ * recording because of how it failed rather than that it did. The E2E suite
+ * passes `--with-fixtures` because it must log in as `admin@example.com`, so it
+ * silently received this whole dataset; the eight demo memberships then pushed
+ * that account off the first page of a users table paginating at ten, and two
+ * specs about authentication and users failed on a missing table cell. Nothing
+ * about documents was involved. A gate shared with something a test suite needs
+ * makes every future change to this file able to break an unrelated spec — and
+ * the fix belonged here, not in the specs, because scoping them around this data
+ * would pin the tests to the seed's contents and the seed is meant to stay free
+ * to change.
+ *
+ * The gate covers {@see DemoOrganisationSeeder} too, and that failure is the
+ * reason: the rows that broke E2E were PEOPLE, not documents.
  */
 final class DocumentDemoSeeder
 {
