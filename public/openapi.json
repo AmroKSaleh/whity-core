@@ -6462,6 +6462,121 @@
                         "bearerAuth": []
                     }
                 ]
+            },
+            "post": {
+                "operationId": "post_api_v1_documents",
+                "summary": "Raise a document from a template, supplying values for its placeholders",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The record is the deliverable and the rendered artifact is opportunistic. `documents.render_enabled` defaults to FALSE, so on a default install this returns a document with no artifact and `content_url: null` \u2014 which is a complete, routable document, not a degraded one: the values it was raised with are stored on the record, and POST /api/documents/{id}/render mints the artifact from them if the tier is later switched on. The `render` block says what happened. Sending `render: true` turns \"could not render\" into a 503 instead, for a caller who genuinely requires the bytes. A template the caller cannot SEE is a 404, never a 403, and the check is the designer's own visibility policy \u2014 creating from a gated template must not be a way to read it.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The document, and whether an artifact was rendered for it",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentCreateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such template, or it is not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "No template named, a bad dataRows shape, or a value supplied for a placeholder the template does not declare",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "render:true was requested and rendering or persistence is disabled on this instance",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/documents/views": {
@@ -26891,6 +27006,79 @@
                 },
                 "required": [
                     "name"
+                ]
+            },
+            "DocumentCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "document_template_id": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "dataRows": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "sheet": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "nullable": true
+                    },
+                    "render": {
+                        "type": "boolean",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "document_template_id"
+                ]
+            },
+            "DocumentCreateResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/Document"
+                    },
+                    "render": {
+                        "type": "object",
+                        "properties": {
+                            "attempted": {
+                                "type": "boolean"
+                            },
+                            "stored": {
+                                "type": "boolean"
+                            },
+                            "reason": {
+                                "type": "string",
+                                "nullable": true,
+                                "enum": [
+                                    "declined",
+                                    "disabled",
+                                    "persist_disabled",
+                                    "rejected",
+                                    "unavailable",
+                                    "storage_unavailable",
+                                    null
+                                ]
+                            }
+                        },
+                        "required": [
+                            "attempted",
+                            "stored"
+                        ]
+                    }
+                },
+                "required": [
+                    "data",
+                    "render"
                 ]
             },
             "DocumentListResponse": {

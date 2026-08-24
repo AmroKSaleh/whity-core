@@ -21,6 +21,7 @@ use Whity\Core\Document\Organizer\DocumentViewContext;
 use Whity\Core\Document\Organizer\DocumentViewPresenter;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Document\Render\VariableData;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Ou\OuReachResolver;
@@ -45,6 +46,7 @@ use Whity\Storage\StorageException;
  * Issued documents (#947 item 1) and the organizer that browses them
  * (#947 item 5, via #978):
  *
+ *   POST /api/documents                                    (documents:render)
  *   GET  /api/documents                                    (documents:read)
  *   GET  /api/documents/views                              (documents:read)
  *   GET  /api/documents/{id}                               (documents:read)
@@ -87,6 +89,47 @@ use Whity\Storage\StorageException;
  * that promised immutability with no way to supersede anything would never
  * have the promise tested.
  *
+ * CREATING ONE (#947 item 1, the half that was missing)
+ * ---------------------------------------------------
+ * Until now nothing in this API could bring a document into existence. The list
+ * was a list, the re-render corrected something that already existed, and the
+ * only create path in the whole subsystem was `POST
+ * /api/document-templates/{id}/render` with `persist: true` — a document as a
+ * SIDE EFFECT of rendering a template, on the template's own resource, and
+ * unreachable on a default install because `documents.render_enabled` is false.
+ * Every document anybody had ever seen came from the demo seeder writing rows.
+ *
+ * {@see create()} is the front door: name a template, supply values for its
+ * placeholders, get a document. Four decisions in it are worth stating here
+ * because each had a plausible alternative:
+ *
+ *  1. IT IS GATED ON `documents:render`, and no new slug was minted. Migration
+ *     113 already made this exact argument when it chose who may ROUTE a
+ *     document: *"`documents:render` is what gates `persist: true` on the render
+ *     routes, so a role holding it is precisely a role that can bring a document
+ *     into existence"*. That sentence is either true, in which case this route
+ *     belongs behind the same slug, or it was wrong then. A `documents:create`
+ *     would be a second answer to one question — and, on every existing
+ *     install, a slug NOBODY HOLDS, which is a lockout wearing the costume of a
+ *     permission check.
+ *
+ *  2. THE RECORD IS THE DELIVERABLE; THE ARTIFACT IS OPPORTUNISTIC. Rendering is
+ *     attempted when the instance can do it and skipped when it cannot, and
+ *     either way the document exists. See {@see create()} for why the opposite
+ *     (refuse to create anything without bytes) would make this route dead on
+ *     every fresh install.
+ *
+ *  3. THE VALUES ARE PERSISTED, on the row, by migration 118. They are the only
+ *     content an unrendered document has, and without them a correction months
+ *     later would silently reissue the document with the template's SAMPLE text
+ *     where the real reference number was.
+ *
+ *  4. THE TEMPLATE'S OWN VISIBILITY IS RE-CHECKED, through the same
+ *     {@see DocumentAccessPolicy} + {@see OuReachResolver} pair the designer's
+ *     list and the re-render already use. Creating from a template you cannot
+ *     SEE would make this route a way to read a gated template's contents by
+ *     rendering it.
+ *
  * NO 403s ON A MISS
  * -----------------
  * A document the caller may not see is reported as missing, not as forbidden.
@@ -98,6 +141,20 @@ use Whity\Storage\StorageException;
  */
 final class DocumentsApiHandler
 {
+    /**
+     * How many unrecognised field names a 422 will list before it stops.
+     *
+     * A fixed ceiling rather than a setting, deliberately: it is not a limit on
+     * what a caller may SEND (the render ceilings in
+     * {@see \Whity\Core\Settings\SettingsRegistry} are, and those are
+     * per-tenant overridable), it is how long one error message is allowed to
+     * get. Nothing about a tenant makes a different answer right, and an
+     * operator asked to tune it would have no basis to choose. Ten is past the
+     * point where a reader is still reading and well short of a response bigger
+     * than the request.
+     */
+    private const UNKNOWN_FIELDS_REPORTED = 10;
+
     public function __construct(
         private readonly DocumentRepository $documents,
         private readonly DocumentArtifactRepository $artifacts,
@@ -147,6 +204,290 @@ final class DocumentsApiHandler
         private readonly ?RouteEventRepository $routeEvents = null,
         private readonly ?RouteRecipientRepository $routeRecipients = null,
     ) {
+    }
+
+    /**
+     * POST /api/documents — raise a document from a template.
+     *
+     * WHAT IT WRITES, AND IN WHICH ORDER
+     * ----------------------------------
+     *  1. The record, committed. Template pointer + `template_name` snapshot,
+     *     title, origin unit, the values supplied. This is the deliverable.
+     *  2. THEN, only if this instance can render and the caller did not opt out,
+     *     the PDF, appended as an artifact.
+     *
+     * Step 2 failing does not undo step 1, and that is the decision this route
+     * turns on. `documents.render_enabled` DEFAULTS TO FALSE: the render tier is
+     * a separate headless-Chromium container that a sovereign deployment may
+     * never run. If a document could not exist without one, this route would be
+     * a 503 on every fresh install and the front door would still be missing.
+     *
+     * An unrendered document is not a broken one. It has an id, a title, the
+     * values it was raised with, an origin unit, and a `content_url` of null —
+     * which the read path has always handled. Everything the routing engine
+     * needs is `documents.id`, so it can be circulated, acknowledged and
+     * audited with no PDF in sight, and `POST /api/documents/{id}/render` mints
+     * the artifact from the stored values whenever the tier is switched on.
+     *
+     * The response therefore reports the render OUTCOME as a sibling of `data`
+     * — the same shape the routing create uses for `resolved`/`delivered` —
+     * rather than encoding it in the status code. 201 means "the document
+     * exists"; `render.stored` means "and here is whether it has bytes yet".
+     * Folding those into one code would make a working create on a
+     * render-less instance indistinguishable from a failure.
+     *
+     * THE ONE CASE THAT IS AN ERROR RATHER THAN AN OUTCOME is a caller who
+     * EXPLICITLY asked to render (`"render": true`) on an instance that cannot.
+     * Omitting the key means "render if you can", which is what a client that
+     * does not care should send; passing `true` is a claim about the result, and
+     * answering 201 to it would be a lie the client has no way to detect. That
+     * is a 503, before anything is written.
+     *
+     * A CREATOR IN NO UNIT is not an error either. `origin_ou_id` is nullable,
+     * the demo fixture deliberately includes a registry officer who belongs to
+     * no unit, and the organizer already renders OU-anchored folders DISABLED
+     * WITH A REASON rather than hiding them (#951). So the document is raised
+     * with a null origin, it lists and routes normally, and the only thing it is
+     * absent from is the unit-anchored folders — which is true of it, and
+     * which those folders already say out loud.
+     */
+    public function create(Request $request): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+
+        $body = JsonBody::parsed($request);
+
+        $templateId = $body['document_template_id'] ?? null;
+        // A string id is accepted: JSON from a form-driven client routinely
+        // carries numbers as strings, and refusing it here would be a 422 whose
+        // cause is invisible in the payload the developer is looking at. A
+        // non-numeric value is still refused rather than coerced to 0, which
+        // would report "template not found" for a request that named no
+        // template at all.
+        if (is_string($templateId) && ctype_digit($templateId)) {
+            $templateId = (int) $templateId;
+        }
+        if (!is_int($templateId) || $templateId <= 0) {
+            return Response::error("'document_template_id' must be the id of a template to raise this document from", 422);
+        }
+
+        // The SAME visibility pair the designer's own list applies
+        // (DocumentAccessPolicy over the caller's scoped permissions and their
+        // OU reach) — not a re-implementation, and not the document
+        // visibility policy, which answers a different question about a
+        // different row. 404 rather than 403 on a miss, for the reason this
+        // class's docblock gives: a 403 would confirm the template exists.
+        $template = $this->templates->findById($templateId, $tenantId);
+        if ($template === null
+            || !$this->templatePolicy->canView(
+                $template,
+                $callerId,
+                $this->permissionResolver($callerId, $tenantId),
+                $this->ouReach->reachFor($tenantId, $callerId),
+            )) {
+            return Response::error('Template not found', 404);
+        }
+
+        $templateData = is_array($template['data']) ? $template['data'] : [];
+
+        // Validated by the SAME normaliser the render path uses, so a document
+        // can never store values the renderer would later refuse. Note the
+        // argument is the RAW body value including its absence: null means
+        // "fall back to the template's placeholder samples", which is what a
+        // client that offered no form should get, and `[]` means the same.
+        $rows = VariableData::normalizeRows($body['dataRows'] ?? null, $templateData);
+        if ($rows === null) {
+            return Response::error('dataRows must be a list of flat string maps', 422);
+        }
+
+        $unknown = $this->unknownPlaceholders($rows, $templateData);
+        if ($unknown !== []) {
+            // Named, because the alternative is a developer comparing two JSON
+            // blobs by eye. The keys came from the request, so echoing them
+            // discloses nothing the caller did not send.
+            return Response::error(
+                'These fields are not placeholders on this template: ' . implode(', ', $unknown),
+                422
+            );
+        }
+
+        $title = $this->resolveTitle($body, $template);
+
+        $effective = $this->settings->effective($tenantId);
+        $renderable = ($effective[SettingsRegistry::DOCUMENTS_RENDER_ENABLED] ?? 'false') === 'true';
+        // The artifact half only. A record with no artifact writes nothing to
+        // the tenant's storage, and this setting exists to cap storage that
+        // grows without bound — see SettingsRegistry, which describes it as
+        // asking "whether the output may be written". Reading it as a gate on
+        // the RECORD would make an operator who capped storage unable to raise
+        // a document at all, which is not what they turned off.
+        $persistable = ($effective[SettingsRegistry::DOCUMENTS_PERSIST_ENABLED] ?? 'true') === 'true';
+
+        // Tri-state, and the absent case is the common one. `true` = "I require
+        // an artifact"; `false` = "record only, do not render even if you can";
+        // absent = "render if this instance can".
+        $requested = $body['render'] ?? null;
+        if ($requested === true && !$renderable) {
+            return Response::error('Server-side document rendering is disabled on this instance', 503);
+        }
+        if ($requested === true && !$persistable) {
+            return Response::error('Persisting rendered documents is disabled on this instance', 503);
+        }
+
+        try {
+            $document = $this->issuer->raise($tenantId, $callerId, $template, $title, $rows);
+        } catch (\Throwable $e) {
+            error_log('[DocumentsApiHandler] raising the document failed: ' . $e->getMessage());
+            return Response::error('The document could not be created', 503);
+        }
+
+        $render = $this->attemptRender(
+            $tenantId,
+            $callerId,
+            $document,
+            $templateData,
+            $rows,
+            $body['sheet'] ?? null,
+            $requested,
+            $renderable,
+            $persistable,
+        );
+
+        return Response::json([
+            'data' => DocumentPresenter::document(
+                $document,
+                $this->artifacts->listForDocument((int) $document['id'], $tenantId)
+            ),
+            'render' => $render,
+        ], 201);
+    }
+
+    /**
+     * Render the freshly-raised document and append the artifact, reporting what
+     * happened rather than throwing.
+     *
+     * EVERY RETURN IS A 201. This method runs AFTER the record is committed, so
+     * there is no failure left that should take the document away — see
+     * {@see create()}. What it owes the caller instead is an honest, machine
+     * readable account, which is why `reason` is a CLOSED VOCABULARY rather than
+     * a sentence: a client deciding whether to offer a "render now" button needs
+     * to tell `disabled` (never going to work here, hide the button) from
+     * `unavailable` (transient, offer the retry) from `declined` (the caller
+     * asked for this). A prose message cannot be branched on, and a null reason
+     * beside `stored: false` would be the shrug this route exists to avoid.
+     *
+     * @param array<string, mixed>        $document
+     * @param array<string, mixed>        $templateData
+     * @param list<array<string, string>> $rows
+     * @return array{attempted: bool, stored: bool, reason: string|null}
+     */
+    private function attemptRender(
+        int $tenantId,
+        int $callerId,
+        array $document,
+        array $templateData,
+        array $rows,
+        mixed $sheet,
+        mixed $requested,
+        bool $renderable,
+        bool $persistable,
+    ): array {
+        if ($requested === false) {
+            return ['attempted' => false, 'stored' => false, 'reason' => 'declined'];
+        }
+        if (!$renderable) {
+            return ['attempted' => false, 'stored' => false, 'reason' => 'disabled'];
+        }
+        if (!$persistable) {
+            return ['attempted' => false, 'stored' => false, 'reason' => 'persist_disabled'];
+        }
+
+        try {
+            $pdf = $this->renderer->render($tenantId, $templateData, $rows, $sheet);
+        } catch (DocumentRenderRejectedException $e) {
+            // Reachable only through `sheet`: `dataRows` was normalised and the
+            // ceilings were not, so an oversized batch or template lands here.
+            // The document keeps its values and can be rendered once the
+            // operator raises the ceiling, which is why this is not a 422 that
+            // discards the record.
+            error_log('[DocumentsApiHandler] the new document was refused a render: ' . $e->clientMessage);
+            return ['attempted' => true, 'stored' => false, 'reason' => 'rejected'];
+        } catch (\Throwable $e) {
+            error_log('[DocumentsApiHandler] rendering the new document failed: ' . $e->getMessage());
+            return ['attempted' => true, 'stored' => false, 'reason' => 'unavailable'];
+        }
+
+        try {
+            $this->issuer->appendArtifact($tenantId, $callerId, $document, $pdf);
+        } catch (\Throwable $e) {
+            error_log('[DocumentsApiHandler] storing the new document artifact failed: ' . $e->getMessage());
+            return ['attempted' => true, 'stored' => false, 'reason' => 'storage_unavailable'];
+        }
+
+        return ['attempted' => true, 'stored' => true, 'reason' => null];
+    }
+
+    /**
+     * The keys a request supplied that the template declares no placeholder for,
+     * in the order they were sent, without duplicates, and CAPPED.
+     *
+     * HASH LOOKUPS, NOT `in_array`, AND A CEILING ON WHAT IS ECHOED. Both are
+     * about the same request: a large batch (a label sheet can legitimately be
+     * hundreds of rows) with a bad key on every row. Two linear scans per key
+     * makes that quadratic, and naming every offender makes the error body
+     * larger than the request that caused it. Neither is hypothetical for a
+     * route whose input is a caller-supplied map of arbitrary keys.
+     *
+     * The names ARE echoed rather than replaced by a count, up to the cap: the
+     * whole value of this refusal is that it says `refrence` instead of leaving
+     * a developer to compare two JSON blobs by eye. They came from the request,
+     * so echoing them discloses nothing the caller did not send.
+     *
+     * @param list<array<string, string>> $rows
+     * @param array<string, mixed>        $templateData
+     * @return list<string>
+     */
+    private function unknownPlaceholders(array $rows, array $templateData): array
+    {
+        $declared = array_fill_keys(VariableData::keysOf($templateData), true);
+        $unknown = [];
+        foreach ($rows as $row) {
+            foreach ($row as $key => $_value) {
+                if (!isset($declared[$key]) && !isset($unknown[$key])) {
+                    $unknown[$key] = true;
+                    if (count($unknown) >= self::UNKNOWN_FIELDS_REPORTED) {
+                        return array_keys($unknown);
+                    }
+                }
+            }
+        }
+
+        return array_keys($unknown);
+    }
+
+    /**
+     * The document's title: what the caller sent, or the template's name.
+     *
+     * Falling back keeps every record named something, which is what the
+     * organizer lists and what an inbox item is recognised by — the same
+     * fallback {@see DocumentRenderApiHandler} already applies, spelled the same
+     * way so two create paths cannot name the same document differently.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $template
+     */
+    private function resolveTitle(array $body, array $template): string
+    {
+        $title = $body['title'] ?? null;
+        $resolved = is_string($title) && trim($title) !== ''
+            ? trim($title)
+            : (string) $template['name'];
+
+        return mb_substr($resolved, 0, 255);
     }
 
     /**
@@ -460,8 +801,22 @@ final class DocumentsApiHandler
         $body = JsonBody::parsed($request);
         $templateData = is_array($template['data']) ? $template['data'] : [];
 
+        // THE VALUES THE DOCUMENT WAS RAISED WITH, when the request supplies
+        // none. Before migration 118 there was nothing to fall back to and the
+        // renderer used the template's placeholder SAMPLES instead — so
+        // correcting a six-week-old circular from a client that had not kept the
+        // original values reissued it reading `Ref: DEMO-0001`, and the
+        // correction looked like a success. A recorded value now wins over a
+        // sample; a request that names its own `dataRows` still wins over both,
+        // because an explicit correction of the values is exactly what that
+        // field is for.
+        $dataRows = $body['dataRows'] ?? null;
+        if ($dataRows === null) {
+            $dataRows = $document['variable_data'] ?? null;
+        }
+
         try {
-            $pdf = $this->renderer->render($tenantId, $templateData, $body['dataRows'] ?? null, $body['sheet'] ?? null);
+            $pdf = $this->renderer->render($tenantId, $templateData, $dataRows, $body['sheet'] ?? null);
         } catch (DocumentRenderRejectedException $e) {
             // ->clientMessage, never ->getMessage(): see the exception's docblock.
             return Response::error($e->clientMessage, 422);

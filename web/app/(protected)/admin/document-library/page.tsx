@@ -25,8 +25,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { IconStar, IconStarFilled, IconTrash } from '@tabler/icons-react';
+import { IconFilePlus, IconStar, IconStarFilled, IconTrash } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useRouter } from 'next/navigation';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { DOCUMENTS_RENDER, DOCUMENTS_ROUTE } from '@/lib/capabilities';
+import {
+  CreateDocumentDialog,
+  type CreatableTemplate,
+} from '@/components/documents/create-document-dialog';
 import { ViewRail, viewLabel } from './view-rail';
 import type {
   DocumentCollection,
@@ -99,6 +106,11 @@ export default function DocumentLibraryPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const t = useTranslation('documents');
+  const router = useRouter();
+  // UI hints only — the server is authoritative on both. `has()` fails CLOSED, so
+  // a payload it could not parse hides the New button rather than dangling an
+  // affordance that 403s on submit.
+  const { has: hasCapability } = useCapabilities();
 
   const [viewKey, setViewKey] = useState(DEFAULT_VIEW);
   const [collectionId, setCollectionId] = useState<number | null>(null);
@@ -110,6 +122,7 @@ export default function DocumentLibraryPage() {
   // the URL and the results disagree for a few hundred milliseconds.
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
+  const [creatingDocument, setCreatingDocument] = useState(false);
   const [creatingCollection, setCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [deletingCollection, setDeletingCollection] = useState<DocumentCollection | null>(null);
@@ -132,6 +145,53 @@ export default function DocumentLibraryPage() {
     }
     const body = (await response.json()) as { data?: DocumentCollection[] };
     return body.data ?? [];
+  }, [apiClient]);
+
+  /**
+   * The templates the caller may raise a document from.
+   *
+   * SERVER-FILTERED, and this screen deliberately does not filter again. The
+   * list route applies `DocumentAccessPolicy` row by row, so a template gated
+   * behind a permission tag or filed at a unit the caller has no standing in is
+   * ABSENT from the payload — which is also why a second, client-side copy of
+   * that rule would be a liability rather than defence in depth: it could only
+   * ever be wrong in one direction, and it would be the visible one.
+   *
+   * A partial walk is treated as a FAILURE rather than presented as the whole
+   * library, for the reason the unit list above already gives: a picker missing
+   * templates silently tells somebody they cannot raise the document they came
+   * to raise.
+   */
+  const templates = useFetch<CreatableTemplate[]>(async () => {
+    const result = await fetchAllPages<{
+      id: number;
+      name: string;
+      data?: { placeholders?: unknown };
+    }>(apiClient, '/api/v1/document-templates');
+    if (!result.complete) {
+      throw new Error(t('organizer.error.templates', 'Failed to load the full template list'));
+    }
+    return result.items.map((row) => ({
+      id: row.id,
+      name: row.name,
+      // `data` is verbatim client JSON, so it is narrowed here rather than
+      // trusted. A template whose placeholders are unreadable offers no fields
+      // instead of crashing the picker — it can still be raised from.
+      placeholders: Array.isArray(row.data?.placeholders)
+        ? row.data.placeholders.flatMap((p) => {
+            if (typeof p !== 'object' || p === null) return [];
+            const candidate = p as { key?: unknown; label?: unknown; sample?: unknown };
+            if (typeof candidate.key !== 'string' || candidate.key === '') return [];
+            return [
+              {
+                key: candidate.key,
+                label: typeof candidate.label === 'string' ? candidate.label : candidate.key,
+                sample: typeof candidate.sample === 'string' ? candidate.sample : '',
+              },
+            ];
+          })
+        : [],
+    }));
   }, [apiClient]);
 
   const ous = useFetch<OuOption[]>(async () => {
@@ -377,6 +437,39 @@ export default function DocumentLibraryPage() {
           'organizer.description',
           'Every folder here is a query over what documents record — nothing stores where a document lives. Collections are your own.'
         )}
+        action={
+          // Gated on `documents:render`, which is the capability the create
+          // route itself requires — migration 113 already settled that a role
+          // holding it "is precisely a role that can bring a document into
+          // existence", and no new slug was minted for this. Hidden rather than
+          // disabled: a person who may not raise documents has nothing to act
+          // on here, which is the case #951 leaves to hiding (a DISABLED control
+          // with a reason is for a capability the viewer could obtain — an
+          // anchor they lack, a switch an operator can flip).
+          hasCapability(DOCUMENTS_RENDER) ? (
+            <Button onClick={() => setCreatingDocument(true)}>
+              <IconFilePlus className="me-2 size-4" aria-hidden />
+              {t('organizer.new', 'New document')}
+            </Button>
+          ) : undefined
+        }
+      />
+
+      <CreateDocumentDialog
+        open={creatingDocument}
+        onOpenChange={setCreatingDocument}
+        templates={templates.data ?? []}
+        templatesLoading={templates.loading}
+        templatesError={templates.error}
+        canRoute={hasCapability(DOCUMENTS_ROUTE)}
+        onSend={(documentId) => router.push(`/admin/document-routing/${documentId}`)}
+        onCreated={() => {
+          // The listing is refetched immediately, not on close: the document is
+          // real the moment the server answered, and a browser that still shows
+          // the old page while the dialog reports success is a browser the
+          // author has to be told to reload.
+          documents.refetch();
+        }}
       />
 
       {views.error && (

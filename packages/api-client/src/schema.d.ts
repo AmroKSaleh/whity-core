@@ -931,7 +931,11 @@ export interface paths {
          */
         get: operations["get_api_v1_documents"];
         put?: never;
-        post?: never;
+        /**
+         * Raise a document from a template, supplying values for its placeholders
+         * @description The record is the deliverable and the rendered artifact is opportunistic. `documents.render_enabled` defaults to FALSE, so on a default install this returns a document with no artifact and `content_url: null` — which is a complete, routable document, not a degraded one: the values it was raised with are stored on the record, and POST /api/documents/{id}/render mints the artifact from them if the tier is later switched on. The `render` block says what happened. Sending `render: true` turns "could not render" into a 503 instead, for a caller who genuinely requires the bytes. A template the caller cannot SEE is a 404, never a 403, and the check is the designer's own visibility policy — creating from a gated template must not be a way to read it.
+         */
+        post: operations["post_api_v1_documents"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3834,6 +3838,26 @@ export interface components {
         };
         DocumentCollectionUpdateRequest: {
             name: string;
+        };
+        DocumentCreateRequest: {
+            document_template_id: number;
+            title?: string | null;
+            dataRows?: {
+                [key: string]: string;
+            }[];
+            sheet?: {
+                [key: string]: unknown;
+            } | null;
+            render?: boolean | null;
+        };
+        DocumentCreateResponse: {
+            data: components["schemas"]["Document"];
+            render: {
+                attempted: boolean;
+                stored: boolean;
+                /** @enum {string|null} */
+                reason?: "declined" | "disabled" | "persist_disabled" | "rejected" | "unavailable" | "storage_unavailable" | null;
+            };
         };
         DocumentListResponse: {
             data: components["schemas"]["Document"][];
@@ -10897,6 +10921,102 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_documents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The document, and whether an artifact was rendered for it */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentCreateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such template, or it is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No template named, a bad dataRows shape, or a value supplied for a placeholder the template does not declare */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description render:true was requested and rendering or persistence is disabled on this instance */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

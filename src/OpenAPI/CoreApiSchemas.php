@@ -3064,6 +3064,61 @@ final class CoreApiSchemas
                 ], ['key']),
             ], ['data', 'pagination', 'view']),
             'DocumentResponse' => self::dataEnvelope(SchemaBuilder::ref('Document')),
+
+            // The FRONT DOOR (#947 item 1, the half that was missing). Naming a
+            // template is the only requirement; everything else has a defined
+            // fallback, because a client that knows nothing but the template
+            // should still be able to raise a document from it.
+            //
+            // `dataRows` is the SAME shape the render routes take, deliberately,
+            // and is what the values are STORED as (migration 118,
+            // `documents.variable_data`) rather than a second authoring format
+            // that would have to be converted before it could be rendered. Keys
+            // are the template's own placeholder keys; a key the template does
+            // not declare is a 422 naming it, because a typo silently accepted
+            // renders as the literal text `{{reference}}` in a finished document.
+            //
+            // `render` is a TRI-STATE and its absent case is the common one:
+            // absent = "render if this instance can", true = "I require an
+            // artifact" (503 when it cannot), false = "record only". Omitting it
+            // is what a client that does not care should do.
+            'DocumentCreateRequest' => self::object([
+                'document_template_id' => self::int(),
+                'title' => self::str(true),
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+                'render' => ['type' => 'boolean', 'nullable' => true],
+            ], ['document_template_id']),
+
+            // Why the render outcome is a SIBLING of `data` rather than a status
+            // code, and why `reason` is a closed vocabulary: a 201 means the
+            // document exists, which it does on an instance with no render tier
+            // at all (`documents.render_enabled` defaults to false). A client
+            // deciding whether to offer a "render now" button has to tell
+            // `disabled` (never going to work here) from `unavailable`
+            // (transient, retry) from `declined` (you asked for this), and a
+            // prose message cannot be branched on. Same posture as the routing
+            // create's `resolved`/`delivered` keys.
+            'DocumentCreateResponse' => self::object([
+                'data' => SchemaBuilder::ref('Document'),
+                'render' => self::object([
+                    'attempted' => self::bool(),
+                    'stored' => self::bool(),
+                    'reason' => [
+                        'type' => 'string',
+                        'nullable' => true,
+                        'enum' => [
+                            'declined',
+                            'disabled',
+                            'persist_disabled',
+                            'rejected',
+                            'unavailable',
+                            'storage_unavailable',
+                            null,
+                        ],
+                    ],
+                ], ['attempted', 'stored']),
+            ], ['data', 'render']),
             // The re-render body. Same render inputs as DocumentRenderRequest
             // minus `persist`/`title`: this route ALWAYS persists (that is what
             // it is for) and never renames the record it appends to.
@@ -6214,6 +6269,41 @@ final class CoreApiSchemas
                     200 => self::jsonResponse(
                         'The computable folders, plus the fact sources this installation lacks',
                         'DocumentViewListResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            // The create route sits on `documents:render` rather than a slug of
+            // its own — migration 113 already argued that a role holding it is
+            // "precisely a role that can bring a document into existence", and a
+            // new `documents:create` would be a permission nobody on any
+            // existing install holds. See public/index.php's registration.
+            self::permissionRoute('POST', '/api/documents', 'documents:render', [
+                'summary' => 'Raise a document from a template, supplying values for its placeholders',
+                'description' =>
+                    'The record is the deliverable and the rendered artifact is opportunistic. '
+                    . '`documents.render_enabled` defaults to FALSE, so on a default install this '
+                    . 'returns a document with no artifact and `content_url: null` — which is a '
+                    . 'complete, routable document, not a degraded one: the values it was raised with '
+                    . 'are stored on the record, and POST /api/documents/{id}/render mints the '
+                    . 'artifact from them if the tier is later switched on. The `render` block says '
+                    . 'what happened. Sending `render: true` turns "could not render" into a 503 '
+                    . 'instead, for a caller who genuinely requires the bytes. A template the caller '
+                    . 'cannot SEE is a 404, never a 403, and the check is the designer\'s own '
+                    . 'visibility policy — creating from a gated template must not be a way to read it.',
+                'tags' => ['documents'],
+                'request' => 'DocumentCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse(
+                        'The document, and whether an artifact was rendered for it',
+                        'DocumentCreateResponse'
+                    ),
+                    404 => self::errorResponse('No such template, or it is not visible to the caller'),
+                    422 => self::errorResponse(
+                        'No template named, a bad dataRows shape, or a value supplied for a '
+                        . 'placeholder the template does not declare'
+                    ),
+                    503 => self::errorResponse(
+                        'render:true was requested and rendering or persistence is disabled on this instance'
                     ),
                 ] + self::authErrors(),
             ]),

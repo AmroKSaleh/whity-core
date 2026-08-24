@@ -69,7 +69,13 @@ final class DocumentRenderer
             );
         }
 
-        $dataRows = $this->normalizeDataRows($rawDataRows, $templateData);
+        // Delegated to VariableData since `POST /api/documents` has to apply the
+        // IDENTICAL reading to values it PERSISTS without rendering them
+        // (migration 118). Two normalisers would let a document store values
+        // this renderer would then refuse — a document that cannot be rendered,
+        // discovered weeks later with nothing pointing at the two spellings.
+        // Idempotent, so a caller that already normalised loses nothing here.
+        $dataRows = VariableData::normalizeRows($rawDataRows, $templateData);
         if ($dataRows === null) {
             throw DocumentRenderRejectedException::because('dataRows must be a list of flat string maps');
         }
@@ -137,68 +143,6 @@ final class DocumentRenderer
             $block = $this->blocks->findById((int) $id, $tenantId);
             if ($block !== null) {
                 $out[$id] = ['id' => $id, 'elements' => $block['data']];
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * Validate + normalise the request's `dataRows`: a list of flat
-     * string=>string maps. Absent/empty defaults to a single row built from
-     * the template's placeholder samples (mirrors the designer's own
-     * `sampleDataOf()` preview default — a render with no explicit batch still
-     * produces one sensible page rather than an empty one).
-     *
-     * @param array<string, mixed> $templateData
-     * @return list<array<string, string>>|null Null on a validation failure.
-     */
-    private function normalizeDataRows(mixed $raw, array $templateData): ?array
-    {
-        if ($raw === null) {
-            return [$this->sampleDataOf($templateData)];
-        }
-        if (!is_array($raw) || !array_is_list($raw)) {
-            return null;
-        }
-        if ($raw === []) {
-            return [$this->sampleDataOf($templateData)];
-        }
-
-        $rows = [];
-        foreach ($raw as $row) {
-            if (!is_array($row)) {
-                return null;
-            }
-            $normalized = [];
-            foreach ($row as $key => $value) {
-                if (!is_string($key) || !is_scalar($value)) {
-                    return null;
-                }
-                $normalized[$key] = (string) $value;
-            }
-            $rows[] = $normalized;
-        }
-
-        return $rows;
-    }
-
-    /**
-     * The sample-data map built from a template's placeholders (key -> sample),
-     * mirroring `web/lib/documents/storage.ts`'s `sampleDataOf()`.
-     *
-     * @param array<string, mixed> $templateData
-     * @return array<string, string>
-     */
-    private function sampleDataOf(array $templateData): array
-    {
-        $out = [];
-        $placeholders = $templateData['placeholders'] ?? [];
-        if (is_array($placeholders)) {
-            foreach ($placeholders as $p) {
-                if (is_array($p) && is_string($p['key'] ?? null)) {
-                    $out[$p['key']] = (string) ($p['sample'] ?? '');
-                }
             }
         }
 
