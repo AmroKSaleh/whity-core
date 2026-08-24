@@ -864,6 +864,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-route-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** This tenant's route template DESIGNS, by name (paginated, no people counts) */
+        get: operations["get_api_v1_document_route_templates"];
+        put?: never;
+        /** Start a route template. Created EMPTY — the graph is saved by its own verb */
+        post: operations["post_api_v1_document_route_templates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-route-templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One design, with its steps, its edges and the quorum an unset step will follow */
+        get: operations["get_api_v1_document_route_templates_id"];
+        put?: never;
+        post?: never;
+        /** Discard a design. Routes already issued from it are untouched — they carry their own steps */
+        delete: operations["delete_api_v1_document_route_templates_id"];
+        options?: never;
+        head?: never;
+        /** Rename or re-describe a template. The graph is untouched — it has its own verb */
+        patch: operations["patch_api_v1_document_route_templates_id"];
+        trace?: never;
+    };
+    "/api/v1/document-route-templates/{id}/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** REPLACE the template's whole graph — every step and every edge, atomically */
+        put: operations["put_api_v1_document_route_templates_id_graph"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -5100,6 +5154,72 @@ export interface components {
             name?: string;
             description?: string;
             permissions?: (number | string)[];
+        };
+        RouteTemplate: {
+            id: number;
+            name: string;
+            description?: string | null;
+            step_count: number;
+            created_by?: number | null;
+            created_at: string;
+            updated_at: string;
+        };
+        RouteTemplateCreateRequest: {
+            name: string;
+            description?: string | null;
+        };
+        RouteTemplateDeleteResponse: {
+            data: {
+                id: number;
+                deleted: boolean;
+            };
+        };
+        RouteTemplateEdge: {
+            from: number;
+            to: number;
+            verdict: string;
+        };
+        RouteTemplateGraphRequest: {
+            steps: components["schemas"]["RouteTemplateStep"][];
+            edges?: components["schemas"]["RouteTemplateEdge"][];
+        };
+        RouteTemplateGraphResponse: {
+            data: {
+                id: number;
+                name: string;
+                description?: string | null;
+                step_count?: number;
+                default_quorum: string;
+                max_steps: number;
+                created_by?: number | null;
+                created_at?: string;
+                updated_at?: string;
+                steps: components["schemas"]["RouteTemplateStep"][];
+                edges: components["schemas"]["RouteTemplateEdge"][];
+            };
+        };
+        RouteTemplateListResponse: {
+            data: components["schemas"]["RouteTemplate"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        RouteTemplateResponse: {
+            data: components["schemas"]["RouteTemplate"];
+        };
+        RouteTemplateStep: {
+            position: number;
+            rule_kind: string;
+            rule_config: {
+                [key: string]: unknown;
+            };
+            label?: string | null;
+            decision: boolean;
+            decision_quorum?: string | null;
+            canvas_x?: number;
+            canvas_y?: number;
+        };
+        RouteTemplateUpdateRequest: {
+            name?: string;
+            description?: string | null;
         };
         RoutingRule: {
             kind: string;
@@ -10370,6 +10490,493 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_route_templates: {
+        parameters: {
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100) */
+                per_page?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant's route templates with pagination */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_route_templates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteTemplateCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created template */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A template with that name already exists in this tenant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing, empty or over-long name */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_route_templates_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template and its graph */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateGraphResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Route template not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_document_route_templates_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deleted template id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateDeleteResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Route template not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_document_route_templates_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteTemplateUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated template */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Route template not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Another template in this tenant already has that name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description An empty or over-long name, or a non-text description */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_document_route_templates_id_graph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteTemplateGraphRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved graph */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateGraphResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Route template not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A rule kind nothing registered, a config the rule refused, an edge naming a position that is not on the canvas, an edge leaving a step that is not a decision, or more steps than documents.routing_max_steps allows */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

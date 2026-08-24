@@ -815,6 +815,32 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
     ];
     $items[] = [
+        'id' => 'document-route-templates',
+        'label' => 'Route Templates',
+        'href' => '/admin/document-route-templates',
+        'icon' => 'sitemap',
+        'group' => 'documents',
+        // Group-local, a unique positive integer (#1007/#1010 — a fractional
+        // order is silently skipped by a regroup that matches integers, and a
+        // test now enforces the invariant). 1 = Document Library, 2 = Documents,
+        // 3 = Approval Gating, 4 = Templates & Blocks, so this is 5.
+        'order' => 5,
+        // The node-based flow editor (#1027): the reusable, branching designs a
+        // document travels. A sibling of "Templates & Blocks" rather than a tab
+        // on it, because the two answer different questions about different
+        // records — that one governs what a document LOOKS like, this one governs
+        // where it GOES, and they are edited by different people.
+        //
+        // Gates on route_templates:read, which is what GET
+        // /api/document-route-templates requires. Designing is gated
+        // route_templates:write per-control on the page, and the API enforces it
+        // regardless of what the client renders — a clerk who may route a
+        // document should not thereby be able to rewrite where every document
+        // goes. Migration 119 grants both to whoever holds `roles:write`, and
+        // read additionally to whoever holds `documents:route`.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::ROUTE_TEMPLATES_READ,
+    ];
+    $items[] = [
         'id' => 'approval-gating',
         'label' => 'Approval Gating',
         'href' => '/admin/registrations',
@@ -2363,6 +2389,53 @@ $router->register('GET',    '/api/user-groups/{id:\d+}/preview',   [$userGroupsH
 $router->register('GET',    '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'show'],          null, null, CorePermissions::GROUPS_READ);
 $router->register('PATCH',  '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'update'],        null, null, CorePermissions::GROUPS_WRITE);
 $router->register('DELETE', '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'destroy'],       null, null, CorePermissions::GROUPS_WRITE);
+
+// 13a-nonies-quinquies. DOCUMENT ROUTE TEMPLATES (#1027) — the reusable,
+// BRANCHING flow designs the node-based editor edits. Migration 112 named this
+// seam ("a `document_route_templates` / `document_route_template_steps` pair")
+// and migration 119 takes it.
+//
+// A template is to a route what `document_templates` is to `documents`: the
+// thing DESIGNED, with a different lifetime from the thing that HAPPENED. The
+// append-only trail hangs off the second and cannot be reached from here at all.
+//
+// Three things about this surface are deliberate:
+//
+//  - THE GRAPH HAS ITS OWN VERB. `PATCH /{id}` renames; `PUT /{id}/graph`
+//    replaces the canvas. They are different acts by different people at
+//    different moments, and folding them would make every rename send the whole
+//    graph back — with an omitted `steps` indistinguishable from an author who
+//    meant to clear it.
+//
+//  - THERE IS NO PREVIEW ROUTE. "How many people does this node reach?" is
+//    already answered exactly by `POST /api/user-groups/preview` (#1003), which
+//    the editor calls per node. A second one here would be a second
+//    implementation of the resolver's semantics, free to drift.
+//
+//  - NOTHING INSTANTIATES A TEMPLATE ONTO A DOCUMENT. That needs the engine to
+//    follow verdict edges (#1014), and a route that "applied" a branching design
+//    today would flatten it into a linear one — silently doing less than the
+//    canvas draws, which is the failure this whole subsystem is written against.
+//    Filed, with migration 112's own seam (`template_id` + a `template_name`
+//    snapshot on `document_routes`), rather than half-built.
+//
+// Reading a design and DESIGNING one are separate permissions on purpose: a
+// clerk who may send a form onward should not thereby be able to rewrite where
+// every form goes. `/graph` is registered before `/{id}` for the same reason
+// `/preview` is above — the router matches in registration order.
+$routeTemplateRepository = new \Whity\Core\Document\RouteTemplate\RouteTemplateRepository($db->getPdo());
+$routeTemplateGraph = new \Whity\Core\Document\RouteTemplate\RouteTemplateGraph($routingRuleRegistry);
+$routeTemplatesHandler = new \Whity\Api\DocumentRouteTemplatesApiHandler(
+    $routeTemplateRepository,
+    $routeTemplateGraph,
+    $settingsService
+);
+$router->register('GET',    '/api/document-route-templates',                  [$routeTemplatesHandler, 'index'],         null, null, CorePermissions::ROUTE_TEMPLATES_READ);
+$router->register('POST',   '/api/document-route-templates',                  [$routeTemplatesHandler, 'create'],        null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
+$router->register('PUT',    '/api/document-route-templates/{id:\d+}/graph',   [$routeTemplatesHandler, 'replaceGraph'],  null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
+$router->register('GET',    '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'show'],          null, null, CorePermissions::ROUTE_TEMPLATES_READ);
+$router->register('PATCH',  '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'update'],        null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
+$router->register('DELETE', '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'destroy'],       null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
 
 // 13a-nonies-quater. Routing's recipients registered as an #881 INBOX SOURCE —
 // not a surface of their own. The `document_route_recipients` table IS an inbox,
