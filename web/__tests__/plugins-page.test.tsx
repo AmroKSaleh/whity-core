@@ -123,7 +123,6 @@ beforeEach(() => {
   mockUseNavigation.mockReturnValue({
     items: [],
     isLoading: false,
-    getGroupedItems: () => new Map(),
     refresh,
     removeItemsByHref,
   });

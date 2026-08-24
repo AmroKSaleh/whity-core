@@ -4,6 +4,10 @@ import { ADMIN, SIDEBAR_SECTIONS } from './support/constants';
 
 test.describe('Sidebar navigation (admin)', () => {
   test('all expected sidebar sections are present', async ({ adminPage }) => {
+    // The sidebar now opens only the group holding the current page (#1007),
+    // so open them all first — otherwise this asserts the disclosure state
+    // rather than the RBAC-filtered set it exists to check.
+    await adminPage.shell.expandAllNavGroups();
     for (const section of SIDEBAR_SECTIONS) {
       // navLink resolves by unique href, so "Settings" vs "Website Settings"
       // (both end in "Settings") don't collide under strict mode.
@@ -115,5 +119,51 @@ test.describe('Sidebar navigation (admin)', () => {
     await shell.logout();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  });
+
+  test('nav groups collapse to the one holding the current page, and open on click', async ({
+    adminPage,
+    page,
+  }) => {
+    const shell = adminPage.shell;
+    // A FULL load, not clickNav: the app-router layout keeps the sidebar
+    // mounted across client navigations, so disclosure state survives them —
+    // and clickNav opens every group on the way. Only a fresh mount shows
+    // what a user actually arrives at.
+    await page.goto('/admin/users');
+    await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
+
+    const access = shell.navGroupToggle('access');
+    const system = shell.navGroupToggle('system');
+    await expect(access).toHaveAttribute('aria-expanded', 'true');
+    await expect(system).toHaveAttribute('aria-expanded', 'false');
+
+    // Present but hidden — the distinction the RBAC specs depend on.
+    await expect(shell.navLink('Website Settings')).toHaveCount(1);
+    await expect(shell.navLink('Website Settings')).toBeHidden();
+
+    await system.click();
+    await expect(system).toHaveAttribute('aria-expanded', 'true');
+    await expect(shell.navLink('Website Settings')).toBeVisible();
+  });
+
+  test('the nav filter reaches a page sitting in a closed group', async ({
+    adminPage,
+    page,
+  }) => {
+    const shell = adminPage.shell;
+    await page.goto('/admin/users');
+    await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
+
+    await expect(shell.navLink('Website Settings')).toBeHidden();
+
+    await shell.navSearch.fill('website');
+    // Reached without knowing which group holds it, and without opening it.
+    await expect(shell.navLink('Website Settings')).toBeVisible();
+    // A query narrows to matches, so a non-matching link leaves the DOM.
+    await expect(shell.navLink('Users')).toHaveCount(0);
+
+    await shell.navSearch.fill('');
+    await expect(shell.navLink('Users')).toBeVisible();
   });
 });

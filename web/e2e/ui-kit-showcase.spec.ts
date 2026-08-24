@@ -40,6 +40,10 @@ test.describe('UiKitShowcase: UI-Kit Reference block screen (WC-228)', () => {
   }) => {
     // The feature is gated on uikit:view, which the migration grants to admin,
     // so the RBAC-filtered navigation surfaces the "UI-Kit Reference" link.
+    // Plugin-contributed links land in the `plugins` group, which is closed
+    // unless the current page is in it (#1007) — open the groups first, or
+    // this asserts the disclosure state instead of the RBAC-filtered nav.
+    await adminPage.shell.expandAllNavGroups();
     const link = adminPage.shell.navLink(FEATURE_LABEL);
     await expect(link).toBeVisible();
 
