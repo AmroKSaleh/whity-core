@@ -19,7 +19,15 @@ use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
+use Whity\Core\Document\Routing\DocumentRouter;
+use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
+use Whity\Core\Document\Routing\RoleRuleResolver;
+use Whity\Core\Document\Routing\RouteAction;
+use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
+use Whity\Core\Document\Routing\RouteRepository;
+use Whity\Core\Document\Routing\RouteStepRepository;
+use Whity\Core\Document\Routing\RoutingRuleRegistry;
 use Whity\Core\Document\Organizer\CoreDocumentSubstrates;
 use Whity\Core\Document\Organizer\CoreDocumentViews;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
@@ -46,12 +54,20 @@ use Whity\Storage\LocalStorageDriver;
  *
  * The things worth failing a build over, in order:
  *
- *  1. NO FOLDER IS RENDERED THAT CANNOT BE COMPUTED. The routing-derived
- *     folders are absent from `GET /api/documents/views` and 404 on request.
- *     An empty "Awaiting me" would state "nothing awaits you", which is false.
+ *  1. NO FOLDER IS RENDERED THAT CANNOT BE COMPUTED. The routing-derived folders
+ *     are offered here, because this schema is built from every migration — and
+ *     {@see testTheRoutingFoldersVanishWhenTheirTablesDo()} DROPS migration 112's
+ *     tables from the live database and asserts that all three leave the rail and
+ *     404 on request. An empty "Awaiting me" would state "nothing awaits you",
+ *     which is false, so the folder is absent rather than empty.
  *  2. THE THREE-WAY DISTINCTION. Absent (404), unanchored-for-this-caller (422
  *     with a reason), and genuinely empty (200 with no rows) are three different
  *     answers to three different questions.
+ *  2b. THE INBOX ONLY LISTS OPEN ITEMS. A recipient row closed by an act leaves
+ *     "awaiting me" and stays in "acted on by me". An inbox that keeps what you
+ *     have already done never empties, and is wrong in the direction that looks
+ *     like work — so the transition is driven through the real
+ *     {@see DocumentRouter} rather than by writing the rows this test wants.
  *  3. VISIBILITY IS RE-APPLIED THROUGH EVERY FOLDER, INCLUDING A COLLECTION. A
  *     document filed in March and hidden in April must stop appearing. A stored
  *     pointer is never a grant.
@@ -79,6 +95,10 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
     private const UNAFFILIATED = 12;
     private const OTHER_TENANT_ADMIN = 20;
 
+    /** Roles the routing fixtures address. `admin` is seeded by migration 060; `clerk` below. */
+    private const ROLE_ADMIN = 1;
+    private const ROLE_CLERK = 101;
+
     // OU tree seeded below: 2 (Campus) → 3 (Registry) → 4 (Records Office), 3 → 5 (Archive).
     private const OU_CAMPUS = 2;
     private const OU_REGISTRY = 3;
@@ -92,7 +112,20 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
     private DocumentsApiHandler $documents;
     private DocumentCollectionsApiHandler $collections;
     private \Whity\Api\DocumentRenderApiHandler $renderHandler;
+    private DocumentRouter $router;
     private string $storageRoot;
+
+    /**
+     * Builds a handler whose registries measured the schema AS IT IS NOW.
+     *
+     * Held as a factory rather than built once because one case drops migration
+     * 112's tables mid-test: {@see PdoSchemaPresence} caches per instance,
+     * exactly as production does, so the handler that must not see routing has to
+     * be a different instance rather than the same one asked again.
+     *
+     * @var \Closure(): DocumentsApiHandler
+     */
+    private \Closure $makeDocuments;
 
     protected function setUp(): void
     {
@@ -124,36 +157,73 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         // than stubbed, because this file asserts that a COLLECTION re-applies
         // visibility, and a stub would let the collection path pass while the
         // production wiring diverged.
+        $recipientRepo = new RouteRecipientRepository($this->pdo);
         $visibility = new DocumentVisibilityPolicy(
-            new RouteRecipientRepository($this->pdo),
+            $recipientRepo,
             new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
         );
         $templatePolicy = new DocumentAccessPolicy();
 
+        // The real routing engine, so the routing folders are asked about rows
+        // the engine actually wrote. The alternative — INSERTing recipient and
+        // trail rows this test chose — would let "awaiting me" pass while
+        // disagreeing with what routing produces, which is the one thing an
+        // inbox must not do. In particular, closing a recipient row is
+        // DocumentRouter::act()'s business, and that transition is the assertion
+        // that matters most here.
+        $rules = new RoutingRuleRegistry();
+        $rules->registerCoreRoutingRules(
+            new RoleRuleResolver($this->pdo),
+            new RoleBelowActorRuleResolver($this->pdo)
+        );
+        $this->router = new DocumentRouter(
+            $this->pdo,
+            new RouteRepository($this->pdo),
+            new RouteStepRepository($this->pdo),
+            new RouteEventRepository($this->pdo),
+            $recipientRepo,
+            $rules,
+            $settings,
+            null
+        );
+
         // Wired the way public/index.php wires it: registries built over the
         // LIVE schema, so an unavailable folder here is unavailable in
         // production and vice versa.
-        $substrates = new DocumentSubstrateRegistry(new PdoSchemaPresence($this->pdo));
-        CoreDocumentSubstrates::registerInto($substrates);
-        $views = new DocumentViewRegistry($substrates);
-        CoreDocumentViews::registerInto($views);
-
-        $this->documents = new DocumentsApiHandler(
+        $this->makeDocuments = function () use (
             $documentRepo,
             $artifactRepo,
             $store,
             $visibility,
-            $this->templateRepo,
             $templatePolicy,
             $renderer,
             $issuer,
             $roleChecker,
-            $settings,
-            $views,
-            $substrates,
-            $this->collectionRepo,
-            $this->pdo,
-        );
+            $settings
+        ): DocumentsApiHandler {
+            $substrates = new DocumentSubstrateRegistry(new PdoSchemaPresence($this->pdo));
+            CoreDocumentSubstrates::registerInto($substrates);
+            $views = new DocumentViewRegistry($substrates);
+            CoreDocumentViews::registerInto($views);
+
+            return new DocumentsApiHandler(
+                $documentRepo,
+                $artifactRepo,
+                $store,
+                $visibility,
+                $this->templateRepo,
+                $templatePolicy,
+                $renderer,
+                $issuer,
+                $roleChecker,
+                $settings,
+                $views,
+                $substrates,
+                $this->collectionRepo,
+                $this->pdo,
+            );
+        };
+        $this->documents = ($this->makeDocuments)();
 
         $this->collections = new DocumentCollectionsApiHandler(
             $this->collectionRepo,
@@ -186,10 +256,9 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
 
     /**
      * The keystone. The rail offers the folders this installation can actually
-     * compute, and the three routing-derived ones from #947 item 5 are NOT
-     * among them.
+     * compute — which, on a schema built from every migration, is all nine.
      */
-    public function testTheRailOffersOnlyComputableFoldersAndNamesWhatIsMissing(): void
+    public function testTheRailOffersEveryComputableFolderAndNamesWhatIsMissing(): void
     {
         $body = self::decode($this->getViews(self::AUDITOR));
 
@@ -200,38 +269,109 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
                 CoreDocumentViews::CREATED_BY_ME,
                 CoreDocumentViews::RAISED_BY_MY_UNIT,
                 CoreDocumentViews::BELOW_MY_UNIT,
+                CoreDocumentViews::AWAITING_ME,
+                CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
                 CoreDocumentViews::STARRED,
                 CoreDocumentViews::COLLECTION,
             ],
             $keys
         );
 
-        // #947 item 3 HAS landed, so its tables exist and both routing substrates
-        // resolve — and the three folders derived from them are STILL not
-        // offered, because each needs a predicate and a registration of its own.
-        // A resolvable fact source is not a folder. Had they been registered
-        // behind the substrate to "appear automatically", they would be here
-        // now, empty, saying "nothing awaits you".
-        foreach (['awaiting-me', 'acted-on-by-me', 'passed-through-my-unit'] as $absent) {
-            self::assertNotContains($absent, $keys, "'{$absent}' is not built and must not be offered");
-        }
+        // Each routing folder tells the client which fact source it reads, which
+        // is what lets a rail explain its own absence somewhere else.
+        $byKey = self::byKey(self::rows($this->getViews(self::AUDITOR)));
+        self::assertSame(['routing.recipients'], $byKey[CoreDocumentViews::AWAITING_ME]['requires']);
+        self::assertSame(['routing.trail'], $byKey[CoreDocumentViews::ACTED_ON_BY_ME]['requires']);
+        self::assertSame(
+            ['routing.trail', 'ou.tree'],
+            $byKey[CoreDocumentViews::PASSED_THROUGH_MY_UNIT]['requires']
+        );
 
         // Nothing is reported missing on a fully migrated installation, which is
         // simply true here. The field still exists and is still the place an
-        // absent fact source is explained (#951) — DocumentViewRegistryTest
-        // exercises that with a substrate whose table genuinely is not there.
+        // absent fact source is explained (#951) — the case below takes the
+        // routing tables away and reads it.
         self::assertSame([], $body['unavailable_substrates']);
     }
 
-    /** And requesting one is a 404: from outside, it does not exist. */
-    public function testRequestingARoutingDerivedFolderIsNotFound(): void
+    /**
+     * The property the whole registry exists for, asserted against a real
+     * database rather than by inspection: DROP migration 112's tables and the
+     * three routing folders leave the rail entirely and 404 on request, while the
+     * six that read `documents` are untouched.
+     *
+     * This is what an installation that has not run migration 112 looks like from
+     * outside, and it is the state #978 built the seam for. The folders are not
+     * rendered-and-empty, not listed-and-disabled, but ABSENT: there is nothing
+     * truthful to say about an inbox on an installation that records no
+     * recipients, and an empty one would say "nothing awaits you".
+     */
+    public function testTheRoutingFoldersVanishWhenTheirTablesDo(): void
     {
         $this->issue(self::AUDITOR, 'Invoice');
 
-        foreach (['awaiting-me', 'acted-on-by-me', 'passed-through-my-unit', 'nonsense'] as $key) {
-            $res = $this->list(self::AUDITOR, ['view' => $key]);
+        // Recipients first: their rows point INTO the trail, so the other order
+        // is refused by the foreign key on PostgreSQL. CASCADE covers the
+        // dependency either way and SQLite has no such clause, which is why the
+        // order is written out rather than relied upon.
+        $this->pdo->exec('DROP TABLE document_route_recipients');
+        $this->pdo->exec('DROP TABLE document_route_events');
+
+        // A NEW handler, because the schema probe caches per instance exactly as
+        // it does in production. Asking the old one again would answer from a map
+        // read before the drop, which is the staleness PdoSchemaPresence is
+        // instance-scoped to bound rather than to eliminate.
+        $documents = ($this->makeDocuments)();
+
+        $body = self::decode($this->documentsCallOn($documents, 'views', self::AUDITOR));
+        $keys = array_map(static fn (array $v): string => (string) $v['key'], self::asRows($body['data']));
+
+        self::assertSame(
+            [
+                CoreDocumentViews::ALL,
+                CoreDocumentViews::CREATED_BY_ME,
+                CoreDocumentViews::RAISED_BY_MY_UNIT,
+                CoreDocumentViews::BELOW_MY_UNIT,
+                CoreDocumentViews::STARRED,
+                CoreDocumentViews::COLLECTION,
+            ],
+            $keys,
+            'without migration 112 the rail is exactly what #978 shipped'
+        );
+
+        // Not hidden in silence: the two missing fact sources are named, with
+        // what would supply them, so an operator asking "why is there no inbox
+        // here" gets an answer instead of a shorter list (#951).
+        $missing = self::asRows($body['unavailable_substrates']);
+        self::assertEqualsCanonicalizing(
+            ['routing.recipients', 'routing.trail'],
+            array_map(static fn (array $s): string => (string) $s['key'], $missing)
+        );
+        foreach ($missing as $substrate) {
+            self::assertStringContainsString('migration 112', (string) $substrate['provenance']);
+        }
+
+        // And requesting one is a 404: from outside, it does not exist.
+        foreach (
+            [
+                CoreDocumentViews::AWAITING_ME,
+                CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
+            ] as $key
+        ) {
+            $res = $this->documentsCallOn($documents, 'list', self::AUDITOR, query: ['view' => $key]);
             self::assertSame(404, $res->getStatusCode(), "view={$key} must 404, never return an empty page");
         }
+    }
+
+    /** A key nobody registered is the same 404, and for the same reason. */
+    public function testRequestingAViewThatWasNeverRegisteredIsNotFound(): void
+    {
+        $this->issue(self::AUDITOR, 'Invoice');
+
+        $res = $this->list(self::AUDITOR, ['view' => 'nonsense']);
+        self::assertSame(404, $res->getStatusCode());
     }
 
     // ── 2. absent vs unanchored vs empty ───────────────────────────────────
@@ -369,6 +509,213 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             ]);
             self::assertSame(400, $res->getStatusCode(), "ou_id={$foreignOu} must be refused, not ignored");
         }
+    }
+
+    // ── the routing folders ────────────────────────────────────────────────
+
+    /**
+     * The assertion that matters most in this file.
+     *
+     * "Awaiting me" lists OPEN recipient rows. A row closed by an act leaves the
+     * folder, and the transition is driven through the real
+     * {@see DocumentRouter} — issue puts the row there, `act` closes it — rather
+     * than by writing the rows this test would like to see.
+     *
+     * Get this wrong and the inbox never empties: every document that ever
+     * reached you stays listed, the count only ever rises, and within a week
+     * nobody reads it. That is worse than not shipping the folder, because the
+     * screen still looks like it is working.
+     */
+    public function testAwaitingMeListsOpenRowsAndDropsThemTheMomentTheyAreActedOn(): void
+    {
+        $route = $this->routeToClerkBelowRegistry('Circular');
+
+        // Before: the clerk has an open row, and can see the document BECAUSE a
+        // route reached them — they hold no `documents:read:all`.
+        $before = self::decode($this->list(self::CLERK, ['view' => CoreDocumentViews::AWAITING_ME]));
+        self::assertSame(['Circular'], self::titles($before));
+        self::assertSame(1, $before['pagination']['total'], 'the total describes the same set as the page');
+
+        $this->act(self::CLERK, $route, RouteAction::ACKNOWLEDGED);
+
+        // After: the row is closed, so it is out of the inbox — and the row
+        // itself still exists, which is the point. The folder is a predicate over
+        // `closed_by_event_id`, not a delete.
+        $after = self::decode($this->list(self::CLERK, ['view' => CoreDocumentViews::AWAITING_ME]));
+        self::assertSame([], $after['data'], 'an acted-on item must leave the inbox');
+        self::assertSame(0, $after['pagination']['total']);
+        self::assertSame(
+            1,
+            $this->countRows('SELECT COUNT(*) FROM document_route_recipients WHERE tenant_id = ?', [self::TENANT]),
+            'the recipient row is closed, never removed — its history is the inbox\'s whole basis'
+        );
+        self::assertSame(
+            1,
+            $this->countRows(
+                'SELECT COUNT(*) FROM document_route_recipients
+                  WHERE tenant_id = ? AND closed_by_event_id IS NOT NULL',
+                [self::TENANT]
+            ),
+            'and it is closed by pointing at the trail row for the act, which is what "open" is the '
+                . 'absence of'
+        );
+    }
+
+    /**
+     * The complement, and why the two folders are separate predicates rather than
+     * one slot: a document you have finished with LEAVES your inbox and STAYS in
+     * "acted on by me". Somebody who forwarded something last week must still be
+     * able to find what they forwarded.
+     */
+    public function testActedOnByMeKeepsWhatHasLeftYourInbox(): void
+    {
+        $route = $this->routeToClerkBelowRegistry('Circular');
+
+        // Nothing yet: being a recipient is not having acted.
+        self::assertSame(
+            [],
+            self::decode($this->list(self::CLERK, ['view' => CoreDocumentViews::ACTED_ON_BY_ME]))['data'],
+            'an item sitting in your inbox is not one you have acted on'
+        );
+
+        $this->act(self::CLERK, $route, RouteAction::ACKNOWLEDGED);
+
+        self::assertSame(
+            ['Circular'],
+            self::titles(self::decode($this->list(self::CLERK, ['view' => CoreDocumentViews::ACTED_ON_BY_ME])))
+        );
+
+        // The issuer is an actor too — the `issued` event names them — so this is
+        // not "things in my inbox I closed", it is the trail read by actor.
+        self::assertSame(
+            ['Circular'],
+            self::titles(self::decode($this->list(self::AUDITOR, ['view' => CoreDocumentViews::ACTED_ON_BY_ME])))
+        );
+
+        // And a person who has been sent nothing and done nothing gets an honest
+        // empty page rather than a refusal: this folder anchors on the caller,
+        // who always exists.
+        $res = $this->list(self::UNAFFILIATED, ['view' => CoreDocumentViews::ACTED_ON_BY_ME]);
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame([], self::decode($res)['data']);
+    }
+
+    /**
+     * "Passed through my unit" reads BOTH ends of a transition, over the anchor's
+     * SUBTREE.
+     *
+     * The fixture is built so each end is provable on its own. The `issued` event
+     * records `from_ou_id` = Registry (the issuer's unit) and `to_ou_id` = Records
+     * Office (the single unit its recipients landed in), and nobody in Records has
+     * acted yet — so a folder anchored at Records can only be matching on the
+     * arriving end. A `from`-only predicate would answer nothing there while
+     * looking correct everywhere else.
+     */
+    public function testPassedThroughMyUnitCoversBothEndsOfATransitionAcrossTheSubtree(): void
+    {
+        $this->routeToClerkBelowRegistry('Circular');
+
+        // Registry is the FROM end, and its subtree contains the TO end as well.
+        self::assertSame(
+            ['Circular'],
+            self::titles(self::decode($this->list(self::AUDITOR, [
+                'view' => CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
+            ]))),
+            'the issuing unit is on the trail'
+        );
+
+        // Records Office is the TO end ONLY: no event has left it.
+        self::assertSame(
+            0,
+            $this->countRows(
+                'SELECT COUNT(*) FROM document_route_events WHERE tenant_id = ? AND from_ou_id = ?',
+                [self::TENANT, self::OU_RECORDS]
+            ),
+            'fixture: nothing has been done FROM Records Office yet, so the next assertion can only '
+                . 'be matching on to_ou_id'
+        );
+        self::assertSame(
+            ['Circular'],
+            self::titles(self::decode($this->list(self::AUDITOR, [
+                'view' => CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
+                'ou_id' => (string) self::OU_RECORDS,
+            ]))),
+            'a unit the routing arrived at has had the document pass through it'
+        );
+
+        // Archive is a sibling of Records under Registry and is on neither end,
+        // so it is an honestly empty page — the predicate is a filter, not a
+        // "documents that were routed at all" list.
+        $archive = self::decode($this->list(self::AUDITOR, [
+            'view' => CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
+            'ou_id' => (string) self::OU_ARCHIVE,
+        ]));
+        self::assertSame([], $archive['data']);
+        self::assertSame(0, $archive['pagination']['total']);
+
+        // And a document that was never routed is in no unit's folder, however
+        // it was raised.
+        $this->issue(self::AUDITOR, 'Never routed');
+        self::assertSame(
+            ['Circular'],
+            self::titles(self::decode($this->list(self::AUDITOR, [
+                'view' => CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
+            ]))),
+            'being raised from a unit is a different fact from having passed through it'
+        );
+    }
+
+    /**
+     * The #951 case for the third unit folder. A caller in no unit cannot anchor
+     * it, so it is LISTED and disabled with the reason, and opening it is a 422 —
+     * never a 200 with no rows, which would read as "nothing passed through my
+     * unit" to somebody who has no unit.
+     */
+    public function testPassedThroughMyUnitIsUnanchoredRatherThanEmptyForACallerInNoUnit(): void
+    {
+        $this->routeToClerkBelowRegistry('Circular');
+
+        $byKey = self::byKey(self::rows($this->getViews(self::UNAFFILIATED)));
+        self::assertArrayHasKey(CoreDocumentViews::PASSED_THROUGH_MY_UNIT, $byKey);
+        self::assertFalse($byKey[CoreDocumentViews::PASSED_THROUGH_MY_UNIT]['available']);
+        self::assertStringContainsString(
+            'unit',
+            (string) $byKey[CoreDocumentViews::PASSED_THROUGH_MY_UNIT]['unavailable_reason']
+        );
+
+        // The two caller-anchored routing folders are unaffected: having no unit
+        // does not stop you having an inbox.
+        self::assertTrue($byKey[CoreDocumentViews::AWAITING_ME]['available']);
+        self::assertTrue($byKey[CoreDocumentViews::ACTED_ON_BY_ME]['available']);
+
+        $res = $this->list(self::UNAFFILIATED, ['view' => CoreDocumentViews::PASSED_THROUGH_MY_UNIT]);
+        self::assertSame(422, $res->getStatusCode(), '422 is the folder existing and this caller not fitting it');
+        self::assertStringContainsString('unit', self::decode($res)['error'] ?? '');
+    }
+
+    /**
+     * A routing folder narrows like every other one: it cannot show a caller a
+     * document they may not see, even though the recipient row proves routing
+     * reached somebody.
+     */
+    public function testARoutingFolderCannotWidenWhatTheCallerMaySee(): void
+    {
+        $this->routeToClerkBelowRegistry('Circular');
+        // A second document whose routing touches the SAME units and never
+        // reaches the clerk: circulated among admins, all of whom sit in
+        // Registry. Its trail is inside the subtree the clerk anchors on below,
+        // so only row visibility can be what keeps it out.
+        $this->routeTo('Admins only', 'role', self::ROLE_ADMIN);
+
+        // The clerk sits below Registry, so anchoring at Campus spans everything
+        // the trail touched — and they still see only what reached them.
+        $body = self::decode($this->list(self::CLERK, [
+            'view' => CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
+            'ou_id' => (string) self::OU_CAMPUS,
+        ]));
+
+        self::assertSame(['Circular'], self::titles($body));
+        self::assertSame(1, $body['pagination']['total']);
     }
 
     /** Search is a title substring, and an empty `q` is a cleared box rather than a term. */
@@ -822,6 +1169,69 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
     }
 
     /**
+     * Issue a document and route it, through the real engine.
+     *
+     * `role_below_actor` from the auditor (Registry) with the clerk's role
+     * resolves to exactly one person in exactly one unit — the clerk, in Records
+     * Office — which is what makes the `issued` event carry a single `to_ou_id`
+     * and lets the "both ends of a transition" assertions separate the two ends.
+     * A tenant-wide `role` fan-out spanning two units would leave `to_ou_id`
+     * null, correctly, and prove nothing about the arriving end.
+     *
+     * @return array<string, mixed> The `document_routes` row, for {@see act()}.
+     */
+    private function routeToClerkBelowRegistry(string $title): array
+    {
+        return $this->routeTo($title, 'role_below_actor', self::ROLE_CLERK);
+    }
+
+    /** @return array<string, mixed> The `document_routes` row. */
+    private function routeTo(string $title, string $ruleKind, int $roleId, int $actorId = self::AUDITOR): array
+    {
+        $documentId = $this->issue($actorId, $title);
+
+        $stmt = $this->pdo->prepare('SELECT * FROM documents WHERE id = ? AND tenant_id = ?');
+        $stmt->execute([$documentId, self::TENANT]);
+        $document = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($document, 'fixture setup: the issued document must be readable');
+
+        $outcome = $this->router->issue(self::TENANT, $actorId, $document, $title . ' route', [
+            ['rule_kind' => $ruleKind, 'rule_config' => ['role_id' => $roleId]],
+        ]);
+        self::assertGreaterThan(
+            0,
+            $outcome['delivered'],
+            'fixture setup: a route that reached nobody would make every assertion below vacuous'
+        );
+
+        return $outcome['route'];
+    }
+
+    /** @param array<string, mixed> $route */
+    private function act(int $actorId, array $route, string $action): void
+    {
+        $this->router->act(self::TENANT, $actorId, $route, $action, null);
+    }
+
+    /**
+     * A COUNT read straight off the tables, for the two assertions that are about
+     * ROWS rather than about a response: "the recipient row was CLOSED, not
+     * deleted", and "nothing has yet been done FROM this unit" — the fixture
+     * precondition that makes the `to_ou_id` assertion beside it mean anything.
+     * Neither is visible through the API, which is the point of reading the
+     * database for them.
+     *
+     * @param list<int|string> $bindings
+     */
+    private function countRows(string $sql, array $bindings = []): int
+    {
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($bindings);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
      * @param array<string, string> $params
      * @param array<string, string> $query
      */
@@ -829,6 +1239,24 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         string $method,
         int $actorId,
         array $params,
+        int $tenantId = self::TENANT,
+        array $query = []
+    ): Response {
+        return $this->documentsCallOn($this->documents, $method, $actorId, $params, $tenantId, $query);
+    }
+
+    /**
+     * The same call against an EXPLICIT handler, for the one case that needs a
+     * handler whose schema probe ran after a table was dropped.
+     *
+     * @param array<string, string> $params
+     * @param array<string, string> $query
+     */
+    private function documentsCallOn(
+        DocumentsApiHandler $handler,
+        string $method,
+        int $actorId,
+        array $params = [],
         int $tenantId = self::TENANT,
         array $query = []
     ): Response {
@@ -842,9 +1270,9 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         $req->user = (object) ['profile_id' => $actorId, 'active_tenant_id' => $tenantId];
 
         return match ($method) {
-            'views' => $this->documents->views($req),
-            'list' => $this->documents->list($req),
-            'show' => $this->documents->show($req, $params),
+            'views' => $handler->views($req),
+            'list' => $handler->list($req),
+            'show' => $handler->show($req, $params),
             default => throw new \InvalidArgumentException("Unknown documents route: {$method}"),
         };
     }
@@ -941,6 +1369,20 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
 
         /** @var list<array<string, mixed>> $data */
         return $data;
+    }
+
+    /**
+     * A decoded JSON array as a list PHPStan can index into — the same job
+     * {@see rows()} does for a response, for a field that is not `data`.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function asRows(mixed $value): array
+    {
+        self::assertIsArray($value);
+
+        /** @var list<array<string, mixed>> $value */
+        return $value;
     }
 
     /**
