@@ -3625,6 +3625,9 @@ export interface components {
             artifacts: components["schemas"]["DocumentArtifact"][];
             collection_ids?: number[];
             starred?: boolean;
+            sections?: {
+                [key: string]: components["schemas"]["RecordSectionVerdict"];
+            };
         };
         DocumentArtifact: {
             id: number;
