@@ -89,9 +89,12 @@ class MigrationsCommandTest extends TestCase
      */
     public function testCommandFailsGracefullyWithoutDatabase(): void
     {
-        // If database is available, skip this test
-        if ($this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database is available, skipping no-database test');
+        // The inverse question, and the only half of the probe answerable without
+        // opening a socket: this test is about the no-database path, so a
+        // configured database — reachable or not — means there is nothing here
+        // to assert.
+        if (self::aDatabaseIsConfigured()) {
+            $this->markTestSkipped('A database is configured, so the no-database path is not what would run.');
         }
 
         $command = new MigrationsCommand();
