@@ -23,6 +23,7 @@ use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
+use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\Ou\OuSubtree;
 use Whity\Core\Ou\PrimaryMembershipOu;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
@@ -30,6 +31,7 @@ use Whity\Core\Document\Render\RenderServiceUnavailableException;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\RecordSectionRequirement;
 use Whity\Core\RBAC\RecordSectionResolver;
+use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Settings\SettingsRegistry;
@@ -118,6 +120,11 @@ final class DocumentsApiHandler
         // drift from the first, so this handler uses them rather than wrapping
         // them in collaborators of its own.
         private readonly PDO $db,
+        // The WHERE half of TEMPLATE visibility (migration 117): a template
+        // filed at an organizational unit is withheld from callers with no
+        // standing there, so this path cannot become a way to reach a template
+        // the designer's own list would not have shown.
+        private readonly OuReachResolver $ouReach,
         // ── #993: the record page's per-region authorization ─────────────────
         //
         // All three OPTIONAL, and all three defaulting to "absent" rather than
@@ -441,7 +448,12 @@ final class DocumentsApiHandler
         $templateId = $document['document_template_id'];
         $template = is_int($templateId) ? $this->templates->findById($templateId, $tenantId) : null;
         if ($template === null
-            || !$this->templatePolicy->canView($template, $callerId, $this->permissionResolver($callerId, $tenantId))) {
+            || !$this->templatePolicy->canView(
+                $template,
+                $callerId,
+                $this->permissionResolver($callerId, $tenantId),
+                $this->ouReach->reachFor($tenantId, $callerId),
+            )) {
             return Response::error('The template this document was issued from is no longer available', 409);
         }
 
@@ -677,8 +689,17 @@ final class DocumentsApiHandler
         $templateId = $document['document_template_id'];
         $template = is_int($templateId) ? $this->templates->findById($templateId, $tenantId) : null;
 
+        // #1004 made template visibility two-part: the permission gate AND the
+        // OU reach predicate. Passing only the first here would let the record
+        // page re-issue from a template the designer's own list withholds,
+        // which is the one thing that scoping exists to prevent.
         return $template !== null
-            && $this->templatePolicy->canView($template, $callerId, $this->permissionResolver($callerId, $tenantId));
+            && $this->templatePolicy->canView(
+                $template,
+                $callerId,
+                $this->permissionResolver($callerId, $tenantId),
+                $this->ouReach->reachFor($tenantId, $callerId),
+            );
     }
 
     /**
@@ -941,12 +962,10 @@ final class DocumentsApiHandler
     }
 
     /**
-     * @return callable(string): bool
+     * @return callable(string, int|null=): bool
      */
     private function permissionResolver(int $callerId, int $tenantId): callable
     {
-        $set = array_fill_keys($this->roleChecker->getEffectivePermissionsForProfile($callerId, $tenantId), true);
-
-        return static fn (string $permission): bool => isset($set[$permission]);
+        return ScopedPermissionSet::forProfile($this->roleChecker, $callerId, $tenantId);
     }
 }

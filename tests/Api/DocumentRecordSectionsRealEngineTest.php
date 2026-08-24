@@ -30,9 +30,10 @@ use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
-use Whity\Core\RBAC\RecordSectionResolver;
+use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
 use Whity\Core\RBAC\ResourceTypeRegistry;
+use Whity\Core\RBAC\RecordSectionResolver;
 use Whity\Core\Request;
 use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Core\Settings\SettingsRegistry;
@@ -126,7 +127,16 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
         $views = new DocumentViewRegistry($substrates);
         CoreDocumentViews::registerInto($views);
 
-        // The thirteen shared arguments, so the two handlers below differ ONLY in
+        // Migration 117's template reach predicate. REQUIRED since #1004, and
+        // shared rather than per-handler: the issue path reads a template too, so
+        // withholding one filed at a unit the caller has no standing at must hold
+        // on both, or the record page becomes a way around the designer's list.
+        $ouReach = new OuReachResolver(
+            $this->pdo,
+            new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
+        );
+
+        // The fifteen shared arguments, so the two handlers below differ ONLY in
         // the three this PR adds. A hand-written second construction would let
         // the "unwired" case drift into differing for some other reason.
         $shared = [
@@ -144,6 +154,7 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
             $substrates,
             new DocumentCollectionRepository($this->pdo),
             $this->pdo,
+            $ouReach,
         ];
 
         $this->handler = new DocumentsApiHandler(
@@ -162,7 +173,8 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
             $roleChecker,
             $this->settingsService,
             $renderer,
-            $issuer
+            $issuer,
+            $ouReach
         );
 
         // Both must be on for a document to be re-issuable at all; the record

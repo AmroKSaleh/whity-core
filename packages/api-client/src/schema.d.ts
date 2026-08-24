@@ -3651,6 +3651,7 @@ export interface components {
             required_permission?: string | null;
             is_system: boolean;
             created_by?: number | null;
+            owner_ou_id?: number | null;
             created_at: string;
             updated_at: string;
         };
@@ -3662,6 +3663,7 @@ export interface components {
             /** @enum {string} */
             scope?: "personal" | "tenant" | "global" | "system";
             required_permission?: string | null;
+            owner_ou_id?: number | null;
         };
         DocumentBlockListResponse: {
             data: components["schemas"]["DocumentBlock"][];
@@ -3677,6 +3679,7 @@ export interface components {
             /** @enum {string} */
             scope?: "personal" | "tenant" | "global" | "system";
             required_permission?: string | null;
+            owner_ou_id?: number | null;
         };
         DocumentCollection: {
             id: number;
@@ -3819,6 +3822,7 @@ export interface components {
             required_permission?: string | null;
             is_system: boolean;
             created_by?: number | null;
+            owner_ou_id?: number | null;
             created_at: string;
             updated_at: string;
         };
@@ -3830,6 +3834,7 @@ export interface components {
             /** @enum {string} */
             scope?: "personal" | "tenant" | "global" | "system";
             required_permission?: string | null;
+            owner_ou_id?: number | null;
         };
         DocumentTemplateListResponse: {
             data: components["schemas"]["DocumentTemplate"][];
@@ -3845,6 +3850,7 @@ export interface components {
             /** @enum {string} */
             scope?: "personal" | "tenant" | "global" | "system";
             required_permission?: string | null;
+            owner_ou_id?: number | null;
         };
         DocumentTrailEvent: {
             id: number;

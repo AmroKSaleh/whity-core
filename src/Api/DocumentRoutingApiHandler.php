@@ -16,6 +16,7 @@ use Whity\Core\Document\Routing\RouteStepRepository;
 use Whity\Core\Document\Routing\RoutingPresenter;
 use Whity\Core\Document\Routing\RoutingRejectedException;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
+use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
@@ -368,12 +369,10 @@ final class DocumentRoutingApiHandler
     }
 
     /**
-     * @return callable(string): bool
+     * @return callable(string, int|null=): bool
      */
     private function permissionResolver(int $callerId, int $tenantId): callable
     {
-        $set = array_fill_keys($this->roleChecker->getEffectivePermissionsForProfile($callerId, $tenantId), true);
-
-        return static fn (string $permission): bool => isset($set[$permission]);
+        return ScopedPermissionSet::forProfile($this->roleChecker, $callerId, $tenantId);
     }
 }

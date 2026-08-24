@@ -222,6 +222,47 @@ class ResourceRoleAssignmentRepository
     }
 
     /**
+     * The resources of one TYPE at which a profile PERSONALLY holds a grant.
+     *
+     * The inverse of {@see hasProfileGrantAt()}: that answers "does this person
+     * have standing HERE?", this answers "where does this person have standing?".
+     * {@see \Whity\Core\Ou\OuReachResolver} asks it with `ou` to learn which
+     * units a profile has authority at beyond the ones they are a member of —
+     * the dean's secretary who also covers Materials Science.
+     *
+     * It lives here rather than as a query in the caller because this class is
+     * the single access path for `resource_role_assignments`, and a caller that
+     * wrote its own SELECT would have to re-derive the nullable-`profile_id`
+     * rule below. Re-deriving it wrongly is not a visible bug; it is a silent
+     * widening.
+     *
+     * EVERYONE-GRANTS (`profile_id IS NULL`) ARE EXCLUDED, for the reason
+     * {@see hasProfileGrantAt()} records at length: migration 088 defines such a
+     * row as "everyone WITH ACCESS to this resource gets role R here", so it
+     * modifies what already-reachable people may DO and is not itself a grant of
+     * access. Counting one as standing would give every profile in the tenant
+     * authority at any unit carrying a single everyone-grant.
+     *
+     * @return list<int> Distinct resource ids, ascending.
+     */
+    public function resourceIdsForProfile(int $tenantId, string $resourceType, int $profileId): array
+    {
+        $statement = $this->db->prepare(
+            'SELECT DISTINCT resource_id FROM resource_role_assignments
+             WHERE tenant_id = ? AND resource_type = ? AND profile_id = ?
+             ORDER BY resource_id'
+        );
+        $statement->execute([$tenantId, $resourceType, $profileId]);
+
+        $out = [];
+        foreach ($statement->fetchAll(PDO::FETCH_COLUMN) ?: [] as $resourceId) {
+            $out[] = (int) $resourceId;
+        }
+
+        return $out;
+    }
+
+    /**
      * Every grant at one resource, tenant scoped.
      *
      * @return list<array{id: int, role_id: int, profile_id: int|null}>
