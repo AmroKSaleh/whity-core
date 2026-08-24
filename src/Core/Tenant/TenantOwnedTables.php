@@ -177,9 +177,9 @@ final class TenantOwnedTables
         // children rather than reaching it through `template_id`, so the
         // predicate guard polices a step and an edge read DIRECTLY instead of
         // trusting a join it cannot see.
-        'document_route_templates'      => '119_create_document_route_templates.php',
-        'document_route_template_steps' => '119_create_document_route_templates.php',
-        'document_route_template_edges' => '119_create_document_route_templates.php',
+        'document_route_templates'      => '120_create_document_route_templates.php',
+        'document_route_template_steps' => '120_create_document_route_templates.php',
+        'document_route_template_edges' => '120_create_document_route_templates.php',
 
         // #999 — named USER GROUPS (migration 116). One row per group: a name
         // plus the `rule_kind` + `rule_config` pair that says which people it

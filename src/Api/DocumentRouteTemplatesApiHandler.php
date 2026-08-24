@@ -43,9 +43,16 @@ use Whity\Http\PaginationParams;
  * THERE IS NO PREVIEW ENDPOINT HERE, DELIBERATELY
  * -----------------------------------------------
  * "How many people does this node reach?" is already answered, exactly, by
- * `POST /api/v1/user-groups/preview` (#1003) — a count plus a bounded sample,
- * with `groups.preview_sample_size` behind it. The editor calls that, per node,
- * and this surface adds nothing.
+ * #1003's preview — a count plus a bounded sample, with
+ * `groups.preview_sample_size` behind it. The editor calls it per node and this
+ * surface adds nothing.
+ *
+ * It is TWO endpoints rather than one, and the split is #999's rather than a
+ * client-side preference: `POST /api/v1/user-groups/preview` resolves a rule
+ * that could DEFINE a group, so it refuses `rule_kind: "group"` — a group cannot
+ * be defined as another group. A group STAGE is a perfectly ordinary thing and
+ * is previewed through `GET /api/v1/user-groups/{id}/preview` instead, which is
+ * also the looser gate (`groups:read`).
  *
  * A preview of my own would be a second implementation of the resolver's
  * semantics — active memberships only, direct membership role, resource-scoped
@@ -53,7 +60,7 @@ use Whity\Http\PaginationParams;
  * edited. #1003's endpoint is gated on `groups:write` because it resolves an
  * ARBITRARY rule the caller composed, which is exactly what a template author is
  * doing; on any ordinary install the same people hold both, because migration 116
- * grants `groups:write` and migration 119 grants `route_templates:write` to the
+ * grants `groups:write` and migration 120 grants `route_templates:write` to the
  * same audience (`roles:write`). Where they do not, the editor renders the node
  * WITHOUT a count and says so, rather than this class quietly re-deriving one.
  *

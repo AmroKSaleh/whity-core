@@ -44,7 +44,7 @@ final class RouteTemplateContract
      *
      * On a step with no `approved` edge the route continues to the next
      * authoring ordinal — which is why a plain linear template needs no edges at
-     * all. See migration 119's docblock.
+     * all. See migration 120's docblock.
      */
     public const VERDICT_APPROVED = 'approved';
 

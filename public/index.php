@@ -836,7 +836,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // route_templates:write per-control on the page, and the API enforces it
         // regardless of what the client renders — a clerk who may route a
         // document should not thereby be able to rewrite where every document
-        // goes. Migration 119 grants both to whoever holds `roles:write`, and
+        // goes. Migration 120 grants both to whoever holds `roles:write`, and
         // read additionally to whoever holds `documents:route`.
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::ROUTE_TEMPLATES_READ,
     ];
@@ -2393,7 +2393,7 @@ $router->register('DELETE', '/api/user-groups/{id:\d+}',           [$userGroupsH
 // 13a-nonies-quinquies. DOCUMENT ROUTE TEMPLATES (#1027) — the reusable,
 // BRANCHING flow designs the node-based editor edits. Migration 112 named this
 // seam ("a `document_route_templates` / `document_route_template_steps` pair")
-// and migration 119 takes it.
+// and migration 120 takes it.
 //
 // A template is to a route what `document_templates` is to `documents`: the
 // thing DESIGNED, with a different lifetime from the thing that HAPPENED. The

@@ -6800,7 +6800,7 @@ final class CoreApiSchemas
      *
      * A template is a reusable, BRANCHING route DESIGN: the seam migration 112
      * named ("a `document_route_templates` / `document_route_template_steps`
-     * pair") and migration 119 takes. It is to a route what `document_templates`
+     * pair") and migration 120 takes. It is to a route what `document_templates`
      * is to `documents` — the thing DESIGNED, with a different lifetime from the
      * thing that HAPPENED, and the append-only trail hangs off the second.
      *

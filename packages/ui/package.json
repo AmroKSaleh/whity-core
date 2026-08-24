@@ -51,6 +51,8 @@
     "./plugin-card": "./src/plugin-card.tsx",
     "./popover": "./src/popover.tsx",
     "./radio-group": "./src/radio-group.tsx",
+    "./route-flow/model": "./src/route-flow/model.ts",
+    "./route-flow/editor": "./src/route-flow/editor.tsx",
     "./screen-too-small": "./src/screen-too-small.tsx",
     "./select": "./src/select.tsx",
     "./separator": "./src/separator.tsx",
@@ -85,6 +87,7 @@
   "dependencies": {
     "@amroksaleh/tokens": "^0.1.0",
     "@tanstack/react-table": "^8.21.3",
+    "@xyflow/react": "^12.11.3",
     "bwip-js": "^4.11.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

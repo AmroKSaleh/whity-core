@@ -7,7 +7,7 @@ namespace Whity\Core\Document\RouteTemplate;
 use PDO;
 
 /**
- * Data-access for the three route-TEMPLATE tables (#1027, migration 119).
+ * Data-access for the three route-TEMPLATE tables (#1027, migration 120).
  *
  * A template is a DESIGN — the record the node-based editor edits — and this
  * class reads and writes designs and nothing else. It resolves no rules, counts
