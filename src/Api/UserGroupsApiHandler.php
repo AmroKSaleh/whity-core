@@ -528,9 +528,14 @@ final class UserGroupsApiHandler
             return (int) $raw;
         }
 
-        $default = SettingsRegistry::defaults()[SettingsRegistry::GROUPS_PREVIEW_SAMPLE_SIZE] ?? '10';
-
-        return max(1, (int) $default);
+        // `defaultFor()`, not `defaults()[...] ?? '10'`. The key is a constant on
+        // the registry, so a literal beside it is not a safety net — it is a
+        // SECOND default, in a second place, that nothing would ever notice
+        // disagreeing with the first. DocumentRouter needs the `??` form because
+        // its key is a variable; here the registry either knows the key or the
+        // constant is wrong, and `defaultFor()` says so instead of quietly
+        // substituting a number of its own.
+        return max(1, (int) SettingsRegistry::defaultFor(SettingsRegistry::GROUPS_PREVIEW_SAMPLE_SIZE));
     }
 
     /**

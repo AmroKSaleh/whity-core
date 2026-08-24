@@ -44,6 +44,10 @@ final class SettingsRegistryTest extends TestCase
              'documents.persist_enabled',
              // #947 item 3 - routing ceilings, tenant-overridable like the render ones.
              'documents.routing_max_steps', 'documents.routing_max_recipients_per_step',
+             // #999: how many people a USER GROUP preview SHOWS beside its
+             // (always exact) count. Tenant-overridable — see the governance
+             // test below for why this one is not operator-only.
+             'groups.preview_sample_size',
              // WC-746: the bulk data-type lifecycle batch ceiling.
              'data_types.bulk_max_ids',
              // WC-error-tracking. The DSN is deliberately absent: it is a
@@ -109,7 +113,29 @@ final class SettingsRegistryTest extends TestCase
         self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_max_steps'));
         self::assertContains('documents.routing_max_recipients_per_step', SettingsRegistry::tenantTextKeys());
         self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_max_recipients_per_step'));
-        self::assertCount(14, SettingsRegistry::tenantTextKeys());
+        // 15 since #999: the user-group preview SAMPLE SIZE. Deliberately
+        // tenant-overridable rather than operator-only, and this is the
+        // assertion that states it.
+        //
+        // Resolution is LAYERED, not a choice between two surfaces: a call site
+        // reads the per-tenant override, else the global value, else the
+        // registry default (SettingsService::effective, the same chain the
+        // render and routing ceilings use). Shipping it in this list rather
+        // than in GLOBAL_ONLY_KEYS means a deployment that never sets a tenant
+        // value behaves exactly as if the key were global-only, and a tenant
+        // that later needs its own number is an operator decision rather than a
+        // schema migration — no call site changes either way.
+        //
+        // Why a tenant would want its own: ten faces is enough to recognise a
+        // departmental group and not enough to recognise a faculty-wide one, so
+        // an operator running both must be able to raise one without raising
+        // the other. That is the same argument the render and routing ceilings
+        // won on, and it is why this key is NOT governance — it tunes how much
+        // of an answer a screen shows, and grants nobody anything.
+        self::assertContains('groups.preview_sample_size', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('groups.preview_sample_size'));
+        self::assertSame('10', SettingsRegistry::defaultFor('groups.preview_sample_size'));
+        self::assertCount(15, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -232,7 +258,8 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(56, $describe);
+        // 57 since #999 added groups.preview_sample_size.
+        self::assertCount(57, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
