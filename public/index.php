@@ -2359,25 +2359,20 @@ $router->register('DELETE', '/api/document-collections/{id:\d+}/documents/{docum
 $router->register('PUT',    '/api/documents/{id:\d+}/star',                                    [$documentCollectionsHandler, 'star'],           null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('DELETE', '/api/documents/{id:\d+}/star',                                    [$documentCollectionsHandler, 'unstar'],         null, null, CorePermissions::DOCUMENTS_READ);
 
-// 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3):
-// a brand-new tenant should never open the designer to an empty library. The
-// SYNC 'tenant.created' hook (not '.async') is used deliberately — seeding
-// must complete before the tenant-creation response returns, same as the
-// AuditLogger audit-log write already subscribed to this same event just
-// above (so a sync DB-writing listener on this hook is an established
-// pattern, not a first use). Wrapped in its own try/catch AND
-// DocumentStarterSeeder::seedForTenant() itself never throws (see its
-// docblock) — a seeding failure must never turn a successful tenant creation
-// into a 500 for the caller.
-$documentStarterSeeder = new \Whity\Core\Document\DocumentStarterSeeder(
-    $documentTemplateRepository,
-    $documentBlockRepository,
-    $logger
-);
-$hookManager->listen('tenant.created', function ($data, $context) use ($documentStarterSeeder) {
-    $documentStarterSeeder->seedForTenant((int) $data['id'], (string) ($data['name'] ?? ''));
-    return $data;
-});
+// 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3)
+// is NOT registered here any more, and the move is the fix for #1012.
+//
+// It was a `tenant.created` listener registered at this entry point, which meant
+// it fired for tenants created by an HTTP request and for no others. The Default
+// Tenant is created by the CLI seeder, which exits this file at the command
+// dispatch hundreds of lines above and never reaches this line — so the one
+// tenant every fresh install actually opens the designer in was the only one
+// that opened it empty.
+//
+// Starters are now a {@see \Whity\Core\Tenant\TenantProvisioningStep} run by
+// {@see \Whity\Core\Tenant\TenantProvisioner}, which every creation path goes
+// through, seeder included. `tenant.created` keeps announcing the fact to audit
+// and to plugins; it is no longer what core provisioning secretly hangs off.
 
 // 13b-ter. Native taxonomy/tagging API (WC-621): a domain-neutral tagging
 // primitive. Tenant-scoped, RBAC-gated CRUD for tag groups + tags, plus a

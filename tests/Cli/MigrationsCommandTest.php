@@ -3,6 +3,7 @@
 namespace Whity\Tests\Cli;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RequiresConfiguredDatabase;
 use Whity\Cli\Commands\MigrationsCommand;
 
 /**
@@ -13,34 +14,10 @@ use Whity\Cli\Commands\MigrationsCommand;
  */
 class MigrationsCommandTest extends TestCase
 {
-    /**
-     * Check if database is available for testing
-     */
-    private function isDatabaseAvailable(): bool
-    {
-        try {
-            // Try to connect to database
-            $db_host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?? 'localhost';
-            $db_user = $_ENV['DB_USER'] ?? getenv('DB_USER');
-            $db_password = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD');
-            $db_name = $_ENV['DB_NAME'] ?? getenv('DB_NAME');
-
-            if (!$db_user || !$db_password) {
-                return false; // Missing required credentials
-            }
-
-            // Try to connect
-            $pdo = new \PDO(
-                "pgsql:host=$db_host;dbname=$db_name",
-                $db_user,
-                $db_password,
-                [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
-            );
-            return true;
-        } catch (\Throwable $e) {
-            return false;
-        }
-    }
+    // The probe reads DB_PORT, and fails rather than skips when a database is
+    // configured and unreachable — see the trait for why those are two different
+    // situations and only one of them deserves a skip (#1013).
+    use RequiresConfiguredDatabase;
 
     /**
      * Test that MigrationsCommand can be instantiated
@@ -68,9 +45,9 @@ class MigrationsCommandTest extends TestCase
      */
     public function testMigrationStatusWithDatabase(): void
     {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
+        // Skips only when nothing says where a database is; fails loudly when
+        // something does and it is not there.
+        $this->connectToConfiguredDatabase();
 
         $command = new MigrationsCommand();
 
@@ -91,9 +68,9 @@ class MigrationsCommandTest extends TestCase
      */
     public function testMigrationRunWithDatabase(): void
     {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
+        // Skips only when nothing says where a database is; fails loudly when
+        // something does and it is not there.
+        $this->connectToConfiguredDatabase();
 
         $command = new MigrationsCommand();
 

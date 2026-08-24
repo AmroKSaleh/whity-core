@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Document;
 
 use Psr\Log\LoggerInterface;
+use Whity\Core\Tenant\TenantProvisioningStep;
 
 /**
  * Seeds the starter document/label templates + blocks for a newly created
@@ -38,7 +39,7 @@ use Psr\Log\LoggerInterface;
  * Rows are seeded scope=system (visible to everyone in the tenant, per
  * {@see DocumentAccessPolicy}), is_system=true, created_by=null.
  */
-final class DocumentStarterSeeder
+final class DocumentStarterSeeder implements TenantProvisioningStep
 {
     private DocumentTemplateRepository $templates;
     private DocumentBlockRepository $blocks;
@@ -52,6 +53,25 @@ final class DocumentStarterSeeder
         $this->templates = $templates;
         $this->blocks = $blocks;
         $this->logger = $logger;
+    }
+
+    /**
+     * The {@see TenantProvisioningStep} seam (#1012).
+     *
+     * Starters used to reach a tenant through a `tenant.created` listener
+     * registered in `public/index.php`, which meant they reached tenants created
+     * by an HTTP request and no others — so the Default Tenant, created by the
+     * CLI seeder's INSERT, was the one tenant on every fresh install that never
+     * got them. Being a step instead puts this on every creation path, including
+     * the seeder's, which never boots the listener registry at all.
+     *
+     * Delegates rather than renames: `seedForTenant()` is the name the demo
+     * seeder and the starter tests call it by, and the interface's name has to be
+     * neutral enough for the next step that is not about documents.
+     */
+    public function provisionTenant(int $tenantId, string $tenantName): void
+    {
+        $this->seedForTenant($tenantId, $tenantName);
     }
 
     /**

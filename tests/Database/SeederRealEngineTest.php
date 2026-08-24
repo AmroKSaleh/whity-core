@@ -7,6 +7,8 @@ namespace Whity\Tests\Database;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Core\Document\DocumentBlockRepository;
+use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Database\Database;
 use Whity\Database\Seeder;
 
@@ -134,6 +136,132 @@ final class SeederRealEngineTest extends TestCase
 
         self::assertIsArray($count);
         self::assertSame(1, (int) $count['c'], 'Re-running the seeder must not duplicate the superuser.');
+    }
+
+    // ── #1012: the Default Tenant is a provisioned tenant, not just a row ────
+
+    /**
+     * A FRESH SEED LEAVES THE DEFAULT TENANT WITH ITS STARTER TEMPLATES.
+     *
+     * The regression this pins is that it did not. Starters were provisioned by
+     * a `tenant.created` listener registered in `public/index.php`; the seeder
+     * created this tenant with a bare INSERT and never reached that file's
+     * bootstrap, so the tenant every fresh install actually opens the designer in
+     * was the only one in the system with an empty library — defeating the
+     * explicit requirement that the designer never present an empty document.
+     *
+     * ASSERTED ON THE OUTCOME, NOT ON THE MECHANISM. There is deliberately no
+     * assertion here that a `tenant.created` dispatch happened, or that a step
+     * ran, or that any particular class was called: the event is one way to
+     * arrange this and the starters are the requirement. A future rearrangement
+     * that keeps the tenant stocked should keep this test green; one that
+     * dispatches perfectly and leaves the library empty should not.
+     */
+    public function testAFreshSeedLeavesTheDefaultTenantWithItsStarterTemplates(): void
+    {
+        Seeder::seed($this->db);
+
+        $templates = (new DocumentTemplateRepository($this->pdo))->listForTenant($this->defaultTenantId());
+
+        self::assertNotSame(
+            [],
+            $templates,
+            'A fresh install must not open the designer on an empty library in the Default Tenant.'
+        );
+
+        // And they are the SHIPPED starters rather than some other row that
+        // happens to exist: every one carries the stable `starter_key` the
+        // starter seeder writes, which is also the column #1013 made readable.
+        foreach ($templates as $template) {
+            self::assertNotNull(
+                $template['starter_key'],
+                'Every template a bare seed leaves behind must be a shipped starter.'
+            );
+        }
+    }
+
+    /** The header/footer blocks are half of "never an empty document", and arrive the same way. */
+    public function testAFreshSeedLeavesTheDefaultTenantWithItsStarterBlocks(): void
+    {
+        Seeder::seed($this->db);
+
+        $blocks = (new DocumentBlockRepository($this->pdo))->listForTenant($this->defaultTenantId());
+
+        self::assertNotSame([], $blocks, 'The starter header/footer blocks must reach the Default Tenant too.');
+        foreach ($blocks as $block) {
+            self::assertNotNull($block['starter_key']);
+        }
+    }
+
+    /** Re-seeding must not leave the tenant with two of every starter. */
+    public function testReSeedingDoesNotDuplicateTheStarters(): void
+    {
+        Seeder::seed($this->db);
+        $first = $this->designerRowCounts();
+
+        Seeder::seed($this->db);
+        Seeder::seed($this->db);
+
+        self::assertSame($first, $this->designerRowCounts());
+        self::assertGreaterThan(0, $first['document_templates']);
+        self::assertGreaterThan(0, $first['document_blocks']);
+    }
+
+    /**
+     * AN INSTALL THAT NEVER GOT ITS STARTERS ACQUIRES THEM ON THE NEXT SEED.
+     *
+     * Every install created before this fix is in exactly this state: the tenant
+     * is there, the library is empty, and nothing will ever create it again if
+     * provisioning only runs at creation. So the provisioner runs its steps
+     * against a tenant that already exists as well as one it just made, and this
+     * is the assertion that keeps that true — an operator's remedy for the bug is
+     * `seed`, not a rebuild.
+     */
+    public function testAnExistingTenantWithNoStartersIsBackfilledByTheNextSeed(): void
+    {
+        Seeder::seed($this->db);
+        $tenantId = $this->defaultTenantId();
+
+        $this->pdo->prepare('DELETE FROM document_templates WHERE tenant_id = :t')->execute([':t' => $tenantId]);
+        $this->pdo->prepare('DELETE FROM document_blocks WHERE tenant_id = :t')->execute([':t' => $tenantId]);
+        self::assertSame(
+            ['document_templates' => 0, 'document_blocks' => 0],
+            $this->designerRowCounts(),
+            'Precondition: the tenant is standing where a pre-fix install stands.'
+        );
+
+        Seeder::seed($this->db);
+
+        $counts = $this->designerRowCounts();
+        self::assertGreaterThan(0, $counts['document_templates']);
+        self::assertGreaterThan(0, $counts['document_blocks']);
+    }
+
+    private function defaultTenantId(): int
+    {
+        $row = $this->db
+            ->query('SELECT id FROM tenants WHERE name = :name', [':name' => Seeder::DEFAULT_TENANT_NAME])
+            ->fetch();
+
+        self::assertIsArray($row, 'The seeder must leave a "' . Seeder::DEFAULT_TENANT_NAME . '" behind.');
+
+        return (int) $row['id'];
+    }
+
+    /** @return array{document_templates: int, document_blocks: int} */
+    private function designerRowCounts(): array
+    {
+        $tenantId = $this->defaultTenantId();
+
+        $templates = $this->pdo->prepare('SELECT count(*) FROM document_templates WHERE tenant_id = :t');
+        $templates->execute([':t' => $tenantId]);
+        $blocks = $this->pdo->prepare('SELECT count(*) FROM document_blocks WHERE tenant_id = :t');
+        $blocks->execute([':t' => $tenantId]);
+
+        return [
+            'document_templates' => (int) $templates->fetchColumn(),
+            'document_blocks'    => (int) $blocks->fetchColumn(),
+        ];
     }
 
     /**

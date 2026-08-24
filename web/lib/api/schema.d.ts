@@ -3760,6 +3760,7 @@ export interface components {
             is_system: boolean;
             created_by?: number | null;
             owner_ou_id?: number | null;
+            starter_key?: string | null;
             created_at: string;
             updated_at: string;
         };
@@ -3949,6 +3950,7 @@ export interface components {
             is_system: boolean;
             created_by?: number | null;
             owner_ou_id?: number | null;
+            starter_key?: string | null;
             created_at: string;
             updated_at: string;
         };

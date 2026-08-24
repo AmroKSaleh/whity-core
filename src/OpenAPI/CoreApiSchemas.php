@@ -2943,6 +2943,11 @@ final class CoreApiSchemas
                 // Where in the organisation the row is filed (migration 117). null = tenant-wide,
                 // which is what every row was before it and what an unplaced row still is.
                 'owner_ou_id' => self::int(true),
+                // WHICH shipped starter this row is, or null for anything a user made
+                // (#1013). `is_system` says "a system row" and cannot answer it, so a
+                // client rendering a Starter badge off that alone can label the row but
+                // never offer to restore the starter it came from.
+                'starter_key' => self::str(true),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
@@ -3457,6 +3462,11 @@ final class CoreApiSchemas
                 // Where in the organisation the row is filed (migration 117). null = tenant-wide,
                 // which is what every row was before it and what an unplaced row still is.
                 'owner_ou_id' => self::int(true),
+                // WHICH shipped starter this row is, or null for anything a user made
+                // (#1013). `is_system` says "a system row" and cannot answer it, so a
+                // client rendering a Starter badge off that alone can label the row but
+                // never offer to restore the starter it came from.
+                'starter_key' => self::str(true),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),

@@ -37,7 +37,7 @@ final class DocumentTemplateRepository
     public function listForTenant(int $tenantId): array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at
              FROM document_templates WHERE tenant_id = :tenant_id ORDER BY updated_at DESC, id DESC'
         );
         $stmt->execute([':tenant_id' => $tenantId]);
@@ -53,7 +53,7 @@ final class DocumentTemplateRepository
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at
              FROM document_templates WHERE id = :id AND tenant_id = :tenant_id'
         );
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
@@ -96,8 +96,18 @@ final class DocumentTemplateRepository
      * the tenant, across BOTH user-visible and any other rows — a stable
      * identity distinct from the (user-renameable) `name`, so the seeder can
      * insert-if-missing per starter without duplicating or clobbering a row a
-     * user has since edited. Seeder-internal; not part of the public API
-     * response shape (see {@see DocumentRecordTrait::normalizeRow}).
+     * user has since edited.
+     *
+     * KEYS ONLY, AND THAT IS NOW A DELIBERATE NARROWNESS RATHER THAN A GAP
+     * (#1013). It answers "has this tenant got starter X" and nothing else. A
+     * caller that needs the ROW — its id, to point a `blockInstance` at it or to
+     * offer "restore this starter" — reads `starter_key` off the rows
+     * {@see self::listForTenant()} and {@see self::findById()} return, which
+     * {@see DocumentRecordTrait::normalizeRow()} now carries. Before that it did
+     * not, and between the two halves a starter's id had no supported route at
+     * all; the fix belongs there rather than in a second key => id method here,
+     * because it makes the round trip work for every existing caller instead of
+     * only the one that asked.
      *
      * @return list<string>
      */
@@ -282,7 +292,7 @@ final class DocumentTemplateRepository
         if ($this->driver() === 'pgsql') {
             // ::text cast for the reason given in referencesBlock().
             $stmt = $this->db->prepare(
-                "SELECT id, tenant_id, name, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
+                "SELECT id, tenant_id, name, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at
                    FROM document_templates
                   WHERE tenant_id = :tenant_id
                     AND jsonb_path_exists(
@@ -300,7 +310,7 @@ final class DocumentTemplateRepository
         }
 
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at
              FROM document_templates WHERE tenant_id = :tenant_id ORDER BY updated_at DESC, id DESC'
         );
         $stmt->execute([':tenant_id' => $tenantId]);
@@ -344,6 +354,11 @@ final class DocumentTemplateRepository
             'is_system'           => DbBool::of($row['is_system']),
             'created_by'          => $row['created_by'] !== null ? (int) $row['created_by'] : null,
             'owner_ou_id'         => ($row['owner_ou_id'] ?? null) !== null ? (int) $row['owner_ou_id'] : null,
+            // Carried for the same reason {@see DocumentRecordTrait::normalizeRow()}
+            // carries it, and because a usage list that dropped it would be the one
+            // template shape in this class a caller could not ask "which starter is
+            // this?" about.
+            'starter_key'         => ($row['starter_key'] ?? null) !== null ? (string) $row['starter_key'] : null,
             'created_at'          => (string) $row['created_at'],
             'updated_at'          => (string) $row['updated_at'],
         ];
