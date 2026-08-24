@@ -141,6 +141,20 @@ use Whity\Storage\StorageException;
  */
 final class DocumentsApiHandler
 {
+    /**
+     * How many unrecognised field names a 422 will list before it stops.
+     *
+     * A fixed ceiling rather than a setting, deliberately: it is not a limit on
+     * what a caller may SEND (the render ceilings in
+     * {@see \Whity\Core\Settings\SettingsRegistry} are, and those are
+     * per-tenant overridable), it is how long one error message is allowed to
+     * get. Nothing about a tenant makes a different answer right, and an
+     * operator asked to tune it would have no basis to choose. Ten is past the
+     * point where a reader is still reading and well short of a response bigger
+     * than the request.
+     */
+    private const UNKNOWN_FIELDS_REPORTED = 10;
+
     public function __construct(
         private readonly DocumentRepository $documents,
         private readonly DocumentArtifactRepository $artifacts,
@@ -419,7 +433,19 @@ final class DocumentsApiHandler
 
     /**
      * The keys a request supplied that the template declares no placeholder for,
-     * in the order they were sent, without duplicates.
+     * in the order they were sent, without duplicates, and CAPPED.
+     *
+     * HASH LOOKUPS, NOT `in_array`, AND A CEILING ON WHAT IS ECHOED. Both are
+     * about the same request: a large batch (a label sheet can legitimately be
+     * hundreds of rows) with a bad key on every row. Two linear scans per key
+     * makes that quadratic, and naming every offender makes the error body
+     * larger than the request that caused it. Neither is hypothetical for a
+     * route whose input is a caller-supplied map of arbitrary keys.
+     *
+     * The names ARE echoed rather than replaced by a count, up to the cap: the
+     * whole value of this refusal is that it says `refrence` instead of leaving
+     * a developer to compare two JSON blobs by eye. They came from the request,
+     * so echoing them discloses nothing the caller did not send.
      *
      * @param list<array<string, string>> $rows
      * @param array<string, mixed>        $templateData
@@ -427,17 +453,20 @@ final class DocumentsApiHandler
      */
     private function unknownPlaceholders(array $rows, array $templateData): array
     {
-        $declared = VariableData::keysOf($templateData);
+        $declared = array_fill_keys(VariableData::keysOf($templateData), true);
         $unknown = [];
         foreach ($rows as $row) {
-            foreach (array_keys($row) as $key) {
-                if (!in_array($key, $declared, true) && !in_array($key, $unknown, true)) {
-                    $unknown[] = $key;
+            foreach ($row as $key => $_value) {
+                if (!isset($declared[$key]) && !isset($unknown[$key])) {
+                    $unknown[$key] = true;
+                    if (count($unknown) >= self::UNKNOWN_FIELDS_REPORTED) {
+                        return array_keys($unknown);
+                    }
                 }
             }
         }
 
-        return $unknown;
+        return array_keys($unknown);
     }
 
     /**
