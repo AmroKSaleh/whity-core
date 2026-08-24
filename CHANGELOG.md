@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-08-24
+
 ### Added
 
 - **A plugin's records have addresses: `/admin/x/{featureId}/{recordId}` (#948).** Everything needed to render a plugin record page shipped with SDK 1.33/1.34 — `dataRecord` fetches one resource, `recordFields` renders it, `accessGate` decides whether it may be edited, and `dataRecord.source` accepts `{record}`, which the SDK documents as "the record a record-page ROUTE is about". The route that would supply it did not exist: the web app had exactly one plugin page, `/admin/x/[featureId]`, which read the feature id and nothing else, and nothing outside a test ever passed `record=`. So `{record}` could not bind in a real session, and for every resource a plugin owns, "send me the link to that record" had no answer. #883 closed with its own definition of done unmet; this is the missing half, and it is the plugin-facing counterpart to what #882 did for `/admin/roles/[id]`.
