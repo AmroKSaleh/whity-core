@@ -252,6 +252,22 @@ final class DocumentRepository
      * has to be re-collapsed, and it silently multiplies the COUNT — the exact
      * bug that makes a pagination total disagree with its own page.
      *
+     * THE THREE ROUTING FRAGMENTS ARE EXISTS FOR THE SAME REASON, DOUBLED
+     * -------------------------------------------------------------------
+     * A document reaches many recipients and accumulates many trail rows, so a
+     * join to either table multiplies the document by its own routing volume —
+     * the busiest documents wrongest. `EXISTS` asks the only question these
+     * folders pose ("is there such a row?"), stops at the first hit, and leaves
+     * the COUNT describing documents rather than events.
+     *
+     * Each of them re-binds `:tenant_id` inside the subquery, exactly as
+     * {@see VISIBLE_TO_CALLER} does. The document, the recipient row and the
+     * trail row all have to belong to the same tenant for the document to match,
+     * so a mis-tenanted row cannot bridge the two — and the predicate is written
+     * out rather than inferred from the join, because a subquery whose only
+     * scoping is `document_id` is one the guard cannot verify and one that stops
+     * being scoped the moment somebody widens the join.
+     *
      * @param array<string, int|string> $bindings Filled in with the values to bind.
      */
     private function criteriaSql(DocumentCriteria $criteria, array &$bindings): string
@@ -304,6 +320,72 @@ final class DocumentRepository
                                      AND i.collection_id = :collection_id
                                      AND i.document_id = documents.id)';
             $bindings[':collection_id'] = $criteria->inCollectionId;
+        }
+
+        // "Awaiting me" — #947 item 5's inbox folder.
+        //
+        // `closed_by_event_id IS NULL` is the predicate, not an optimisation.
+        // Migration 112 deliberately gives the recipient row no status column;
+        // open-ness IS the absence of a closing trail pointer, and this is the
+        // same clause RouteRecipientRepository::listForProfile() applies, spelled
+        // out here rather than delegated so both are literals the guard reads.
+        //
+        // Drop it and the folder lists everything that ever reached you: an
+        // inbox that never empties, whose count never falls, and which is
+        // therefore ignored within a week — the failure that costs the most
+        // precisely because the screen still looks like it is working. It also
+        // matches the partial unique index migration 112 declares, so the open
+        // set is what the schema itself is organised around.
+        if ($criteria->awaitingProfileId !== null) {
+            $sql .= ' AND EXISTS (SELECT 1 FROM document_route_recipients ar
+                                   WHERE ar.tenant_id = :tenant_id
+                                     AND ar.document_id = documents.id
+                                     AND ar.profile_id = :awaiting_profile_id
+                                     AND ar.closed_by_event_id IS NULL)';
+            $bindings[':awaiting_profile_id'] = $criteria->awaitingProfileId;
+        }
+
+        // "Acted on by me" — the trail, keyed on who did it.
+        //
+        // No action filter: every verb in migration 112's CHECK vocabulary is
+        // something the actor did, `noted` included, and a folder that silently
+        // omitted one would be a list of "things you did, except the kind we
+        // decided did not count".
+        if ($criteria->actedOnByProfileId !== null) {
+            $sql .= ' AND EXISTS (SELECT 1 FROM document_route_events ae
+                                   WHERE ae.tenant_id = :tenant_id
+                                     AND ae.document_id = documents.id
+                                     AND ae.actor_profile_id = :acted_on_by)';
+            $bindings[':acted_on_by'] = $criteria->actedOnByProfileId;
+        }
+
+        // "Passed through my unit" — the trail, keyed on either end of a
+        // transition. The unit set is the anchor's SUBTREE, resolved by the view
+        // before it reaches here; this fragment only knows it was given units.
+        if ($criteria->routedThroughOuIds !== null) {
+            // Same reading as `originOuIds` above, and the same reason for
+            // spelling it out: an empty set is "nothing matches", never "no
+            // filter", and `IN ()` is a syntax error on PostgreSQL rather than a
+            // helpful nothing.
+            if ($criteria->routedThroughOuIds === []) {
+                return $sql . ' AND 1 = 0';
+            }
+            $placeholders = [];
+            foreach (array_values($criteria->routedThroughOuIds) as $i => $ouId) {
+                $name = ':through_ou_' . $i;
+                $placeholders[] = $name;
+                $bindings[$name] = $ouId;
+            }
+            // The same placeholder list appears on both sides of the OR. PDO
+            // binds a repeated named parameter once for every occurrence — which
+            // self::VISIBLE_TO_CALLER already relies on for `:tenant_id`, on both
+            // engines — so this is one binding per unit rather than two.
+            $in = implode(', ', $placeholders);
+            $sql .= ' AND EXISTS (SELECT 1 FROM document_route_events pe
+                                   WHERE pe.tenant_id = :tenant_id
+                                     AND pe.document_id = documents.id
+                                     AND (pe.from_ou_id IN (' . $in . ')
+                                          OR pe.to_ou_id IN (' . $in . ')))';
         }
 
         if ($criteria->search !== null && $criteria->search !== '') {

@@ -29,6 +29,20 @@ namespace Whity\Core\Document\Organizer;
  * seam that has to stay open is AVAILABILITY, not SQL; see
  * {@see DocumentViewRegistry}.
  *
+ * THE ROUTING SLOTS PAID THAT PRICE, AND IT WAS THE QUOTED ONE
+ * ------------------------------------------------------------
+ * #947 item 5's three routing folders arrived exactly as costed above: three
+ * slots here, three literal `EXISTS` fragments in the repository, and not one
+ * line changed in the registry, the presenter, the handler or the rail. That is
+ * the evidence for the trade rather than an argument for it — the alternative,
+ * a view handing down its own `AND …`, would have saved these three properties
+ * and given up the only mechanical check the platform has on cross-tenant
+ * isolation.
+ *
+ * {@see $awaitingProfileId} carries the one semantic worth stating twice: it
+ * matches OPEN recipient rows only. A closed row is a thing you already did, and
+ * an inbox that also lists those never empties. See its note below.
+ *
  * TWO CREATOR SLOTS, DELIBERATELY
  * -------------------------------
  * `restrictToCreator` is the VISIBILITY answer from
@@ -51,6 +65,35 @@ final class DocumentCriteria
      * @param int|null       $inCollectionId    View filter: documents filed in this collection.
      *                                          The caller's ownership of it is established BEFORE
      *                                          it reaches here — this is a join, never a grant.
+     * @param int|null       $awaitingProfileId View filter: documents with an OPEN routing recipient
+     *                                          row addressed to this profile — the inbox.
+     *
+     *                                          OPEN is the whole content of this slot. A recipient
+     *                                          row holds no status of its own; migration 112 gives
+     *                                          it `closed_by_event_id`, NULL while the item is
+     *                                          outstanding and a trail row id once somebody acted.
+     *                                          Matching every row instead of the open ones produces
+     *                                          an inbox that never empties, which is a worse answer
+     *                                          than no inbox: it is wrong in the direction that
+     *                                          looks like work.
+     * @param int|null       $actedOnByProfileId View filter: documents whose routing trail records
+     *                                          this profile as the ACTOR of some event. Deliberately
+     *                                          the complement of the slot above rather than its
+     *                                          inverse — a document may be both awaiting you and
+     *                                          already acted on by you, because a return puts back
+     *                                          in your inbox something you once forwarded.
+     * @param list<int>|null $routedThroughOuIds View filter: documents whose trail records an event
+     *                                          leaving OR arriving at one of these units. Null means
+     *                                          no constraint; an EMPTY list means nothing matches,
+     *                                          the same reading {@see $originOuIds} carries.
+     *
+     *                                          BOTH ENDS, because migration 112 records a transition:
+     *                                          `from_ou_id` is where the actor acted from and
+     *                                          `to_ou_id` is where the act was directed. A unit that
+     *                                          only ever received would be invisible to a `from`-only
+     *                                          predicate, and a folder called "passed through my
+     *                                          unit" that omits what arrived there is a folder whose
+     *                                          name is a lie.
      * @param string|null    $search            Case-insensitive substring of the title.
      * @param bool           $matchesNothing    A view that resolved to an empty set (an anchor with
      *                                          no members, a starred pile that does not exist yet).
@@ -62,6 +105,9 @@ final class DocumentCriteria
         public readonly ?int $createdBy = null,
         public readonly ?array $originOuIds = null,
         public readonly ?int $inCollectionId = null,
+        public readonly ?int $awaitingProfileId = null,
+        public readonly ?int $actedOnByProfileId = null,
+        public readonly ?array $routedThroughOuIds = null,
         public readonly ?string $search = null,
         public readonly bool $matchesNothing = false,
     ) {
@@ -85,6 +131,14 @@ final class DocumentCriteria
      *
      * Applied after a view resolves rather than before, so a view can never
      * see — let alone drop — the restriction it is being narrowed by.
+     *
+     * Every view slot is re-stated here, and a slot ADDED to this class and
+     * forgotten here is the failure worth naming: it would be dropped on the way
+     * to the repository, and the folder it belongs to would silently widen from
+     * "awaiting me" to the whole tenant — a folder that is wrong while looking
+     * busy. Nothing in the language catches that, so DocumentViewRegistryTest
+     * pins it: the test resolves every registered core view, pushes each result
+     * through this method, and asserts nothing was lost.
      */
     public function withRequestScope(?int $restrictToCreator, ?string $search): self
     {
@@ -93,6 +147,9 @@ final class DocumentCriteria
             createdBy: $this->createdBy,
             originOuIds: $this->originOuIds,
             inCollectionId: $this->inCollectionId,
+            awaitingProfileId: $this->awaitingProfileId,
+            actedOnByProfileId: $this->actedOnByProfileId,
+            routedThroughOuIds: $this->routedThroughOuIds,
             search: $search,
             matchesNothing: $this->matchesNothing,
         );

@@ -14,11 +14,12 @@ namespace Whity\Core\Document\Organizer;
  * There are three ways a folder can fail to show documents, and conflating any
  * two of them is the bug #978 is about:
  *
- *  1. THE FACT SOURCE DOES NOT EXIST. "Awaiting me" cannot be computed because
- *     no installation records recipient rows yet. The view is ABSENT — it never
- *     reaches this type, because {@see DocumentViewRegistry} filters it out.
- *     Rendering it empty would state "nothing awaits you", which is false and
- *     which the reader has no way to check.
+ *  1. THE FACT SOURCE DOES NOT EXIST. "Awaiting me" cannot be computed on an
+ *     installation that has not run migration 112, because there are no
+ *     recipient rows to read. The view is ABSENT — it never reaches this type,
+ *     because {@see DocumentViewRegistry} filters it out. Rendering it empty
+ *     would state "nothing awaits you", which is false and which the reader has
+ *     no way to check.
  *
  *  2. THIS CALLER CANNOT ANCHOR IT. "Raised by my unit" is perfectly
  *     computable; this particular person belongs to no unit. That is {@see

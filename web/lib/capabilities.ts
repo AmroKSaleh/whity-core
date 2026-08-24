@@ -61,6 +61,32 @@ export const LANGUAGES_MANAGE = 'languages:manage';
 export const TRANSLATIONS_MANAGE = 'translations:manage';
 
 /**
+ * Putting an issued document into circulation (#947 item 3, migration 113).
+ *
+ * The ONE capability routing adds, and the only one it needs. Three things about
+ * it are worth stating where the constant lives, because each is a trap:
+ *
+ *  - It is resolved by NAME, like every slug in this file, and never by id. #992
+ *    removed eight slugs (`users:create/update`, `roles:create/update`,
+ *    `tenants:create/update`, `ous:create/update`) which held ids 2, 3, 6, 7,
+ *    10, 11, 14, 15 — so the low id range has holes and an id is not stable
+ *    across installs of different ages.
+ *
+ *  - It gates STARTING a route only. ACTING on one — forward, acknowledge,
+ *    return, note — is deliberately unpermissioned: being a recipient IS the
+ *    authorization, and requiring a grant on top would let a route resolve to
+ *    somebody who then cannot answer it, leaving the item open forever. So do
+ *    NOT gate the act controls on this.
+ *
+ *  - It is HELD. Migration 113 grants it to every role holding
+ *    `documents:render` rather than to the `admin` role by name, so a custom
+ *    administrative role does not silently lose it on upgrade. Verified against
+ *    a freshly migrated schema before gating anything on it — the check that
+ *    `roles:read` failed for months.
+ */
+export const DOCUMENTS_ROUTE = 'documents:route';
+
+/**
  * Narrow an unknown `/api/me/capabilities` payload to its permission slugs.
  *
  * Returns `[]` for any shape that does not match `{ data: { permissions:
