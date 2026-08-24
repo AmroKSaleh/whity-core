@@ -63,6 +63,11 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     }
 
     // admin (role grant) and delegate (delegated hello:view) get the screen.
+    // The `plugins` group is closed unless the current page is in it
+    // (#1007). The count-0 branch above needs no such step: navLink is a
+    // CSS locator and counts a hidden link, so absence there still means
+    // the role genuinely cannot see it.
+    await roleSession.shell.expandAllNavGroups();
     const link = roleSession.shell.navLink('Greetings');
     await expect(link).toBeVisible();
     const listResponse = page.waitForResponse(
