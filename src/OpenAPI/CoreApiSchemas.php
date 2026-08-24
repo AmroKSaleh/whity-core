@@ -3366,6 +3366,35 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
                 'owner_ou_id' => self::int(true),
             ], []),
+            // What would break if this block changed — the answer a management UI
+            // needs BEFORE offering an edit or a delete, since a block is
+            // pointer-referenced and an edit propagates to every instance.
+            //
+            // `templates` is row-filtered (never the identity of a template the
+            // caller may not see); `total` is NOT, and `hidden` is the difference.
+            // A visible-only total would understate the blast radius of an edit
+            // to exactly the callers whose reach is narrowest — the argument is
+            // written out in full on DocumentBlocksApiHandler::usage().
+            //
+            // `owner_ou_id` is an id, not a name: resolving unit names is
+            // ous:read's job and this route is gated on documents:read, so a
+            // client that cannot read units renders the id rather than being
+            // handed a name this endpoint had no authority to look up.
+            'DocumentBlockUsage' => self::object([
+                'block_id' => self::int(),
+                'total' => self::int(),
+                'hidden' => self::int(),
+                'templates' => ['type' => 'array', 'items' => self::object([
+                    'id' => self::int(),
+                    'name' => self::str(),
+                    'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                    'required_permission' => self::str(true),
+                    'owner_ou_id' => self::int(true),
+                    'is_system' => self::bool(),
+                    'updated_at' => self::str(),
+                ], ['id', 'name', 'scope', 'is_system', 'updated_at'])],
+            ], ['block_id', 'total', 'hidden', 'templates']),
+            'DocumentBlockUsageResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlockUsage')),
 
             // ── Resource-scoped role grants (WC-712 §3) ───────────────────────
             // `profile_id` nullability carries the meaning, so it is nullable
@@ -6477,6 +6506,24 @@ final class CoreApiSchemas
                 'tags' => ['documents'],
                 'responses' => [
                     200 => self::jsonResponse('The block', 'DocumentBlockResponse'),
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            // Listed after GET /{id} and before the write routes purely for
+            // readability; `usage` is not a digit, so it could never have matched
+            // the /{id:\d+} constraint either way.
+            self::permissionRoute('GET', '/api/document-blocks/{id:\d+}/usage', 'documents:read', [
+                'summary' => 'What would break if this block changed: the templates that instance it',
+                'description' =>
+                    'A block is POINTER-referenced (a `blockInstance` element), so editing it propagates '
+                    . 'to every template that instances it — and unlike delete, an edit is never refused. '
+                    . 'This is the answer a client needs before offering either action. `templates` is '
+                    . 'row-filtered to what the caller may see; `total` counts EVERY referencing template '
+                    . 'in the tenant and `hidden` is the difference, so a caller with narrow reach is told '
+                    . 'the edit reaches further than they can see instead of being quietly understated.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The referencing templates, plus the unfiltered total', 'DocumentBlockUsageResponse'),
                     404 => self::errorResponse('Block not found or not visible to the caller'),
                 ] + self::authErrors(),
             ]),

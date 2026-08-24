@@ -750,6 +750,32 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
     ];
     $items[] = [
+        'id' => 'document-templates',
+        'label' => 'Templates & Blocks',
+        'href' => '/admin/document-templates',
+        'icon' => 'layout-grid',
+        'group' => 'documents',
+        // Group-local, a unique positive integer (#1007/#1010 — a fractional
+        // order is silently skipped by a regroup that matches integers, and a
+        // test now enforces the invariant). 1 = Documents, 2 = Document
+        // Designer, 3 = Approval Gating, so this is 4.
+        'order' => 4,
+        // The GOVERNANCE surface for the designer's saved work: who can see a
+        // template or block and why, where it is filed, what instances a block.
+        // A third documents entry rather than a tab on the designer, for the
+        // reason the designer/organizer split already records — the designer is
+        // a full-screen editor in the `(editor)` route group with no app sidebar,
+        // so it has nowhere to put an admin table, and re-scoping a template is
+        // not something you do while drawing on a canvas.
+        //
+        // Mirrors GET /api/document-templates + /api/document-blocks, both gated
+        // documents:read, so the nav item gates on the same permission. Rename
+        // and delete are gated documents:write and re-scoping/publishing on
+        // documents:publish, per-control on the page; the API enforces all three
+        // regardless of what the client renders.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
+    ];
+    $items[] = [
         'id' => 'approval-gating',
         'label' => 'Approval Gating',
         'href' => '/admin/registrations',
@@ -1990,6 +2016,9 @@ $documentBlocksHandler = new \Whity\Api\DocumentBlocksApiHandler(
 $router->register('GET',    '/api/document-blocks',          [$documentBlocksHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-blocks',          [$documentBlocksHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('GET',    '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
+// "What would break if this block changed" — gated documents:read, not :write,
+// because the whole point is to be asked BEFORE deciding to write.
+$router->register('GET',    '/api/document-blocks/{id:\d+}/usage', [$documentBlocksHandler, 'usage'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PATCH',  '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
 

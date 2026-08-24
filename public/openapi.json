@@ -5041,6 +5041,93 @@
                 ]
             }
         },
+        "/api/v1/document-blocks/{id}/usage": {
+            "get": {
+                "operationId": "get_api_v1_document_blocks_id_usage",
+                "summary": "What would break if this block changed: the templates that instance it",
+                "tags": [
+                    "documents"
+                ],
+                "description": "A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to every template that instances it \u2014 and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. `templates` is row-filtered to what the caller may see; `total` counts EVERY referencing template in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The referencing templates, plus the unfiltered total",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentBlockUsageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Block not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/document-collections": {
             "get": {
                 "operationId": "get_api_v1_document_collections",
@@ -25840,6 +25927,81 @@
                         "nullable": true
                     }
                 }
+            },
+            "DocumentBlockUsage": {
+                "type": "object",
+                "properties": {
+                    "block_id": {
+                        "type": "integer"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "hidden": {
+                        "type": "integer"
+                    },
+                    "templates": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "integer"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "scope": {
+                                    "type": "string",
+                                    "enum": [
+                                        "personal",
+                                        "tenant",
+                                        "global",
+                                        "system"
+                                    ]
+                                },
+                                "required_permission": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "owner_ou_id": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "is_system": {
+                                    "type": "boolean"
+                                },
+                                "updated_at": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "id",
+                                "name",
+                                "scope",
+                                "is_system",
+                                "updated_at"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "block_id",
+                    "total",
+                    "hidden",
+                    "templates"
+                ]
+            },
+            "DocumentBlockUsageResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentBlockUsage"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "DocumentCollection": {
                 "type": "object",
