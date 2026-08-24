@@ -42,6 +42,7 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 require dirname(__DIR__) . '/src/helpers.php';
+require dirname(__DIR__) . '/scripts/lib/core-route-table.php';
 
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\PluginLoader;
@@ -112,48 +113,43 @@ $projectRoot = dirname(__DIR__);
 // exactly as it does in production (Router::doRegister compares the PREFIXED
 // method+path). The routes are scraped from index.php rather than hand-listed —
 // a curated copy would only encode which core routes somebody remembered, which
-// is the failure mode this guard exists to remove. Extraction mirrors
-// Tests\OpenAPI\RouteCatalogueCompletenessTest::extractLiveRoutes().
+// is the failure mode this guard exists to remove.
 //
-// requiredPermission is deliberately null on these: a collision is decided by
-// method+path alone, and a plugin route that IS accepted keeps its own declared
-// permission — so core's permission values cannot change any verdict below.
+// The extraction itself now lives in scripts/lib/core-route-table.php, together
+// with the floor check that used to be here: #990's permission-holder guard
+// needs the same table plus each route's requiredPermission, and two scrapers of
+// one file are two things to keep in step — with "silently stopped matching" as
+// the shared failure mode. The floor moved WITH it and is enforced there, so a
+// core route table that comes back implausibly small still fails loudly rather
+// than letting this guard pass vacuously against an empty one.
+//
+// requiredPermission is deliberately NOT passed on these: a collision is decided
+// by method+path alone, and a plugin route that IS accepted keeps its own
+// declared permission — so core's permission values cannot change any verdict
+// below.
 $router = new Router('/v1');
 
-$indexPhp = file_get_contents($projectRoot . '/public/index.php');
-if (!is_string($indexPhp)) {
-    fwrite(STDERR, "FAIL: could not read public/index.php to build the core route table.\n");
-    exit(1);
-}
-
-preg_match_all(
-    '/\$router->(register|registerUnversioned)\s*\(\s*\'(GET|POST|PATCH|PUT|DELETE)\'\s*,\s*\'([^\']+)\'/',
-    $indexPhp,
-    $matches,
-    PREG_SET_ORDER
-);
-
-if (count($matches) < 100) {
-    // A refactor that moves core registration out of index.php would leave this
-    // guard testing plugins against an EMPTY core route table: every collision
-    // would vanish and the guard would pass vacuously. Fail loudly instead.
+try {
+    $coreRoutes = whity_core_route_table($projectRoot . '/public/index.php');
+} catch (RuntimeException $e) {
     fwrite(
         STDERR,
-        'FAIL: only ' . count($matches) . " core routes were found in public/index.php.\n"
+        "FAIL: core's route table could not be read, so plugin routes cannot be checked against it.\n\n"
+        . $e->getMessage() . "\n\n"
         . "This guard needs core's real route table to reproduce production's collision ordering;\n"
-        . "if core registration moved, point the extractor at its new home.\n"
+        . "if core registration moved, point the extractor in scripts/lib/core-route-table.php at\n"
+        . "its new home.\n"
     );
     exit(1);
 }
 
 $noop = static fn (): null => null;
-foreach ($matches as $match) {
-    [, $call, $method, $path] = $match;
-    if ($call === 'registerUnversioned') {
-        $router->registerUnversioned($method, $path, $noop);
-    } else {
-        $router->register($method, $path, $noop);
+foreach ($coreRoutes as $coreRoute) {
+    if ($coreRoute['call'] === 'registerUnversioned') {
+        $router->registerUnversioned($coreRoute['method'], $coreRoute['path'], $noop);
+        continue;
     }
+    $router->register($coreRoute['method'], $coreRoute['path'], $noop);
 }
 
 // ---------------------------------------------------------------------------

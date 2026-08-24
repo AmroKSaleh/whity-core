@@ -263,6 +263,12 @@ INITIAL_SUPERUSER_PASSWORD=superuser123'
   log "Re-run migrations (idempotency on PostgreSQL)"
   run_in_ci_with_pg "${PG_ENV[@]}" php public/index.php migrate run
 
+  # #990: needs a MIGRATED database, which is why it runs here and not beside the
+  # static guards in job_unit. It refuses to answer against a database that is not
+  # migrated to this tree, so it has to come after the two steps above.
+  log "Permission-holder guard"
+  run_in_ci_with_pg "${PG_ENV[@]}" php scripts/ci-permission-holder-guard.php
+
   log "Run Integration suite on real PostgreSQL"
   run_in_ci_with_pg "${PG_ENV[@]}" vendor/bin/phpunit --testsuite Integration
 
