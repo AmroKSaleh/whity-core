@@ -184,6 +184,101 @@ final class DocumentRepositoryRealEngineTest extends TestCase
         self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_B));
     }
 
+    /**
+     * `referencingTemplates()` answers the same question as `referencesBlock()`
+     * but as a list — so the two must never be able to disagree. Asserted
+     * together, on one fixture, because they carry SEPARATE jsonpath/PHP-walk
+     * implementations and a drift between them would show up as a management
+     * screen that says "nothing uses this" over a delete that then 409s.
+     */
+    public function testReferencingTemplatesNamesEveryTemplateHoldingAPointer(): void
+    {
+        $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]);
+
+        // assertCount, not assertSame([], …): PHPStan's PHPUnit extension takes an
+        // assertSame against a literal `[]` as narrowing the METHOD's return type
+        // to array{} for the rest of the scope, which then reports the honest
+        // agreement check further down as a comparison that can never be true.
+        self::assertCount(0, $this->templates->referencingTemplates($blockId, self::TENANT_A));
+        self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_A));
+
+        $this->templates->create(self::TENANT_A, ['name' => 'Invoice', 'data' => $this->treeReferencing($blockId)]);
+        $this->templates->create(self::TENANT_A, ['name' => 'Works order', 'data' => $this->treeReferencing($blockId)]);
+        // A template pointing elsewhere, and one with no pointer at all.
+        $this->templates->create(self::TENANT_A, ['name' => 'Other block', 'data' => $this->treeReferencing($blockId + 999)]);
+        $this->templates->create(self::TENANT_A, ['name' => 'Plain', 'data' => ['version' => 2, 'pages' => []]]);
+
+        $rows = $this->templates->referencingTemplates($blockId, self::TENANT_A);
+        $names = array_map(static fn (array $r): string => (string) $r['name'], $rows);
+        sort($names);
+        self::assertSame(['Invoice', 'Works order'], $names);
+
+        // The list and the boolean guard must never disagree — they carry separate
+        // jsonpath/PHP-walk implementations, and a drift shows up as a management
+        // screen saying "nothing uses this" over a delete the server then refuses.
+        self::assertSame(
+            $rows !== [],
+            $this->templates->referencesBlock($blockId, self::TENANT_A),
+            'referencingTemplates() and referencesBlock() answered differently'
+        );
+
+        // Tenant-scoped, exactly like the boolean guard.
+        self::assertCount(0, $this->templates->referencingTemplates($blockId, self::TENANT_B));
+    }
+
+    /**
+     * The reference rows carry the governance columns the visibility policy reads
+     * — otherwise the handler could not filter them — and carry NO template body.
+     *
+     * The empty `data` is asserted rather than merely documented: a later "reuse
+     * normalizeRow, it is right there" refactor would silently start shipping N
+     * full template trees to render N names, and nothing else in the suite would
+     * notice.
+     */
+    public function testReferencingTemplatesCarryGovernanceColumnsButNotTheTemplateBody(): void
+    {
+        $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]);
+        $this->templates->create(self::TENANT_A, [
+            'name'                => 'Gated contract',
+            'data'                => $this->treeReferencing($blockId),
+            'scope'               => 'tenant',
+            'required_permission' => 'documents:use:contracts',
+            'created_by'          => 77,
+            'owner_ou_id'         => null,
+        ]);
+
+        $rows = $this->templates->referencingTemplates($blockId, self::TENANT_A);
+        self::assertCount(1, $rows);
+        $row = $rows[0];
+
+        self::assertSame('Gated contract', $row['name']);
+        self::assertSame('tenant', $row['scope']);
+        self::assertSame('documents:use:contracts', $row['required_permission']);
+        self::assertSame(77, $row['created_by']);
+        self::assertNull($row['owner_ou_id']);
+        self::assertFalse($row['is_system']);
+        self::assertSame(self::TENANT_A, $row['tenant_id']);
+        self::assertSame([], $row['data'], 'a usage listing must not haul every referencing template body across');
+    }
+
+    /**
+     * A minimal v2 tree whose only element points at $blockId.
+     *
+     * @return array<string, mixed>
+     */
+    private function treeReferencing(int $blockId): array
+    {
+        return [
+            'version' => 2,
+            'pages' => [[
+                'id' => 'p1',
+                'elements' => [
+                    ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $blockId],
+                ],
+            ]],
+        ];
+    }
+
     public function testReferencesBlockIsFalseWhenNoTemplatePointsAtIt(): void
     {
         $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Unreferenced', 'data' => [['id' => 'e1', 'type' => 'image']]]);
