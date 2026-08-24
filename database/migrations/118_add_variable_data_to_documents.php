@@ -79,6 +79,25 @@ use Whity\Database\Database;
  * the template's samples exactly as it did before this column existed (so no
  * existing document changes behaviour), and a recorded value is used instead.
  *
+ * WHAT JSONB DOES AND DOES NOT PRESERVE
+ * -------------------------------------
+ * PostgreSQL stores JSONB parsed, not as text, and it does NOT keep a JSON
+ * OBJECT's keys in the order they arrived - it normalises them (shortest first,
+ * then bytewise). So a row written as `{reference, date}` reads back as
+ * `{date, reference}`. That is harmless and is worth writing down anyway,
+ * because it is invisible on the SQLite engine the unit suite builds its schema
+ * on (which stores this column as TEXT, verbatim) and therefore splits the two
+ * engines for anything that compares the column order-sensitively. It cost this
+ * migration's own test file a red dialect shard before it was written down.
+ *
+ * It is harmless because nothing reads these keys positionally:
+ * {@see \Whity\Core\Document\Render\VariableData} and the render harness's
+ * `interpolate()` both look a placeholder up BY NAME.
+ *
+ * The ROW sequence is a different question and IS preserved, on both engines - a
+ * JSON array keeps its order - which is the half that matters: a label sheet's
+ * Nth row is a specific label in a specific position on a specific sheet.
+ *
  * NO INDEX. Nothing queries on it — it is read only by id, alongside the row it
  * belongs to, and a GIN index on JSONB that no predicate touches is write cost
  * for nothing. The four indexes migration 108 declared are still the four reads

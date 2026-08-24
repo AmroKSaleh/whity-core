@@ -200,7 +200,7 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         // The row remembers what it was raised with.
         $row = $this->documents->findById($documentId, self::TENANT);
         self::assertNotNull($row);
-        self::assertSame([['reference' => 'FAC-2026-014', 'date' => '2026-08-24']], $row['variable_data']);
+        self::assertVariableData([['reference' => 'FAC-2026-014', 'date' => '2026-08-24']], $row['variable_data']);
 
         // Weeks later the operator switches the render tier on and the document
         // is rendered with NO dataRows in the request.
@@ -209,7 +209,7 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         self::assertSame(201, $rendered->getStatusCode());
 
         self::assertCount(1, $this->fakeRender->calls);
-        self::assertSame(
+        self::assertVariableData(
             [['reference' => 'FAC-2026-014', 'date' => '2026-08-24']],
             $this->renderedRows(),
             'a render with no supplied values must use the ones the document was RAISED with, '
@@ -242,14 +242,14 @@ final class DocumentCreateApiRealEngineTest extends TestCase
             'dataRows' => [['reference' => 'FAC-001-CORRECTED', 'date' => '2026-01-02']],
         ]);
 
-        self::assertSame(
+        self::assertVariableData(
             [['reference' => 'FAC-001-CORRECTED', 'date' => '2026-01-02']],
             $this->renderedRows(count($this->fakeRender->calls) - 1)
         );
 
         $row = $this->documents->findById($documentId, self::TENANT);
         self::assertNotNull($row);
-        self::assertSame(
+        self::assertVariableData(
             [['reference' => 'FAC-001', 'date' => '2026-01-01']],
             $row['variable_data'],
             'the values the document was RAISED with are provenance and are never rewritten'
@@ -269,7 +269,45 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         $row = $this->documents->findById((int) self::data($created)['id'], self::TENANT);
 
         self::assertNotNull($row);
-        self::assertSame([['reference' => 'DEMO-0001', 'date' => '2026-01-15']], $row['variable_data']);
+        self::assertVariableData([['reference' => 'DEMO-0001', 'date' => '2026-01-15']], $row['variable_data']);
+    }
+
+    /**
+     * A LABEL SHEET keeps its rows in the order they were sent.
+     *
+     * The companion to {@see assertVariableData}'s deliberate blindness to KEY
+     * order. Row order is not decoration: #947 item 2's serialized device labels
+     * are one document of N rows, and the Nth row is a specific label on a
+     * specific sheet position. A store that reordered them would print the right
+     * set of labels in the wrong places, which is the kind of wrong nobody
+     * notices until the labels are stuck to things.
+     *
+     * JSON ARRAYS preserve sequence on both engines - it is only object KEYS
+     * PostgreSQL normalises - so this passes today. It is asserted anyway
+     * because the alternative is trusting an engine detail nothing states.
+     */
+    public function testALabelSheetKeepsItsRowsInOrder(): void
+    {
+        $templateId = $this->createTemplate(self::RAISER, 'Device label');
+
+        $rows = [];
+        for ($i = 1; $i <= 12; $i++) {
+            $rows[] = ['reference' => 'SN-' . str_pad((string) $i, 4, '0', STR_PAD_LEFT), 'date' => '2026-05-05'];
+        }
+
+        $res = $this->create(self::RAISER, ['document_template_id' => $templateId, 'dataRows' => $rows]);
+        self::assertSame(201, $res->getStatusCode());
+
+        $row = $this->documents->findById((int) self::data($res)['id'], self::TENANT);
+        self::assertNotNull($row);
+        self::assertVariableData($rows, $row['variable_data'], 'the sheet must come back in the order it went in');
+
+        // And spelled out, so a failure names the position rather than dumping
+        // twelve rows: the first is the first and the last is the last.
+        $stored = $row['variable_data'];
+        self::assertIsArray($stored);
+        self::assertSame('SN-0001', $stored[0]['reference']);
+        self::assertSame('SN-0012', $stored[11]['reference']);
     }
 
     // ── template scoping ─────────────────────────────────────────────────────
@@ -462,7 +500,7 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         $content = $this->call('content', self::RAISER, ['id' => (string) $documentId]);
         self::assertSame("%PDF-1.4\nraised\n%%EOF", $content->getBody());
         // And the values the caller supplied are the ones that were rendered.
-        self::assertSame([['reference' => 'R-1', 'date' => '2026-02-02']], $this->renderedRows());
+        self::assertVariableData([['reference' => 'R-1', 'date' => '2026-02-02']], $this->renderedRows());
     }
 
     /**
@@ -546,7 +584,7 @@ final class DocumentCreateApiRealEngineTest extends TestCase
 
         $row = $this->documents->findById((int) self::data($res)['id'], self::TENANT);
         self::assertNotNull($row);
-        self::assertSame([['reference' => 'KEEP-ME', 'date' => '2026-03-03']], $row['variable_data']);
+        self::assertVariableData([['reference' => 'KEEP-ME', 'date' => '2026-03-03']], $row['variable_data']);
         self::assertNull(self::data($res)['content_url'], 'a record with no artifact must not promise bytes');
     }
 
@@ -718,6 +756,46 @@ final class DocumentCreateApiRealEngineTest extends TestCase
             ],
             'pages' => [['id' => 'p1', 'elements' => []]],
         ];
+    }
+
+    /**
+     * Compare a row set to what was expected, WITHOUT depending on the order of
+     * the keys inside a row.
+     *
+     * WHY THIS IS NOT `assertSame`, and why that is a fact about the product
+     * rather than a test convenience. `documents.variable_data` is JSONB, and
+     * PostgreSQL does not store a JSON object's keys in the order they arrived -
+     * it normalises them (shortest first, then bytewise). So a row written as
+     * `{reference, date}` reads back as `{date, reference}` on the real engine
+     * and as `{reference, date}` on the SQLite the unit suite uses, and an
+     * order-sensitive assertion passes on one engine and fails on the other.
+     * (It did: this file was green on SQLite and red on the PostgreSQL dialect
+     * shard, which is exactly the split that gate exists to catch.)
+     *
+     * The right assertion is order-INSENSITIVE because key order carries no
+     * meaning here: interpolation is a lookup by key
+     * ({@see \Whity\Core\Document\Render\VariableData}), so a row means the
+     * same thing whatever order PostgreSQL chose to keep it in.
+     *
+     * ROW order is a different matter and IS preserved - a JSON array keeps its
+     * sequence on both engines - which matters because a label sheet's rows are
+     * its rows in order. {@see testALabelSheetKeepsItsRowsInOrder} pins that
+     * half rather than leaving it to this helper's silence.
+     *
+     * @param list<array<string, string>> $expected
+     * @param mixed                       $actual
+     */
+    private static function assertVariableData(array $expected, mixed $actual, string $message = ''): void
+    {
+        self::assertIsArray($actual, $message);
+        self::assertCount(count($expected), $actual, $message);
+        foreach ($expected as $i => $row) {
+            self::assertArrayHasKey($i, $actual, $message);
+            // assertEquals, not assertSame: PHP's `==` on arrays compares
+            // key/value pairs and ignores their order, which is precisely the
+            // comparison this data deserves.
+            self::assertEquals($row, $actual[$i], $message);
+        }
     }
 
     /**
