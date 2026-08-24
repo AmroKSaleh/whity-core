@@ -55,6 +55,18 @@ use Whity\Core\Identity\AuthMethod;
 class Seeder
 {
     /**
+     * The name of the tenant every install gets beside the system tenant.
+     *
+     * A constant rather than a repeated literal because a SECOND caller now has
+     * to find that tenant by name: {@see \Whity\Cli\Commands\SeedCommand}
+     * resolves its id to hand to the document demo seeder. Two spellings of one
+     * literal is how a seeder comes to create a tenant that the thing seeding
+     * into it cannot find — and it would fail as "no demo data appeared", with
+     * nothing anywhere saying why.
+     */
+    public const DEFAULT_TENANT_NAME = 'Default Tenant';
+
+    /**
      * Seed the database with default data
      *
      * @param Database  $db                Database connection instance
@@ -78,13 +90,13 @@ class Seeder
         // ── Create default tenant ─────────────────────────────────────────────
         $db->query(
             'INSERT INTO tenants (name, created_at) VALUES (:name, NOW()) ON CONFLICT (name) DO NOTHING',
-            [':name' => 'Default Tenant']
+            [':name' => self::DEFAULT_TENANT_NAME]
         );
 
         // Fetch the tenant ID
         $tenantResult = $db->query(
             'SELECT id FROM tenants WHERE name = :name',
-            [':name' => 'Default Tenant']
+            [':name' => self::DEFAULT_TENANT_NAME]
         );
         $tenant   = $tenantResult->fetch();
         $tenantId = (int) ($tenant['id'] ?? 1);

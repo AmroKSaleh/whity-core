@@ -50,15 +50,17 @@ never rewrites an existing account's password.
 ```bash
 whity-cli seed
 whity-cli seed --with-fixtures
+whity-cli seed --with-document-demo
 ```
 
 `migrate run` **already** creates the bootstrap administrator, so `seed` is not
 required for a working install.
 
-| Account | Seeded when |
-|---------|-------------|
+| Seeded | When |
+|--------|------|
 | Bootstrap administrator (system tenant, admin role) — address from `INITIAL_SYSTEM_ADMIN_EMAIL`, default `system@whity.local` | always |
 | `admin@example.com`, `user@example.com`, `superuser@example.com` | `APP_ENV=development`, or `--with-fixtures` |
+| The **document demo dataset** (see below) | `--with-document-demo` only — never implied by `APP_ENV` |
 
 Passwords come from `INITIAL_SYSTEM_ADMIN_PASSWORD`, `INITIAL_ADMIN_PASSWORD`,
 `INITIAL_USER_PASSWORD` and `INITIAL_SUPERUSER_PASSWORD`; an unset one is
@@ -71,6 +73,56 @@ Seeding also reconciles the bootstrap administrator's address with
 `INITIAL_SYSTEM_ADMIN_EMAIL`, so an operator who decides to rename it after
 `migrate run` has already happened can set the variable and re-seed. See the
 [Go-Live Checklist](Go-Live-Checklist.md) for retiring the account afterwards.
+
+### The document demo dataset
+
+Every document surface renders an honest empty state, and honest empty states
+look alike — so on an unseeded database "Awaiting me", "Acted on by me" and
+"Passed through my unit" are the same blank panel, and two secretaries holding
+one role see one template list. The demo dataset exists so those distinctions
+can be looked at rather than inferred. It lands in the **Default Tenant**.
+
+**It is off by default in every environment, `APP_ENV=development` included, and
+only `--with-document-demo` turns it on.** That is a separate gate from
+`--with-fixtures` on purpose. The two answer different questions: demo
+*accounts* are infrastructure other things need — the E2E suite seeds in a
+development environment precisely because it must log in as
+`admin@example.com` — while demo *content* is illustration for a person, and
+nothing depends on it. When the two shared one flag, the demo's eight
+memberships pushed `admin@example.com` off the first page of a users table that
+paginates at ten, and specs with nothing to do with documents began failing on
+the missing cell. A shared gate leaves every future change to the seed able to
+break an unrelated test.
+
+| Seeded | Makes visible |
+|--------|---------------|
+| A faculty with two departments, and eight people (one of them in no unit) | "raised by my unit" / "everything below my unit" / "passed through my unit" as three different answers |
+| Six documents in different routing states — awaiting, settled, two fanned out with some recipients acted and some not, one passed through a second unit | the inbox, the append-only trail, and per-step progress (a single progress bar over a fan-out cannot be right) |
+| Templates and blocks placed at three units, one of them permission-tagged | a faculty secretary and a department secretary holding the **same** role seeing different sets |
+| A starred collection beside a custom one | that starring **is** a collection (`system_key = 'starred'`), not a second concept |
+| One document with two artifacts | the viewer's "version N of M" and its superseded-version warning |
+
+Every routing state is produced by driving the real engine (`DocumentRouter`),
+and every document and artifact by `DocumentIssuer`, so the fixture cannot
+express a state the product would refuse to produce. The artifact **bytes** are
+generated locally rather than rendered: a real render needs the opt-in
+`whity_render` container, which `seed` must not require.
+
+Identities go through `ProfileProvisioner::findOrCreate()` rather than a bespoke
+`INSERT`, for the same reason: a hand-rolled profile row can sit in a state the
+provisioning path would never produce. One visible consequence — the provisioner
+derives a display name from the address's local part, so the demo people appear
+as `dean`, `faculty-secretary`, `civil-head` and so on.
+
+The eight demo accounts are all under `@demo.example.com` and share one password
+taken from `DEMO_SEED_PASSWORD` — unset, one is generated and printed once, like
+the other initial passwords. Logging in as them is the point: sign in as
+`faculty-secretary@demo.example.com` and then as `civil-secretary@demo.example.com`
+to see the same role produce two different designer libraries.
+
+```bash
+DEMO_SEED_PASSWORD=... whity-cli seed --with-document-demo
+```
 
 ---
 
