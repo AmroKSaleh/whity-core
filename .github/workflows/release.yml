@@ -252,6 +252,14 @@ jobs:
       - name: Re-run migrations (idempotency on PostgreSQL)
         run: php public/index.php migrate run
 
+      # A release must not ship a route gated on a permission nobody holds (#990).
+      # On upgrade that is a capability an operator HAD and silently loses, on a
+      # deployment nobody is watching — the sovereign long-lived installs this
+      # platform sells into apply migrations incrementally, so the tag is the last
+      # point at which the grant and the gate can still be shipped together.
+      - name: Permission-holder guard
+        run: php scripts/ci-permission-holder-guard.php
+
   web:
     name: Frontend types, tests & generated-artifact drift
     runs-on: ubuntu-latest

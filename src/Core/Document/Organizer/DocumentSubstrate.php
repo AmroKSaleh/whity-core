@@ -14,10 +14,12 @@ namespace Whity\Core\Document\Organizer;
  * migration 108 it cannot, and no amount of permission or configuration changes
  * that.
  *
- * Note the limit of what a YES buys. #947 item 3's recipient rows exist, so
- * `routing.recipients` resolves — and "awaiting me" is still not a folder,
- * because nothing has written its predicate. A substrate says the fact is
- * recorded, never that somebody built the view.
+ * Note the limit of what a YES buys, because it held for a whole release here:
+ * #947 item 3's recipient rows existed and `routing.recipients` resolved for
+ * weeks while "awaiting me" was still not a folder, because nothing had written
+ * its predicate. A substrate says the fact is RECORDED, never that somebody
+ * built the view — and the reverse is what this type enforces, since the folder
+ * that now exists is absent again the moment the fact stops being recorded.
  *
  * WHY THIS TYPE EXISTS AT ALL
  * ---------------------------

@@ -636,6 +636,27 @@ jobs:
       - name: Re-run migrations (idempotency on PostgreSQL)
         run: php public/index.php migrate run
 
+      # Permission-holder guard (#990): fail CI when a route gates on a permission
+      # slug that NO role holds. Such a gate is not a permission check, it is a
+      # lockout — it refuses every caller including the administrator it was
+      # written for, from the moment it ships.
+      #
+      # It belongs in THIS job and no other: it is the only one with a migrated
+      # database, and who holds a permission is a fact only a database knows. It
+      # runs after migrate + seed because that is the state of a fresh install,
+      # which is the deployment that gets locked out (it has whatever the
+      # migrations granted and nothing an operator added by hand), and because the
+      # guard refuses to answer against a database not migrated to this tree —
+      # otherwise a branch that adds a gate AND its grant migration together would
+      # be reported as a lockout it had already fixed.
+      #
+      # `roles:read` is the case it exists for: in the catalogue from migration 013
+      # and held by nobody for ninety-eight migrations, invisible because nothing
+      # consulted it, and one re-gate away from taking every administrator off the
+      # roles screen (#977). #990 queues fourteen more re-gates of the same shape.
+      - name: Permission-holder guard
+        run: php scripts/ci-permission-holder-guard.php
+
       # JWT_SECRET and ENCRYPTION_KEY must match the .env written above so that
       # any test that bootstraps the app via public/index.php sees the same values.
       - name: Run Security suite on real PostgreSQL

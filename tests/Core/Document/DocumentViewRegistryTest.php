@@ -23,21 +23,39 @@ use Whity\Core\Ou\OuSubtree;
  * The capability seam (#978) — the one thing in the document organizer worth
  * failing a build over.
  *
- * #947 item 5 specifies six folders. Three of them read routing facts item 3
- * has not built. The failure this suite exists to prevent is those three
- * rendering as EMPTY rather than being ABSENT: an empty "Awaiting me" states
- * *"nothing awaits you"*, a claim that is false and that the person it misleads
- * cannot check from outside. A document somebody was supposed to act on failing
- * to appear is indistinguishable from having nothing to do.
+ * #947 item 5 specifies six folders, three of which read #947 item 3's routing
+ * facts. The failure this suite exists to prevent is those three rendering as
+ * EMPTY rather than being ABSENT on an installation that does not record those
+ * facts: an empty "Awaiting me" states *"nothing awaits you"*, a claim that is
+ * false and that the person it misleads cannot check from outside. A document
+ * somebody was supposed to act on failing to appear is indistinguishable from
+ * having nothing to do.
+ *
+ * WHAT CHANGED WHEN THE ROUTING FOLDERS WERE BUILT, AND WHAT DID NOT
+ * ------------------------------------------------------------------
+ * #978 shipped this suite with an assertion that no registered view named either
+ * routing substrate WHILE BOTH RESOLVED — the state where the shortcut was
+ * available and refused. That assertion has been inverted rather than deleted,
+ * because the property it protected did not go away: what it now asserts is that
+ * the three folders exist, name exactly the substrates they read, and are
+ * therefore still absent wherever those substrates are not satisfied. Deleting
+ * it would have left the shortcut it caught unguarded in the other direction — a
+ * folder whose declaration drifts off the fact it reads is a folder that
+ * survives the migration being missing.
+ *
+ * The FICTIONAL-substrate tests are untouched on purpose. They are what proves
+ * the mechanism without requiring core to ship the stub the design refuses, and
+ * they keep proving it now that every core substrate resolves on a migrated
+ * schema and could no longer demonstrate absence by itself.
  *
  * So the assertions here are, in order of how much they matter:
  *
  *  1. A view whose substrate is absent is not listed AND cannot be requested.
- *  2. Core ships NO view that names the absent routing substrate — not even a
- *     filtered one, because a registered-then-hidden view is a stub, and a stub
- *     is what somebody turns on.
+ *  2. The three routing folders name the routing substrates and nothing else,
+ *     so removing migration 112's tables removes exactly them.
  *  3. The gating is per SUBSTRATE, not global: removing collections must take
- *     the two collection folders and leave the unit ones alone.
+ *     the two collection folders and leave the unit ones alone; removing the
+ *     trail must leave the inbox.
  *  4. The three-way distinction survives — absent (not listed), unanchored
  *     (listed, disabled, with a reason), and genuinely empty.
  *  5. A view that arrives LATER slots in without this registry changing, which
@@ -110,22 +128,23 @@ final class DocumentViewRegistryTest extends TestCase
         self::assertTrue($withColumn->isAvailable(CoreDocumentSubstrates::AUTHORSHIP));
     }
 
-    // ── 2. core ships no routing stub ───────────────────────────────────────
+    // ── 2. the three routing folders, and what they are gated on ────────────
 
     /**
-     * The assertion #978 is really about, and it survived #947 item 3 landing.
+     * The inverted seam assertion. #978 shipped this test asserting that NO
+     * registered view named either routing substrate while both resolved — the
+     * state in which the shortcut was available and refused. The folders are
+     * built now, so the same test asserts the same property from the other side:
+     * each of the three exists, and each names EXACTLY the substrates it reads.
      *
-     * Routing's tables now EXIST, so both routing substrates resolve — and there
-     * is still no routing folder, because a resolvable substrate is a fact
-     * source rather than a view. Each of item 5's three routing folders needs a
-     * predicate on {@see DocumentCriteria} and a registration of its own.
-     *
-     * This is the assertion that catches the tempting shortcut: registering the
-     * three views guarded by the substrate so they "appear automatically" when
-     * routing lands. They would have appeared EMPTY, and an empty "Awaiting me"
-     * states "nothing awaits you".
+     * The declaration is the whole point, which is why it is asserted rather
+     * than the folders' mere presence. A routing folder that named no substrate,
+     * or named `documents.records`, would work perfectly on a migrated
+     * installation and render an empty "Awaiting me" on one that never ran
+     * migration 112 — the failure #978 exists to prevent, reintroduced by a
+     * declaration instead of by a conditional.
      */
-    public function testARoutingSubstrateThatResolvesStillProducesNoRoutingFolder(): void
+    public function testTheThreeRoutingFoldersExistAndNameTheFactsTheyRead(): void
     {
         $substrates = new DocumentSubstrateRegistry($this->schema($this->fullSchema()));
         CoreDocumentSubstrates::registerInto($substrates);
@@ -136,19 +155,150 @@ final class DocumentViewRegistryTest extends TestCase
         self::assertTrue($substrates->isAvailable(CoreDocumentSubstrates::ROUTING_RECIPIENTS));
         self::assertTrue($substrates->isAvailable(CoreDocumentSubstrates::ROUTING_TRAIL));
 
-        foreach ($views->available() as $view) {
-            self::assertNotContains(
-                CoreDocumentSubstrates::ROUTING_RECIPIENTS,
+        $expected = [
+            // The inbox reads recipient rows and nothing else — notably NOT the
+            // trail, even though the row points into it, because open-ness is a
+            // column on the recipient row rather than a question for the trail.
+            CoreDocumentViews::AWAITING_ME => [CoreDocumentSubstrates::ROUTING_RECIPIENTS],
+            CoreDocumentViews::ACTED_ON_BY_ME => [CoreDocumentSubstrates::ROUTING_TRAIL],
+            // Two, and neither is `documents.origin_ou`: the trail's own unit
+            // columns, plus a hierarchy to walk them against.
+            CoreDocumentViews::PASSED_THROUGH_MY_UNIT => [
+                CoreDocumentSubstrates::ROUTING_TRAIL,
+                CoreDocumentSubstrates::OU_TREE,
+            ],
+        ];
+
+        foreach ($expected as $key => $requires) {
+            $view = $views->get($key);
+            self::assertNotNull($view, "'{$key}' must exist on a migrated installation");
+            self::assertSame(
+                $requires,
                 $view->requires,
-                "core registered a view against routing recipients with no predicate to back it"
+                "'{$key}' must declare exactly the fact sources it reads — no more, so it is not "
+                    . 'hidden for an unrelated reason, and no fewer, so it cannot render on an '
+                    . 'installation that does not record them'
             );
-            self::assertNotContains(CoreDocumentSubstrates::ROUTING_TRAIL, $view->requires);
         }
 
-        // And the same statement from the other side: none of the three folder
-        // keys #947 item 5 specifies for routing resolves to anything.
-        foreach (['awaiting-me', 'acted-on-by-me', 'passed-through-my-unit'] as $key) {
-            self::assertNull($views->get($key), "a routing folder must not exist until it is built");
+        // And the folders that do NOT read routing must not have acquired a
+        // dependency on it, which would hide them on an installation with
+        // documents and no routing.
+        foreach ([CoreDocumentViews::ALL, CoreDocumentViews::CREATED_BY_ME, CoreDocumentViews::STARRED] as $key) {
+            $view = $views->get($key);
+            self::assertNotNull($view);
+            self::assertNotContains(CoreDocumentSubstrates::ROUTING_RECIPIENTS, $view->requires);
+            self::assertNotContains(CoreDocumentSubstrates::ROUTING_TRAIL, $view->requires);
+        }
+    }
+
+    /**
+     * The inverse, and the property the whole registry exists for: take
+     * migration 112's tables away and the three folders are gone — not listed,
+     * not requestable — while the six that read `documents` are untouched.
+     *
+     * Asserted rather than inspected, because "these views declare a substrate"
+     * and "these views disappear when it does" are different claims and only the
+     * second one is what a person on an un-migrated installation experiences.
+     */
+    public function testRemovingTheRoutingTablesTakesExactlyTheRoutingFolders(): void
+    {
+        $schema = $this->fullSchema();
+        unset($schema['document_route_recipients'], $schema['document_route_events']);
+
+        $substrates = new DocumentSubstrateRegistry($this->schema($schema));
+        CoreDocumentSubstrates::registerInto($substrates);
+        $views = new DocumentViewRegistry($substrates);
+        CoreDocumentViews::registerInto($views);
+
+        self::assertSame(
+            [
+                CoreDocumentViews::ALL,
+                CoreDocumentViews::CREATED_BY_ME,
+                CoreDocumentViews::RAISED_BY_MY_UNIT,
+                CoreDocumentViews::BELOW_MY_UNIT,
+                CoreDocumentViews::STARRED,
+                CoreDocumentViews::COLLECTION,
+            ],
+            array_map(static fn (DocumentView $v): string => $v->key, $views->available()),
+            'without routing the rail is exactly what #978 shipped'
+        );
+
+        foreach (
+            [
+                CoreDocumentViews::AWAITING_ME,
+                CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
+            ] as $key
+        ) {
+            self::assertNull(
+                $views->get($key),
+                "'{$key}' must not be openable where routing is not recorded — a listed-but-closed "
+                    . 'folder still asserts it exists, and an open one would answer with an empty page'
+            );
+        }
+
+        // The absence is EXPLAINED rather than silent (#951): both routing fact
+        // sources are reported missing, each pointing at the work that supplies
+        // them, so an operator asking "why is there no inbox here" has an answer.
+        $missing = array_map(
+            static fn (DocumentSubstrate $s): string => $s->key,
+            $substrates->unavailable()
+        );
+        self::assertEqualsCanonicalizing(
+            [CoreDocumentSubstrates::ROUTING_RECIPIENTS, CoreDocumentSubstrates::ROUTING_TRAIL],
+            $missing
+        );
+        foreach ($substrates->unavailable() as $substrate) {
+            self::assertStringContainsString('migration 112', (string) $substrate->provenance);
+        }
+    }
+
+    /**
+     * The gating is per FACT SOURCE, not per feature. Recipient rows and the
+     * trail are separate substrates precisely so that losing one does not take
+     * the other's folder, and this is the assertion that makes that split earn
+     * its keep rather than being a tidy-looking pair of constants.
+     */
+    public function testRemovingOnlyTheTrailLeavesTheInboxStanding(): void
+    {
+        $schema = $this->fullSchema();
+        unset($schema['document_route_events']);
+
+        $substrates = new DocumentSubstrateRegistry($this->schema($schema));
+        CoreDocumentSubstrates::registerInto($substrates);
+        $views = new DocumentViewRegistry($substrates);
+        CoreDocumentViews::registerInto($views);
+
+        $keys = array_map(static fn (DocumentView $v): string => $v->key, $views->available());
+
+        self::assertContains(CoreDocumentViews::AWAITING_ME, $keys, 'the inbox reads recipients, not the trail');
+        self::assertNotContains(CoreDocumentViews::ACTED_ON_BY_ME, $keys);
+        self::assertNotContains(CoreDocumentViews::PASSED_THROUGH_MY_UNIT, $keys);
+    }
+
+    /**
+     * And the other half of the trail's declaration: it names BOTH unit columns,
+     * because "passed through my unit" asks about either end of a transition. A
+     * trail recording only where things came from would answer half the question
+     * while looking like it answered all of it.
+     */
+    public function testTheTrailSubstrateNeedsBothEndsOfATransition(): void
+    {
+        foreach (['from_ou_id', 'to_ou_id'] as $column) {
+            $schema = $this->fullSchema();
+            $schema['document_route_events'] = array_values(array_filter(
+                $schema['document_route_events'],
+                static fn (string $c): bool => $c !== $column
+            ));
+
+            $substrates = new DocumentSubstrateRegistry($this->schema($schema));
+            CoreDocumentSubstrates::registerInto($substrates);
+
+            self::assertFalse(
+                $substrates->isAvailable(CoreDocumentSubstrates::ROUTING_TRAIL),
+                "a trail with no {$column} does not record the transition the folder queries"
+            );
         }
     }
 
@@ -209,7 +359,15 @@ final class DocumentViewRegistryTest extends TestCase
         self::assertContains(CoreDocumentViews::BELOW_MY_UNIT, $keys);
     }
 
-    public function testRemovingTheOuTableTakesOnlyTheUnitFolders(): void
+    /**
+     * Every folder that NAMES a unit goes, and only those. That is three
+     * declarations reaching the same conclusion by two different routes — the
+     * two `documents.origin_ou` folders and the routing folder that declares
+     * `ou.tree` — which is the point of declaring the tree separately: the
+     * routing folder does not read `documents.origin_ou_id`, and it still cannot
+     * walk a hierarchy that is not there.
+     */
+    public function testRemovingTheOuTableTakesEveryFolderThatNamesAUnit(): void
     {
         $schema = $this->fullSchema();
         unset($schema['organizational_units']);
@@ -223,11 +381,17 @@ final class DocumentViewRegistryTest extends TestCase
 
         self::assertNotContains(CoreDocumentViews::RAISED_BY_MY_UNIT, $keys);
         self::assertNotContains(CoreDocumentViews::BELOW_MY_UNIT, $keys);
+        self::assertNotContains(CoreDocumentViews::PASSED_THROUGH_MY_UNIT, $keys);
         self::assertContains(CoreDocumentViews::CREATED_BY_ME, $keys);
         self::assertContains(CoreDocumentViews::STARRED, $keys);
+        // The routing folders that do NOT walk the tree survive, which is what
+        // says the OU dependency was declared where it is actually needed rather
+        // than bolted onto `routing.trail` for the convenience of one folder.
+        self::assertContains(CoreDocumentViews::AWAITING_ME, $keys);
+        self::assertContains(CoreDocumentViews::ACTED_ON_BY_ME, $keys);
     }
 
-    /** On a fully migrated schema, all six core folders are computable, in rail order. */
+    /** On a fully migrated schema, all nine core folders are computable, in rail order. */
     public function testAFullyMigratedSchemaOffersEveryCoreFolderInRailOrder(): void
     {
         $views = $this->coreRegistry();
@@ -238,6 +402,9 @@ final class DocumentViewRegistryTest extends TestCase
                 CoreDocumentViews::CREATED_BY_ME,
                 CoreDocumentViews::RAISED_BY_MY_UNIT,
                 CoreDocumentViews::BELOW_MY_UNIT,
+                CoreDocumentViews::AWAITING_ME,
+                CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
                 CoreDocumentViews::STARRED,
                 CoreDocumentViews::COLLECTION,
             ],
@@ -333,6 +500,160 @@ final class DocumentViewRegistryTest extends TestCase
         $below = $views->get(CoreDocumentViews::BELOW_MY_UNIT)?->resolve($context)->criteria;
         self::assertNotNull($below);
         self::assertEqualsCanonicalizing([4, 5], $below->originOuIds);
+    }
+
+    /**
+     * The two caller-anchored routing folders resolve on the CALLER and never
+     * refuse: a person always exists, unlike a unit. Somebody who has never been
+     * routed anything gets an honest empty page, which they can check.
+     */
+    public function testTheCallerAnchoredRoutingFoldersResolveOnTheCallerAndNeverRefuse(): void
+    {
+        $views = $this->coreRegistry();
+        // No unit, no anchor, nothing starred: the least-equipped caller there is.
+        $context = $this->context();
+
+        $awaiting = $views->get(CoreDocumentViews::AWAITING_ME)?->resolve($context);
+        self::assertNotNull($awaiting);
+        self::assertTrue($awaiting->isAvailable(), 'having no unit does not stop you having an inbox');
+        self::assertNotNull($awaiting->criteria);
+        self::assertSame(self::CALLER, $awaiting->criteria->awaitingProfileId);
+        self::assertFalse($awaiting->criteria->matchesNothing, 'an empty inbox is a result, not a refusal');
+
+        $acted = $views->get(CoreDocumentViews::ACTED_ON_BY_ME)?->resolve($context);
+        self::assertNotNull($acted);
+        self::assertNotNull($acted->criteria);
+        self::assertSame(self::CALLER, $acted->criteria->actedOnByProfileId);
+
+        // The two are separate predicates, not one slot reused: a document can be
+        // awaiting you AND already acted on by you, because a return puts back in
+        // your inbox something you once forwarded.
+        self::assertNull($awaiting->criteria->actedOnByProfileId);
+        self::assertNull($acted->criteria->awaitingProfileId);
+    }
+
+    /**
+     * "Passed through my unit" is the SUBTREE, reached through the same
+     * tenant-bound closure "everything below my unit" uses — deliberately not a
+     * second subtree walk, which is how "my unit" comes to mean two different
+     * sets of people in two screens of one product.
+     */
+    public function testPassedThroughMyUnitWalksTheSubtreeAndRefusesWithoutAnAnchor(): void
+    {
+        $views = $this->coreRegistry();
+
+        // Tree seeded in ouPdo(): 1 → 2 → {3, 4}, 4 → 5. The anchor is INCLUDED.
+        $criteria = $views->get(CoreDocumentViews::PASSED_THROUGH_MY_UNIT)
+            ?->resolve($this->context(primaryOuId: 2))->criteria;
+        self::assertNotNull($criteria);
+        self::assertNotNull($criteria->routedThroughOuIds);
+        self::assertEqualsCanonicalizing([2, 3, 4, 5], $criteria->routedThroughOuIds);
+        self::assertNull($criteria->originOuIds, 'this folder queries the trail, never documents.origin_ou_id');
+
+        // The same subtree the unit folder resolves, from the same closure.
+        $below = $views->get(CoreDocumentViews::BELOW_MY_UNIT)
+            ?->resolve($this->context(primaryOuId: 2))->criteria;
+        self::assertNotNull($below);
+        self::assertEqualsCanonicalizing((array) $below->originOuIds, $criteria->routedThroughOuIds);
+
+        // An explicit anchor overrides the caller's own unit, as on both unit
+        // folders — one view with an optional anchor, not two.
+        $anchored = $views->get(CoreDocumentViews::PASSED_THROUGH_MY_UNIT)
+            ?->resolve($this->context(primaryOuId: 2, anchorOuId: 4))->criteria;
+        self::assertNotNull($anchored);
+        self::assertEqualsCanonicalizing([4, 5], $anchored->routedThroughOuIds);
+
+        // And a caller in no unit gets the #951 refusal with a reason, never an
+        // empty page that would read as "nothing passed through my unit".
+        $unanchored = $views->get(CoreDocumentViews::PASSED_THROUGH_MY_UNIT)
+            ?->resolve($this->context(primaryOuId: null));
+        self::assertNotNull($unanchored);
+        self::assertFalse($unanchored->isAvailable());
+        self::assertNull($unanchored->criteria);
+        self::assertStringContainsString('unit', (string) $unanchored->unavailableReason);
+    }
+
+    /**
+     * Every view slot survives {@see DocumentCriteria::withRequestScope()}.
+     *
+     * A slot added to the criteria and forgotten in that method is dropped on the
+     * way to the repository, and the folder it belongs to silently widens — an
+     * "awaiting me" that quietly becomes "every document in the tenant" is wrong
+     * in the direction that looks like work. Nothing in the language catches
+     * that, so it is asserted over every registered core view rather than over a
+     * hand-written list, which would have to be remembered too.
+     */
+    public function testEveryViewSlotSurvivesTheRequestScopeBeingApplied(): void
+    {
+        $views = $this->coreRegistry();
+        $context = $this->context(primaryOuId: 2, collectionId: 42, starredCollectionId: 77);
+
+        $populated = [];
+        foreach ($views->available() as $view) {
+            $criteria = $view->resolve($context)->criteria;
+            if ($criteria === null) {
+                continue;
+            }
+
+            $scoped = $criteria->withRequestScope(self::CALLER, 'memo');
+
+            self::assertSame(
+                self::viewSlots($criteria),
+                self::viewSlots($scoped),
+                "'{$view->key}' lost a filter when the request scope was applied — the folder would "
+                    . 'silently widen to everything the caller may see'
+            );
+
+            // The two things withRequestScope is FOR are the two that change.
+            self::assertSame(self::CALLER, $scoped->restrictToCreator);
+            self::assertSame('memo', $scoped->search);
+
+            foreach (self::viewSlots($criteria) as $slot => $value) {
+                if ($value !== null && $value !== false) {
+                    $populated[$slot] = true;
+                }
+            }
+        }
+
+        // The loop only proves what it exercised. A folder set that never
+        // populated `awaitingProfileId` would satisfy every assertion above by
+        // comparing null with null, so require that each slot was actually
+        // carried by some folder — `matchesNothing` excepted, since it is only
+        // set by a caller state this context deliberately does not have.
+        foreach (array_keys(self::viewSlots(DocumentCriteria::unfiltered())) as $slot) {
+            if ($slot === 'matchesNothing') {
+                continue;
+            }
+            self::assertArrayHasKey(
+                $slot,
+                $populated,
+                "no core folder populated {$slot}, so this test proved nothing about it"
+            );
+        }
+    }
+
+    /**
+     * A slot the criteria gains must be added to {@see viewSlots()} or the test
+     * above stops covering it, which is the same forgetting one level removed.
+     * So the helper is checked against the constructor itself.
+     */
+    public function testTheSlotInventoryCannotDriftFromTheCriteria(): void
+    {
+        $constructor = (new \ReflectionClass(DocumentCriteria::class))->getConstructor();
+        self::assertNotNull($constructor);
+
+        $declared = array_map(
+            static fn (\ReflectionParameter $p): string => $p->getName(),
+            $constructor->getParameters()
+        );
+
+        self::assertSame(
+            // Everything except the two the REQUEST supplies, which
+            // withRequestScope exists to replace rather than to preserve.
+            array_values(array_diff($declared, ['restrictToCreator', 'search'])),
+            array_keys(self::viewSlots(DocumentCriteria::unfiltered())),
+            'DocumentCriteria gained or lost a view slot; viewSlots() must list every one, in order'
+        );
     }
 
     /**
@@ -434,6 +755,29 @@ final class DocumentViewRegistryTest extends TestCase
 
     // ── helpers ─────────────────────────────────────────────────────────────
 
+    /**
+     * Every filter a VIEW may set, as a comparable snapshot. Deliberately not
+     * `restrictToCreator` or `search`: those are the request's, and
+     * {@see DocumentCriteria::withRequestScope()} is supposed to replace them.
+     *
+     * Pinned against the constructor by
+     * {@see testTheSlotInventoryCannotDriftFromTheCriteria()}.
+     *
+     * @return array<string, int|bool|list<int>|null>
+     */
+    private static function viewSlots(DocumentCriteria $criteria): array
+    {
+        return [
+            'createdBy' => $criteria->createdBy,
+            'originOuIds' => $criteria->originOuIds,
+            'inCollectionId' => $criteria->inCollectionId,
+            'awaitingProfileId' => $criteria->awaitingProfileId,
+            'actedOnByProfileId' => $criteria->actedOnByProfileId,
+            'routedThroughOuIds' => $criteria->routedThroughOuIds,
+            'matchesNothing' => $criteria->matchesNothing,
+        ];
+    }
+
     private function coreRegistry(): DocumentViewRegistry
     {
         $substrates = new DocumentSubstrateRegistry($this->schema($this->fullSchema()));
@@ -445,8 +789,13 @@ final class DocumentViewRegistryTest extends TestCase
     }
 
     /**
-     * Every table and column core's own substrates need, and nothing routing
-     * would add.
+     * Every table and column core's own substrates need — a fully migrated
+     * installation, described rather than built.
+     *
+     * The individual cases UNSET from this rather than each listing what it
+     * needs: a substrate that starts requiring a new column shows up as one
+     * failing assertion about the whole schema instead of silently passing every
+     * case that never mentioned it.
      *
      * @return array<string, list<string>>
      */
@@ -457,11 +806,17 @@ final class DocumentViewRegistryTest extends TestCase
             'organizational_units' => ['id', 'tenant_id', 'parent_id'],
             'document_collections' => ['id', 'tenant_id', 'profile_id', 'name', 'system_key'],
             'document_collection_items' => ['id', 'tenant_id', 'collection_id', 'document_id'],
-            // #947 item 3's tables (migration 112). Present on any migrated
-            // installation, and read by NO view — which is the state the
-            // assertions below pin.
-            'document_route_recipients' => ['id', 'tenant_id', 'document_id', 'profile_id'],
-            'document_route_events' => ['id', 'tenant_id', 'document_id', 'actor_profile_id', 'from_ou_id'],
+            // #947 item 3's tables (migration 112), which the three routing
+            // folders read. `closed_by_event_id` is not declared by any
+            // substrate and is listed anyway, because it is the column the inbox
+            // filters on and a reader of this fixture should see the shape the
+            // folder actually queries.
+            'document_route_recipients' => [
+                'id', 'tenant_id', 'document_id', 'profile_id', 'closed_by_event_id',
+            ],
+            'document_route_events' => [
+                'id', 'tenant_id', 'document_id', 'actor_profile_id', 'from_ou_id', 'to_ou_id',
+            ],
         ];
     }
 
