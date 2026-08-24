@@ -47,7 +47,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { EmptyState, ErrorState } from '@amroksaleh/ui/empty-state';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconRoute } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { useAuth } from '@/lib/auth-context';
 import { useFetch } from '@/hooks/useFetch';
@@ -93,6 +93,7 @@ interface PickerCatalogue<T> {
 
 export default function DocumentRoutingPage() {
   const t = useTranslation('documents');
+  const locale = useFormattingLocale();
   const { apiClient, user } = useAuth();
   const { has, loading: capsLoading } = useCapabilities();
   const router = useRouter();
@@ -457,7 +458,7 @@ export default function DocumentRoutingPage() {
                 <CardTitle className="text-base">{route.title}</CardTitle>
                 <p className="text-xs text-muted-foreground">
                   {t('routing.route.raised', 'Raised {when}', {
-                    when: new Date(route.created_at).toLocaleString(),
+                    when: new Date(route.created_at).toLocaleString(locale),
                   })}
                 </p>
               </CardHeader>

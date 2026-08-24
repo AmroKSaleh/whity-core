@@ -68,15 +68,47 @@ class SeedTranslationCatalogues
         $pdo = $db->getPdo();
         $sync = new TranslationSync($pdo);
 
-        // English first, so a language that is somehow missing its own row for a
-        // key still has the source to fall back to in the console.
-        self::seed($sync, $pdo, TranslationCatalog::SOURCE_LANGUAGE, $source);
+        // ONE TRANSACTION FOR THE WHOLE SEED, and this is not a micro-optimisation.
+        //
+        // TranslationSync issues one INSERT per key because it must consult a
+        // NOT EXISTS guard per key — that is the property that makes it safe to
+        // re-run, and it is not negotiable. But 2,876 keys in two languages is
+        // ~5,750 statements, and in autocommit each one is its own transaction
+        // and its own fsync. Measured against a containerised PostgreSQL that
+        // was SEVEN AND A HALF MINUTES of `migrate run`, on the one command
+        // every install and the `postgres-migrations` CI job both have to run.
+        // Inside a single transaction the same work is seconds.
+        //
+        // It also makes the seed atomic, which matters more than the speed: a
+        // crash halfway through would otherwise leave a database that is half
+        // translated and, because every migration below records itself as done,
+        // has no way to notice.
+        $owned = !$pdo->inTransaction();
+        if ($owned) {
+            $pdo->beginTransaction();
+        }
 
-        foreach ($catalog->localeCodes() as $code) {
-            $translated = $catalog->readLocale($code);
-            if ($translated !== []) {
-                self::seed($sync, $pdo, $code, $translated);
+        try {
+            // English first, so a language that is somehow missing its own row
+            // for a key still has the source to fall back to in the console.
+            self::seed($sync, $pdo, TranslationCatalog::SOURCE_LANGUAGE, $source);
+
+            foreach ($catalog->localeCodes() as $code) {
+                $translated = $catalog->readLocale($code);
+                if ($translated !== []) {
+                    self::seed($sync, $pdo, $code, $translated);
+                }
             }
+
+            if ($owned) {
+                $pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($owned && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
         }
     }
 

@@ -86,7 +86,7 @@ import {
   useRecordResource,
 } from '@amroksaleh/features/record';
 import type { RecordFactsFn, RecordSectionSpec } from '@amroksaleh/features/record';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import { DocumentViewer } from '@/components/plugin/blocks/document-viewer';
@@ -154,7 +154,13 @@ interface DocumentRecordFields {
  * make, on the artifact the reader is actually looking at, and a header badge
  * derived from the record would contradict it the moment they used the picker.
  */
-const documentFacts: RecordFactsFn<DocumentRecordFields> = (document, t) => ({
+// A FACTORY, not a constant, purely so the locale can reach it. `RecordFactsFn`
+// is `(record, t) => facts` and that shape is shared with every other record
+// page, so widening it here to carry a locale would change a contract this
+// screen does not own. Closing over the value instead keeps the change local.
+const documentFactsFor =
+  (locale: string | undefined): RecordFactsFn<DocumentRecordFields> =>
+  (document, t) => ({
   title: document.title,
   subtitle: t('record.subtitle', 'Issued from {template}', { template: document.templateName }),
   stats: [
@@ -166,7 +172,7 @@ const documentFacts: RecordFactsFn<DocumentRecordFields> = (document, t) => ({
     {
       key: 'issued',
       label: t('record.stat.issued', 'First issued'),
-      value: formatRecordDate(document.createdAt),
+      value: formatRecordDate(document.createdAt, locale),
     },
     {
       key: 'unit',
@@ -243,7 +249,10 @@ export interface DocumentRecordScreenProps {
 export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScreenProps) {
   const { apiClient, user } = useAuth();
   const t = useTranslation('documents');
+  const locale = useFormattingLocale();
   const [trailPage, setTrailPage] = useState(FIRST_PAGE);
+
+  const documentFactsMemo = useMemo(() => documentFactsFor(locale), [locale]);
 
   const back = useMemo(
     () => ({ label: t('record.back', 'Back to documents'), onBack }),
@@ -621,7 +630,7 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
     <RecordPageShell
       testId="document-record"
       fields={fields}
-      facts={documentFacts}
+      facts={documentFactsMemo}
       t={t}
       back={back}
       icon={<IconFileText />}

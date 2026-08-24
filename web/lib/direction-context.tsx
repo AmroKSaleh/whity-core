@@ -43,6 +43,53 @@ export type Direction = 'ltr' | 'rtl';
  */
 const RETIRED_STORAGE_KEY = 'whity.dir';
 
+/**
+ * Where the last resolved direction is remembered, purely so the blocking
+ * script below can apply it before first paint.
+ *
+ * NOT a preference, and nothing reads it as one. The language is still the only
+ * input to direction; this is a cache of the answer, refreshed on every render
+ * that resolves one, and a stale value is corrected within a frame of the
+ * provider mounting. It is deliberately separate from the language key: the
+ * script must not need to know that 'ar' means RTL, because the whole point of
+ * `languages.direction` is that no code anywhere tests a language code.
+ */
+const DIRECTION_CACHE_KEY = 'whity.dir.resolved';
+
+/** Where LanguageProvider remembers the last resolved language code. */
+const LANGUAGE_CACHE_KEY = 'i18n_language';
+
+/**
+ * Applies the remembered direction to <html> BEFORE the browser paints.
+ *
+ * The comment on ThemeModeInitScript used to say a wrong-then-corrected
+ * direction, unlike a wrong colour scheme, was not worth blocking for. That is
+ * backwards. `dir` was applied in a useEffect that runs after the language has
+ * been fetched over the network, so an Arabic user's every full page load began
+ * left-to-right and in English: the sidebar on the wrong side, every panel
+ * mirrored, text ragged on the wrong edge, then the whole layout jumping when
+ * the fetch returned. A colour flash changes how the page looks; this one
+ * changes where everything IS.
+ *
+ * Same shape as ThemeModeInitScript: synchronous, tiny, wrapped in try/catch so
+ * a browser with storage disabled falls through to the server-rendered default
+ * rather than throwing before any of the bundle has run.
+ */
+const BLOCKING_SCRIPT = `(function(){try{` +
+  `var d=localStorage.getItem('${DIRECTION_CACHE_KEY}');` +
+  `if(d==='rtl'||d==='ltr'){document.documentElement.dir=d;}` +
+  `var l=localStorage.getItem('${LANGUAGE_CACHE_KEY}');` +
+  `if(l){document.documentElement.lang=l;}` +
+  `}catch(e){}})();`;
+
+/**
+ * Renders the blocking anti-flash script. MUST be placed in <head>, as early as
+ * the theme's equivalent, so `dir` lands before the first paint.
+ */
+export function DirectionInitScript() {
+  return <script dangerouslySetInnerHTML={{ __html: BLOCKING_SCRIPT }} />;
+}
+
 interface DirectionContextValue {
   dir: Direction;
 }
@@ -52,9 +99,16 @@ const DirectionContext = createContext<DirectionContextValue | null>(null);
 export function DirectionProvider({ children }: { children: React.ReactNode }) {
   const dir = useLanguageDirection();
 
-  // Reflect the language's direction onto <html> (DOM mutation, not React state).
+  // Reflect the language's direction onto <html> (DOM mutation, not React state),
+  // and remember it so the next page load can apply it before paint.
   useEffect(() => {
     document.documentElement.dir = dir;
+    try {
+      localStorage.setItem(DIRECTION_CACHE_KEY, dir);
+    } catch {
+      // Storage disabled (private mode): the only cost is that the next load
+      // starts LTR and corrects itself, which is exactly the old behaviour.
+    }
   }, [dir]);
 
   // Drop the retired toggle's key once, so it cannot linger in a browser

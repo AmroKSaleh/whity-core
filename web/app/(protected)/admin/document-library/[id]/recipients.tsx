@@ -37,7 +37,7 @@
 import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
 import { RecordList, RecordListItem, formatRecordDateTime } from '@amroksaleh/features/record';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 
 import { personName, unitName } from './trail';
 import type { Directory, RouteRecipient } from './types';
@@ -78,6 +78,7 @@ export function OpenRecipients({
   awaitingViewer,
 }: OpenRecipientsProps) {
   const t = useTranslation('documents');
+  const locale = useFormattingLocale();
 
   const open = recipients.filter((recipient) => recipient.open);
   const closed = recipients.length - open.length;
@@ -142,7 +143,7 @@ export function OpenRecipients({
                     ? t('record.recipients.since', 'In {unit} since {when}', {
                         unit: unitName(t, directory, recipient.ou_id),
                         when:
-                          formatRecordDateTime(recipient.created_at) ?? recipient.created_at,
+                          formatRecordDateTime(recipient.created_at, locale) ?? recipient.created_at,
                       })
                     : // The fan-out edge, said out loud: a reader tracing a
                       // document needs to know it arrived by being forwarded and
@@ -150,7 +151,7 @@ export function OpenRecipients({
                       t('record.recipients.sinceVia', 'In {unit} since {when}, forwarded by {who}', {
                         unit: unitName(t, directory, recipient.ou_id),
                         when:
-                          formatRecordDateTime(recipient.created_at) ?? recipient.created_at,
+                          formatRecordDateTime(recipient.created_at, locale) ?? recipient.created_at,
                         who: personName(t, directory, parent.profile_id),
                       })
                 }

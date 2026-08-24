@@ -1284,20 +1284,20 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={t('designer.page.moveLeft', 'Move page left')}
+          aria-label={t('designer.page.moveEarlier', 'Move page earlier')}
           disabled={pageIndex === 0}
           onClick={() => movePage('left')}
         >
-          <IconChevronLeft className="h-4 w-4" />
+          <IconChevronLeft className="h-4 w-4 rtl:rotate-180" />
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={t('designer.page.moveRight', 'Move page right')}
+          aria-label={t('designer.page.moveLater', 'Move page later')}
           disabled={pageIndex >= template.pages.length - 1}
           onClick={() => movePage('right')}
         >
-          <IconChevronRight className="h-4 w-4" />
+          <IconChevronRight className="h-4 w-4 rtl:rotate-180" />
         </Button>
         <Button
           variant="ghost"
@@ -1328,7 +1328,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
                 disabled={batchClampIndex <= 0}
                 onClick={() => setBatchIndex(batchClampIndex - 1)}
               >
-                <IconChevronLeft className="h-4 w-4" />
+                <IconChevronLeft className="h-4 w-4 rtl:rotate-180" />
               </Button>
               <span className="tabular-nums">
                 {t('designer.status.row', 'Row {index} / {total}', {
@@ -1344,7 +1344,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
                 disabled={batchClampIndex >= rows.length - 1}
                 onClick={() => setBatchIndex(batchClampIndex + 1)}
               >
-                <IconChevronRight className="h-4 w-4" />
+                <IconChevronRight className="h-4 w-4 rtl:rotate-180" />
               </Button>
             </span>
           )}

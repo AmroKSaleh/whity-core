@@ -48,7 +48,7 @@
 
 import { IconArrowRight } from '@tabler/icons-react';
 import { RecordTimeline, RecordTimelineItem, formatRecordDateTime } from '@amroksaleh/features/record';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Pagination } from '@/components/ui/pagination';
 
@@ -148,6 +148,7 @@ export interface DocumentTrailProps {
  */
 export function DocumentTrail({ events, pagination, directory, onPageChange }: DocumentTrailProps) {
   const t = useTranslation('documents');
+  const locale = useFormattingLocale();
 
   return (
     <div className="space-y-3" data-testid="document-record-trail">
@@ -161,7 +162,7 @@ export function DocumentTrail({ events, pagination, directory, onPageChange }: D
               title={actionLabel(t, event.action)}
               meta={t('record.trail.by', '{who} — {when}', {
                 who: personName(t, directory, event.actor_profile_id),
-                when: formatRecordDateTime(event.occurred_at) ?? event.occurred_at,
+                when: formatRecordDateTime(event.occurred_at, locale) ?? event.occurred_at,
               })}
               detail={
                 moved || event.note !== null ? (

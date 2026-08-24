@@ -102,7 +102,7 @@ import { apiClient } from '@/lib/api-client';
 // exists specifically to prevent — two copies had already disagreed about whether
 // an empty string is a date.
 import { formatRecordDateTime } from '@amroksaleh/features/record/format';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
@@ -444,10 +444,11 @@ function VersionBar({
   onSelect: (id: number) => void;
 }) {
   const t = useTranslation('plugin');
+  const locale = useFormattingLocale();
   const total = artifacts.length;
   const version = versionOf(artifacts, position);
   const superseded = position > 0;
-  const issuedAt = formatRecordDateTime(artifact.rendered_at) ?? artifact.rendered_at;
+  const issuedAt = formatRecordDateTime(artifact.rendered_at, locale) ?? artifact.rendered_at;
 
   return (
     <div className="space-y-2" data-slot="document-viewer-versions">
@@ -478,7 +479,7 @@ function VersionBar({
                   <SelectItem key={candidate.id} value={String(candidate.id)}>
                     {t('blocks.documentViewer.versionOption', 'Version {version} — {issued}', {
                       version: versionOf(artifacts, i),
-                      issued: formatRecordDateTime(candidate.rendered_at) ?? candidate.rendered_at,
+                      issued: formatRecordDateTime(candidate.rendered_at, locale) ?? candidate.rendered_at,
                     })}
                   </SelectItem>
                 ))}
@@ -510,7 +511,7 @@ function VersionBar({
                 version,
                 total,
                 issued:
-                  formatRecordDateTime(artifacts[0].rendered_at) ?? artifacts[0].rendered_at,
+                  formatRecordDateTime(artifacts[0].rendered_at, locale) ?? artifacts[0].rendered_at,
               }
             )}
           </AlertDescription>
