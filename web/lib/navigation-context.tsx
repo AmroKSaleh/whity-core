@@ -15,7 +15,6 @@ export interface NavigationItem {
 interface NavigationContextType {
   items: NavigationItem[];
   isLoading: boolean;
-  getGroupedItems: () => Map<string, NavigationItem[]>;
   /**
    * Re-run the `/api/v1/navigation` fetch for the current user and apply the
    * result. Resolves once the new (RBAC-filtered) list is in state, so callers
@@ -147,30 +146,10 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     setItems((prev) => prev.filter((item) => !drop.has(item.href)));
   }, []);
 
-  const getGroupedItems = useCallback(() => {
-    const grouped = new Map<string, NavigationItem[]>();
-    grouped.set('_ungrouped', []);
-
-    // Sort by `order` ascending so the client is robust regardless of the order
-    // the API returns items in. Array.prototype.sort is stable (ES2019+), so
-    // items sharing an `order` keep their original relative order.
-    const sortedItems = [...items].sort((a, b) => a.order - b.order);
-
-    // Group items by group property
-    sortedItems.forEach((item) => {
-      const groupId = item.group || '_ungrouped';
-      if (!grouped.has(groupId)) {
-        grouped.set(groupId, []);
-      }
-      grouped.get(groupId)!.push(item);
-    });
-
-    return grouped;
-  }, [items]);
 
   return (
     <NavigationContext.Provider
-      value={{ items, isLoading, getGroupedItems, refresh, removeItemsByHref }}
+      value={{ items, isLoading, refresh, removeItemsByHref }}
     >
       {children}
     </NavigationContext.Provider>

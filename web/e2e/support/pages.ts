@@ -145,12 +145,53 @@ export class AppShell {
     // to the navigation region excludes it; (2) within the nav, a section's
     // href is unique (/settings vs /admin/settings), so "Settings" and
     // "Website Settings" (both end in "Settings") never collide under strict mode.
+    //
+    // BOTH branches are CSS/text locators, deliberately not getByRole. Since
+    // the sidebar groups collapsed (#1007), a link in a group the user has not
+    // opened carries `hidden` — correct for a disclosure, but it also leaves
+    // the accessibility tree, so a role query reports count 0 for it. Several
+    // specs assert count 0 as PROOF that RBAC filtered a link out for a role
+    // (matrix-*.spec.ts, auth-transitions.spec.ts); a role query would satisfy
+    // them whether or not that filtering still works. A CSS/text locator counts
+    // the hidden link, so absence keeps meaning what those specs read it to
+    // mean. VISIBILITY is a separate question and still needs the group open —
+    // call expandAllNavGroups() before asserting it.
     const nav = this.sidebar.getByRole('navigation');
     const section = SIDEBAR_SECTIONS.find((s) => s.label === label);
     if (section) {
       return nav.locator(`a[href="${section.href}"]`);
     }
-    return nav.getByRole('link', { name: new RegExp(`\\b${escapeRegExp(label)}$`) });
+    return nav.locator('a').filter({ hasText: new RegExp(`\\b${escapeRegExp(label)}$`) });
+  }
+
+  /**
+   * Open every collapsed nav group, so any link can be seen or clicked.
+   *
+   * The sidebar opens only the group holding the current page, which is the
+   * point of grouping 22 links — but it means a link elsewhere is present and
+   * hidden. Idempotent: a group already open is left alone.
+   */
+  async expandAllNavGroups(): Promise<void> {
+    const toggles = this.sidebar.locator('[data-slot="app-sidebar-group-toggle"]');
+    const count = await toggles.count();
+    for (let i = 0; i < count; i++) {
+      const toggle = toggles.nth(i);
+      if ((await toggle.getAttribute('aria-expanded')) === 'false') {
+        await toggle.click();
+      }
+    }
+  }
+
+  /** The nav's filter box (#1007), present only when the sidebar is expanded. */
+  get navSearch(): Locator {
+    return this.sidebar.locator('[data-slot="app-sidebar-search"]');
+  }
+
+  /** The disclosure button for one nav group, by its server-side group id. */
+  navGroupToggle(groupId: string): Locator {
+    return this.sidebar.locator(
+      `[data-slot="app-sidebar-group-toggle"][data-group-id="${groupId}"]`
+    );
   }
 
   /** The desktop collapse/expand toggle in the sidebar header (title attr). */
@@ -171,6 +212,8 @@ export class AppShell {
   }
 
   async clickNav(label: string): Promise<void> {
+    // Expand first: the target link may sit in a group this page did not open.
+    await this.expandAllNavGroups();
     await this.navLink(label).click();
   }
 

@@ -32,7 +32,7 @@ jest.mock('@/lib/auth-context', () => ({
 }));
 
 jest.mock('@/lib/navigation-context', () => ({
-  useNavigation: () => ({ items: [], getGroupedItems: () => [], refresh: jest.fn() }),
+  useNavigation: () => ({ items: [], refresh: jest.fn() }),
 }));
 
 jest.mock('@/lib/branding-context', () => ({
