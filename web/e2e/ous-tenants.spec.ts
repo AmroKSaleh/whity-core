@@ -81,7 +81,14 @@ test.describe('Tenants (admin)', () => {
     await expect(dialog).toBeHidden();
   });
 
-  test('edit dialog pre-fills the selected tenant and cancels without mutating it', async ({
+  /**
+   * #882/#884: Edit is a RECORD PAGE now, not a dialog. This test was
+   * `edit dialog pre-fills the selected tenant and cancels without mutating it`
+   * and is rewritten rather than deleted — the coverage it carried (the edit
+   * surface pre-fills from the selected row, and leaving it mutates nothing) is
+   * still exactly what needs asserting; only the surface moved.
+   */
+  test('the row opens a workspace RECORD with an address, pre-filled and unsaved', async ({
     adminPage,
     page,
   }) => {
@@ -89,17 +96,60 @@ test.describe('Tenants (admin)', () => {
     await page.waitForURL('**/admin/tenants');
 
     const row = page.getByRole('row', { name: /Default Tenant/ });
-    await row.getByRole('button').click();
+    await row.getByRole('button', { name: 'Row actions' }).click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
 
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByRole('heading', { name: 'Edit Tenant' })).toBeVisible();
-    // The Name field is pre-filled from the selected row.
-    await expect(dialog.getByLabel('Name')).toHaveValue('Default Tenant');
+    // The record has an ADDRESS — that is the whole point of the page, so the
+    // URL is asserted rather than only the content.
+    await page.waitForURL(/\/admin\/tenants\/\d+$/);
+    await expect(page.getByTestId('tenant-record')).toBeVisible();
+    // And it is NOT an overlay: nothing is stacked over the list any more.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
 
-    // Cancel without saving — the seeded tenant must remain exactly as it was.
-    await dialog.getByRole('button', { name: 'Cancel' }).click();
-    await expect(dialog).toBeHidden();
+    // Pre-filled from the record the URL names — the assertion the old dialog
+    // test carried.
+    await expect(page.getByTestId('tenant-record-name')).toHaveValue('Default Tenant');
+
+    // The admin is tenant 1 looking at its OWN workspace, so the record is
+    // editable and Save exists — but stays inert until something changes, which
+    // is what makes "open it and leave" a safe read on a shared database.
+    await expect(page.getByTestId('tenant-record-save')).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Back to workspaces' }).click();
+    await page.waitForURL('**/admin/tenants');
+    await expect(
+      page.getByRole('cell', { name: 'Default Tenant', exact: true })
+    ).toBeVisible();
+  });
+
+  test('a workspace record survives a hard reload and the back button', async ({
+    adminPage,
+    page,
+  }) => {
+    await adminPage.shell.clickNav('Tenants');
+    await page.waitForURL('**/admin/tenants');
+
+    // Reach the record by clicking the row's own NAME — the affordance a list
+    // gets once its records have addresses.
+    await page.getByRole('button', { name: 'Default Tenant', exact: true }).click();
+    await page.waitForURL(/\/admin\/tenants\/\d+$/);
+    await expect(page.getByTestId('tenant-record')).toBeVisible();
+    const recordUrl = page.url();
+
+    // THE ACTUAL RELOAD, not a re-navigation: nothing survives it except the
+    // URL, so this is the only way to prove the page is rebuilt from the
+    // address rather than from the click that reached it.
+    await page.reload();
+    await expect(page).toHaveURL(recordUrl);
+    await expect(page.getByTestId('tenant-record')).toBeVisible();
+    await expect(page.getByTestId('tenant-record-name')).toHaveValue('Default Tenant');
+    await expect(page.getByTestId('tenant-record-stat-slug')).toBeVisible();
+
+    // The back BUTTON of the browser, distinct from the page's own back link:
+    // a record page that only works via its own control is still a modal with a
+    // URL bar.
+    await page.goBack();
+    await page.waitForURL('**/admin/tenants');
     await expect(
       page.getByRole('cell', { name: 'Default Tenant', exact: true })
     ).toBeVisible();
@@ -113,7 +163,7 @@ test.describe('Tenants (admin)', () => {
     await page.waitForURL('**/admin/tenants');
 
     const row = page.getByRole('row', { name: /Default Tenant/ });
-    await row.getByRole('button').click();
+    await row.getByRole('button', { name: 'Row actions' }).click();
     await page.getByRole('menuitem', { name: 'Delete' }).click();
 
     const deleteDialog = page.getByRole('dialog');

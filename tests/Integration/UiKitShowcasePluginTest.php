@@ -367,14 +367,14 @@ final class UiKitShowcasePluginTest extends TestCase
 
     /**
      * WC-236 / WC-240: interactive and chart demos are now in the tree, so the
-     * coverage assertion is restored to ALL BlockContract::types()
-     * (SP1 + SP2 + SP3 interactive + SP4 chart).
-     * Total: 46 types (21 SP1+SP2 + 12 SP3 interactive + 1 SP4 chart
-     * + 2 overlay containers: modal + drawer + 2 workflow leaves: timeline +
-     * inbox + 1 ouScopePicker, #868 — and the rest the whitelist has grown
-     * since). The count is written out rather than derived because a type added
-     * to the whitelist WITHOUT a showcase instance is precisely what this test
-     * exists to catch.
+     * coverage assertion is restored to ALL BlockContract::types() — 50 as of
+     * #950, which added `flow`. The count is written out rather than derived
+     * because a type added to the whitelist WITHOUT a showcase instance is
+     * precisely what this test exists to catch.
+     *
+     * The breakdown that used to sit here (so many SP1, so many SP3, …) is gone
+     * deliberately: it had drifted three types out of date, and a stale tally is
+     * worse than none — it reads as though somebody checked.
      */
     public function testTheBlocksTreeCoversEveryBlockType(): void
     {
@@ -701,7 +701,11 @@ final class UiKitShowcasePluginTest extends TestCase
                 "the showcase must never declare '{$reserved}' as a record fact (#895)"
             );
         }
-        $this->assertSame(['name', 'role', 'status', 'joined'], $declared);
+        // `documentId` joined the whitelist with #947 item 4's `documentViewer`
+        // demo, which binds to it. It is a FACT about the record — which
+        // document was issued from it — so it belongs here; the guard above is
+        // what keeps a caller flag out, and it still runs over this list.
+        $this->assertSame(['name', 'role', 'status', 'joined', 'documentId'], $declared);
     }
 
     /**

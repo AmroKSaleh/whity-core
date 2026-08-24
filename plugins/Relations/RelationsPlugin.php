@@ -23,6 +23,17 @@ use Whity\Sdk\Sql\SequenceAllocator;
  * the web app until cutover; this plugin owns the offline (and eventually the
  * server) surface.
  *
+ * As with Taxonomy and Documents, the `/api/persons` routes and the
+ * `relations:read`/`relations:manage` permissions belong to core on the SERVER —
+ * so the plugin is inert there until the cutover, and is the sole provider on the
+ * OFFLINE host, where no core Relations exists. That inertness reaches the
+ * frontend too (#969): the block screen below is refused by whity-core's loader,
+ * and — measured, not assumed — the rule that refuses it is the core-permission
+ * OWNERSHIP rule, which fires before (and independently of) the route collisions.
+ * The device host applies neither rule, which is why the screen renders there.
+ * `scripts/ci-plugin-frontend-features.php` records that expectation and fails if
+ * the reason ever changes.
+ *
  * SLICE 1 — persons as a two-way-syncable resource via
  * {@see \Whity\Sdk\Sync\SyncController}.
  *

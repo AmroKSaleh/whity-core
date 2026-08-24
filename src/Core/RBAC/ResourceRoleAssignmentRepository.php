@@ -188,6 +188,81 @@ class ResourceRoleAssignmentRepository
     }
 
     /**
+     * Whether ONE PROFILE holds any grant addressed at one resource (#947 item 3).
+     *
+     * The cheap existence question, for a caller that only needs to know whether
+     * a person has authority here — {@see \Whity\Core\Document\DocumentVisibilityPolicy}
+     * asks it to decide whether somebody may read a document. Distinct from
+     * {@see listFor()}, which returns every grant at the resource including the
+     * everyone-grants; fetching that list to answer a yes/no is a wider read for
+     * a narrower question.
+     *
+     * EVERYONE-GRANTS (`profile_id IS NULL`) ARE DELIBERATELY EXCLUDED. Migration
+     * 088 defines that row as "everyone WITH ACCESS TO this resource gets role R
+     * here" — it modifies what people who can already reach the record may do,
+     * and is not itself a grant of access. Counting it here would inverted its
+     * meaning: a document carrying one everyone-grant would become readable by
+     * every profile in the tenant, which is precisely the widening the row is
+     * not.
+     */
+    public function hasProfileGrantAt(
+        int $tenantId,
+        string $resourceType,
+        int $resourceId,
+        int $profileId,
+    ): bool {
+        $statement = $this->db->prepare(
+            'SELECT 1 FROM resource_role_assignments
+             WHERE tenant_id = ? AND resource_type = ? AND resource_id = ? AND profile_id = ?
+             LIMIT 1'
+        );
+        $statement->execute([$tenantId, $resourceType, $resourceId, $profileId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
+     * The resources of one TYPE at which a profile PERSONALLY holds a grant.
+     *
+     * The inverse of {@see hasProfileGrantAt()}: that answers "does this person
+     * have standing HERE?", this answers "where does this person have standing?".
+     * {@see \Whity\Core\Ou\OuReachResolver} asks it with `ou` to learn which
+     * units a profile has authority at beyond the ones they are a member of —
+     * the dean's secretary who also covers Materials Science.
+     *
+     * It lives here rather than as a query in the caller because this class is
+     * the single access path for `resource_role_assignments`, and a caller that
+     * wrote its own SELECT would have to re-derive the nullable-`profile_id`
+     * rule below. Re-deriving it wrongly is not a visible bug; it is a silent
+     * widening.
+     *
+     * EVERYONE-GRANTS (`profile_id IS NULL`) ARE EXCLUDED, for the reason
+     * {@see hasProfileGrantAt()} records at length: migration 088 defines such a
+     * row as "everyone WITH ACCESS to this resource gets role R here", so it
+     * modifies what already-reachable people may DO and is not itself a grant of
+     * access. Counting one as standing would give every profile in the tenant
+     * authority at any unit carrying a single everyone-grant.
+     *
+     * @return list<int> Distinct resource ids, ascending.
+     */
+    public function resourceIdsForProfile(int $tenantId, string $resourceType, int $profileId): array
+    {
+        $statement = $this->db->prepare(
+            'SELECT DISTINCT resource_id FROM resource_role_assignments
+             WHERE tenant_id = ? AND resource_type = ? AND profile_id = ?
+             ORDER BY resource_id'
+        );
+        $statement->execute([$tenantId, $resourceType, $profileId]);
+
+        $out = [];
+        foreach ($statement->fetchAll(PDO::FETCH_COLUMN) ?: [] as $resourceId) {
+            $out[] = (int) $resourceId;
+        }
+
+        return $out;
+    }
+
+    /**
      * Every grant at one resource, tenant scoped.
      *
      * @return list<array{id: int, role_id: int, profile_id: int|null}>

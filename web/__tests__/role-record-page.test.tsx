@@ -13,9 +13,10 @@
  *     most-recent assignment come from `getRoleAssignments`, whose `total` is
  *     the FULL count while `assignments` is only the page. Reading the count off
  *     `assignments.length` is the bug this endpoint exists to prevent.
- *  3. **Read-only is a state, not a disabled form.** Both gates — the caller's
- *     `roles:write` and the role's server-computed `manageable` — must produce a
- *     page with no inputs, and one that says why.
+ *  3. **Read-only is a state, not a disabled form**, and since #910 it is a
+ *     state PER REGION. The server ships a verdict per region and the screen
+ *     renders it; a read-only region must have no inputs, and must say why.
+ *     `role-record-sections.test.tsx` drives the three states themselves.
  *  4. **A missing `audit:read` hides the history panel** rather than showing an
  *     error, because that is an ungranted capability and not a failure.
  *
@@ -46,6 +47,20 @@ const t = (_key: string, fallback?: string, vars?: Record<string, string | numbe
   );
 };
 
+/**
+ * The server's per-region verdicts (#910). Both regions editable is the ordinary
+ * case for a role administrator, and the baseline these tests vary from.
+ */
+const RECORD_DENIAL = {
+  code: 'record',
+  reason: 'This is a global base role. Only the system tenant can change it.',
+  detail: null,
+};
+const EDITABLE_SECTIONS = {
+  details: { state: 'editable' as const, denial: null },
+  permissions: { state: 'editable' as const, denial: null },
+};
+
 const CATALOGUE: Permission[] = [
   { id: 1, name: 'users:read', description: 'Read users' },
   { id: 2, name: 'users:write', description: 'Write users' },
@@ -62,8 +77,15 @@ const TENANT_ROLE: RoleWithPermissions = {
   manageable: true,
   global: false,
   permissions: [CATALOGUE[0], CATALOGUE[2]],
+  sections: EDITABLE_SECTIONS,
 };
 
+/**
+ * The same role as a TENANT sees it: global, unmanageable here, and both regions
+ * read-only for the RECORD's own reason rather than for anything the caller
+ * lacks. Because the two regions give the same reason the shell hoists it and
+ * says it once above the page.
+ */
 const GLOBAL_ROLE: RoleWithPermissions = {
   ...TENANT_ROLE,
   id: 1,
@@ -71,6 +93,10 @@ const GLOBAL_ROLE: RoleWithPermissions = {
   description: 'Global base role',
   manageable: false,
   global: true,
+  sections: {
+    details: { state: 'read-only' as const, denial: RECORD_DENIAL },
+    permissions: { state: 'read-only' as const, denial: RECORD_DENIAL },
+  },
 };
 
 function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
@@ -89,9 +115,12 @@ function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
   };
 }
 
-/** Caller holds every capability unless a test says otherwise. */
-const canAll = () => true;
-
+/**
+ * No `can` prop, and that is the #910 change these tests exercise throughout:
+ * the screen resolves nothing about the caller. Every state below is produced by
+ * varying what the SERVER said in `getRole`, which is the only place the answer
+ * comes from now.
+ */
 function renderRecord(props: Partial<React.ComponentProps<typeof RoleRecordScreen>> = {}) {
   const adapter = props.adapter ?? fakeAdapter();
   const onBack = props.onBack ?? jest.fn();
@@ -99,7 +128,6 @@ function renderRecord(props: Partial<React.ComponentProps<typeof RoleRecordScree
     <RoleRecordScreen
       adapter={adapter}
       roleId={props.roleId ?? 10}
-      can={props.can ?? canAll}
       t={t}
       onNotify={props.onNotify}
       onBack={onBack}
@@ -368,12 +396,50 @@ describe('RoleRecordScreen — read-only is a state, not a disabled form', () =>
     expect(document.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
   });
 
-  it('renders read-only, and says why, for a caller without roles:write', async () => {
-    renderRecord({ can: () => false });
+  it('renders read-only, and says why, for a caller the server refused on permission', async () => {
+    renderRecord({
+      adapter: fakeAdapter({
+        getRole: jest.fn().mockResolvedValue({
+          ...TENANT_ROLE,
+          sections: {
+            details: {
+              state: 'read-only' as const,
+              denial: {
+                code: 'permission',
+                reason: 'server prose the client overrides',
+                detail: null,
+              },
+            },
+            // Carries the operator-grade half, which the server sends only to a
+            // caller holding `permissions:read`. The shell appends it after the
+            // localized sentence, exactly as `DeniedControl` does (#968).
+            permissions: {
+              state: 'read-only' as const,
+              denial: {
+                code: 'permission',
+                reason: 'server prose the client overrides',
+                detail: "changing this requires the 'roles:manage' permission",
+              },
+            },
+          },
+        }),
+      }),
+    });
 
     expect(
       await screen.findByText(
-        "You don't have permission to edit roles, so this record is read-only."
+        "You don't have permission to change roles, so these details are read-only."
+      )
+    ).toBeInTheDocument();
+    // The two regions were refused by DIFFERENT slugs, so each says its own — a
+    // single page-level sentence could only ever have named one of them.
+    // The localized sentence, with the server's operator-grade `detail`
+    // appended — the composition the shell owns so every screen does it the
+    // same way (#968).
+    expect(
+      screen.getByText(
+        "You may see what this role grants, but not change it. " +
+          "(changing this requires the 'roles:manage' permission)"
       )
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();

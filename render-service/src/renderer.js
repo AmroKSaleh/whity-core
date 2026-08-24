@@ -28,6 +28,16 @@ const puppeteer = require('puppeteer-core');
 const DEFAULT_CHROMIUM_PATH = '/usr/bin/chromium';
 const NAV_TIMEOUT_MS = Number(process.env.RENDER_NAV_TIMEOUT_MS || 20000);
 const READY_TIMEOUT_MS = Number(process.env.RENDER_READY_TIMEOUT_MS || 20000);
+// Printing is its own wait, and it was the one this file did not name. Left
+// unset, `page.pdf()` takes puppeteer's implicit 30 s protocol timeout — a
+// hard ceiling nobody chose and no environment variable could move, sitting
+// far BELOW the batch sizes documents.render_max_rows/_max_pages allow (a
+// 500-row job over a three-page template is ~1500 pages and reaches it while
+// the settings still consider the request well within bounds). The default
+// stays 30 s so behaviour is unchanged; naming it makes it raiseable by an
+// operator who has also raised the limits and RENDER_TIMEOUT_SECONDS on the
+// core side. See docs/wiki/Document-Render-Service.md.
+const PDF_TIMEOUT_MS = Number(process.env.RENDER_PDF_TIMEOUT_MS || 30000);
 
 let browserPromise = null;
 
@@ -102,6 +112,7 @@ async function renderToPdf(payload, opts) {
       printBackground: true,
       preferCSSPageSize: true,
       margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+      timeout: PDF_TIMEOUT_MS,
     });
 
     return Buffer.from(pdf);

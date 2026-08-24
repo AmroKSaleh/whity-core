@@ -6,6 +6,9 @@ namespace Whity\Cli\Commands;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Audit\AuditOrigin;
+use Whity\Core\Hooks\HookManager;
 use Whity\Core\Queue\CoreJobs;
 use Whity\Core\Queue\JobRegistry;
 use Whity\Core\Queue\JobRepository;
@@ -76,6 +79,24 @@ final class QueueWorkCommand
             // codebase has already paid for more than once (#717, #724, #727).
             \Whity\register_service(Database::class, $database);
 
+            // Everything a job does is audited, and until #935 none of it was.
+            //
+            // The worker builds its own loader, so the audit writer the HTTP and
+            // CLI kernels subscribe was simply absent here: core CRUD driven by a
+            // job dispatched into nothing, and a plugin's declared events did too.
+            //
+            // The manager is REGISTERED as a service as well as handed to the
+            // loader. HookManager's constructor arguments are all optional, so a
+            // handler resolving `\Whity\app(HookManager::class)` from a worker
+            // that had not registered one got a freshly built manager with no
+            // subscribers — a dispatch that succeeds, reaches nobody, and reports
+            // nothing. Registering the wired instance makes the container answer
+            // with the audited manager instead of improvising an unaudited one.
+            $hookManager = new HookManager();
+            $auditLogger = new AuditLogger($pdo, $this->logger, AuditOrigin::job());
+            $auditLogger->subscribe($hookManager);
+            \Whity\register_service(HookManager::class, $hookManager);
+
             $repo ??= new JobRepository($pdo);
             $registry = new JobRegistry();
             // Pass the PDO so the internal notification-delivery job (+ its default
@@ -85,7 +106,7 @@ final class QueueWorkCommand
             // a plugin's are namespaced under its own plugin name, so the order is
             // not load-bearing for correctness — but it does mean a plugin that
             // fails to load never delays or displaces core's own work.
-            PluginJobs::register($registry, null, $this->logger);
+            PluginJobs::register($registry, null, $this->logger, $hookManager, $auditLogger);
             $runner ??= new JobRunner($repo, $registry, $this->logger);
         }
         $this->repo = $repo;

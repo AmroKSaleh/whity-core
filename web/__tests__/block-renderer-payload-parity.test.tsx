@@ -37,6 +37,17 @@
  *    submit token — only resolves for a field the table happens to show. The
  *    tree below declares every field as a column so both renderers start from
  *    the same context and this test measures the defaults path, not that one.
+ *  - the ENVELOPE a form preload reads (found while adding the #957 section
+ *    below, and left for its own change): web seeds the value map from the
+ *    whole JSON body, desktop from `body.data`. So one flat `{field: value}`
+ *    reply prefills web and lands desktop in `error`; one `{data: {…}}` reply
+ *    prefills desktop and seeds web a junk `data` key. Whichever an author
+ *    picks, ONE renderer shows an enabled un-prefilled form — the #957 hazard
+ *    reached by a second route. Deciding which envelope is right changes
+ *    behaviour for every existing declaration on one of the two platforms, so
+ *    it is a contract call and not a rider on this fix. The #957 cases below
+ *    therefore measure the REQUESTS and the unbound STATE, which is what #957
+ *    is about, and not the seeded values, which this would confound.
  */
 
 import React from 'react';
@@ -751,5 +762,170 @@ describe('web ⇄ desktop access-gate parity (#909)', () => {
     expect(desktop.container.querySelector('[data-slot="block-access-pending"]')).toBeNull();
     expect(desktop.container.textContent).not.toContain('EDITABLE');
     expect(desktop.container.textContent).not.toContain('READ ONLY');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #957: same form + same unbound token ⇒ the same NON-REQUEST, and the same
+// refusal to present itself as editable.
+//
+// This is the divergence that made the parity file worth extending. #949 fixed
+// the web renderer's form preload — it interpolated `dataSource.path` and
+// stopped fetching until every token was bound — and the desktop twin kept the
+// old behaviour for another release, because nothing here covered form
+// preloads. That is the SECOND time the two renderers were found out of step on
+// one contract, and it is the more expensive one: the desktop runs offline,
+// against a local host, with nobody watching, and what it writes syncs later.
+//
+// An un-prefilled edit form submitted against an update endpoint that replaces
+// rather than merges blanks every field the user did not retype and reports
+// success. On a device the blanked row then replicates as a legitimate edit,
+// and nothing downstream can tell it from an intentional clear.
+//
+// So both halves are asserted on both twins: no request while unbound, AND the
+// form disabled and saying so. The second half is the one that closes the
+// data-loss path — an enabled un-prefilled form is the thing that gets
+// submitted over a real record.
+// ---------------------------------------------------------------------------
+
+/** One record, named by a token nothing has bound yet. */
+const PRELOAD_FORM = [
+  {
+    type: 'form',
+    submit: { method: 'PATCH', endpoint: '/api/v1/people/{record}' },
+    dataSource: { method: 'GET', path: '/api/v1/people/{record}' },
+    children: [
+      { type: 'textInput', name: 'full_name', label: 'Full name' },
+      { type: 'submitButton', label: 'Save' },
+    ],
+  },
+];
+
+/** What one renderer did with the form: every path it asked for, and the state
+ * it left the form in. Both hosts answer everything 200 — including the
+ * truncated `/api/v1/people/`, which is the point: the collection route does
+ * not fail, so only "was it asked at all" separates the fix from the bug. */
+type FormOutcome = { paths: string[]; disabled: boolean; unbound: boolean };
+
+/** Both renderers disable a form through the enclosing `<fieldset disabled>`,
+ * and `HTMLInputElement.disabled` reflects only the attribute ON THE INPUT — so
+ * reading that alone would report every form here as enabled and agree with
+ * itself while measuring nothing. This is the ancestor walk `toBeDisabled()`
+ * does, kept as a boolean so both twins' answers can be compared rather than
+ * asserted one at a time. */
+function effectivelyDisabled(element: HTMLElement): boolean {
+  return (element as HTMLInputElement).disabled || element.closest('fieldset[disabled]') !== null;
+}
+
+async function webFormOutcome(record?: string): Promise<FormOutcome> {
+  cleanup();
+  mockApiClient.mockClear();
+  mockApiClient.mockResolvedValue(stubResponse(200, { data: [{ id: '7' }] }));
+  const view = renderWeb(<WebBlockRenderer blocks={PRELOAD_FORM as unknown as WebBlock[]} record={record} />);
+
+  const input = await screen.findByRole('textbox', { name: /full name/i });
+  // Let any effect that wanted to fetch have fired before the paths are read.
+  await waitFor(() => expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument());
+
+  return {
+    paths: mockApiClient.mock.calls.map((call) => String(call[0])),
+    disabled: effectivelyDisabled(input),
+    unbound: view.container.querySelector('[data-slot="form-unbound"]') !== null,
+  };
+}
+
+async function desktopFormOutcome(record?: string): Promise<FormOutcome> {
+  cleanup();
+  mockInvoke.mockClear();
+  mockInvoke.mockResolvedValue({ status: 200, body: { data: [{ id: '7' }] } });
+  const view = render(
+    <DesktopBlockRenderer
+      feature={{ ...FEATURE, blocks: PRELOAD_FORM as unknown as DesktopBlock[] }}
+      record={record}
+    />
+  );
+
+  const input = await screen.findByRole('textbox', { name: /full name/i });
+  await waitFor(() => expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument());
+
+  return {
+    paths: mockInvoke.mock.calls.map(([, args]) => String((args as { path: string }).path)),
+    disabled: effectivelyDisabled(input),
+    unbound: view.container.querySelector('[data-slot="form-unbound"]') !== null,
+  };
+}
+
+/** Web renders inside a ToastProvider; the desktop renderer has no equivalent. */
+function renderWeb(ui: React.ReactElement) {
+  return render(ui, { wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider> });
+}
+
+describe('web ⇄ desktop form-preload parity (#957)', () => {
+  it('agrees that an unbound form preload costs ZERO requests', async () => {
+    const web = await webFormOutcome();
+    const desktop = await desktopFormOutcome();
+
+    expect(desktop.paths).toEqual(web.paths);
+    // Pinned literally too, so a shared regression in which BOTH renderers ask
+    // still fails here rather than agreeing on the wrong request.
+    expect(web.paths).toEqual([]);
+  });
+
+  it('agrees on the one request a bound form preload costs', async () => {
+    const web = await webFormOutcome('7');
+    const desktop = await desktopFormOutcome('7');
+
+    expect(desktop.paths).toEqual(web.paths);
+    expect(web.paths).toEqual(['/api/v1/people/7']);
+    // Never the truncated collection, and never the raw token — the two wrong
+    // answers this contract exists to rule out.
+    for (const path of [...web.paths, ...desktop.paths]) {
+      expect(path).not.toBe('/api/v1/people/');
+      expect(path).not.toContain('{');
+      expect(path).not.toContain('%7B');
+    }
+  });
+
+  it('agrees that an unbound form is disabled and says so, not empty and submittable', async () => {
+    // The half that actually closes the data-loss path. Deferring the fetch
+    // alone would leave an enabled form holding nothing, which is exactly what
+    // gets submitted over a real record.
+    const web = await webFormOutcome();
+    const desktop = await desktopFormOutcome();
+
+    for (const outcome of [web, desktop]) {
+      expect(outcome.disabled).toBe(true);
+      expect(outcome.unbound).toBe(true);
+    }
+  });
+
+  it('agrees that a bound form is enabled and drops the notice', async () => {
+    const web = await webFormOutcome('7');
+    const desktop = await desktopFormOutcome('7');
+
+    for (const outcome of [web, desktop]) {
+      expect(outcome.disabled).toBe(false);
+      expect(outcome.unbound).toBe(false);
+    }
+  });
+
+  it('agrees that an unbound form submits nothing when Save is pressed', async () => {
+    // Belt and braces on the same seam, through the control a user actually
+    // reaches for: a disabled fieldset must swallow the click on both twins.
+    cleanup();
+    mockApiClient.mockClear();
+    mockApiClient.mockResolvedValue(stubResponse(200, { data: [] }));
+    renderWeb(<WebBlockRenderer blocks={PRELOAD_FORM as unknown as WebBlock[]} />);
+    await userEvent.click(await screen.findByRole('button', { name: /save/i }));
+    expect(mockApiClient).not.toHaveBeenCalled();
+
+    cleanup();
+    mockInvoke.mockClear();
+    mockInvoke.mockResolvedValue({ status: 200, body: { data: [] } });
+    render(
+      <DesktopBlockRenderer feature={{ ...FEATURE, blocks: PRELOAD_FORM as unknown as DesktopBlock[] }} />
+    );
+    await userEvent.click(await screen.findByRole('button', { name: /save/i }));
+    expect(mockInvoke).not.toHaveBeenCalled();
   });
 });

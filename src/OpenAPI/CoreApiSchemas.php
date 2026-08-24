@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\OpenAPI;
 
 use Whity\Core\Ou\OuTypeRegistry;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\Response;
 use Whity\Core\Router;
@@ -110,6 +111,11 @@ final class CoreApiSchemas
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
             self::documentBlockRoutes(),
+            self::documentRecordRoutes(),
+            self::documentRoutingRoutes(),
+            self::meInboxRoutes(),
+            self::userGroupRoutes(),
+            self::documentCollectionRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
             self::tagRoutes(),
@@ -590,7 +596,7 @@ final class CoreApiSchemas
             // for page 2 without lying about the contract. Declaring them changes
             // no behaviour; it stops the published spec understating what the
             // endpoint does.
-            self::adminRoute('GET', '/api/roles', [
+            self::permissionRoute('GET', '/api/roles', CorePermissions::ROLES_READ, [
                 'summary' => 'List the roles visible to the tenant (own + global)',
                 'tags' => ['roles'],
                 'parameters' => [
@@ -601,7 +607,7 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('Visible roles with permission counts', 'RoleListResponse'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('POST', '/api/roles', [
+            self::permissionRoute('POST', '/api/roles', CorePermissions::ROLES_WRITE, [
                 'summary' => 'Create a role, owned by the caller\'s tenant unless a system caller names another',
                 'tags' => ['roles'],
                 'request' => 'RoleCreateRequest',
@@ -614,7 +620,7 @@ final class CoreApiSchemas
                     422 => self::errorResponse('name over 255 or description over 10000 characters'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/roles/{id:\d+}', [
+            self::permissionRoute('GET', '/api/roles/{id:\d+}', CorePermissions::ROLES_READ, [
                 'summary' => 'Get a role with its permissions',
                 'tags' => ['roles'],
                 'responses' => [
@@ -622,7 +628,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not visible'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('PATCH', '/api/roles/{id:\d+}', [
+            self::permissionRoute('PATCH', '/api/roles/{id:\d+}', CorePermissions::ROLES_WRITE, [
                 'summary' => 'Update a role (permissions are replaced when supplied)',
                 'tags' => ['roles'],
                 'request' => 'RoleUpdateRequest',
@@ -633,7 +639,7 @@ final class CoreApiSchemas
                     422 => self::errorResponse('name over 255 or description over 10000 characters'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('DELETE', '/api/roles/{id:\d+}', [
+            self::permissionRoute('DELETE', '/api/roles/{id:\d+}', CorePermissions::ROLES_DELETE, [
                 'summary' => 'Delete a role',
                 'tags' => ['roles'],
                 'responses' => [
@@ -647,7 +653,7 @@ final class CoreApiSchemas
             // first, so page one is the recent-assignment history and
             // `pagination.total` is the headcount — one request for both, and no
             // client-side count over every user in the tenant.
-            self::adminRoute('GET', '/api/roles/{id:\d+}/assignments', [
+            self::permissionRoute('GET', '/api/roles/{id:\d+}/assignments', CorePermissions::ROLES_READ, [
                 'summary' => 'List who holds this role, newest grant first (total = headcount)',
                 'tags' => ['roles'],
                 'parameters' => [
@@ -659,7 +665,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not visible'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/roles/{id:\d+}/permissions', [
+            self::permissionRoute('GET', '/api/roles/{id:\d+}/permissions', CorePermissions::PERMISSIONS_READ, [
                 'summary' => 'List a role\'s permissions',
                 'tags' => ['roles'],
                 'responses' => [
@@ -671,7 +677,7 @@ final class CoreApiSchemas
             // so adding one permission means reading the set and writing it back
             // — and two admins doing that at once silently lose one edit. These
             // send only the delta, and are idempotent in both directions.
-            self::adminRoute('POST', '/api/roles/{id:\d+}/permissions', [
+            self::permissionRoute('POST', '/api/roles/{id:\d+}/permissions', CorePermissions::ROLES_MANAGE, [
                 'summary' => 'Grant permissions to a role (additive, idempotent)',
                 'tags' => ['roles'],
                 'request' => 'RolePermissionsChangeRequest',
@@ -681,7 +687,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not manageable by the tenant'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('DELETE', '/api/roles/{id:\d+}/permissions', [
+            self::permissionRoute('DELETE', '/api/roles/{id:\d+}/permissions', CorePermissions::ROLES_MANAGE, [
                 'summary' => 'Revoke permissions from a role (subtractive, idempotent)',
                 'tags' => ['roles'],
                 'request' => 'RolePermissionsChangeRequest',
@@ -1949,13 +1955,36 @@ final class CoreApiSchemas
      */
     private static function brandingRoutes(): array
     {
+        // #954: this body was written under the key `requestBody`, which
+        // SchemaGenerator::addOperation() does not read — it reads `request`.
+        // The declaration was therefore built, merged, and dropped on the floor:
+        // both upload operations published with NO request body at all, so a
+        // generated client could see the endpoint and had no way to learn the
+        // part is called `file`. The key is the whole fix; the shape below was
+        // already right.
+        //
+        // A complete OpenAPI requestBody object (it carries `content`), so the
+        // generator passes it through verbatim rather than re-wrapping it as
+        // application/json — the same path POST /api/plugins/upload takes.
         $multipartBody = [
-            'requestBody' => [
+            'request' => [
                 'required' => true,
                 'content' => [
                     'multipart/form-data' => [
                         'schema' => self::object([
-                            'file' => ['type' => 'string', 'format' => 'binary'],
+                            // BrandingApiHandler::readUploadedFile() reads exactly
+                            // one part, named `file`, via getUploadedFiles(); there
+                            // is no other field and no JSON alternative (FrankenPHP
+                            // drains php://input, so a raw-body path cannot work).
+                            // Absent, the handler answers 400.
+                            'file' => [
+                                'type' => 'string',
+                                'format' => 'binary',
+                                'description' => 'The asset bytes. The TYPE is decided by magic bytes, not by '
+                                    . 'filename or Content-Type: `logo_wide` and `logo_square` accept PNG, WebP '
+                                    . 'or SVG (max 2 MiB, SVG stored sanitized), `favicon` accepts ICO or PNG '
+                                    . '(max 1 MiB). Anything else is a 422.',
+                            ],
                         ], ['file']),
                     ],
                 ],
@@ -2911,24 +2940,31 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
                 'is_system' => self::bool(),
                 'created_by' => self::int(true),
+                // Where in the organisation the row is filed (migration 117). null = tenant-wide,
+                // which is what every row was before it and what an unplaced row still is.
+                'owner_ou_id' => self::int(true),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
             'DocumentTemplateListResponse' => self::listEnvelope('DocumentTemplate'),
             'DocumentTemplateResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentTemplate')),
-            // scope/required_permission are optional; setting a shared scope or a
-            // permission tag requires documents:publish (403 otherwise).
+            // scope/required_permission/owner_ou_id are all optional; setting a
+            // shared scope, a permission tag, or a placement requires
+            // documents:publish (403 otherwise). owner_ou_id must be a unit of the
+            // caller's own tenant (422 otherwise); null files the row tenant-wide.
             'DocumentTemplateCreateRequest' => self::object([
                 'name' => self::str(),
                 'data' => ['type' => 'object', 'additionalProperties' => true],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
                 'required_permission' => self::str(true),
+                'owner_ou_id' => self::int(true),
             ], ['name', 'data']),
             'DocumentTemplateUpdateRequest' => self::object([
                 'name' => self::str(),
                 'data' => ['type' => 'object', 'additionalProperties' => true],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
                 'required_permission' => self::str(true),
+                'owner_ou_id' => self::int(true),
             ], []),
 
             // Server-side render (ADR 0012 / WC-docdesigner Track 2). `dataRows`
@@ -2938,10 +2974,472 @@ final class CoreApiSchemas
             // freeform (mirror the client's DocElement-adjacent JSON shapes
             // rather than a rigid schema, same "verbatim client JSON" posture
             // as DocumentTemplate.data itself).
+            //
+            // `persist` (#947 item 1) turns the render into a DOCUMENT RECORD:
+            // the response becomes a DocumentResponse (201) instead of PDF
+            // bytes. It defaults to FALSE because the dominant caller is the
+            // designer's preview, which must not write to storage — see
+            // DocumentRenderApiHandler. `title` names the record and is ignored
+            // when not persisting.
             'DocumentRenderRequest' => self::object([
                 'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
                 'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+                'persist' => ['type' => 'boolean', 'default' => false],
+                'title' => self::str(true),
             ], []),
+
+            // ── Issued documents (#947 item 1) ────────────────────────────────
+            // A document is the RECORD; its artifacts are the immutable files
+            // that were issued from it. `content_url` is the durable reference —
+            // an API path, not a storage key (which is never on the wire) and
+            // not a signed URL (the local driver cannot produce one).
+            // `document_template_id` is nullable because the template may be
+            // deleted after the fact; `template_name` is the snapshot that keeps
+            // the record legible when it is.
+            'DocumentArtifact' => self::object([
+                'id' => self::int(),
+                'document_id' => self::int(),
+                'content_type' => self::str(),
+                'byte_size' => self::int(),
+                // Lowercase hex SHA-256 of the stored bytes: what lets a
+                // consumer prove the file it downloaded is the file that was
+                // issued.
+                'checksum_sha256' => self::str(),
+                'rendered_by' => self::int(true),
+                'rendered_at' => self::str(),
+                'content_url' => self::str(),
+            ], ['id', 'document_id', 'content_type', 'byte_size', 'checksum_sha256', 'rendered_at', 'content_url']),
+            'Document' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'document_template_id' => self::int(true),
+                'template_name' => self::str(),
+                'title' => self::str(),
+                'origin_ou_id' => self::int(true),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                // The CURRENT artifact's bytes; null only for a record whose
+                // artifact rows are gone (a partial restore), since the issuer
+                // never commits a document without one.
+                'content_url' => self::str(true),
+                // Newest first. More than one entry means the document has been
+                // re-rendered: every earlier artifact is still fetchable at its
+                // own content_url.
+                'artifacts' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentArtifact')],
+                // #978: the CALLER's own filing of this document. Both keys are
+                // OPTIONAL and their ABSENCE is meaningful — the routes that
+                // know who is asking (list, get) compute them; the render route
+                // does not, and defaulting `starred` to false there would be a
+                // claim nobody made. Neither is in `required` for that reason.
+                'collection_ids' => ['type' => 'array', 'items' => self::int()],
+                'starred' => self::bool(),
+                // #993: the record page's per-region verdicts, keyed by region
+                // (`document`, `trail`, `recipients`). Sent by `GET /{id}` only
+                // — the LIST omits it, for the same reason the filing keys above
+                // are optional: a verdict is an answer about one record and one
+                // caller, and 25 of them per page would gate nothing.
+                //
+                // A region the caller may not see is ABSENT from the map. There
+                // is no `hidden` state on the wire and there must not be: a
+                // `{"state": "hidden"}` entry would tell a caller the exact
+                // thing withholding the region was for. See
+                // RecordSectionResolver.
+                'sections' => [
+                    'type' => 'object',
+                    'additionalProperties' => SchemaBuilder::ref('RecordSectionVerdict'),
+                ],
+            ], ['id', 'tenant_id', 'template_name', 'title', 'created_at', 'artifacts']),
+            // Not paginatedListEnvelope: the organizer echoes back WHICH view it
+            // ran and what anchor it resolved to, so a client rendering a rail
+            // does not have to re-derive the selection from its own URL — and
+            // the anchor the server actually used (the caller's own unit, when
+            // none was supplied) is visible rather than assumed.
+            'DocumentListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('Document')],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+                'view' => self::object([
+                    'key' => self::str(),
+                    'ou_id' => self::int(true),
+                    'collection_id' => self::int(true),
+                ], ['key']),
+            ], ['data', 'pagination', 'view']),
+            'DocumentResponse' => self::dataEnvelope(SchemaBuilder::ref('Document')),
+            // The re-render body. Same render inputs as DocumentRenderRequest
+            // minus `persist`/`title`: this route ALWAYS persists (that is what
+            // it is for) and never renames the record it appends to.
+            'DocumentRerenderRequest' => self::object([
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+            ], []),
+
+            // -- Document routing (#947 item 3) --------------------------------
+            // A ROUTE is one circulation of one document; its STEPS are the
+            // ordered plan, and each step names a RULE rather than a person, so
+            // the people are resolved at send time against the organisation as
+            // it stands then. The TRAIL is append-only and is the system of
+            // record - there is no status column anywhere in routing, on purpose.
+            //
+            // `rule_config` is freeform because a rule's parameters are open by
+            // construction: core cannot know what an `acme:committee` rule needs
+            // to be told, and the only code that does is the resolver the plugin
+            // registered (which validates it at authoring time). Contrast the
+            // trail below, whose shape IS fixed and is therefore typed.
+            'RoutingRule' => self::object([
+                'kind' => self::str(),
+                'label' => self::str(),
+                // 'core', or the plugin that contributed the kind.
+                'source' => self::str(),
+            ], ['kind', 'label', 'source']),
+            'RoutingRuleListResponse' => self::listEnvelope('RoutingRule'),
+
+            'DocumentRouteStep' => self::object([
+                'id' => self::int(),
+                // A 1-based AUTHORING ORDINAL, not a depth: see migration 112.
+                'position' => self::int(),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+                'label' => self::str(true),
+            ], ['id', 'position', 'rule_kind', 'rule_config']),
+            'DocumentRoute' => self::object([
+                'id' => self::int(),
+                'document_id' => self::int(),
+                'title' => self::str(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteStep')],
+            ], ['id', 'document_id', 'title', 'created_at', 'steps']),
+            'DocumentRouteListResponse' => self::listEnvelope('DocumentRoute'),
+            // `resolved` and `delivered` are on the envelope rather than on the
+            // route, because they describe what THIS request did rather than a
+            // property of the record: `resolved` is how many people the first
+            // step's rule answered with, `delivered` how many rows that became
+            // after de-duplicating against chains that already reached them. A
+            // rule that matched nobody is legal, and reporting the counts is what
+            // makes it VISIBLE in the response instead of six weeks later.
+            'DocumentRouteResponse' => self::object([
+                'data' => SchemaBuilder::ref('DocumentRoute'),
+                'resolved' => self::int(),
+                'delivered' => self::int(),
+            ], ['data', 'resolved', 'delivered']),
+            // `steps` is required and must be non-empty: a route with no steps
+            // would issue a document to nobody and record it as sent.
+            'DocumentRouteCreateRequest' => self::object([
+                'title' => self::str(true),
+                'steps' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'rule_kind' => self::str(),
+                        'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+                        'label' => self::str(true),
+                    ], ['rule_kind']),
+                ],
+            ], ['steps']),
+
+            // The trail. Every field is a COLUMN (migration 112) rather than a
+            // JSONB key, because the shape is fixed and known to core - which is
+            // the argument for the table existing at all.
+            'DocumentTrailEvent' => self::object([
+                'id' => self::int(),
+                'document_id' => self::int(),
+                'route_id' => self::int(),
+                // Null on an `issued` event, which is about the route rather than
+                // any one step.
+                'step_id' => self::int(true),
+                'actor_profile_id' => self::int(true),
+                'action' => ['type' => 'string', 'enum' => ['issued', 'forwarded', 'acknowledged', 'returned', 'noted']],
+                'from_ou_id' => self::int(true),
+                // Null whenever the act named no SINGLE unit - a tenant-wide
+                // fan-out has no destination, and naming one would make the
+                // browser's "passed through my unit" folder report a unit that
+                // was never involved.
+                'to_ou_id' => self::int(true),
+                'note' => self::str(true),
+                'occurred_at' => self::str(),
+            ], ['id', 'document_id', 'route_id', 'action', 'occurred_at']),
+            'DocumentTrailListResponse' => self::paginatedListEnvelope('DocumentTrailEvent'),
+
+            // A recipient row: the inbox, and the document's own view of where it
+            // currently is. `open` is DERIVED from `closed_by_event_id` and both
+            // are published - the boolean is what a screen renders, the pointer
+            // is what lets a reader follow the claim back into the trail and
+            // check it.
+            'DocumentRouteRecipient' => self::object([
+                'id' => self::int(),
+                'document_id' => self::int(),
+                'route_id' => self::int(),
+                'step_id' => self::int(),
+                'profile_id' => self::int(),
+                'ou_id' => self::int(true),
+                // The recipient whose action produced this row; null at the first
+                // step. This is what makes distribution fan out rather than block.
+                'parent_recipient_id' => self::int(true),
+                'created_by_event_id' => self::int(),
+                'closed_by_event_id' => self::int(true),
+                'open' => self::bool(),
+                'created_at' => self::str(),
+            ], ['id', 'document_id', 'route_id', 'step_id', 'profile_id', 'created_by_event_id', 'open', 'created_at']),
+            'DocumentRouteRecipientListResponse' => self::listEnvelope('DocumentRouteRecipient'),
+
+            'DocumentRouteActionRequest' => self::object([
+                'action' => ['type' => 'string', 'enum' => ['forwarded', 'acknowledged', 'returned', 'noted']],
+                // Required for `noted` (an empty note records nothing), optional
+                // on the other three.
+                'note' => self::str(true),
+            ], ['action']),
+            'DocumentRouteActionResponse' => self::object([
+                'data' => SchemaBuilder::ref('DocumentTrailEvent'),
+                'resolved' => self::int(),
+                'delivered' => self::int(),
+            ], ['data', 'resolved', 'delivered']),
+
+            // -- The inbox (#881, first source contributed by #947 item 3) -----
+            // Field names are the props the `inbox` block type declares (#868),
+            // so a screen can point a block straight at this endpoint and the two
+            // cannot disagree. `status` is NOT a stored status: for the routing
+            // source it is read from the trail event that created the item.
+            'InboxItem' => self::object([
+                // A string, because the eventual cross-source aggregate will mix
+                // sources whose ids are not integers.
+                'id' => self::str(),
+                'title' => self::str(),
+                'subtitle' => self::str(true),
+                'timestamp' => self::str(),
+                'status' => self::str(true),
+                'resource_type' => self::str(true),
+                'resource_id' => self::str(true),
+                // Source-specific extras a client may use and must not depend on.
+                'meta' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['id', 'title', 'timestamp']),
+            'InboxItemListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('InboxItem')],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+                'source' => self::str(),
+            ], ['data', 'pagination', 'source']),
+            'InboxSource' => self::object([
+                'key' => self::str(),
+                'label' => self::str(),
+                'origin' => self::str(),
+                // The `inbox` block prop => item field mapping, published rather
+                // than left for each client to hardcode.
+                'item_fields' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                'open_count' => self::int(),
+            ], ['key', 'label', 'origin', 'item_fields', 'open_count']),
+            'InboxSourceListResponse' => self::listEnvelope('InboxSource'),
+            // ── The document organizer (#978, implementing #947 item 5) ───────
+            // A "folder" is a NAMED QUERY, never a stored container: a document
+            // raised centrally and needed by fifteen units has no single home,
+            // and a stored tree has to be maintained as the organisation
+            // changes. So this describes the folders that EXIST, which is not
+            // the same as the folders somebody specified.
+            //
+            // `requires` names the fact sources the view reads. A view whose
+            // sources this installation does not record is NOT IN THE RESPONSE
+            // AT ALL. Note the converse, which #947 item 3 landing made
+            // concrete: its facts now exist, so the routing substrates resolve,
+            // and item 5's "awaiting me", "acted on by me" and "passed through
+            // my unit" are still absent because a substrate is not a folder —
+            // each needs a predicate and a registration. An empty "Awaiting me"
+            // would state "nothing awaits you", which is false and which the
+            // reader cannot check.
+            //
+            // `available: false` is the DIFFERENT case: the folder is real and
+            // THIS caller cannot anchor it (they belong to no unit). It carries
+            // the reason and is rendered disabled, per #951 — a control hidden
+            // for three unrelated causes makes all three look identical.
+            'DocumentView' => self::object([
+                'key' => self::str(),
+                // English. A client translates the keys it knows and falls back
+                // to this for a view registered by a later feature or a plugin,
+                // which it cannot have a translation for.
+                'label' => self::str(),
+                'description' => self::str(),
+                // `derived` (a fact about the document) or `personal` (a fact
+                // about you).
+                'group' => self::str(),
+                'parameters' => ['type' => 'array', 'items' => self::object([
+                    'name' => self::str(),
+                    'required' => self::bool(),
+                ], ['name', 'required'])],
+                'requires' => ['type' => 'array', 'items' => self::str()],
+                'available' => self::bool(),
+                'unavailable_reason' => self::str(true),
+            ], ['key', 'label', 'description', 'group', 'parameters', 'requires', 'available']),
+            // What this installation does NOT record, and what would supply it.
+            // A diagnostic, deliberately a separate field from `data`: an
+            // operator asking "why is there no inbox here" otherwise has no
+            // answer at all, and nothing in this list has a key to open, so no
+            // client can mistake it for a folder.
+            'DocumentSubstrate' => self::object([
+                'key' => self::str(),
+                'description' => self::str(),
+                'provenance' => self::str(true),
+            ], ['key', 'description']),
+            'DocumentViewListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentView')],
+                'unavailable_substrates' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentSubstrate')],
+            ], ['data', 'unavailable_substrates']),
+
+            // ── Per-user collections (#978) ──────────────────────────────────
+            // The one part of the organizer that is stored, because it is the
+            // one part that claims nothing about the document: "I filed this"
+            // is a fact about me.
+            //
+            // `system_key` is `starred` for the collection the star control
+            // addresses and null for one somebody made. It is the collection's
+            // IDENTITY rather than its name, which is why the name is free to
+            // be renamed or translated and why a keyed collection refuses
+            // rename and delete (409). Starring is not a separate concept —
+            // there is no `document_stars` table; migration 114 argues why.
+            //
+            // `item_count` is how many documents are FILED, which can exceed
+            // how many the owner may still read: visibility narrows over time
+            // and a stored pointer is never a grant.
+            'DocumentCollection' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'profile_id' => self::int(),
+                'name' => self::str(),
+                'system_key' => self::str(true),
+                'created_at' => self::str(),
+                'item_count' => self::int(),
+            ], ['id', 'tenant_id', 'profile_id', 'name', 'created_at']),
+            // ── Named user groups (#999) ──────────────────────────────────────
+            // A group is a NAMED RULE, not a list of people. The shape says so:
+            // there is no `members` field, no `member_count`, and no
+            // `member_ids`, because a group's membership is not a property of the
+            // group — it is a question asked of the organisation at a moment in
+            // time, relative to whoever asks, and `/preview` is where it is
+            // answered.
+            //
+            // `rule_kind` + `rule_config` are the pair #989 shipped for route
+            // steps, deliberately spelled the same: a group and a route step are
+            // the same expression, one stored under a name for reuse and one
+            // stored inline for a single circulation. `rule_config` is freeform
+            // for the same reason it is freeform there — core cannot know what an
+            // `acme:committee` rule needs to be told, and only the resolver the
+            // plugin registered does.
+            'UserGroup' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'name' => self::str(),
+                // Optional prose. A name cannot carry intent — "Instructors"
+                // does not say whether visiting lecturers count — and a group
+                // many people will address documents to needs somewhere to say.
+                'description' => self::str(true),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+                // Null once the person who defined it has been deleted. The group
+                // survives them: "instructors" is the institution's definition,
+                // not that person's private filing, which is why migration 116
+                // makes this SET NULL where `document_collections.profile_id`
+                // cascades.
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'name', 'rule_kind', 'rule_config', 'created_at', 'updated_at']),
+            'UserGroupListResponse' => self::paginatedListEnvelope('UserGroup'),
+            'UserGroupResponse' => self::dataEnvelope(SchemaBuilder::ref('UserGroup')),
+            'UserGroupCreateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['name', 'rule_kind']),
+            // PATCH: omitted fields keep their value. `rule_kind` and
+            // `rule_config` must be sent TOGETHER or not at all — a config
+            // written for `role` means nothing to `explicit`, and pairing a new
+            // kind with the old config silently would store a rule the resolver
+            // will later refuse.
+            'UserGroupUpdateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+            ], []),
+            'UserGroupPreviewRequest' => self::object([
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['rule_kind']),
+            'UserGroupDeleteResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'deleted' => self::bool(),
+            ], ['id', 'deleted'])),
+            // The rule kinds a GROUP DEFINITION may name — a subset of
+            // `/api/routing-rules`, excluding `group` itself and any plugin kind
+            // that needs the document it is routed with. Same row shape as
+            // `RoutingRule` and deliberately a separate component: a client draws
+            // one picker from one list, rather than filtering a list by a rule it
+            // would have to know.
+            'GroupRule' => self::object([
+                'kind' => self::str(),
+                'label' => self::str(),
+                'source' => self::str(),
+            ], ['kind', 'label', 'source']),
+            'GroupRuleListResponse' => self::listEnvelope('GroupRule'),
+            // One sampled person. `display_name` is null when the caller does not
+            // hold `users:read` — the COUNT is a fact about the rule, a name is a
+            // fact about a person, and `users:read` is the platform's existing
+            // answer to who may read those. Nullable rather than omitted so
+            // there is ONE payload shape and a client renders an id when there is
+            // no name instead of branching on which flavour it received.
+            'UserGroupPreviewMember' => self::object([
+                'profile_id' => self::int(),
+                // The unit the rule reached them THROUGH, or null when the rule
+                // is not unit-scoped. `explicit` is always null: it named people,
+                // through no unit at all.
+                'ou_id' => self::int(true),
+                'display_name' => self::str(true),
+            ], ['profile_id', 'ou_id', 'display_name']),
+            // A COUNT AND A SAMPLE, NEVER A LIST, and there is no page parameter
+            // anywhere on this shape. `total` is exact; `sample` holds at most
+            // `sample_size` people (the `groups.preview_sample_size` setting),
+            // lowest profile id first so two previews of an unchanged group show
+            // the same faces. A surface that rendered 1,043 rows would have
+            // rebuilt the thousand-nodes problem the whole design avoids; a
+            // caller who wants a person-by-person list is asking `/api/users` a
+            // question about roles.
+            //
+            // `resolved_for` is on every preview, not only the actor-relative
+            // kinds. `role_below_actor` resolves to a different set for a dean
+            // than for a faculty officer, so without this two colleagues would
+            // read two different counts off the same screen with nothing to
+            // explain the difference — and whether a kind is relative is the
+            // resolver's business, not something core can ask it.
+            'UserGroupPreviewResponse' => self::dataEnvelope(self::object([
+                'total' => self::int(),
+                'truncated' => self::bool(),
+                'sample_size' => self::int(),
+                'sample' => ['type' => 'array', 'items' => SchemaBuilder::ref('UserGroupPreviewMember')],
+                'resolved_for' => self::object([
+                    'profile_id' => self::int(true),
+                    'ou_id' => self::int(true),
+                ], ['profile_id', 'ou_id']),
+            ], ['total', 'truncated', 'sample_size', 'sample', 'resolved_for'])),
+
+            'DocumentCollectionListResponse' => self::listEnvelope('DocumentCollection'),
+            'DocumentCollectionResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentCollection')),
+            'DocumentCollectionCreateRequest' => self::object([
+                'name' => self::str(),
+            ], ['name']),
+            'DocumentCollectionUpdateRequest' => self::object([
+                'name' => self::str(),
+            ], ['name']),
+            // Read back rather than asserted: filing is idempotent, and two
+            // clicks racing a concurrent un-star from another tab both land
+            // here, so the row that is actually there is the answer.
+            'DocumentCollectionMembershipResponse' => self::dataEnvelope(self::object([
+                'collection_id' => self::int(),
+                'document_id' => self::int(),
+                'in_collection' => self::bool(),
+            ], ['collection_id', 'document_id', 'in_collection'])),
+            // The starred collection as it now stands, plus the resulting state.
+            // `data` is null only on an un-star by someone who has never starred
+            // anything — creating the collection just to delete a row from it
+            // would write a row to record an absence.
+            'DocumentStarResponse' => self::object([
+                'data' => ['oneOf' => [SchemaBuilder::ref('DocumentCollection'), ['type' => 'null']]],
+                'starred' => self::bool(),
+            ], ['data', 'starred']),
 
             // ── Document/label designer blocks (WC-521) ───────────────────────
             // `data` is the verbatim client DocElement[] fragment (freeform array);
@@ -2956,24 +3454,31 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
                 'is_system' => self::bool(),
                 'created_by' => self::int(true),
+                // Where in the organisation the row is filed (migration 117). null = tenant-wide,
+                // which is what every row was before it and what an unplaced row still is.
+                'owner_ou_id' => self::int(true),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
             'DocumentBlockListResponse' => self::listEnvelope('DocumentBlock'),
             'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
-            // scope/required_permission are optional; setting a shared scope or a
-            // permission tag requires documents:publish (403 otherwise).
+            // scope/required_permission/owner_ou_id are all optional; setting a
+            // shared scope, a permission tag, or a placement requires
+            // documents:publish (403 otherwise). owner_ou_id must be a unit of the
+            // caller's own tenant (422 otherwise); null files the row tenant-wide.
             'DocumentBlockCreateRequest' => self::object([
                 'name' => self::str(),
                 'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
                 'required_permission' => self::str(true),
+                'owner_ou_id' => self::int(true),
             ], ['name', 'data']),
             'DocumentBlockUpdateRequest' => self::object([
                 'name' => self::str(),
                 'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
                 'required_permission' => self::str(true),
+                'owner_ou_id' => self::int(true),
             ], []),
 
             // ── Resource-scoped role grants (WC-712 §3) ───────────────────────
@@ -3162,8 +3667,44 @@ final class CoreApiSchemas
                 // `!manageable`, which reads correctly for a tenant and inverts
                 // for the system tenant.
                 'global' => self::bool(),
+                // #910 — OPTIONAL, and its absence is what says "hidden".
+                //
+                // `permissions` is no longer required, because a caller without
+                // `permissions:read` does not receive the region's data at all:
+                // the record page gates its REGIONS, and a hidden region is
+                // withheld rather than suppressed on the client. A response that
+                // shipped the rows and asked the browser not to draw them would
+                // be a rendering instruction, not a control.
                 'permissions' => ['type' => 'array', 'items' => SchemaBuilder::ref('Permission')],
-            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'manageable', 'global', 'permissions']),
+                // The per-region verdicts. Keyed by region (`details`,
+                // `permissions`); a region the caller may not see is ABSENT,
+                // which is the only way this contract has of saying so — a
+                // `{"state": "hidden"}` entry would disclose the region it was
+                // withholding, and shipping a viewer the labels of things they
+                // may not see is a different bug wearing authorization's clothes.
+                'sections' => [
+                    'type' => 'object',
+                    'additionalProperties' => SchemaBuilder::ref('RecordSectionVerdict'),
+                ],
+            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'manageable', 'global']),
+            // The same `{code, reason, detail}` shape #951/#968 settled for a
+            // denied crud control, because a region is the same idea one level
+            // up: present, inert, and able to say why.
+            'RecordSectionDenial' => self::object([
+                // `permission` — the caller lacks what the write needs;
+                // `record` — the record itself refuses (a global base role).
+                'code' => ['type' => 'string', 'enum' => ['permission', 'record']],
+                // Audience-safe prose, and the client's i18n fallback.
+                'reason' => self::str(),
+                // Operator-grade, naming the permission the write would need.
+                // Non-null only for a caller holding `permissions:read` — the
+                // permission that governs seeing permission slugs at all.
+                'detail' => self::str(true),
+            ], ['code', 'reason', 'detail']),
+            'RecordSectionVerdict' => self::object([
+                'state' => ['type' => 'string', 'enum' => ['read-only', 'editable']],
+                'denial' => SchemaBuilder::ref('RecordSectionDenial'),
+            ], ['state', 'denial']),
             'RoleDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('RoleDetail')),
             // #882 — one holder of a role. `assignedAt` is the membership's
             // created_at: when this person was given this role in this tenant,
@@ -3491,6 +4032,23 @@ final class CoreApiSchemas
                     'canEdit' => self::bool(),
                     'canDelete' => self::bool(),
                 ], ['canCreate', 'canEdit', 'canDelete']),
+                // #951: why a capability came back FALSE, so the renderer can
+                // disable the control and say what happened instead of omitting
+                // it (three unrelated causes used to render as one missing
+                // button). One entry per false capability — a true one has no
+                // entry — so every property here is optional and the object is
+                // empty when all three are granted. `detail` is the
+                // operator-grade half and is non-null only for a caller holding
+                // plugins:read; see FrontendFeaturesApiHandler for the audience
+                // split.
+                'capabilityReasons' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'canCreate' => SchemaBuilder::ref('CapabilityDenial'),
+                        'canEdit' => SchemaBuilder::ref('CapabilityDenial'),
+                        'canDelete' => SchemaBuilder::ref('CapabilityDenial'),
+                    ],
+                ],
                 // WC-226: present (and host-validated) ONLY for screen='blocks' —
                 // the platform-neutral block tree a renderer translates to native
                 // widgets. A coarse array of objects here; the SDK BlockValidator
@@ -3500,8 +4058,40 @@ final class CoreApiSchemas
                     'type' => 'array',
                     'items' => ['type' => 'object', 'additionalProperties' => true],
                 ],
-            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'embed', 'requiredPermission', 'capabilities']),
-            'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
+            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'embed', 'requiredPermission', 'capabilities', 'capabilityReasons']),
+            // #951: one denied capability, explained for both audiences at once.
+            // `code` is the stable machine discriminant the renderer keys its
+            // localized string off; `reason` is the already-localizable English
+            // fallback, safe for any caller; `detail` names the route or the
+            // RBAC the platform actually looked at and is null unless the caller
+            // holds plugins:read.
+            'CapabilityDenial' => self::object([
+                'code' => ['type' => 'string', 'enum' => ['no-resource', 'no-route', 'forbidden']],
+                'reason' => self::str(),
+                'detail' => self::str(true),
+            ], ['code', 'reason', 'detail']),
+            // #953: a feature descriptor the host REFUSED, and why. Refused at
+            // plugin load (an ownership or shape rule) or while serving the
+            // request (an invalid block tree) — one question to an
+            // administrator, so one list.
+            'DroppedFrontendFeature' => self::object([
+                'plugin' => self::str(),
+                'featureId' => self::str(true),
+                'reason' => self::str(),
+            ], ['plugin', 'featureId', 'reason']),
+            // `dropped` is NOT required: it is present only for a caller holding
+            // plugins:read, and its absence is what says "not yours to read" as
+            // distinct from an empty array's "nothing was refused".
+            'FrontendFeatureListResponse' => self::object(
+                [
+                    'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('FrontendFeature')],
+                    'dropped' => [
+                        'type' => 'array',
+                        'items' => SchemaBuilder::ref('DroppedFrontendFeature'),
+                    ],
+                ],
+                ['data']
+            ),
 
             // WC-176 (#205): the caller's effective permission slugs. Mirrors
             // MeCapabilitiesApiHandler's ACTUAL output: a data envelope wrapping
@@ -5550,6 +6140,554 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Template not found or not visible to the caller'),
                     422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
                     503 => self::errorResponse('Rendering is disabled on this instance, or the render service is unavailable'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Issued-document routes (#947 item 1). Tenant-scoped; reads are gated on
+     * documents:read at the route and row-filtered on top (you raised it, or
+     * you hold documents:read:all), so a caller who may not see a document is
+     * told it does not exist rather than that it is forbidden.
+     *
+     * The re-render APPENDS an artifact. Every earlier one stays fetchable at
+     * its own `content_url` — that permanence is the observable form of the
+     * immutability guarantee, which is why the artifact-level content route
+     * exists alongside the document-level one.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentRecordRoutes(): array
+    {
+        $pdfResponse = [
+            'description' => 'The stored artifact bytes',
+            'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]],
+        ];
+
+        return [
+            // The organizer's rail (#978). Listed BEFORE /api/documents/{id}
+            // because `views` is not a digit and could never have matched that
+            // route's constraint — said out loud so the ordering is a decision
+            // rather than an accident if the constraint is ever loosened.
+            self::permissionRoute('GET', '/api/documents/views', 'documents:read', [
+                'summary' => 'List the document folders this installation can actually compute',
+                'description' =>
+                    'A folder is a derived query, never a stored container. A view whose fact source this '
+                    . 'installation does not record is ABSENT from this response rather than present and '
+                    . 'empty — an empty "Awaiting me" would state "nothing awaits you", which is false and '
+                    . 'unfalsifiable from outside. A view the CALLER cannot anchor (they belong to no unit) '
+                    . 'is present with available=false and a reason, to be rendered disabled (#951). '
+                    . '`unavailable_substrates` says what this installation does not record and what would '
+                    . 'supply it.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The computable folders, plus the fact sources this installation lacks',
+                        'DocumentViewListResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents', 'documents:read', [
+                'summary' => 'List issued documents visible to the caller (newest first, paginated)',
+                'description' =>
+                    'Naming no view is the plain tenant-wide list. `view` selects one of the folders from '
+                    . 'GET /api/documents/views; a key this installation cannot compute is a 404, because '
+                    . 'from outside it does not exist.',
+                'tags' => ['documents'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    self::queryParam('view', 'string', 'Folder key from GET /api/documents/views (default "all")'),
+                    self::queryParam(
+                        'ou_id',
+                        'integer',
+                        'Anchor unit for the unit-scoped folders. Defaults to the caller\'s own unit.'
+                    ),
+                    self::queryParam('collection_id', 'integer', 'Required by the "collection" view'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring of the document title'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The documents the caller may see, with pagination', 'DocumentListResponse'),
+                    400 => self::errorResponse('A required view parameter is missing, or ou_id is not a unit in this tenant'),
+                    404 => self::errorResponse(
+                        'No such view, this installation cannot compute it, or the named collection '
+                        . 'belongs to somebody else'
+                    ),
+                    422 => self::errorResponse('The view exists but the caller cannot anchor it (e.g. they belong to no unit)'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}', 'documents:read', [
+                'summary' => 'Get an issued document and its full artifact history',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The document', 'DocumentResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/content', 'documents:read', [
+                'summary' => 'Download the current artifact of a document',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => $pdfResponse,
+                    404 => self::errorResponse('Document not found, not visible, or has no stored content'),
+                    503 => self::errorResponse('The stored artifact could not be read from storage'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/artifacts/{artifactId:\\d+}/content', 'documents:read', [
+                'summary' => 'Download one specific artifact, superseded or not',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => $pdfResponse,
+                    404 => self::errorResponse('Document or artifact not found, or not visible to the caller'),
+                    503 => self::errorResponse('The stored artifact could not be read from storage'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/documents/{id:\\d+}/render', 'documents:render', [
+                'summary' => 'Re-render the document and APPEND a new artifact (never replaces one)',
+                'tags' => ['documents'],
+                'request' => 'DocumentRerenderRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The document with the new artifact at the head of its history', 'DocumentResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    409 => self::errorResponse('The template this document was issued from is no longer available'),
+                    422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
+                    503 => self::errorResponse('Rendering or persistence is disabled, or the render service is unavailable'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Document ROUTING routes (#947 item 3).
+     *
+     * Three views in #978 read these: the composer (`/routing-rules` + POST
+     * `/routes`), the trail view (`/trail`), and acting (`/actions`).
+     *
+     * TWO DIFFERENT KINDS OF GATE. Issuing a route is `documents:route`
+     * (migration 113). ACTING on an item that reached you carries NO permission
+     * and is session-gated only, because being a recipient IS the authorization:
+     * the route named a rule, the rule resolved to you, and the engine wrote the
+     * row. A second permission on top would let a route resolve to somebody who
+     * then cannot answer it - the item stays open forever and the person holding
+     * it cannot discover why. Same posture as `/api/me/notifications`.
+     *
+     * Reads are `documents:read` at the route and row-filtered on top by
+     * DocumentVisibilityPolicy (you raised it, you hold documents:read:all, a
+     * route reached you, or a role was granted to you on the document), so a
+     * caller who may not see a document is told it does not exist.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentRoutingRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/routing-rules', 'documents:read', [
+                'summary' => 'List the routing rule kinds a route step may name on this instance',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        "Core's own kinds plus any a plugin registered",
+                        'RoutingRuleListResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/documents/{id:\\d+}/routes', 'documents:route', [
+                'summary' => 'Issue a route on a document: create it, its ordered steps and the first step\'s recipients',
+                'tags' => ['documents'],
+                'request' => 'DocumentRouteCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse(
+                        'The route with its steps, and how many recipients the first step resolved to and delivered',
+                        'DocumentRouteResponse'
+                    ),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    422 => self::errorResponse(
+                        'No steps, a step naming an unregistered rule kind, a config the rule refused, '
+                        . 'or a step/recipient ceiling exceeded'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/routes', 'documents:read', [
+                'summary' => 'List the circulations of a document, newest first, each with its steps',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The routes on this document', 'DocumentRouteListResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/trail', 'documents:read', [
+                'summary' => "The document's append-only routing trail, oldest first (paginated)",
+                'tags' => ['documents'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The trail across every route on this document',
+                        'DocumentTrailListResponse'
+                    ),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\\d+}/recipients', 'documents:read', [
+                'summary' => 'Who the document\'s routes reached, and what became of each item',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'Every recipient row on this document',
+                        'DocumentRouteRecipientListResponse'
+                    ),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'POST',
+                'path' => '/api/documents/{id:\\d+}/routes/{routeId:\\d+}/actions',
+                'requiredRole' => null,
+                // Deliberately unpermissioned - see the group docblock. Being a
+                // recipient is the authorization; `noted` needs only visibility.
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Act on a route: forward, acknowledge, return, or add a note',
+                    'tags' => ['documents'],
+                    'request' => 'DocumentRouteActionRequest',
+                    'responses' => [
+                        201 => self::jsonResponse(
+                            'The appended trail event, and how many recipients the act resolved to and delivered',
+                            'DocumentRouteActionResponse'
+                        ),
+                        404 => self::errorResponse('Document or route not found, or not visible to the caller'),
+                        422 => self::errorResponse(
+                            'No open item on this route, a forward from the last step, a return from the '
+                            . 'first, an empty note, or an unknown action'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Named user groups (#999).
+     *
+     * A group is a named, reusable RULE over the tenant's people — "everyone
+     * holding the instructor role" stored once and referenced from many places,
+     * starting with routing's `group` step kind. One node saying "instructors",
+     * not a thousand nodes for a thousand instructors.
+     *
+     * TWO ABSENCES ON THIS SURFACE ARE DELIBERATE, NOT GAPS
+     * ----------------------------------------------------
+     *  - NO MEMBER LIST ROUTE. `/preview` answers with a count and a bounded
+     *    sample and has no `page` parameter, and one is not coming. A screen that
+     *    renders 1,043 people has rebuilt the problem the design exists to avoid.
+     *    Somebody who wants a person-by-person list is asking `/api/users` a
+     *    question about roles, which it already answers with its own filtering,
+     *    paging and permission.
+     *  - NO MEMBER COUNTS ON THE LIST. Resolution is live and uncached (a cache
+     *    is the rejected stored list with a timestamp on it), so a count per row
+     *    would resolve every rule on every render — forty groups, forty fan-out
+     *    queries, to decorate a screen nobody asked a membership question on.
+     *
+     * TWO CATALOGUES OVER ONE REGISTRY. `/api/group-rules` is the subset of
+     * `/api/routing-rules` that can answer without a document: it excludes
+     * `group` itself (which is what makes a group-of-groups impossible rather
+     * than merely discouraged) and any plugin kind that reads the document it is
+     * routed with.
+     *
+     * PERMISSIONS. Reads are `groups:read`; writes and the DRAFT preview are
+     * `groups:write`. The draft preview is the tighter of the two on purpose — it
+     * resolves an arbitrary rule the caller composed, so a reader who may only
+     * see existing definitions cannot probe the organisation by inventing new
+     * ones. Both slugs are granted by migration 116 to a nameable audience, so
+     * neither is a catalogue row nobody holds.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function userGroupRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/group-rules', 'groups:read', [
+                'summary' => "List the rule kinds a user group's definition may name on this instance",
+                'tags' => ['user-groups'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        "The subset of routing rule kinds that can answer without a document",
+                        'GroupRuleListResponse'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/user-groups', 'groups:read', [
+                'summary' => "This tenant's user group DEFINITIONS, by name (paginated, no member counts)",
+                'tags' => ['user-groups'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s groups with pagination', 'UserGroupListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/user-groups/preview', 'groups:write', [
+                'summary' => 'Preview an UNSAVED rule: how many people it resolves to right now, plus a sample',
+                'tags' => ['user-groups'],
+                'request' => 'UserGroupPreviewRequest',
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The count, a bounded sample, and the actor it was resolved against',
+                        'UserGroupPreviewResponse'
+                    ),
+                    422 => self::errorResponse(
+                        'A malformed kind, a kind nothing provides, a kind that needs a document, '
+                        . 'or a config the rule refused'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/user-groups', 'groups:write', [
+                'summary' => 'Define a user group: a name plus the rule that says who is in it',
+                'tags' => ['user-groups'],
+                'request' => 'UserGroupCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created group', 'UserGroupResponse'),
+                    409 => self::errorResponse('A group with that name already exists in this tenant'),
+                    422 => self::errorResponse(
+                        'A missing or over-long name, a malformed kind, a kind nothing provides, '
+                        . 'a kind that needs a document, or a config the rule refused'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/user-groups/{id:\\d+}/preview', 'groups:read', [
+                'summary' => 'How many people this group resolves to RIGHT NOW, plus a bounded sample',
+                'tags' => ['user-groups'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The count, a bounded sample, and the actor it was resolved against',
+                        'UserGroupPreviewResponse'
+                    ),
+                    404 => self::errorResponse('Group not found in this tenant'),
+                    422 => self::errorResponse(
+                        "The group's rule can no longer be resolved on this instance — for example the "
+                        . 'plugin that supplied its kind was removed'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/user-groups/{id:\\d+}', 'groups:read', [
+                'summary' => "One group's definition (no membership — see /preview)",
+                'tags' => ['user-groups'],
+                'responses' => [
+                    200 => self::jsonResponse('The group', 'UserGroupResponse'),
+                    404 => self::errorResponse('Group not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/user-groups/{id:\\d+}', 'groups:write', [
+                'summary' => 'Rename or redefine a group. Takes effect immediately, including for routes in flight',
+                'tags' => ['user-groups'],
+                'request' => 'UserGroupUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated group', 'UserGroupResponse'),
+                    404 => self::errorResponse('Group not found in this tenant'),
+                    409 => self::errorResponse('Another group in this tenant already has that name'),
+                    422 => self::errorResponse(
+                        "'rule_kind' sent without 'rule_config' (or the reverse), an over-long name, "
+                        . 'or a config the rule refused'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/user-groups/{id:\\d+}', 'groups:write', [
+                'summary' => 'Delete a group. Route steps naming it then fail LOUDLY by name, never silently',
+                'tags' => ['user-groups'],
+                'responses' => [
+                    200 => self::jsonResponse('The deleted group id', 'UserGroupDeleteResponse'),
+                    404 => self::errorResponse('Group not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * The caller's INBOX (#881), read one registered source at a time.
+     *
+     * Self-scoped to the caller's own (tenant, profile) and session-gated with NO
+     * RBAC permission - an inbox row already names exactly one person, so a
+     * tenant-wide permission has no work left to do. Matches the other `/api/me`
+     * self-service surfaces.
+     *
+     * `source` IS REQUIRED on the list. #881 names three questions that arise
+     * only when sources are AGGREGATED - ordering across heterogeneous sources,
+     * per-source failure isolation, and pagination across sources - and says each
+     * needs deciding before an aggregate ships. Answering an unsourced request
+     * would decide all three by accident, and the answer would silently become
+     * wrong the day a second source registers. So it is a 422 naming the
+     * registered keys, and the aggregate is a later behaviour for that case
+     * reading this same registry.
+     *
+     * Routing's recipients are the first source rather than a surface of their
+     * own: two inbox surfaces would be the same mistake as two audit trails.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function meInboxRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/me/inbox/sources',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => "The registered inbox sources, with the caller's open count for each",
+                    'tags' => ['inbox'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Every registered source, its item-field mapping and the open count',
+                            'InboxSourceListResponse'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/me/inbox',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => "A page of one inbox source's items awaiting the caller",
+                    'tags' => ['inbox'],
+                    'parameters' => [
+                        self::queryParam('source', 'string', 'REQUIRED. A key from /api/me/inbox/sources'),
+                        self::queryParam('open', 'boolean', 'Falsey to include the caller\'s history as well (default open-only)'),
+                        self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                        self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    ],
+                    'responses' => [
+                        200 => self::jsonResponse("That source's items, with pagination", 'InboxItemListResponse'),
+                        422 => self::errorResponse("'source' is missing or names no registered source"),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Per-user document collections and the star (#978, implementing #947
+     * item 5).
+     *
+     * Every route is gated on `documents:read`, INCLUDING the writes, and a
+     * `documents:organize` beside it was rejected: a permission earns its
+     * existence by being withholdable from somebody who holds its neighbours,
+     * and there is no administrator who wants a colleague to read documents but
+     * not to keep a private note of which ones matter. A collection is
+     * invisible to everyone else, confers nothing, and dies with its owner.
+     *
+     * What IS enforced is ownership — a collection is looked up by
+     * (id, tenant, profile), so another person's id is NOT FOUND rather than
+     * forbidden, since collection ids are enumerable — and document visibility
+     * on the way in, so the filing endpoints cannot be used to discover which
+     * document ids exist.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentCollectionRoutes(): array
+    {
+        $notFound = self::errorResponse('Collection not found, or not the caller\'s');
+        $nameErrors = [
+            409 => self::errorResponse('The caller already has a collection with that name'),
+            422 => self::errorResponse('name is missing, empty, or over 160 characters'),
+        ];
+
+        return [
+            self::permissionRoute('GET', '/api/document-collections', 'documents:read', [
+                'summary' => 'List the caller\'s own document collections, with item counts',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The caller\'s collections', 'DocumentCollectionListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-collections', 'documents:read', [
+                'summary' => 'Create one of the caller\'s own collections',
+                'description' =>
+                    '`system_key` is never accepted from a client: minting a well-known key would be '
+                    . 'claiming the target of the star control.',
+                'tags' => ['documents'],
+                'request' => 'DocumentCollectionCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created collection', 'DocumentCollectionResponse'),
+                ] + $nameErrors + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-collections/{id:\\d+}', 'documents:read', [
+                'summary' => 'Rename one of the caller\'s own collections',
+                'description' =>
+                    'Refused with 409 for a built-in (system_key) collection: the star control addresses '
+                    . 'it by key and does not label it from the row, so renaming it would rename something '
+                    . 'nothing displays.',
+                'tags' => ['documents'],
+                'request' => 'DocumentCollectionUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The renamed collection', 'DocumentCollectionResponse'),
+                    404 => $notFound,
+                ] + $nameErrors + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-collections/{id:\\d+}', 'documents:read', [
+                'summary' => 'Delete one of the caller\'s own collections (the documents are untouched)',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('Deletion confirmation', 'MutationResponse'),
+                    404 => $notFound,
+                    409 => self::errorResponse('A built-in collection cannot be deleted'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute(
+                'PUT',
+                '/api/document-collections/{id:\\d+}/documents/{documentId:\\d+}',
+                'documents:read',
+                [
+                    'summary' => 'File a document into one of the caller\'s collections (idempotent)',
+                    'tags' => ['documents'],
+                    'responses' => [
+                        200 => self::jsonResponse('The resulting membership, read back', 'DocumentCollectionMembershipResponse'),
+                        404 => self::errorResponse('Collection not found, or the document is not visible to the caller'),
+                    ] + self::authErrors(),
+                ]
+            ),
+            self::permissionRoute(
+                'DELETE',
+                '/api/document-collections/{id:\\d+}/documents/{documentId:\\d+}',
+                'documents:read',
+                [
+                    'summary' => 'Remove a document from one of the caller\'s collections (idempotent)',
+                    'description' =>
+                        'Deliberately does NOT re-check the document\'s visibility: un-filing something the '
+                        . 'caller can no longer read is exactly the case they need, and refusing it would '
+                        . 'leave a row they own and cannot get rid of.',
+                    'tags' => ['documents'],
+                    'responses' => [
+                        200 => self::jsonResponse('The resulting membership, read back', 'DocumentCollectionMembershipResponse'),
+                        404 => $notFound,
+                    ] + self::authErrors(),
+                ]
+            ),
+            self::permissionRoute('PUT', '/api/documents/{id:\\d+}/star', 'documents:read', [
+                'summary' => 'Star a document — files it into the caller\'s well-known "starred" collection',
+                'description' =>
+                    'Starring is a collection, not a second concept. The collection is created on first '
+                    . 'use rather than seeded per profile, which would write a row for every member of '
+                    . 'every tenant to record something nobody has done.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The starred collection and the resulting state', 'DocumentStarResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/documents/{id:\\d+}/star', 'documents:read', [
+                'summary' => 'Un-star a document',
+                'description' =>
+                    'A 200 even when the caller has never starred anything: they asked for a state that is '
+                    . 'already true, and creating the collection just to delete a row from it would write a '
+                    . 'row to record an absence.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The starred collection (null if none) and the resulting state', 'DocumentStarResponse'),
                 ] + self::authErrors(),
             ]),
         ];

@@ -120,8 +120,17 @@ final class BootstrapIdentityRealEngineTest extends TestCase
 
         $pdo = SchemaFromMigrations::make();
 
+        // Service principals are excluded rather than counted (#928). They are
+        // not identities anyone can be: nothing can authenticate as one, and
+        // this assertion is about the BOOTSTRAP ADMINISTRATOR not being
+        // duplicated by a rename. Counting every row would make it fail the day
+        // any unrelated principal is seeded — which is exactly what happened —
+        // while relaxing it to `assertGreaterThan` would stop catching the
+        // duplicate it exists for. The predicate names what is being counted.
         // @tenant-guard-ignore: profiles/profile_emails are sanctioned GLOBAL tables (ADR 0005 §§1-2)
-        $stmt = $pdo->query('SELECT COUNT(*) FROM profiles');
+        $stmt = $pdo->query(
+            "SELECT COUNT(*) FROM profiles WHERE auth_method <> 'service'"
+        );
         self::assertNotFalse($stmt);
         self::assertSame(
             1,

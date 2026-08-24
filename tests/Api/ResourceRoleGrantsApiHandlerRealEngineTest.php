@@ -52,7 +52,7 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
     private const TENANT_B = 2;
 
     /** A plugin-declared type, deliberately NOT the built-in 'ou'. */
-    private const TYPE_DOCUMENT = 'testplugin:document';
+    private const TYPE_DOSSIER = 'testplugin:dossier';
     private const DOC_ID = 4242;
 
     private PDO $pdo;
@@ -220,14 +220,20 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * A plugin declaring `document` is registered as `testplugin:document`, so
+     * A plugin declaring `dossier` is registered as `testplugin:dossier`, so
      * granting on the BARE slug must fail — otherwise two plugins could collide
      * on one unnamespaced name.
+     *
+     * The example slug must be one CORE DOES NOT OWN. It used to be `document`,
+     * which #947 item 3 turned into a real core resource type — at which point
+     * the bare slug became legitimately grantable and this stopped asserting
+     * anything about namespacing. Only the example moved; the property is the
+     * same.
      */
     public function testBarePluginSlugIsRejected(): void
     {
         $response = $this->handler()->create($this->req('POST', '/api/resource-role-grants', [
-            'resource_type' => 'document',
+            'resource_type' => 'dossier',
             'resource_id' => self::DOC_ID,
             'role_id' => $this->roleId('editor'),
         ]));
@@ -329,7 +335,7 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
     public function testPluginResourceTypeIsRefusedWhenNoOwnerVouchesForTheId(): void
     {
         $response = $this->handler()->create($this->req('POST', '/api/resource-role-grants', [
-            'resource_type' => self::TYPE_DOCUMENT,
+            'resource_type' => self::TYPE_DOSSIER,
             'resource_id' => self::DOC_ID,
             'role_id' => $this->roleId('editor'),
         ]));
@@ -343,7 +349,7 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
         $this->vouchForDocument(self::DOC_ID, self::TENANT_A);
 
         $response = $this->handler()->create($this->req('POST', '/api/resource-role-grants', [
-            'resource_type' => self::TYPE_DOCUMENT,
+            'resource_type' => self::TYPE_DOSSIER,
             'resource_id' => self::DOC_ID,
             'role_id' => $this->roleId('editor'),
         ]));
@@ -360,7 +366,7 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
         $this->vouchForDocument(self::DOC_ID, self::TENANT_B);
 
         $response = $this->handler()->create($this->req('POST', '/api/resource-role-grants', [
-            'resource_type' => self::TYPE_DOCUMENT,
+            'resource_type' => self::TYPE_DOSSIER,
             'resource_id' => self::DOC_ID,
             'role_id' => $this->roleId('editor'),
         ]));
@@ -489,7 +495,7 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
         $this->createGrant(ResourceTypeRegistry::TYPE_OU, $this->ouA, $roleId, null);
 
         $this->vouchForDocument($this->ouA, self::TENANT_A);
-        $this->createGrant(self::TYPE_DOCUMENT, $this->ouA, $roleId, null);
+        $this->createGrant(self::TYPE_DOSSIER, $this->ouA, $roleId, null);
 
         $response = $this->revokeAll(ResourceTypeRegistry::TYPE_OU, $this->ouA);
 
@@ -497,7 +503,7 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
         self::assertSame(1, $this->data($response)['revoked']);
         self::assertCount(
             1,
-            $this->listGrants(self::TYPE_DOCUMENT, $this->ouA),
+            $this->listGrants(self::TYPE_DOSSIER, $this->ouA),
             'A different resource TYPE at the same numeric id must survive'
         );
     }
@@ -546,13 +552,13 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
     public function testRevokeAllDoesNotRequireTheOwnerToVouchForTheResource(): void
     {
         $this->vouchForDocument(self::DOC_ID, self::TENANT_A);
-        $this->createGrant(self::TYPE_DOCUMENT, self::DOC_ID, $this->roleId('editor'), null);
-        $this->createGrant(self::TYPE_DOCUMENT, self::DOC_ID, $this->roleId('editor'), $this->memberProfileId);
+        $this->createGrant(self::TYPE_DOSSIER, self::DOC_ID, $this->roleId('editor'), null);
+        $this->createGrant(self::TYPE_DOSSIER, self::DOC_ID, $this->roleId('editor'), $this->memberProfileId);
 
         // The record is gone: nothing vouches for its id any more.
         $this->hooks = new HookManager();
 
-        $response = $this->revokeAll(self::TYPE_DOCUMENT, self::DOC_ID);
+        $response = $this->revokeAll(self::TYPE_DOSSIER, self::DOC_ID);
 
         self::assertSame(
             200,
@@ -760,7 +766,7 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * Register a listener standing in for the plugin that owns `document`,
+     * Register a listener standing in for the plugin that owns `dossier`,
      * vouching for exactly one (id, tenant) pair.
      */
     private function vouchForDocument(int $documentId, int $tenantId): void
@@ -768,7 +774,7 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
         $this->hooks->listen(
             'rbac.resource_grant.verify_resource',
             static function (array $data) use ($documentId, $tenantId): array {
-                if ($data['resource_type'] === self::TYPE_DOCUMENT
+                if ($data['resource_type'] === self::TYPE_DOSSIER
                     && $data['resource_id'] === $documentId
                     && $data['tenant_id'] === $tenantId
                 ) {
@@ -881,12 +887,12 @@ final class ResourceRoleGrantsApiHandlerRealEngineTest extends TestCase
     /**
      * A registry with one plugin-declared type. The plugin declares the BARE
      * slug and the registry namespaces it, so the canonical type is
-     * `testplugin:document` — which is what {@see self::TYPE_DOCUMENT} holds.
+     * `testplugin:document` — which is what {@see self::TYPE_DOSSIER} holds.
      */
     private function resourceTypes(): ResourceTypeRegistry
     {
         $types = new ResourceTypeRegistry();
-        $types->register('TestPlugin', ['document']);
+        $types->register('TestPlugin', ['dossier']);
 
         return $types;
     }

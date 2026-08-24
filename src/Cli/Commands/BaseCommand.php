@@ -18,6 +18,7 @@ use Whity\Core\RBAC\RoleCheckerPermissionResolver;
 use Whity\Sdk\Rbac\PermissionResolver;
 use Whity\Core\Hooks\HookManager;
 use Whity\Database\Database;
+use Whity\Core\Identity\AuthMethod;
 use Whity\Api\UsersApiHandler;
 use Whity\Api\RolesApiHandler;
 use Whity\Api\TenantsApiHandler;
@@ -138,6 +139,85 @@ abstract class BaseCommand
         $ouTypeRegistry = new \Whity\Core\Ou\OuTypeRegistry($hookManager);
         $ouTypeRegistry->registerCoreOuTypes();
         \Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry);
+
+        // Document ROUTING RULE catalogue (#947 item 3), registered as a service
+        // for exactly the same reason. A command that issues or advances a route
+        // — a scheduled escalation, an import that circulates what it created —
+        // resolves its steps through this registry, and a CLI-only EMPTY
+        // catalogue would answer that core's own `role` kind does not exist. The
+        // route would then fail to resolve at send time rather than at
+        // authoring, which is the worst place for it: the document is already
+        // issued.
+        //
+        // Divergence between the two entry points here is the recurring bug class
+        // this repo has already paid for twice (#717, #724), which is why the
+        // core resolvers are registered identically in both.
+        $routingRuleRegistry = new \Whity\Core\Document\Routing\RoutingRuleRegistry($hookManager);
+        // #999: the `group` kind dereferences a stored user group, so its
+        // resolver needs the group repository — and the group resolver needs the
+        // REGISTRY, to resolve whatever kind the group is defined as. The cycle
+        // is broken with a closure rather than a setter, so a plugin kind
+        // registered later is still visible to it.
+        $userGroupRepository = new \Whity\Core\Group\UserGroupRepository($db->getPdo());
+        $groupResolver = new \Whity\Core\Group\GroupResolver(
+            $db->getPdo(),
+            $userGroupRepository,
+            static fn (): \Whity\Core\Document\Routing\RoutingRuleRegistry => $routingRuleRegistry
+        );
+        $routingRuleRegistry->registerCoreRoutingRules(
+            new \Whity\Core\Document\Routing\RoleRuleResolver($db->getPdo()),
+            new \Whity\Core\Document\Routing\RoleBelowActorRuleResolver($db->getPdo()),
+            new \Whity\Core\Audience\ExplicitRuleResolver(),
+            new \Whity\Core\Group\GroupRuleResolver($groupResolver)
+        );
+        \Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry);
+
+        // INBOX SOURCE catalogue (#881). Registered with core's routing source
+        // already attached, so a command asking "what is awaiting this person"
+        // gets the same answer the HTTP surface gives. An empty registry here
+        // would report every inbox as EMPTY — which is the most ordinary answer
+        // an inbox has, so nothing would look wrong.
+        $inboxSourceRegistry = new \Whity\Core\Inbox\InboxSourceRegistry();
+        $inboxSourceRegistry->registerCoreSource(
+            \Whity\Core\Inbox\InboxSourceRegistry::CORE_DOCUMENT_ROUTING,
+            new \Whity\Core\Document\Routing\DocumentRoutingInboxSource(
+                new \Whity\Core\Document\Routing\RouteRecipientRepository($db->getPdo())
+            )
+        );
+        \Whity\register_service(\Whity\Core\Inbox\InboxSourceRegistry::class, $inboxSourceRegistry);
+
+        // DOCUMENT ORGANIZER registries (#978). Built here for the same reason
+        // the routing rule catalogue above is: a CLI-driven caller resolving
+        // either of these from the container must get the POPULATED one.
+        //
+        // The failure an empty one produces is the quietest in this file. An
+        // empty view registry answers "this installation computes no document
+        // folders" — which is a perfectly ordinary answer, indistinguishable
+        // from a correctly-wired install whose substrates are genuinely absent,
+        // and it is the exact absent-versus-empty conflation #978 exists to
+        // prevent one layer up. Both classes are HostWiredService, so an
+        // unregistered lookup throws instead of improvising; registering them
+        // here is what keeps that throw from being the CLI's normal state.
+        //
+        // Per request on the HTTP side, per command here — never cached across
+        // either. Availability is measured against the live schema, and a
+        // cached answer would outlive the migration that changes it (#701).
+        $documentSubstrateRegistry = new \Whity\Core\Document\Organizer\DocumentSubstrateRegistry(
+            new \Whity\Core\Document\Organizer\PdoSchemaPresence($db->getPdo())
+        );
+        \Whity\Core\Document\Organizer\CoreDocumentSubstrates::registerInto($documentSubstrateRegistry);
+
+        $documentViewRegistry = new \Whity\Core\Document\Organizer\DocumentViewRegistry($documentSubstrateRegistry);
+        \Whity\Core\Document\Organizer\CoreDocumentViews::registerInto($documentViewRegistry);
+
+        \Whity\register_service(
+            \Whity\Core\Document\Organizer\DocumentSubstrateRegistry::class,
+            $documentSubstrateRegistry
+        );
+        \Whity\register_service(
+            \Whity\Core\Document\Organizer\DocumentViewRegistry::class,
+            $documentViewRegistry
+        );
 
         // Status-page probe catalogue (WC-status-probes), registered as a service
         // exactly as public/index.php does. A divergence between the two entry
@@ -273,7 +353,12 @@ abstract class BaseCommand
             $dataTypeRegistry,
             $pluginSettingsRegistry,
             $auditLogger,
-            $ouTypeRegistry
+            $ouTypeRegistry,
+            // Plugin-contributed document routing rules (#947 item 3, SDK 1.36).
+            // Handed to the loader in BOTH entry points, so a route authored over
+            // HTTP against a plugin's kind still resolves when a command advances
+            // it.
+            $routingRuleRegistry
         );
         $pluginLoader->load();
 
@@ -299,7 +384,14 @@ abstract class BaseCommand
         $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
         // Only GET allowed - tenants can view their own info
         // Create/update/delete restricted to system administrators (CLI only)
-        $router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
+        // All four, not just list (#928). `tenant create/update/delete` are
+        // documented commands that were never registered in this router, so
+        // they answered 405 — a second, independent defect from the 401, and
+        // one the 401 hid completely: nothing reached routing to find out.
+        $router->register('GET',    '/api/tenants',      [$tenantsHandler, 'list'],   'admin');
+        $router->register('POST',   '/api/tenants',      [$tenantsHandler, 'create'], 'admin');
+        $router->register('PATCH',  '/api/tenants/{id}', [$tenantsHandler, 'update'], 'admin');
+        $router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], 'admin');
 
         $permissionsHandler = new PermissionsApiHandler($db->getPdo());
         $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
@@ -329,20 +421,71 @@ abstract class BaseCommand
         $router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
         $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
 
-        // Generate a CLI token if none provided. This synthetic admin token is
+        // Generate a CLI token if none provided. This synthetic token is
         // authorised via JwtParser in the RBAC/tenant middleware (NOT via
         // TokenValidator's cookie path), so it is never epoch-checked; the
         // token_epoch claim is included only for issuance consistency (WC-185)
         // and pinned to the default 0.
+        //
+        // IT CARRIES A REAL PROFILE ID (#928). The pre-cutover shape
+        // (`user_id`/`role`, no `profile_id`) stopped working at the identity
+        // cutover: `RbacMiddleware` requires an integer `profile_id` and fails
+        // closed without one, so every gated route answered
+        // `401 Invalid token payload` and the whole CLI API surface was dead.
+        // Nothing in the suite noticed because the command tests mock callApi().
+        //
+        // A fabricated id would not have helped either — the middleware then
+        // checks the role against the AUTHORITATIVE STORE — so the claim names
+        // the seeded service principal (migration 107), which genuinely holds
+        // `admin` in the system tenant and which nothing can authenticate as.
+        //
+        // TENANT 0, not 1. `EnforceTenantIsolation` pins every request to the
+        // token's tenant, so the old `tenant_id: 1` would have refused
+        // `tenant update 5` even once the 401 was fixed. Tenant 0 is the
+        // platform-wide scope these commands have always meant to operate at.
         if (!$this->token) {
             $this->token = $jwtParser->create([
-                'user_id' => 0,
-                'sub' => 'cli-admin',
-                'role' => 'admin',
-                'tenant_id' => 1,
-                'token_epoch' => 0
+                'profile_id'  => self::servicePrincipalId($db),
+                'sub'         => 'cli-service-principal',
+                'tenant_id'   => 0,
+                'token_epoch' => 0,
             ]);
         }
+    }
+
+    /**
+     * The id of the CLI service principal (#928).
+     *
+     * Resolved by the held fact rather than a fixed id or an email, so there is
+     * no second convention to keep in step with migration 107 — and so a
+     * deployment whose ids differ (a restored dump, a re-seeded database) needs
+     * no special handling.
+     *
+     * A missing principal is fatal ON PURPOSE. The alternatives are to mint a
+     * token with no profile (which reproduces the 401 this fixes, with a more
+     * confusing message) or to borrow another identity, which would attribute
+     * operator commands to a real person — the outcome migration 107 exists to
+     * avoid. An unmigrated database should say so plainly.
+     *
+     * @throws \RuntimeException When the principal has not been seeded.
+     */
+    private static function servicePrincipalId(Database $db): int
+    {
+        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+        $stmt = $db->getPdo()->query(
+            "SELECT id FROM profiles WHERE auth_method = '" . AuthMethod::SERVICE . "' ORDER BY id ASC LIMIT 1"
+        );
+        $row = $stmt !== false ? $stmt->fetch() : false;
+
+        if (is_array($row) && isset($row['id'])) {
+            return (int) $row['id'];
+        }
+
+        throw new \RuntimeException(
+            'The CLI service principal is missing. Run `php public/index.php migrate` to apply '
+            . 'migration 107; without it the CLI cannot authorize and every gated command '
+            . 'returns 401.'
+        );
     }
 
     /**

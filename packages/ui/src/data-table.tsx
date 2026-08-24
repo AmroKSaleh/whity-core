@@ -92,13 +92,23 @@ export interface DataTableProps<TData> {
   /** Header text for the row-actions column. Defaults to "Actions". */
   rowActionsLabel?: string
   /**
-   * Accessible name for the table element.
+   * Accessible name for the table element, applied in EVERY state that renders
+   * a `table` — the loading skeleton and the loaded rows alike.
    *
    * A page with two DataTables gives assistive technology — and any test
    * selecting by role — two identical, unnamed `table` landmarks with no way to
    * tell them apart. Naming them is the a11y answer and it is what makes
    * `getByRole('table', { name })` a stable selector instead of a positional
    * guess that breaks the next time a panel is added.
+   *
+   * It was originally wired into the skeleton branch ONLY (#967). Both halves of
+   * that sentence then failed: a screen reader met the LOADED users table — the
+   * state anybody actually reads — as an unnamed twin of the invitations table,
+   * and `getByRole('table', { name })` silently became an assertion about the
+   * skeleton, satisfied only while the request was still in flight. It passed
+   * when the backend was slow and failed when it was fast, which is why it read
+   * as flakiness on unrelated PRs and cost three CI cycles before it was
+   * diagnosed. Any new branch here that renders a `table` must name it too.
    */
   ariaLabel?: string
   /**
@@ -358,6 +368,7 @@ export function DataTable<TData>({
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           <Table
+            aria-label={ariaLabel}
             style={enableColumnResizing ? { width: table.getCenterTotalSize() } : undefined}
           >
             <TableHeader>

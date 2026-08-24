@@ -239,6 +239,25 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'components' => self::demoComponents(),
                 ],
             ],
+            // #950: the node set behind the `flow` block demo. ONE endpoint —
+            // a row is a node, and its successors are a field on that row — so
+            // there is no second route here for the edges.
+            [
+                'method' => 'GET',
+                'path' => '/api/uikit/demo/flow-steps',
+                'handler' => [$this, 'demoFlowSteps'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo process steps for the flow block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoFlowStepsResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
             // #868: the queue behind the `inbox` block demo, plus the two write
             // routes its actions call. Each write route declares its OWN
             // requiredPermission — the single source of truth the host resolves
@@ -369,6 +388,16 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 'role' => $record['role'],
                 'status' => $record['status'],
                 'joined' => $record['joined'],
+                // #947 item 4: the field the `documentViewer` demo binds to.
+                // NULL, and null on purpose. A showcase cannot mint an issued
+                // document — persisting a render needs the render container,
+                // which `documents.render_enabled` leaves off by default — and
+                // pointing the viewer at a made-up id would put a broken-looking
+                // 404 on the page and teach nothing. Null is the honest fixture
+                // and it demonstrates the state that actually matters: an
+                // unresolved binding renders the author's `emptyText`, never a
+                // blank frame and never some other document.
+                'documentId' => null,
                 // Caller decisions, not record facts. Deliberately present.
                 'manageable' => true,
                 'canEdit' => true,
@@ -477,6 +506,59 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'note' => 'Conference travel, pre-approved by finance.',
                     'from' => '',
                     'to' => 'submitted',
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Handle GET /api/uikit/demo/flow-steps (requires uikit:view).
+     *
+     * A static fixture process for the `flow` block demo: an expense-approval
+     * route that BRANCHES at the review step. One endpoint, and a row is a node
+     * — `next` holds the ids this step leads to, and holding a LIST is how the
+     * branch is expressed without a second source for the edges. A terminal step
+     * carries an empty list rather than being omitted, so "this step ends the
+     * process" is stated rather than inferred from a missing key. No PDO, no
+     * side effects.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response Static demo process steps.
+     */
+    public function demoFlowSteps(Request $request, array $params = []): Response
+    {
+        return Response::json([
+            'data' => [
+                [
+                    'id' => 'submitted',
+                    'name' => 'Submitted',
+                    'owner' => 'Requester',
+                    'next' => ['review'],
+                ],
+                [
+                    'id' => 'review',
+                    'name' => 'Manager review',
+                    'owner' => 'Line manager',
+                    'next' => ['finance', 'rejected'],
+                ],
+                [
+                    'id' => 'finance',
+                    'name' => 'Finance approval',
+                    'owner' => 'Finance team',
+                    'next' => ['paid'],
+                ],
+                [
+                    'id' => 'paid',
+                    'name' => 'Paid',
+                    'owner' => 'Payroll',
+                    'next' => [],
+                ],
+                [
+                    'id' => 'rejected',
+                    'name' => 'Rejected',
+                    'owner' => 'Requester',
+                    'next' => [],
                 ],
             ],
         ]);
@@ -656,11 +738,16 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
      * Build the reference block tree.
      *
      * Top level: an intro section, then a `tabs` set splitting the catalogue
-     * into Containers / Content / Data / Interactive — each tab pairing a live
-     * block with the PHP that declares it (via {@see self::demo()}). Every one
-     * of the 33 block types (21 SP1+SP2 + 12 SP3 interactive) appears at least
-     * once, and the result passes
+     * into Containers / Content / Data / Interactive / Overlays / Workflow /
+     * Record — each tab pairing a live block with the PHP that declares it (via
+     * {@see self::demo()}). Every one of the block types in
+     * {@see \Whity\Sdk\Frontend\Blocks\BlockContract::types()} appears at least
+     * once — that is a CI gate, not an aspiration — and the result passes
      * {@see \Whity\Sdk\Frontend\Blocks\BlockValidator::validate()}.
+     *
+     * The tab list is named rather than counted, and the type total is not
+     * restated at all: the number here had drifted 17 types out of date, which
+     * is worse than saying nothing because it reads as though somebody checked.
      *
      * @return list<array<string, mixed>>
      */
@@ -915,6 +1002,7 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     ['field' => 'role', 'label' => 'Role'],
                     ['field' => 'status', 'label' => 'Status'],
                     ['field' => 'joined', 'label' => 'Joined'],
+                    ['field' => 'documentId', 'label' => 'Issued document'],
                 ],
                 'emptyText' => 'Pick a record above to see it here.',
                 'children' => [
@@ -985,6 +1073,41 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         'value' => 'No role resolved yet.',
                         'valueFrom' => 'demo-record.role',
                         'tone' => 'muted',
+                    ],
+                    // ---- #947 item 4: the ISSUED DOCUMENT on a record page ----
+                    // The one block in this tree that fetches something CORE
+                    // owns. Every other data-bound block here names a
+                    // `/api/uikit/...` route this plugin registered, because the
+                    // loader ownership-checks each `source` against exactly
+                    // that. `documentViewer` declares NO source for the same
+                    // reason `ouScopePicker` does not: core's
+                    // `/api/v1/documents/{id}` is unnameable by a plugin, and
+                    // the alternative — this plugin republishing core's document
+                    // reads through a route of its own — would be a second read
+                    // path onto an audit record, gated however this plugin felt
+                    // like gating it.
+                    //
+                    // The binding is to the record's own `documentId`, which the
+                    // fixture returns as NULL (see `demoRecord()`), so what
+                    // renders here is the unresolved state: the author's
+                    // `emptyText`, never a blank frame. That is not a gap in the
+                    // demo, it is the state a plugin author most needs to see —
+                    // the other states (a superseded version banner, a version
+                    // picker, a refusal that names its reason) need an issued
+                    // document, and issuing one needs the render container that
+                    // `documents.render_enabled` leaves off by default.
+                    [
+                        'type' => 'card',
+                        'title' => 'documentViewer — an issued document, mounted in a record',
+                        'description' => 'Core fetches, core gates, core decides which artifact is on screen. '
+                            . 'The plugin says which document, and nothing else.',
+                        'children' => [
+                            [
+                                'type' => 'documentViewer',
+                                'documentIdFrom' => 'demo-record.documentId',
+                                'emptyText' => 'This record has no issued document yet.',
+                            ],
+                        ],
                     ],
                     // The edit affordance a record page carries, seeded from the
                     // record the page is about. `defaultFrom` is PLUMBING rather
@@ -2093,7 +2216,8 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * The "Workflow" tab (#868): `timeline` and `inbox`.
+     * The "Workflow" tab (#868, #950): `timeline`, `inbox` and `flow` — what has
+     * happened, what is waiting for you, and the shape of the process itself.
      *
      * `timeline` is the audit-trail shape — actor, action, timestamp, an optional
      * note, an optional from/to. Read-only: the contract carries no endpoint and
@@ -2107,6 +2231,13 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
      * endpoint is gated on. That is read off the route, so what a reader sees
      * here cannot drift from what the middleware enforces on click.
      *
+     * `flow` (#950) is the third face of the same subject: the DIAGRAM. A
+     * process can already be listed with `dataTable` and edited with `form`, and
+     * neither of those is what makes it legible to the person who has to follow
+     * it. The demo below is deliberately a BRANCHING route rather than a
+     * straight line, because a straight line is the case the contract handles
+     * with no edge modelling at all and so demonstrates nothing about the edges.
+     *
      * @return list<array<string, mixed>>
      */
     private function workflowTab(): array
@@ -2115,16 +2246,17 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
             [
                 'type' => 'heading',
                 'level' => 2,
-                'text' => 'Workflow — history and work awaiting you',
+                'text' => 'Workflow — history, work awaiting you, and the process itself',
             ],
             [
                 'type' => 'text',
-                'value' => 'Two blocks every product with an approval step or an audit trail would '
-                    . 'otherwise re-implement, differently each time. The interesting one is `inbox`: '
+                'value' => 'Three blocks every product with an approval step would otherwise '
+                    . 're-implement, differently each time. The interesting one is `inbox`: '
                     . 'the plugin supplies the items, and CORE resolves which actions the caller may '
                     . 'take on each — from the route the action calls, with the same checks the RBAC '
                     . 'middleware makes. An action is rendered only when the host answered that this '
-                    . 'caller may make that exact request.',
+                    . 'caller may make that exact request. `flow` is the other half of the same '
+                    . 'story: the picture of the route those items travel.',
                 'tone' => 'muted',
             ],
             $this->dataBoundDemo(
@@ -2246,6 +2378,105 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 }
                 PHP,
             ),
+            $this->dataBoundDemo(
+                'flow',
+                'A set of nodes and the edges between them. One source, a row is a node, '
+                    . 'and its successors are a field on that row.',
+                [
+                    // The live example is TWO blocks: the graph, and the drawer a
+                    // node click opens. The drawer declares no `trigger`, so the
+                    // only way in is the node — which is the point being shown.
+                    'type' => 'section',
+                    'children' => [
+                        [
+                            'type' => 'flow',
+                            'source' => '/api/uikit/demo/flow-steps',
+                            'nodeIdField' => 'id',
+                            'nodeLabelField' => 'name',
+                            'nodeSubtitleField' => 'owner',
+                            'edgeToField' => 'next',
+                            'orientation' => 'horizontal',
+                            'nodeActions' => [
+                                ['label' => 'Details', 'open' => 'demo-step-drawer'],
+                            ],
+                            'emptyText' => 'No steps configured yet.',
+                        ],
+                        [
+                            'type' => 'drawer',
+                            'id' => 'demo-step-drawer',
+                            'title' => 'Step detail',
+                            'side' => 'right',
+                            'children' => [
+                                [
+                                    'type' => 'heading',
+                                    'level' => 3,
+                                    'text' => 'Step',
+                                    'textFrom' => 'demo-step-drawer.name',
+                                ],
+                                [
+                                    'type' => 'text',
+                                    'value' => 'Owned by whoever this step is assigned to.',
+                                    'valueFrom' => 'demo-step-drawer.owner',
+                                    'tone' => 'muted',
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                <<<'PHP'
+                [
+                    'type'              => 'flow',
+                    'source'            => '/api/uikit/demo/flow-steps', // ownership-checked + versioned
+                    'nodeIdField'       => 'id',
+                    'nodeLabelField'    => 'name',
+                    'nodeSubtitleField' => 'owner',   // optional, second line on the node
+                    // How the edges are read off the node rows. Omit BOTH and the
+                    // nodes are a linear sequence in payload order — the common
+                    // case, modelled for free.
+                    'edgeToField'       => 'next',    // ids this node leads TO; a LIST branches
+                 // 'edgeFromField'     => 'parentId', // ids this node is reached FROM
+                    'orientation'       => 'horizontal', // or 'vertical'
+                    // The SAME shape as dataTable's rowActions, resolved by the
+                    // same validator. Clicking the node runs the first `open`.
+                    'nodeActions'       => [
+                        ['label' => 'Details', 'open' => 'demo-step-drawer'],
+                    ],
+                 // 'maxNodes'          => 40,  // optional: LOWER the readability
+                                                // ceiling (BlockContract::FLOW_MAX_NODES).
+                                                // Above it a renderer draws the first
+                                                // maxNodes and says the graph was cut.
+                    'emptyText'         => 'No steps configured yet.',
+                ],
+                // The drawer the node click opens. No `trigger`, so the graph is
+                // the only way in; the clicked node's row is published under the
+                // drawer's id for `textFrom` / `valueFrom` / `params.from` to read.
+                [
+                    'type' => 'drawer', 'id' => 'demo-step-drawer', 'title' => 'Step detail',
+                    'children' => [
+                        ['type' => 'heading', 'level' => 3, 'text' => 'Step',
+                         'textFrom' => 'demo-step-drawer.name'],
+                    ],
+                ]
+                PHP,
+                <<<'PHP'
+                // ONE endpoint. A row is a node, and `next` holds the ids it leads
+                // to — so the edges need no second route, no second ownership
+                // check and no join in the renderer. A terminal step carries an
+                // empty list rather than omitting the key: "this ends the process"
+                // is worth stating.
+                public function demoFlowSteps(Request $r, array $p = []): Response {
+                    return Response::json(['data' => [
+                        ['id' => 'submitted', 'name' => 'Submitted',
+                         'owner' => 'Requester',    'next' => ['review']],
+                        ['id' => 'review',    'name' => 'Manager review',
+                         'owner' => 'Line manager', 'next' => ['finance', 'rejected']],
+                        ['id' => 'paid',      'name' => 'Paid',
+                         'owner' => 'Payroll',      'next' => []],
+                        // ...
+                    ]]);
+                }
+                PHP,
+            ),
         ];
     }
 
@@ -2354,12 +2585,13 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 'properties' => [
                     'data' => [
                         'type' => 'object',
-                        'required' => ['name', 'role', 'status', 'joined', 'manageable', 'canEdit'],
+                        'required' => ['name', 'role', 'status', 'joined', 'documentId', 'manageable', 'canEdit'],
                         'properties' => [
                             'name' => ['type' => 'string'],
                             'role' => ['type' => 'string'],
                             'status' => ['type' => 'string'],
                             'joined' => ['type' => 'string'],
+                            'documentId' => ['type' => 'integer', 'nullable' => true],
                             'manageable' => ['type' => 'boolean'],
                             'canEdit' => ['type' => 'boolean'],
                         ],
@@ -2385,6 +2617,30 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'data' => [
                         'type' => 'array',
                         'items' => ['$ref' => '#/components/schemas/UiKitDemoEvent'],
+                    ],
+                ],
+            ],
+            'UiKitDemoFlowStep' => [
+                'type' => 'object',
+                'required' => ['id', 'name', 'owner', 'next'],
+                'properties' => [
+                    'id' => ['type' => 'string'],
+                    'name' => ['type' => 'string'],
+                    'owner' => ['type' => 'string'],
+                    // A LIST, even for the single-successor and terminal steps:
+                    // the branch is the interesting case, and a field that is
+                    // sometimes a scalar and sometimes an array is a field every
+                    // consumer has to normalise.
+                    'next' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ],
+            ],
+            'UiKitDemoFlowStepsResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'array',
+                        'items' => ['$ref' => '#/components/schemas/UiKitDemoFlowStep'],
                     ],
                 ],
             ],

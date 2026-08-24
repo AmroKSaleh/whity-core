@@ -29,6 +29,21 @@ final class PromptRegistry implements HostWiredService
         $this->prompts[] = $prompt;
     }
 
+    /**
+     * Drop every registered prompt.
+     *
+     * The registry is a long-lived worker singleton that the prompts handlers
+     * hold by reference, so it cannot be swapped for a fresh one when the plugin
+     * registry reloads — and re-collecting into it without clearing would leave
+     * an uninstalled plugin's prompts listed forever while duplicating the ones
+     * that survived. Callers re-seed core prompts immediately afterwards; a
+     * registry left empty lists nothing (#952).
+     */
+    public function reset(): void
+    {
+        $this->prompts = [];
+    }
+
     /** @return list<Prompt> */
     public function all(): array
     {

@@ -88,12 +88,22 @@ describe('RolesScreen surfaces the friendly toast on not-manageable (WC-222)', (
     const onNotify = jest.fn();
     const adapter = fakeAdapter({ deleteRole: jest.fn().mockResolvedValue('not-manageable') });
 
-    render(<RolesScreen adapter={adapter} can={can} t={t} onNotify={onNotify} />);
+    render(
+      <RolesScreen
+        adapter={adapter}
+        can={can}
+        t={t}
+        onNotify={onNotify}
+        onOpenRecord={jest.fn()}
+      />
+    );
     await screen.findByText('TenantCustom');
 
     // Open the row menu and choose Delete (enabled — the role is manageable).
     const row = screen.getByText('TenantCustom').closest('tr');
-    await user.click(within(row as HTMLElement).getByRole('button'));
+    // Named: the row holds two buttons since #910 — the role's NAME, which opens
+    // the record, and the actions trigger.
+    await user.click(within(row as HTMLElement).getByRole('button', { name: 'Actions' }));
     const menu = await screen.findByRole('menu');
     await user.click(within(menu).getByText('Delete'));
 

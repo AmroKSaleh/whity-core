@@ -23,8 +23,17 @@ final class FakeRenderServiceClient implements RenderServiceClientInterface
 
     public bool $throwOnRender = false;
 
-    public function __construct(private readonly string $pdfBytes = "%PDF-1.4\nfake\n%%EOF")
+    /**
+     * The bytes the next render returns. MUTABLE (#947 item 1): a test proving
+     * that a re-render APPENDS an artifact rather than replacing one has to be
+     * able to tell the two payloads apart, and a fixed body makes "the stored
+     * bytes changed" and "the stored bytes were never touched" look identical.
+     */
+    public string $pdfBytes;
+
+    public function __construct(string $pdfBytes = "%PDF-1.4\nfake\n%%EOF")
     {
+        $this->pdfBytes = $pdfBytes;
     }
 
     public function isConfigured(): bool

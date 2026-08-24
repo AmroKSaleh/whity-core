@@ -7,6 +7,7 @@ namespace Whity\Api;
 use Psr\Log\LoggerInterface;
 use Whity\Auth\RoleChecker;
 use Whity\Core\PluginLoader;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
@@ -47,6 +48,36 @@ use Whity\Sdk\Frontend\Blocks\BlockValidator;
  * RbacMiddleware will enforce on submit. A feature without a resource gets all
  * false. The {@see RoleChecker} is the only authority; no direct DB access.
  *
+ * Why a false capability also carries a reason (#951)
+ * ---------------------------------------------------
+ * A capability comes back false for three unrelated reasons: the resource has
+ * no such write route at all, the plugin registered the wrong method (the
+ * classic being PUT where editability is derived from PATCH), or the caller
+ * simply lacks the RBAC for the route that does exist. The renderer used to
+ * answer all three by omitting the control, which made a correct screen the
+ * viewer has no rights on pixel-identical to a broken one — a plugin once
+ * shipped seven screens with no Edit control at all and it read as a design
+ * decision. So every false capability now also ships a `capabilityReasons`
+ * entry, and the renderer disables the control instead of dropping it. The
+ * BOOLEANS are computed and enforced exactly as before; only the discarded
+ * explanation is new.
+ *
+ * That reason serves TWO audiences, which is why it has two fields:
+ *  - `reason` is written for the person looking at the screen and is safe for
+ *    any caller who could already see the feature. It says what happened to
+ *    THEM ("You do not have permission to edit records here") and never names
+ *    an internal identifier.
+ *  - `detail` is written for whoever can fix it, and names the exact route the
+ *    platform looked for, or the exact role/permission the matched route
+ *    demands. It is emitted ONLY to callers holding
+ *    {@see CorePermissions::PLUGINS_READ} — the same permission that gates the
+ *    plugin console, i.e. exactly the people who can act on it.
+ * The `detail` gate is uniform across every reason code rather than decided
+ * per code. Only `forbidden` details leak authorization surface today, but a
+ * per-code exemption is a rule that whoever adds the NEXT code has to remember,
+ * and a uniform one cannot be got wrong. An ordinary caller loses nothing by
+ * it: a route path they cannot call is of no use to them.
+ *
  * Server-driven `screen:'blocks'` features (WC-226)
  * -------------------------------------------------
  * A plugin may expose a `screen:'blocks'` feature carrying a platform-neutral
@@ -64,9 +95,73 @@ use Whity\Sdk\Frontend\Blocks\BlockValidator;
  *    still returns 200 with the OTHER valid features — never a 500.
  * Validation never throws (the SDK validator is pure and worker-safe), so a
  * malformed plugin tree can neither crash the request nor leak across workers.
+ *
+ * Reporting what was dropped (#953)
+ * ---------------------------------
+ * Both of the above refuse features on purpose and the rules are right, but a
+ * refused feature simply was not in the navigation, which looks exactly like a
+ * permission problem, a caching problem, or a typo in the screen id. Finding
+ * the real cause meant reading container logs.
+ *
+ * So the response carries a `dropped` array naming each refused descriptor and
+ * why. It covers BOTH refusal points — the loader's, at plugin load, and this
+ * handler's block-tree validation, per request — because they are one question
+ * to an administrator ("which screens should be here and are not?") and putting
+ * the answer on the response that BUILDS the navigation is what makes the
+ * question and the answer adjacent.
+ *
+ * The key is emitted only to a caller holding
+ * {@see CorePermissions::PLUGINS_READ}: the reasons quote route paths and
+ * permission names, and every authenticated caller fetches this endpoint. Its
+ * ABSENCE is meaningful — an empty array means "nothing was refused", a missing
+ * key means "not yours to read" — so a client is never left guessing which it
+ * is looking at. The list is NOT permission-filtered per descriptor the way
+ * `data` is: a dropped feature is a defect in a plugin's declaration, not
+ * something the caller could hold rights over, and several of the refusals are
+ * precisely that its declared permission was invalid.
  */
 final class FrontendFeaturesApiHandler
 {
+    /** #951: the feature declares no resource, so no write route is derivable. */
+    private const DENIED_NO_RESOURCE = 'no-resource';
+
+    /** #951: a resource exists but nothing is registered to satisfy this action. */
+    private const DENIED_NO_ROUTE = 'no-route';
+
+    /** #951: the route exists and the caller does not satisfy its RBAC. */
+    private const DENIED_FORBIDDEN = 'forbidden';
+
+    /**
+     * The user-facing text for a capability no route can satisfy (#951).
+     *
+     * `no-resource` and `no-route` are one and the same sentence here on
+     * purpose. They are different bugs to an author and the SAME fact to a
+     * reader — the action is not offered on this screen — and the reader is who
+     * this string is for. What separates them lives in `detail`.
+     *
+     * @var array<string, string>
+     */
+    private const UNAVAILABLE_TEXT = [
+        'canCreate' => 'Creating records is not available on this screen.',
+        'canEdit' => 'Editing records is not available on this screen.',
+        'canDelete' => 'Deleting records is not available on this screen.',
+    ];
+
+    /**
+     * The user-facing text for a capability the caller's RBAC denies (#951).
+     *
+     * Says only that the caller lacks it, never which permission would grant
+     * it: the subject is the reader, which they are entitled to be told, while
+     * the identifier is RBAC surface they are not.
+     *
+     * @var array<string, string>
+     */
+    private const FORBIDDEN_TEXT = [
+        'canCreate' => 'You do not have permission to create records here.',
+        'canEdit' => 'You do not have permission to edit records here.',
+        'canDelete' => 'You do not have permission to delete records here.',
+    ];
+
     private PluginLoader $pluginLoader;
     private RoleChecker $roleChecker;
     private Router $router;
@@ -114,6 +209,22 @@ final class FrontendFeaturesApiHandler
                 return Response::error('Authentication required', 403);
             }
 
+            // Whether this caller gets the operator-grade `detail` on a denied
+            // capability (#951). Resolved ONCE per request rather than per
+            // feature: it is a property of the caller, not of the descriptor,
+            // and asking the RoleChecker again for every feature would be the
+            // same answer at N times the cost.
+            $includeDetail = $this->roleChecker->hasPermissionForProfile(
+                $userId,
+                CorePermissions::PLUGINS_READ,
+                $tenantId
+            );
+
+            // Refusals made while serving THIS request (#953). The loader's own
+            // refusals are read back separately below; they happened at load
+            // time and are not re-derived per request.
+            $droppedHere = [];
+
             $data = [];
             foreach ($this->pluginLoader->getFrontendFeatures() as $feature) {
                 // Defence in depth: a descriptor without a string permission
@@ -135,16 +246,34 @@ final class FrontendFeaturesApiHandler
                 // null when the feature must be dropped (already logged).
                 $validatedBlocks = null;
                 if (($feature['screen'] ?? null) === 'blocks') {
-                    $validatedBlocks = $this->validateBlocksOrNull($feature);
+                    $validatedBlocks = $this->validateBlocksOrNull($feature, $droppedHere);
                     if ($validatedBlocks === null) {
                         continue;
                     }
                 }
 
-                $data[] = $this->toPublicFeature($feature, $permission, $userId, $tenantId, $validatedBlocks);
+                $data[] = $this->toPublicFeature(
+                    $feature,
+                    $permission,
+                    $userId,
+                    $tenantId,
+                    $validatedBlocks,
+                    $includeDetail
+                );
             }
 
-            return Response::json(['data' => $data], 200);
+            $body = ['data' => $data];
+
+            // #953. Same audience as a capability's `detail`, for the same
+            // reason: these reasons are for whoever can repair the plugin.
+            if ($includeDetail) {
+                $body['dropped'] = array_merge(
+                    $this->pluginLoader->getDroppedFrontendFeatures(),
+                    $droppedHere
+                );
+            }
+
+            return Response::json($body, 200);
         } catch (\Throwable) {
             // Never leak internal exception details to clients.
             return Response::error('Failed to fetch frontend features', 500);
@@ -164,6 +293,8 @@ final class FrontendFeaturesApiHandler
      * @param list<mixed>|null $validatedBlocks The already-validated block tree for a
      *        `screen:'blocks'` feature (emitted verbatim under `blocks`), or null
      *        for every other screen (no `blocks` key is added).
+     * @param bool $includeDetail Whether the caller may see the operator-grade
+     *        `detail` on a denied capability (#951).
      * @return array<string, mixed> The public entry.
      */
     private function toPublicFeature(
@@ -171,7 +302,8 @@ final class FrontendFeaturesApiHandler
         string $permission,
         int $userId,
         int $tenantId,
-        ?array $validatedBlocks = null
+        ?array $validatedBlocks = null,
+        bool $includeDetail = false
     ): array {
         $resource = null;
         $basePath = null;
@@ -220,6 +352,8 @@ final class FrontendFeaturesApiHandler
             ];
         }
 
+        $resolved = $this->resolveCapabilities($basePath, $userId, $tenantId);
+
         $public = [
             'id' => (string) ($feature['id'] ?? ''),
             'plugin' => (string) ($feature['plugin'] ?? ''),
@@ -232,7 +366,12 @@ final class FrontendFeaturesApiHandler
             'action' => $action,
             'embed' => $embed,
             'requiredPermission' => $permission,
-            'capabilities' => $this->resolveCapabilities($basePath, $userId, $tenantId),
+            'capabilities' => $resolved['capabilities'],
+            // #951: one entry per FALSE capability — a true one needs no
+            // explanation, and emitting an empty reason for it would only
+            // invite the renderer to test the wrong thing. Always present (even
+            // when empty) so the published contract stays exhaustive.
+            'capabilityReasons' => $this->publicReasons($resolved['reasons'], $includeDetail),
         ];
 
         // WC-226: a `screen:'blocks'` feature carries its host-validated block
@@ -255,23 +394,25 @@ final class FrontendFeaturesApiHandler
      * errors are for operators only and never surface to the client.
      *
      * @param array<string, mixed> $feature The normalized loader descriptor.
+     * @param list<array{plugin: string, featureId: string|null, reason: string}> $dropped
+     *        Collects this refusal for the response's `dropped` array (#953).
      * @return list<mixed>|null The validated tree, or null when the feature must be dropped.
      */
-    private function validateBlocksOrNull(array $feature): ?array
+    private function validateBlocksOrNull(array $feature, array &$dropped): ?array
     {
         $featureId = isset($feature['id']) && is_string($feature['id']) ? $feature['id'] : '(no id)';
         $pluginName = isset($feature['plugin']) && is_string($feature['plugin']) ? $feature['plugin'] : '(unknown)';
 
         $blocks = $feature['blocks'] ?? null;
         if (!is_array($blocks)) {
-            $this->logBlocksDropped($pluginName, $featureId, ["'blocks' must be an array, got " . get_debug_type($blocks)]);
+            $this->logBlocksDropped($pluginName, $featureId, ["'blocks' must be an array, got " . get_debug_type($blocks)], $dropped);
 
             return null;
         }
 
         $result = BlockValidator::validate($blocks);
         if ($result['ok'] !== true) {
-            $this->logBlocksDropped($pluginName, $featureId, $result['errors']);
+            $this->logBlocksDropped($pluginName, $featureId, $result['errors'], $dropped);
 
             return null;
         }
@@ -285,12 +426,18 @@ final class FrontendFeaturesApiHandler
      *
      * Structured + secret-free: the validator errors are path-qualified contract
      * diagnostics (block type/prop names), never request data or secrets, and are
-     * passed as PSR-3 context for operator triage — they are NEVER returned to the
-     * client. A no-op when no logger is wired.
+     * passed as PSR-3 context for operator triage. A no-op when no logger is
+     * wired — which is exactly why the refusal is ALSO collected into `$dropped`
+     * (#953): an unwired logger, or a log nobody reads, used to mean the answer
+     * existed nowhere at all.
+     *
+     * The errors reach the client only through the `dropped` array, which is
+     * served solely to a plugin administrator.
      *
      * @param list<string> $errors The validator errors (path-qualified contract diagnostics).
+     * @param list<array{plugin: string, featureId: string|null, reason: string}> $dropped
      */
-    private function logBlocksDropped(string $pluginName, string $featureId, array $errors): void
+    private function logBlocksDropped(string $pluginName, string $featureId, array $errors, array &$dropped): void
     {
         $this->logger?->warning(
             'Frontend feature with screen:blocks dropped: invalid block tree',
@@ -300,6 +447,12 @@ final class FrontendFeaturesApiHandler
                 'errors' => $errors,
             ]
         );
+
+        $dropped[] = [
+            'plugin' => $pluginName,
+            'featureId' => $featureId,
+            'reason' => 'invalid block tree: ' . implode('; ', $errors),
+        ];
     }
 
     /**
@@ -325,17 +478,34 @@ final class FrontendFeaturesApiHandler
      * A feature without a resource (or an empty base path) has no derivable
      * write routes, so every capability is false.
      *
+     * Alongside each FALSE capability this also returns why it is false (#951).
+     * The boolean answers are computed exactly as before — the scan, its order,
+     * and its last-match-wins behaviour are untouched — and the reason is read
+     * off the same pass rather than recomputed, so the two can never disagree.
+     *
      * @param string|null $basePath The resource base path, or null when absent.
      * @param int $userId The resolved caller user id.
      * @param int $tenantId The resolved tenant id.
-     * @return array{canCreate: bool, canEdit: bool, canDelete: bool}
+     * @return array{
+     *     capabilities: array{canCreate: bool, canEdit: bool, canDelete: bool},
+     *     reasons: array<string, array{code: string, reason: string, detail: string}>
+     * }
      */
     private function resolveCapabilities(?string $basePath, int $userId, int $tenantId): array
     {
         $capabilities = ['canCreate' => false, 'canEdit' => false, 'canDelete' => false];
 
         if ($basePath === null || $basePath === '') {
-            return $capabilities;
+            $reasons = [];
+            foreach (array_keys($capabilities) as $capability) {
+                $reasons[$capability] = [
+                    'code' => self::DENIED_NO_RESOURCE,
+                    'reason' => self::UNAVAILABLE_TEXT[$capability],
+                    'detail' => 'the feature declares no resource, so the platform can derive no write route for it',
+                ];
+            }
+
+            return ['capabilities' => $capabilities, 'reasons' => $reasons];
         }
 
         // Matches `${basePath}/{param}` precisely: the remainder after the base
@@ -344,20 +514,123 @@ final class FrontendFeaturesApiHandler
         // sub-resource routes (whose remainder contains a `/`).
         $itemPattern = '#^' . preg_quote($basePath . '/', '#') . '\{[^/]+\}$#';
 
+        // The route each capability was decided BY, or null when the scan never
+        // matched one. This is the whole diagnosis: a false with no matched
+        // route means nothing is registered to satisfy it (the PUT-instead-of-
+        // PATCH case), and a false WITH one means the route exists and the
+        // caller failed its RBAC. The two are indistinguishable from the
+        // boolean alone, which is exactly why #951 was hard to see.
+        $matched = ['canCreate' => null, 'canEdit' => null, 'canDelete' => null];
+
         foreach ($this->router->getRoutes() as $route) {
             $method = $route['method'];
             $path = $route['path'];
 
             if ($method === 'POST' && $path === $basePath) {
                 $capabilities['canCreate'] = $this->callerSatisfies($route, $userId, $tenantId);
+                $matched['canCreate'] = $route;
             } elseif ($method === 'PATCH' && preg_match($itemPattern, $path) === 1) {
                 $capabilities['canEdit'] = $this->callerSatisfies($route, $userId, $tenantId);
+                $matched['canEdit'] = $route;
             } elseif ($method === 'DELETE' && preg_match($itemPattern, $path) === 1) {
                 $capabilities['canDelete'] = $this->callerSatisfies($route, $userId, $tenantId);
+                $matched['canDelete'] = $route;
             }
         }
 
-        return $capabilities;
+        // The path each capability is derived FROM, quoted back to the author so
+        // a wrong-method registration names itself.
+        $itemPath = $basePath . '/{id}';
+        $targets = [
+            'canCreate' => ['POST', $basePath],
+            'canEdit' => ['PATCH', $itemPath],
+            'canDelete' => ['DELETE', $itemPath],
+        ];
+
+        $reasons = [];
+        foreach ($capabilities as $capability => $granted) {
+            if ($granted) {
+                continue;
+            }
+
+            [$method, $path] = $targets[$capability];
+            $route = $matched[$capability];
+
+            $reasons[$capability] = $route === null
+                ? [
+                    'code' => self::DENIED_NO_ROUTE,
+                    'reason' => self::UNAVAILABLE_TEXT[$capability],
+                    'detail' => "no {$method} route is registered at '{$path}'"
+                        // The single most common way to arrive here, and
+                        // invisible from the screen: PUT is a perfectly valid
+                        // registration that this derivation simply does not read.
+                        . ($capability === 'canEdit' ? ' — editability is derived from PATCH, never PUT' : ''),
+                ]
+                : [
+                    'code' => self::DENIED_FORBIDDEN,
+                    'reason' => self::FORBIDDEN_TEXT[$capability],
+                    'detail' => "{$method} {$path} requires " . self::describeRouteRbac($route),
+                ];
+        }
+
+        return ['capabilities' => $capabilities, 'reasons' => $reasons];
+    }
+
+    /**
+     * Name what a route demands, for the operator-grade `detail` (#951).
+     *
+     * Both requirements are named rather than only the one that failed: telling
+     * them apart would mean asking the RoleChecker a second time for an answer
+     * the reader can see for themselves, and an author fixing a screen wants the
+     * route's whole gate anyway.
+     *
+     * @param array{requiredRole: ?string, requiredPermission: ?string} $route The route descriptor.
+     */
+    private static function describeRouteRbac(array $route): string
+    {
+        $demands = [];
+
+        $requiredRole = $route['requiredRole'] ?? null;
+        if (is_string($requiredRole)) {
+            $demands[] = "role '{$requiredRole}'";
+        }
+
+        $requiredPermission = $route['requiredPermission'] ?? null;
+        if (is_string($requiredPermission)) {
+            $demands[] = "permission '{$requiredPermission}'";
+        }
+
+        // Unreachable while the caller failed the check — a route demanding
+        // nothing is satisfied by everyone — but stated rather than assumed, so
+        // the string is never the empty tail of a sentence.
+        return $demands === [] ? 'no role or permission' : implode(' and ', $demands);
+    }
+
+    /**
+     * Shape resolved denial reasons for the wire, applying the audience gate (#951).
+     *
+     * `reason` goes to everyone who could already see the feature; `detail` only
+     * to a caller holding {@see CorePermissions::PLUGINS_READ}. The key is always
+     * emitted so a client never has to distinguish "no detail for you" from "the
+     * server forgot" — it is null in both the ungated and the not-applicable case,
+     * and a client that renders it renders nothing.
+     *
+     * @param array<string, array{code: string, reason: string, detail: string}> $reasons
+     * @param bool $includeDetail Whether this caller may see the operator detail.
+     * @return array<string, array{code: string, reason: string, detail: string|null}>
+     */
+    private function publicReasons(array $reasons, bool $includeDetail): array
+    {
+        $public = [];
+        foreach ($reasons as $capability => $denial) {
+            $public[$capability] = [
+                'code' => $denial['code'],
+                'reason' => $denial['reason'],
+                'detail' => $includeDetail ? $denial['detail'] : null,
+            ];
+        }
+
+        return $public;
     }
 
     /**

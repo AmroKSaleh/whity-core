@@ -1,5 +1,12 @@
 import * as React from "react"
-import { IconChevronLeft, IconChevronRight, IconMenu2, IconX } from "@tabler/icons-react"
+import {
+  IconChevronDown,
+  IconChevronLeft,
+  IconChevronRight,
+  IconMenu2,
+  IconSearch,
+  IconX,
+} from "@tabler/icons-react"
 
 import { cn } from "./utils"
 
@@ -23,7 +30,13 @@ import { cn } from "./utils"
  * icon) — the same shape a Flutter or Tauri-native nav rail would consume;
  * this component owns only the desktop-web collapse/expand + mobile
  * slide-over chrome around that data.
+ *
+ * I18N: every user-visible string is a prop with an English default, and
+ * nothing here imports a translator — the composed wrapper passes already
+ * translated text, so the same component serves a client with no i18n layer
+ * and one with a full catalogue.
  */
+
 export interface AppSidebarNavItem {
   id: string
   label: string
@@ -35,7 +48,12 @@ export interface AppSidebarNavItem {
 
 export interface AppSidebarNavGroup {
   id: string
-  /** Optional group heading, hidden entirely when the sidebar is collapsed. */
+  /**
+   * Optional group heading, hidden entirely when the sidebar is collapsed.
+   * A group WITHOUT a label is never collapsible — there is no header to
+   * click — so its items always render. Use that for a short trailing set
+   * that must stay reachable regardless of collapse state.
+   */
   label?: string
   items: AppSidebarNavItem[]
 }
@@ -72,6 +90,33 @@ export interface AppSidebarProps {
   onMobileOpenChange?: (open: boolean) => void
   /** Custom link component (e.g. Next.js <Link>) — defaults to a plain <a>. */
   linkComponent?: React.ElementType
+  /**
+   * Turn group headings into disclosure buttons. Groups the user has not
+   * opened render their items HIDDEN rather than unmounted — see the
+   * `hidden` attribute in the group body below for why that distinction is
+   * load-bearing.
+   */
+  collapsibleGroups?: boolean
+  /**
+   * Controlled set of open group ids. Uncontrolled if omitted, in which
+   * case exactly one group starts open: the one holding the active item
+   * (falling back to the first group when nothing is active). Navigating to
+   * another group's page opens that group, without closing anything the
+   * user opened by hand.
+   */
+  expandedGroupIds?: readonly string[]
+  onExpandedGroupsChange?: (expanded: readonly string[]) => void
+  /** Render a filter box above the nav that narrows items by label. */
+  searchable?: boolean
+  /** Controlled search query. Uncontrolled if omitted. */
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  /** Placeholder AND accessible name for the filter box. Defaults to "Search". */
+  searchPlaceholder?: string
+  /** Accessible name for the button that empties the filter box. */
+  clearSearchLabel?: string
+  /** Shown in place of the nav when a query matches no item. */
+  searchNoResultsLabel?: string
   /** Accessible name for the navigation landmark. Defaults to "Main". */
   navLabel?: string
   /** Accessible name for the button that opens the mobile drawer. */
@@ -80,7 +125,18 @@ export interface AppSidebarProps {
   closeNavLabel?: string
   /** Text of the collapse toggle. Defaults to "Collapse". */
   collapseLabel?: string
+  /**
+   * Accessible names for the collapse toggle in each direction. Separate
+   * from `collapseLabel`, which is the visible text beside the icon.
+   */
+  collapseAriaLabel?: string
+  expandAriaLabel?: string
   className?: string
+}
+
+/** Case-insensitive substring match, tolerant of surrounding whitespace. */
+function matches(label: string, normalizedQuery: string): boolean {
+  return label.toLocaleLowerCase().includes(normalizedQuery)
 }
 
 export function AppSidebar({
@@ -94,10 +150,21 @@ export function AppSidebar({
   mobileOpen: mobileOpenProp,
   onMobileOpenChange,
   linkComponent,
+  collapsibleGroups = false,
+  expandedGroupIds,
+  onExpandedGroupsChange,
+  searchable = false,
+  searchValue,
+  onSearchChange,
+  searchPlaceholder = "Search",
+  clearSearchLabel = "Clear search",
+  searchNoResultsLabel = "No matching pages",
   navLabel = "Main",
   openNavLabel = "Open navigation",
   closeNavLabel = "Close navigation",
   collapseLabel = "Collapse",
+  collapseAriaLabel = "Collapse sidebar",
+  expandAriaLabel = "Expand sidebar",
   className,
 }: AppSidebarProps) {
   const [collapsedState, setCollapsedState] = React.useState(false)
@@ -114,37 +181,188 @@ export function AppSidebar({
     onMobileOpenChange?.(next)
   }
 
+  const [queryState, setQueryState] = React.useState("")
+  const query = searchValue ?? queryState
+  const setQuery = (next: string) => {
+    if (searchValue === undefined) setQueryState(next)
+    onSearchChange?.(next)
+  }
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const searching = normalizedQuery !== ""
+
+  // The group holding the current page, which is what starts open. Falls back
+  // to the first group so an unmatched route (a detail page no nav item owns)
+  // still shows something rather than a stack of closed headers.
+  const openByDefaultGroupId = React.useMemo(() => {
+    const active = groups.find((group) => group.items.some((item) => item.active))
+    return active?.id ?? groups[0]?.id ?? null
+  }, [groups])
+
+  const [expandedState, setExpandedState] = React.useState<readonly string[]>([])
+  const expanded = expandedGroupIds ?? expandedState
+
+  // `groups` typically arrives empty on first render and fills in after the
+  // nav fetch resolves, so the default cannot be computed in useState's
+  // initializer — it has to react to the id appearing. Keyed on the id alone:
+  // a group the user opened by hand survives navigation within it, and only a
+  // move to a DIFFERENT group re-narrows the sidebar.
+  React.useEffect(() => {
+    if (expandedGroupIds !== undefined) return
+    if (openByDefaultGroupId === null) return
+    setExpandedState((prev) =>
+      prev.includes(openByDefaultGroupId) ? prev : [openByDefaultGroupId]
+    )
+  }, [openByDefaultGroupId, expandedGroupIds])
+
+  const toggleGroup = (id: string) => {
+    const next = expanded.includes(id)
+      ? expanded.filter((groupId) => groupId !== id)
+      : [...expanded, id]
+    if (expandedGroupIds === undefined) setExpandedState(next)
+    onExpandedGroupsChange?.(next)
+  }
+
   const Link = linkComponent ?? "a"
 
+  // While a query is active the disclosure state is bypassed entirely: the
+  // point of the box is to reach an item without knowing which group holds
+  // it. Groups with no match drop out so the result list stays short.
+  const rendered = React.useMemo(() => {
+    if (!searching) {
+      return groups.map((group) => ({ group, items: group.items }))
+    }
+    return groups
+      .map((group) => ({
+        group,
+        items: group.items.filter((item) => matches(item.label, normalizedQuery)),
+      }))
+      .filter((entry) => entry.items.length > 0)
+  }, [groups, searching, normalizedQuery])
+
+  // A group is open when it cannot be closed (no header to click, or the
+  // feature is off), when the icon rail hides the headers anyway, while a
+  // query is bypassing disclosure, or when the user/default opened it.
+  const isGroupOpen = (group: AppSidebarNavGroup): boolean =>
+    !collapsibleGroups ||
+    !group.label ||
+    collapsed ||
+    searching ||
+    expanded.includes(group.id)
+
   const nav = (
-    <nav aria-label={navLabel} className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
-      {groups.map((group) => (
-        <div key={group.id} className="space-y-1">
-          {group.label && !collapsed && (
-            <div className="px-2 text-[0.625rem] font-semibold tracking-wider text-muted-foreground uppercase">
-              {group.label}
+    <nav
+      data-slot="app-sidebar-nav"
+      aria-label={navLabel}
+      className="flex-1 space-y-4 overflow-y-auto px-2 py-4"
+    >
+      {rendered.map(({ group, items }) => {
+        const open = isGroupOpen(group)
+        const showHeading = Boolean(group.label) && !collapsed
+        const isDisclosure = showHeading && collapsibleGroups && !searching
+        const bodyId = `app-sidebar-group-${group.id}`
+
+        return (
+          <div key={group.id} className="space-y-1">
+            {showHeading && isDisclosure && (
+              <button
+                type="button"
+                data-slot="app-sidebar-group-toggle"
+                data-group-id={group.id}
+                aria-expanded={open}
+                aria-controls={bodyId}
+                onClick={() => toggleGroup(group.id)}
+                className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-[0.625rem] font-semibold tracking-wider text-muted-foreground uppercase outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+              >
+                {open ? (
+                  <IconChevronDown className="size-3 shrink-0" />
+                ) : (
+                  <IconChevronRight className="size-3 shrink-0 rtl:rotate-180" />
+                )}
+                <span className="truncate">{group.label}</span>
+              </button>
+            )}
+            {showHeading && !isDisclosure && (
+              <div className="px-2 text-[0.625rem] font-semibold tracking-wider text-muted-foreground uppercase">
+                {group.label}
+              </div>
+            )}
+            {/*
+              A closed group's items are HIDDEN, not unmounted.
+
+              `hidden` is the correct disclosure semantic — collapsed content
+              must leave the accessibility tree, or a screen reader announces
+              links the sighted user cannot see. It follows that a role/name
+              query cannot find an item in a closed group, in Playwright as
+              much as in Testing Library.
+
+              Keeping them mounted is still deliberate: a DOM/CSS query can
+              tell "this group is closed" (present, hidden) from "RBAC removed
+              this link for this role" (absent). Unmounting would collapse
+              both into "absent", and any suite asserting absence as proof of
+              permission filtering would keep passing after that filtering
+              broke. Either query by CSS or open the group first.
+            */}
+            <div id={bodyId} hidden={!open} className="space-y-1">
+              {items.map((item) => (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  aria-current={item.active ? "page" : undefined}
+                  title={collapsed ? item.label : undefined}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs/relaxed font-medium transition-colors",
+                    item.active
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    collapsed && "justify-center"
+                  )}
+                >
+                  {item.icon && <span className="shrink-0 [&_svg]:size-4">{item.icon}</span>}
+                  {!collapsed && <span className="truncate">{item.label}</span>}
+                </Link>
+              ))}
             </div>
-          )}
-          {group.items.map((item) => (
-            <Link
-              key={item.id}
-              href={item.href}
-              aria-current={item.active ? "page" : undefined}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs/relaxed font-medium transition-colors",
-                item.active
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                collapsed && "justify-center"
-              )}
-            >
-              {item.icon && <span className="shrink-0 [&_svg]:size-4">{item.icon}</span>}
-              {!collapsed && <span className="truncate">{item.label}</span>}
-            </Link>
-          ))}
-        </div>
-      ))}
+          </div>
+        )
+      })}
+      {searching && rendered.length === 0 && (
+        <p data-slot="app-sidebar-no-results" className="px-2 py-1 text-xs/relaxed text-muted-foreground">
+          {searchNoResultsLabel}
+        </p>
+      )}
     </nav>
+  )
+
+  // Hidden in the icon rail: a 4rem-wide column has nowhere to put a text
+  // field, and the collapse toggle is right there to widen it again.
+  const search = searchable && !collapsed && (
+    <div className="px-2.5 pt-2.5">
+      <div className="relative flex items-center">
+        <IconSearch className="pointer-events-none absolute start-2 size-3.5 text-muted-foreground" />
+        <input
+          type="search"
+          data-slot="app-sidebar-search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setQuery("")
+          }}
+          placeholder={searchPlaceholder}
+          aria-label={searchPlaceholder}
+          className="h-8 w-full rounded-md border border-sidebar-border bg-background/50 ps-7 pe-7 text-xs/relaxed text-sidebar-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 [&::-webkit-search-cancel-button]:hidden"
+        />
+        {query !== "" && (
+          <button
+            type="button"
+            aria-label={clearSearchLabel}
+            onClick={() => setQuery("")}
+            className="absolute end-1 flex size-6 items-center justify-center rounded-md text-sidebar-foreground/70 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            <IconX className="size-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
   )
 
   return (
@@ -200,11 +418,13 @@ export function AppSidebar({
           </div>
         )}
 
+        {search}
+
         {nav}
 
         <button
           type="button"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? expandAriaLabel : collapseAriaLabel}
           onClick={() => setCollapsed(!collapsed)}
           className="hidden items-center justify-center gap-1.5 border-t border-sidebar-border px-3 py-2 text-xs/relaxed text-sidebar-foreground/70 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/30 md:flex"
         >

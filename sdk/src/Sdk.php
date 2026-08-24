@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.34).
+ * SDK identity (v1.38).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -447,13 +447,155 @@ namespace Whity\Sdk;
  * rather than assumed, because several things walk a block tree and a walker
  * that hard-codes `children` silently skips a slot — for the host loader that
  * is a `source` that never got ownership-checked. Additive: every tree that
- * validated under 1.33 still validates)
+ * validated under 1.33 still validates) ->
+ * 1.35 (THE GRAPH BLOCK: `flow` joins
+ * {@see \Whity\Sdk\Frontend\Blocks\BlockContract}, with a declared node ceiling
+ * ({@see \Whity\Sdk\Frontend\Blocks\BlockContract::FLOW_MAX_NODES}) and no new
+ * prop-rule kind.
+ * The whitelist covered tables, lists, timelines, inboxes, charts, forms,
+ * overlays and master-detail, and not one of its types could render a set of
+ * nodes and the edges between them. So anything modelling an ordered or
+ * branching process — a chain of steps, a state machine, a dependency graph —
+ * could be EDITED natively (`form`, `fieldArray`) and LISTED natively (`table`),
+ * while the DIAGRAM, which for that class of feature is usually the thing that
+ * makes it legible to a non-technical reader, was the one part every product had
+ * to ship as bespoke React. This is not a new renderer: core already runs
+ * `@xyflow/react` behind two screens, and both are the same composition the
+ * block reuses.
+ * ONE FETCH, AND ROWS THAT ARE NODES. `source` is an ordinary ownership-checked
+ * apiPath returning a collection, exactly as `dataTable`'s is, and a row IS a
+ * node. Edges are references off the node rows to OTHER nodes' ids —
+ * `edgeFromField` a predecessor pointer, `edgeToField` a successor pointer,
+ * either optionally holding a LIST so a step can branch — and with neither
+ * declared the nodes are a linear sequence in payload order, which costs an
+ * ordered process no edge modelling at all. A second source for edges was the
+ * obvious alternative and is deliberately not offered: it doubles the ownership
+ * checks and the loading states, and puts a join in the renderer that the
+ * plugin already made when it wrote the rows. A reference to an id no row
+ * declared is dropped rather than materialised, since a box the plugin never
+ * described, labelled with a raw id, is not information.
+ * READ-ONLY BY CONSTRUCTION, like `timeline`: no endpoint, no verb, nothing to
+ * submit. Editing is a form opened FROM a node, and the affordance is
+ * `nodeActions` of the SAME `rowActionList` kind `dataTable.rowActions` already
+ * uses — same validator, same renderer path — because a node's actions are a
+ * row's actions and a second spelling of one shape is two shapes that drift.
+ * Clicking a node runs its first `open` action; a diagram whose only affordance
+ * is a dropdown is one nobody clicks.
+ * THE NODE CEILING IS THE POINT OF DECLARING IT. #192 is open against the two
+ * existing graph screens because a canvas of several hundred boxes, most with no
+ * edges, has stopped conveying anything — and any block on the same renderer
+ * inherits that the moment a tenant's data grows. Carrying it silently would
+ * mean finding it in a plugin's production deployment, so the limit is in the
+ * contract and the behaviour above it is defined: draw the first `maxNodes` in
+ * payload order with the edges among them, and SAY on screen that the graph was
+ * truncated, because a partial graph that looks complete is worse than a tangle.
+ * `maxNodes` may LOWER the ceiling and not raise it: a plugin knows its labels
+ * are long or its target is a phone, which is knowledge worth applying, but it
+ * cannot know that 400 nodes are legible on every platform this tree may render
+ * on. Additive; every tree that validated under 1.34 still validates) ->
+ * 1.36 (THE DOCUMENT VIEWER: `documentViewer` joins
+ * {@see \Whity\Sdk\Frontend\Blocks\BlockContract}, declaring no `source` and no
+ * new prop-rule kind.
+ * #947 item 1 gave core an issued document — a record with an identity and one
+ * immutable artifact per render — and nothing in this contract could show one.
+ * A plugin whose record has an issued work order could link out to it at best,
+ * and a link out of a record is where the reader stops reading the record.
+ * COMPOSING WAS NOT AVAILABLE, and not for want of pieces. Every `source` and
+ * `recordPath` in this contract is ownership-checked against the routes the
+ * DECLARING plugin registered, so core's `/api/v1/documents/{id}` cannot be
+ * named by any plugin; the only composition that would work is a plugin
+ * republishing core's document reads through a route of its own, gated however
+ * that plugin chose. `ouScopePicker` already refused that trade for the OU tree
+ * and the refusal is worth more here, because the thing being republished is an
+ * audit record. So this type follows the same shape: no `source` prop at all,
+ * the host fetching core's own endpoints under the caller's session and the
+ * `documents:read` gate they already carry, and no prop with which to point it
+ * anywhere else.
+ * WHICH DOCUMENT is a `contextPath` (`documentIdFrom`) and there is deliberately
+ * NO literal twin. The `heading`/`text`/`badge`/`stat` rule — literal required,
+ * `...From` additive — exists because an unresolved binding should still render
+ * A title, a duller version of the right answer. Inverted here the fallback is
+ * not duller, it is A DIFFERENT DOCUMENT rendered with full confidence, so
+ * nothing renders until something has said which one and `emptyText` is what an
+ * author says in the meantime.
+ * WHICH ARTIFACT is the question a re-render creates, and the block answers it
+ * two ways. `artifactIdFrom` PINS one — the binding an append-only trail needs,
+ * so an event saying "this is what circulated on the 4th" can show what
+ * circulated on the 4th rather than what the document says today. Absent, the
+ * viewer shows the CURRENT artifact and says so on screen, with the count of the
+ * others and the way to reach them. Showing the newest SILENTLY was the
+ * alternative and is the one thing a viewer of an auditable record must not do:
+ * a corrected document then reads as though it had always said that. The
+ * renderer never falls back between the two — a pinned artifact that is not on
+ * the record is an explicit failure state, because quietly substituting the
+ * current one answers a question about the past with a fact about the present.
+ * NOT OFFERED, deliberately: a prop to hide the version history (a plugin
+ * deciding what a reader of an audit record may know is not a presentation
+ * choice), a prop to suppress the download (the bytes were already served), and
+ * any height/zoom prop (presentational, and the page's own aspect ratio is a
+ * fact the renderer can read). Additive; every tree that validated under 1.35
+ * still validates) ->
+ * 1.37 (DOCUMENT ROUTING RULES: {@see \Whity\Sdk\Routing\PluginRoutingRulesInterface}
+ * joins the optional capability interfaces, with
+ * {@see \Whity\Sdk\Routing\RoutingRuleResolverInterface},
+ * {@see \Whity\Sdk\Routing\RoutingRuleContext} and
+ * {@see \Whity\Sdk\Routing\ResolvedRecipient} as its contract.
+ * #947 item 3 puts a document routing engine in core, and the load-bearing
+ * decision is that a route STEP NAMES A RULE, NEVER A PERSON: the rule is
+ * resolved at send time, against the organisation as it stands then, so a unit
+ * created last week is included because it exists rather than because somebody
+ * remembered to add it. A stored recipient list omits it, the document still
+ * renders, every step still completes and the run reports SUCCESS — which is why
+ * the rule is the contract and the list is not offered.
+ * Core owns two kinds, `role` and `role_below_actor`, and both are generic in
+ * the strong sense: every deployment has roles and every deployment has a unit
+ * tree. Anything narrower is what one organisation happens to mean by "the next
+ * people" — a `supervisor` means three different things in three deployments —
+ * so it arrives through this interface instead of being guessed at in core.
+ * A RESOLVER RETURNS SUGGESTIONS AND WRITES NOTHING. It answers "who, and via
+ * which unit", and the host filters every profile against the ACTIVE MEMBERSHIPS
+ * of the tenant owning the route before a single inbox row exists — so a
+ * resolver, correct or buggy, cannot place a document in another tenant's inbox,
+ * and that check is not a rule every plugin author has to remember.
+ * `validate()` runs at authoring time and its message reaches the person
+ * composing the route verbatim; a throw from `resolve()` is plugin code
+ * misbehaving and its text is logged rather than shown.
+ * BARE SLUGS ONLY: declare `committee`, get `acme:committee`. Two plugins may
+ * both declare `committee` without colliding, and no plugin can mint a bare kind
+ * — so a step already stored naming `role` cannot be re-pointed by installing a
+ * plugin, which matters more here than in most catalogues because the step
+ * decides who receives a document.
+ * Additive; every tree that validated under 1.36 still validates) ->
+ * 1.38 (THE RULE VOCABULARY, GENERALISED OUT OF ROUTING:
+ * {@see \Whity\Sdk\Audience\AudienceRuleContext} and
+ * {@see \Whity\Sdk\Audience\AudienceRuleResolverInterface}.
+ * #999 adds NAMED USER GROUPS, and a group is not a membership table — it is
+ * one of these same rule expressions given a name and stored once, so that
+ * "the instructors" is ONE node referenced from many places rather than a
+ * thousand rows re-listed per place. A stored list goes stale the first time
+ * somebody is hired: it omits them, still renders, and still reports success.
+ * A rule includes them because they exist.
+ * The generalisation is a SUBTYPE, not a widening.
+ * `RoutingRuleContext extends AudienceRuleContext`, so every property a 1.37
+ * resolver reads is still present with the same type — nothing became nullable —
+ * and every call site still compiles. A resolver that never touches the
+ * document, the route or the step declares `resolve(AudienceRuleContext)`,
+ * which satisfies BOTH interfaces from one body, and its kind then becomes
+ * usable as a group definition.
+ * The two alternatives were rejected for the same reason: making the routing
+ * fields nullable changes the type under plugin code already shipped, and
+ * passing zeros in them is a lie the type system would endorse.
+ * ONE REGISTRY STILL. {@see \Whity\Sdk\Routing\PluginRoutingRulesInterface} is
+ * unchanged and remains the only way to contribute a kind; there is no
+ * audience-only declaration, because a rule that can name a set of people can
+ * name the recipients of a step.
+ * Additive; every tree that validated under 1.37 still validates)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.34.0';
+    public const VERSION = '1.38.0';
 
     /**
      * Static identity only — never instantiated.

@@ -88,6 +88,14 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_rows',
             'documents.render_max_pages',
             'documents.render_max_template_bytes',
+            'documents.persist_enabled',
+            // #947 item 3 — routing ceilings, tenant-overridable like the render ones.
+            'documents.routing_max_steps',
+            'documents.routing_max_recipients_per_step',
+            // #999 — how many people a USER GROUP preview SHOWS. Not a ceiling
+            // on resolution: the count a preview reports is exact and unbounded,
+            // this is the size of the sample beside it.
+            'groups.preview_sample_size',
             'data_types.bulk_max_ids',
             'error_tracking.enabled',
             'error_tracking.provider',
@@ -187,6 +195,22 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_rows' => '500',
             'documents.render_max_pages' => '2000',
             'documents.render_max_template_bytes' => '2000000',
+            // #947 item 1. Opt-OUT where documents.render_enabled is opt-in:
+            // the master switch is already off by default, so a deployment that
+            // reaches this key has turned the render tier on deliberately, and
+            // a second off-by-default gate would 503 a correctly-configured
+            // `persist: true`.
+            'documents.persist_enabled' => 'true',
+            // 20 steps: well past the longest real approval chain, low enough
+            // that a client looping over a step builder cannot commission a
+            // thousand-step transaction.
+            'documents.routing_max_steps' => '20',
+            // 500, matching the render row ceiling: the point at which "this is
+            // a distribution" stops being a plausible reading of one step.
+            'documents.routing_max_recipients_per_step' => '500',
+            // Ten faces: enough to recognise a group at a glance, small enough
+            // that nobody mistakes the sample for the list.
+            'groups.preview_sample_size' => '10',
             'data_types.bulk_max_ids' => '500',
             'error_tracking.enabled' => 'false',
             'error_tracking.provider' => 'internal',

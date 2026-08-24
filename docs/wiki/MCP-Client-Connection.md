@@ -19,7 +19,15 @@ Content-Type: application/json
 Authorization: Bearer <mcp-token>
 ```
 
-`GET /mcp` is reserved for server-initiated SSE notifications; it returns 501 in the current release.
+Send `Accept: application/json, text/event-stream` as well. The MCP spec requires it,
+and it is how the server delivers change notifications: when your cached tool, resource
+or prompt list has gone stale, the POST response comes back as an event stream carrying
+the `notifications/*/list_changed` frames ahead of your JSON-RPC response. Omit it and
+you get plain JSON, but you will never be told your cached lists have moved.
+
+`GET /mcp` returns **405**. This server offers no standing SSE stream — a held
+connection would occupy one of eight FrankenPHP workers for its lifetime — so
+notifications ride POST responses instead.
 
 ---
 
@@ -153,9 +161,9 @@ Response:
   "result": {
     "protocolVersion": "2025-03-26",
     "capabilities": {
-      "tools":     { "listChanged": false },
-      "resources": { "subscribe": false, "listChanged": false },
-      "prompts":   { "listChanged": false }
+      "tools":     { "listChanged": true },
+      "resources": { "subscribe": false, "listChanged": true },
+      "prompts":   { "listChanged": true }
     },
     "serverInfo": { "name": "whity-core", "version": "1.0" }
   }

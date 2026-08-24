@@ -31,6 +31,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@amroksaleh/ui/tabs"
 import { Textarea } from "@amroksaleh/ui/textarea"
 
+import { resolveContextPath } from "./context-path"
 import { resolveTablerIcon } from "./resolve-tabler-icon"
 import { submitPluginAction } from "./submit-plugin-action"
 import type {
@@ -43,6 +44,7 @@ import type {
   DataTableBlock,
   DrawerBlock,
   FieldArrayBlock,
+  FlowBlock,
   FormBlock,
   InboxBlock,
   ItemAction,
@@ -59,7 +61,7 @@ import type {
   TimelineBlock,
   VisibleWhen,
 } from "./types"
-import { OU_SCOPE_KINDS } from "./types"
+import { FLOW_MAX_NODES, OU_SCOPE_KINDS } from "./types"
 import { usePluginData, type PluginDataState } from "./use-plugin-data"
 import { usePermittedActions, type PermittedActionCheck } from "./use-permitted-actions"
 
@@ -276,7 +278,16 @@ function resolveDefault(block: { default?: unknown; defaultFrom?: string }, ctx:
  * `resolveFromContext`) — e.g. an edit modal PATCHing
  * `/api/persons/{edit-person.id}` for the row it was opened with. An
  * unresolved token becomes `''`, matching the web renderer/SDK contract's
- * no-cross-reference stance. */
+ * no-cross-reference stance.
+ *
+ * DELIBERATELY NOT the not-until-resolved rule the read paths follow
+ * (#949/#957), and the asymmetry is the point. A read that guesses is silent:
+ * nobody asked for it, nobody is watching it, and its answer is presented as
+ * fact. A submit is PRESSED, and every outcome it can have is reported back —
+ * the inline confirmation, the issues list, or the error alert below. Refusing
+ * it instead would have to SAY why, or Save becomes a no-op that reports
+ * nothing, which is the bug moved rather than fixed. That is its own copy and
+ * its own UX call; web left the same call the same way. */
 function interpolateEndpoint(endpoint: string, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): string {
   return endpoint.replace(/\{([^}]+)\}/g, (_match, ref: string) => {
     const resolved = resolveFromContext(ref, ctx)
@@ -326,23 +337,16 @@ function useEffectiveSource(source: string, params?: SourceParam[]): string {
  * would fetch every record the caller can see and render it as "the record this
  * page is about". Not fetching is the only honest answer to "which record?"
  * when nothing has said.
+ *
+ * A form's `dataSource.path` resolves through the same {@link resolveContextPath}
+ * for exactly that reason (#957) — it is a read, and reads that guess are the
+ * ones that go wrong quietly.
  */
 function useResolvedRecordSource(baseSource: string, params?: SourceParam[]): string | null {
   const ctx = React.useContext(MasterDetailContext)
   return React.useMemo(() => {
-    // Split on the tokens rather than replacing through a callback, matching
-    // the web renderer exactly: a callback recording "something did not
-    // resolve" in a closure variable is a reassignment during render. Splitting
-    // on a CAPTURING pattern puts every token at an odd index, so this is a map
-    // and a join with nothing mutable in it.
-    const parts = baseSource.split(/(\{[^{}]*\})/)
-    const resolvedParts = parts.map((part, index) => {
-      if (index % 2 === 0) return part
-      const value = resolveFromContext(part.slice(1, -1), ctx)
-      return value === undefined || value === null || value === "" ? null : encodeURIComponent(String(value))
-    })
-    if (resolvedParts.some((part) => part === null)) return null
-    const substituted = resolvedParts.join("")
+    const substituted = resolveContextPath(baseSource, (ref) => resolveFromContext(ref, ctx))
+    if (substituted === null) return null
     if (!params || params.length === 0) return substituted
     const pairs = params
       .map((param) => {
@@ -462,15 +466,14 @@ function collectAccessGates(blocks: Block[] | undefined, into: CollectedGate[] =
 
 /** Substitute a gate endpoint's `{token}` segments, or null when any is
  * unresolved. Null means NOT ASKED, exactly as it does for a `dataRecord.source`:
- * a half-substituted path names a different route with a different gate. */
+ * a half-substituted path names a different route with a different gate.
+ *
+ * The substitution itself is {@link resolveContextPath} — shared with
+ * `dataRecord.source` and a form's `dataSource.path` so the three cannot drift
+ * (#957; this file used to hold two hand-written copies of it and pass the
+ * form's path through untouched). */
 function resolveGateEndpoint(endpoint: string, ctx: Pick<MasterDetailContextValue, "selections" | "rows">): string | null {
-  const parts = endpoint.split(/(\{[^{}]*\})/)
-  const resolved = parts.map((part, index) => {
-    if (index % 2 === 0) return part
-    const value = resolveFromContext(part.slice(1, -1), ctx)
-    return value === undefined || value === null || value === "" ? null : encodeURIComponent(String(value))
-  })
-  return resolved.some((part) => part === null) ? null : resolved.join("")
+  return resolveContextPath(endpoint, (ref) => resolveFromContext(ref, ctx))
 }
 
 /** The methods the host will resolve. Mirrors `BlockValidator::ACCESS_CHECK_METHODS`. */
@@ -836,10 +839,14 @@ function BlockNode({ block }: { block: Block }) {
       return <TimelineRenderer block={block} />
     case "inbox":
       return <InboxRenderer block={block} />
+    case "flow":
+      return <FlowRenderer block={block} />
     case "dataRecord":
       return <DataRecordRenderer block={block} />
     case "recordFields":
       return <RecordFieldsRenderer block={block} />
+    case "documentViewer":
+      return <DocumentViewerRenderer />
     case "modal":
       return <ModalRenderer block={block} />
     case "drawer":
@@ -871,6 +878,38 @@ function BlockNode({ block }: { block: Block }) {
     default:
       return <UnsupportedBlock reason={(block as { type?: string }).type ?? "unknown"} />
   }
+}
+
+// ---------------------------------------------------------------- documents
+
+/**
+ * `documentViewer` on the OFFLINE desktop host (#947 item 4).
+ *
+ * The web renderer fetches core's `/api/v1/documents/{id}` and streams the
+ * artifact's bytes into a frame. This host has no documents subsystem to fetch
+ * from: it serves the plugin's own routes over `/__whity/*` and boots with no
+ * server behind it, which is the point of the offline build. Issued documents
+ * live on the server, with the storage and the RBAC that make them auditable.
+ *
+ * So this SAYS THAT, and does not fall through to the generic `UnsupportedBlock`
+ * or to a blank frame. #951 is the position it follows: a capability that is
+ * absent here is shown with its reason, never silently omitted — a plugin author
+ * whose block vanished on the device would have no way to tell an unsupported
+ * type from a broken declaration, and a reader would have no way to tell an
+ * empty document from an unavailable one (#756).
+ *
+ * The block's own `emptyText` is deliberately NOT reused here. It answers a
+ * different question — "nothing on this page has named a document yet" — and an
+ * author's wording for that ("this record has no work order yet") would be a
+ * false statement about the record on a device that simply cannot look.
+ */
+function DocumentViewerRenderer() {
+  return (
+    <EmptyState
+      title="Issued documents are not available offline"
+      description="This document lives on the server, where it is stored and access-checked. Open it from the web app."
+    />
+  )
 }
 
 // ---------------------------------------------------------------- data-bound blocks
@@ -1362,6 +1401,131 @@ function InboxRenderer({ block }: { block: InboxBlock }) {
       {paginate && items.length > 0 && (
         <Pagination page={page} perPage={pageSize} total={items.length} onPageChange={setPage} />
       )}
+    </div>
+  )
+}
+
+/**
+ * FlowRenderer — the desktop rendering of the `flow` graph block (#950).
+ *
+ * IT IS NOT A CANVAS, and that is a decision rather than a gap. The web
+ * renderer draws the graph with `@xyflow/react`, which core already ships for
+ * two admin screens; this template does not carry that dependency, and adding a
+ * graph library to an offline desktop bundle to draw what is, in the
+ * overwhelmingly common case, a straight line of steps is a poor trade.
+ *
+ * The block contract is platform-NEUTRAL: it says what the data means, and each
+ * renderer maps that to its own platform. So the desktop maps it to the same
+ * information without the picture — an ordered list of nodes, each naming the
+ * nodes it leads to. Nothing is dropped: a reader can still follow the route,
+ * see the branch, and open a node. Falling through to `UnsupportedBlock`
+ * instead would have shown them none of it.
+ *
+ * The derivation below mirrors `web/components/plugin/blocks/flow-model.ts`
+ * exactly — the ceiling applied to nodes in payload order before any edge is
+ * derived, references to unknown or truncated ids dropped rather than
+ * materialised, list-valued edge fields expanded, and the truncation announced.
+ * Those are contract behaviour, not rendering, so the two must agree; #847 is
+ * what a silent divergence between these two files costs.
+ */
+function FlowRenderer({ block }: { block: FlowBlock }) {
+  const { openTarget } = React.useContext(MasterDetailContext)
+  const source = useEffectiveSource(block.source, block.params)
+  const state = usePluginData<Record<string, unknown>[]>(source, (data) =>
+    Array.isArray(data) && data.length > 0 ? data : null,
+  )
+  useRefetchOnSignal(state)
+
+  if (state.status === "loading") return <Skeleton className="h-24 w-full" />
+  if (state.status === "error")
+    return <ErrorState title="Couldn't load this diagram" action={<Button onClick={state.retry}>Retry</Button>} />
+  if (state.status === "empty") return <EmptyState title={block.emptyText ?? "Nothing to diagram yet"} />
+
+  const refresh = state.refresh
+  const declared = block.maxNodes !== undefined && block.maxNodes > 0 ? block.maxNodes : FLOW_MAX_NODES
+  const ceiling = Math.min(declared, FLOW_MAX_NODES)
+
+  const seen = new Set<string>()
+  const kept: { id: string; row: Record<string, unknown> }[] = []
+  let total = 0
+  for (const row of state.data) {
+    const id = String(row[block.nodeIdField] ?? "")
+    if (id === "" || seen.has(id)) continue
+    seen.add(id)
+    total++
+    if (kept.length < ceiling) kept.push({ id, row })
+  }
+
+  if (kept.length === 0) return <EmptyState title={block.emptyText ?? "Nothing to diagram yet"} />
+
+  const keptIds = new Set(kept.map((n) => n.id))
+  const labelOf = new Map(kept.map((n) => [n.id, String(n.row[block.nodeLabelField] ?? "")]))
+  const successors = new Map<string, string[]>(kept.map((n) => [n.id, []]))
+  const link = (from: string, to: string) => {
+    if (from === to || !keptIds.has(from) || !keptIds.has(to)) return
+    const list = successors.get(from)!
+    if (!list.includes(to)) list.push(to)
+  }
+  // A LIST is how one step branches to several; anything else is one id.
+  const refs = (value: unknown): string[] =>
+    (Array.isArray(value) ? value : [value])
+      .filter((v) => v !== undefined && v !== null)
+      .map(String)
+      .filter((v) => v !== "")
+
+  if (block.edgeFromField === undefined && block.edgeToField === undefined) {
+    for (let i = 1; i < kept.length; i++) link(kept[i - 1].id, kept[i].id)
+  } else {
+    for (const node of kept) {
+      if (block.edgeFromField !== undefined) for (const other of refs(node.row[block.edgeFromField])) link(other, node.id)
+      if (block.edgeToField !== undefined) for (const other of refs(node.row[block.edgeToField])) link(node.id, other)
+    }
+  }
+
+  // The node's own affordance is its FIRST `open` action, matching the web
+  // renderer: on a canvas that is clicking the box, here it is the row's title.
+  const primaryOpen = block.nodeActions?.find((a): a is Extract<RowAction, { open: string }> => "open" in a)
+
+  return (
+    <div className="space-y-2">
+      {total > kept.length && (
+        // Announced, never silent: a partial graph that looks complete is worse
+        // than a crowded one, because a reader cannot see an absence.
+        <p className="text-xs text-muted-foreground">
+          Showing the first {kept.length} of {total} nodes — the rest are not drawn.
+        </p>
+      )}
+      <ol className="space-y-2">
+        {kept.map((node) => {
+          const next = successors.get(node.id) ?? []
+          const title = labelOf.get(node.id) ?? ""
+          return (
+            <li key={node.id} className="rounded-lg border border-border bg-card p-3">
+              {primaryOpen !== undefined ? (
+                <button type="button" className="text-sm font-medium" onClick={() => openTarget(primaryOpen.open, node.row)}>
+                  {title}
+                </button>
+              ) : (
+                <p className="text-sm font-medium">{title}</p>
+              )}
+              {block.nodeSubtitleField !== undefined && (
+                <p className="text-xs text-muted-foreground">{String(node.row[block.nodeSubtitleField] ?? "")}</p>
+              )}
+              {next.length > 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <span aria-hidden>&rarr; </span>
+                  {next.map((id) => labelOf.get(id) ?? id).join(", ")}
+                </p>
+              )}
+              {block.nodeActions && block.nodeActions.length > 0 && (
+                <div className="mt-2">
+                  <RowActions actions={block.nodeActions} row={node.row} onDone={refresh} />
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ol>
     </div>
   )
 }
@@ -1913,7 +2077,36 @@ function FormRenderer({ block }: { block: FormBlock }) {
   )
   const [submitting, setSubmitting] = React.useState(false)
   const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null)
-  const preload = usePluginData<Record<string, unknown>>(block.dataSource?.path ?? "__no_data_source__", (data) =>
+  // #957: `dataSource.path` carries the same `{token}` syntax a
+  // `dataRecord.source` does, and it now resolves by the same rule — NOT AT ALL
+  // until every token is bound. It used to be handed to `usePluginData`
+  // verbatim, so an edit form on a record pane requested
+  // `/things/%7Brecord%7D` and pre-populated with nothing; substituting `""`
+  // instead would have been no better, since `/things/` is very often the
+  // COLLECTION endpoint — a request that SUCCEEDS and pre-populates the form
+  // with the wrong record. See `resolveContextPath` for why `null` is the only
+  // honest answer, and why it matters more on a device than it does on the web.
+  const dataSourcePath =
+    block.dataSource === undefined ? null : resolveContextPath(block.dataSource.path, (ref) => resolveFromContext(ref, masterDetail))
+
+  // A form whose source names a record NOTHING HAS BOUND YET stays disabled,
+  // and this is the whole point of the issue rather than a detail of it. An
+  // enabled, un-prefilled edit form is indistinguishable from a record that
+  // genuinely holds no values — and against an update endpoint that replaces
+  // rather than merges (`SyncController::update()` writes every domain column
+  // as `values[col] ?? null`), submitting it writes blanks over every field the
+  // user did not retype and reports success. Offline that is unrecoverable by
+  // the time anyone sees it: the blanked row syncs up as a legitimate edit and
+  // nothing downstream can tell it from an intentional clear.
+  const isUnbound = block.dataSource !== undefined && dataSourcePath === null
+
+  // `""` is `usePluginData`'s own "nothing to fetch" (it bails on an empty
+  // source), so "this form declares no dataSource" and "its dataSource names a
+  // record nobody has chosen" reach the hook as the same thing: no request.
+  // That replaces a `"__no_data_source__"` sentinel which was NOT empty and so
+  // was fetched — every form without a dataSource cost the host one doomed
+  // round trip, and the reply, whatever it was, landed in this form's preload.
+  const preload = usePluginData<Record<string, unknown>>(dataSourcePath ?? "", (data) =>
     block.dataSource && data && typeof data === "object" ? (data as Record<string, unknown>) : null,
   )
 
@@ -1931,7 +2124,11 @@ function FormRenderer({ block }: { block: FormBlock }) {
     // Only re-seed when the preload data itself changes, not on every local edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block.dataSource, preload.status === "ready" ? preload.data : null])
-  const isPreloading = block.dataSource !== undefined && preload.status === "loading"
+  // An unbound form is not loading — nothing is on its way. `usePluginData`
+  // reports `loading` for a source it never fetched, so the two states have to
+  // be told apart here or the form would sit under a spinner's disabled
+  // fieldset saying nothing about why.
+  const isPreloading = block.dataSource !== undefined && !isUnbound && preload.status === "loading"
 
   const setValue = React.useCallback((name: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [name]: value }))
@@ -1963,8 +2160,20 @@ function FormRenderer({ block }: { block: FormBlock }) {
 
   return (
     <FormScopeContext.Provider value={scope}>
-      <fieldset disabled={submitting || isPreloading} className="space-y-4">
+      <fieldset disabled={submitting || isPreloading || isUnbound} className="space-y-4">
         <form onSubmit={submit} className="space-y-4">
+          {isUnbound && (
+            // Said out loud, and deliberately not styled as a failure — nothing
+            // has gone wrong, nothing has named a record yet. The same sentence
+            // this renderer's `dataRecord` already uses for the same state, so a
+            // detail pane whose record block and edit form are both waiting on
+            // one selection says one thing twice rather than two things once.
+            // (`data-slot` matches web's so the parity test can ask both
+            // renderers the same question with one selector.)
+            <p className="text-sm text-muted-foreground" data-slot="form-unbound">
+              No record selected
+            </p>
+          )}
           {result?.ok === false && (
             <Alert variant="destructive">
               <AlertDescription>{result.message}</AlertDescription>

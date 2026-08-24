@@ -2,7 +2,8 @@
     "openapi": "3.0.0",
     "info": {
         "title": "Whity Core API",
-        "version": "0.2.6"
+        "version": "0.2.7",
+        "description": "Request bodies are declared, not implied: where an operation accepts one, it is described here. An operation with no `requestBody` accepts none \u2014 a reviewed contract, not a gap in this document. The exception is an operation marked `x-whity-undocumented: true`: that one carries no authored contract at all, its summary and responses are generated defaults, and it may well take a body. Every CORE operation in the published `public/openapi.json` is authored, so the marker appears there only on plugin routes that declare no schema of their own; a document served live by a running instance may mark core routes too."
     },
     "servers": [
         {
@@ -2524,6 +2525,26 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "The asset bytes. The TYPE is decided by magic bytes, not by filename or Content-Type: `logo_wide` and `logo_square` accept PNG, WebP or SVG (max 2 MiB, SVG stored sanitized), `favicon` accepts ICO or PNG (max 1 MiB). Anything else is a 422."
+                                    }
+                                },
+                                "required": [
+                                    "file"
+                                ]
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "The updated effective branding",
@@ -2714,6 +2735,26 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "The asset bytes. The TYPE is decided by magic bytes, not by filename or Content-Type: `logo_wide` and `logo_square` accept PNG, WebP or SVG (max 2 MiB, SVG stored sanitized), `favicon` accepts ICO or PNG (max 1 MiB). Anything else is a 422."
+                                    }
+                                },
+                                "required": [
+                                    "file"
+                                ]
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "200": {
                         "description": "The updated effective branding",
@@ -5000,6 +5041,605 @@
                 ]
             }
         },
+        "/api/v1/document-collections": {
+            "get": {
+                "operationId": "get_api_v1_document_collections",
+                "summary": "List the caller's own document collections, with item counts",
+                "tags": [
+                    "documents"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The caller's collections",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentCollectionListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_document_collections",
+                "summary": "Create one of the caller's own collections",
+                "tags": [
+                    "documents"
+                ],
+                "description": "`system_key` is never accepted from a client: minting a well-known key would be claiming the target of the star control.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentCollectionCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created collection",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentCollectionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The caller already has a collection with that name",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "name is missing, empty, or over 160 characters",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-collections/{id}": {
+            "delete": {
+                "operationId": "delete_api_v1_document_collections_id",
+                "summary": "Delete one of the caller's own collections (the documents are untouched)",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deletion confirmation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MutationResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Collection not found, or not the caller's",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A built-in collection cannot be deleted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_document_collections_id",
+                "summary": "Rename one of the caller's own collections",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Refused with 409 for a built-in (system_key) collection: the star control addresses it by key and does not label it from the row, so renaming it would rename something nothing displays.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentCollectionUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The renamed collection",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentCollectionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Collection not found, or not the caller's",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The caller already has a collection with that name",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "name is missing, empty, or over 160 characters",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-collections/{id}/documents/{documentId}": {
+            "delete": {
+                "operationId": "delete_api_v1_document_collections_id_documents_documentid",
+                "summary": "Remove a document from one of the caller's collections (idempotent)",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Deliberately does NOT re-check the document's visibility: un-filing something the caller can no longer read is exactly the case they need, and refusing it would leave a row they own and cannot get rid of.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "documentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The resulting membership, read back",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentCollectionMembershipResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Collection not found, or not the caller's",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "operationId": "put_api_v1_document_collections_id_documents_documentid",
+                "summary": "File a document into one of the caller's collections (idempotent)",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "documentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The resulting membership, read back",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentCollectionMembershipResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Collection not found, or the document is not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/document-templates": {
             "get": {
                 "operationId": "get_api_v1_document_templates",
@@ -5568,6 +6208,1341 @@
                     },
                     "503": {
                         "description": "Rendering is disabled on this instance, or the render service is unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents": {
+            "get": {
+                "operationId": "get_api_v1_documents",
+                "summary": "List issued documents visible to the caller (newest first, paginated)",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Naming no view is the plain tenant-wide list. `view` selects one of the folders from GET /api/documents/views; a key this installation cannot compute is a 404, because from outside it does not exist.",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "description": "1-indexed page (default 1)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 25, max 100)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "view",
+                        "in": "query",
+                        "required": false,
+                        "description": "Folder key from GET /api/documents/views (default \"all\")",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "ou_id",
+                        "in": "query",
+                        "required": false,
+                        "description": "Anchor unit for the unit-scoped folders. Defaults to the caller's own unit.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "collection_id",
+                        "in": "query",
+                        "required": false,
+                        "description": "Required by the \"collection\" view",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": false,
+                        "description": "Case-insensitive substring of the document title",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The documents the caller may see, with pagination",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "A required view parameter is missing, or ou_id is not a unit in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such view, this installation cannot compute it, or the named collection belongs to somebody else",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The view exists but the caller cannot anchor it (e.g. they belong to no unit)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/views": {
+            "get": {
+                "operationId": "get_api_v1_documents_views",
+                "summary": "List the document folders this installation can actually compute",
+                "tags": [
+                    "documents"
+                ],
+                "description": "A folder is a derived query, never a stored container. A view whose fact source this installation does not record is ABSENT from this response rather than present and empty \u2014 an empty \"Awaiting me\" would state \"nothing awaits you\", which is false and unfalsifiable from outside. A view the CALLER cannot anchor (they belong to no unit) is present with available=false and a reason, to be rendered disabled (#951). `unavailable_substrates` says what this installation does not record and what would supply it.",
+                "responses": {
+                    "200": {
+                        "description": "The computable folders, plus the fact sources this installation lacks",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentViewListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}": {
+            "get": {
+                "operationId": "get_api_v1_documents_id",
+                "summary": "Get an issued document and its full artifact history",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}/artifacts/{artifactId}/content": {
+            "get": {
+                "operationId": "get_api_v1_documents_id_artifacts_artifactid_content",
+                "summary": "Download one specific artifact, superseded or not",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "artifactId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The stored artifact bytes",
+                        "content": {
+                            "application/pdf": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document or artifact not found, or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The stored artifact could not be read from storage",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}/content": {
+            "get": {
+                "operationId": "get_api_v1_documents_id_content",
+                "summary": "Download the current artifact of a document",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The stored artifact bytes",
+                        "content": {
+                            "application/pdf": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found, not visible, or has no stored content",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The stored artifact could not be read from storage",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}/recipients": {
+            "get": {
+                "operationId": "get_api_v1_documents_id_recipients",
+                "summary": "Who the document's routes reached, and what became of each item",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Every recipient row on this document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentRouteRecipientListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}/render": {
+            "post": {
+                "operationId": "post_api_v1_documents_id_render",
+                "summary": "Re-render the document and APPEND a new artifact (never replaces one)",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentRerenderRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The document with the new artifact at the head of its history",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The template this document was issued from is no longer available",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed (bad dataRows, or a batch/size limit exceeded)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Rendering or persistence is disabled, or the render service is unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}/routes": {
+            "get": {
+                "operationId": "get_api_v1_documents_id_routes",
+                "summary": "List the circulations of a document, newest first, each with its steps",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The routes on this document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentRouteListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_documents_id_routes",
+                "summary": "Issue a route on a document: create it, its ordered steps and the first step's recipients",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentRouteCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The route with its steps, and how many recipients the first step resolved to and delivered",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentRouteResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "No steps, a step naming an unregistered rule kind, a config the rule refused, or a step/recipient ceiling exceeded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}/routes/{routeId}/actions": {
+            "post": {
+                "operationId": "post_api_v1_documents_id_routes_routeid_actions",
+                "summary": "Act on a route: forward, acknowledge, return, or add a note",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "routeId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentRouteActionRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The appended trail event, and how many recipients the act resolved to and delivered",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentRouteActionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document or route not found, or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "No open item on this route, a forward from the last step, a return from the first, an empty note, or an unknown action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}/star": {
+            "delete": {
+                "operationId": "delete_api_v1_documents_id_star",
+                "summary": "Un-star a document",
+                "tags": [
+                    "documents"
+                ],
+                "description": "A 200 even when the caller has never starred anything: they asked for a state that is already true, and creating the collection just to delete a row from it would write a row to record an absence.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The starred collection (null if none) and the resulting state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentStarResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "operationId": "put_api_v1_documents_id_star",
+                "summary": "Star a document \u2014 files it into the caller's well-known \"starred\" collection",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Starring is a collection, not a second concept. The collection is created on first use rather than seeded per profile, which would write a row for every member of every tenant to record something nobody has done.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The starred collection and the resulting state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentStarResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}/trail": {
+            "get": {
+                "operationId": "get_api_v1_documents_id_trail",
+                "summary": "The document's append-only routing trail, oldest first (paginated)",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "description": "1-indexed page (default 1)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 25, max 100)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The trail across every route on this document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentTrailListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -6312,6 +8287,7 @@
                 "tags": [
                     "taxonomy"
                 ],
+                "description": "The cleanup hook a plugin calls from its own record-delete path. entity_tags carries no FK to the tagged record, so associations outlive it \u2014 and a later record reusing the same entity_id would silently inherit them. Returns the number of associations removed; 0 is a successful no-op.",
                 "parameters": [
                     {
                         "name": "entity_type",
@@ -6418,6 +8394,7 @@
                 "tags": [
                     "V1"
                 ],
+                "x-whity-undocumented": true,
                 "responses": {
                     "200": {
                         "description": "Successful response"
@@ -6462,6 +8439,7 @@
                 "tags": [
                     "V1"
                 ],
+                "x-whity-undocumented": true,
                 "responses": {
                     "200": {
                         "description": "Successful response"
@@ -6595,6 +8573,82 @@
                 }
             }
         },
+        "/api/v1/group-rules": {
+            "get": {
+                "operationId": "get_api_v1_group_rules",
+                "summary": "List the rule kinds a user group's definition may name on this instance",
+                "tags": [
+                    "user-groups"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The subset of routing rule kinds that can answer without a document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/GroupRuleListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/hello": {
             "get": {
                 "operationId": "get_api_v1_hello",
@@ -6653,6 +8707,7 @@
                 "tags": [
                     "V1"
                 ],
+                "x-whity-undocumented": true,
                 "responses": {
                     "200": {
                         "description": "Successful response"
@@ -9571,6 +11626,196 @@
                 }
             }
         },
+        "/api/v1/me/inbox": {
+            "get": {
+                "operationId": "get_api_v1_me_inbox",
+                "summary": "A page of one inbox source's items awaiting the caller",
+                "tags": [
+                    "inbox"
+                ],
+                "parameters": [
+                    {
+                        "name": "source",
+                        "in": "query",
+                        "required": false,
+                        "description": "REQUIRED. A key from /api/me/inbox/sources",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "open",
+                        "in": "query",
+                        "required": false,
+                        "description": "Falsey to include the caller's history as well (default open-only)",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "description": "1-indexed page (default 1)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 25, max 100)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "That source's items, with pagination",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InboxItemListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "'source' is missing or names no registered source",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/me/inbox/sources": {
+            "get": {
+                "operationId": "get_api_v1_me_inbox_sources",
+                "summary": "The registered inbox sources, with the caller's open count for each",
+                "tags": [
+                    "inbox"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Every registered source, its item-field mapping and the open count",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InboxSourceListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/me/notification-preferences": {
             "get": {
                 "operationId": "get_api_v1_me_notification_preferences",
@@ -10766,6 +13011,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "Returned in rank order (`sort_order`, then key): a campus outranks a faculty outranks a department, and that ordering is data rather than presentation.",
                 "responses": {
                     "200": {
                         "description": "The tenant's OU type vocabulary",
@@ -10956,6 +13202,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "Core and plugin declarations. A plugin's keys are namespaced under the plugin (`acme:clinic`); adopting one with POST /api/ou-types copies its declared label and rank in as the tenant's starting values.",
                 "responses": {
                     "200": {
                         "description": "The declared catalogue",
@@ -11032,6 +13279,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "Refused while any unit still carries the type, since deleting it would untype them and make them invisible to every `?type=` rule that used to match. Repeat with `?force=true` to untype them explicitly.",
                 "parameters": [
                     {
                         "name": "id",
@@ -11212,6 +13460,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "The `key` is immutable \u2014 a routing rule binds to it, so editing it in place would silently repoint every such rule at a type that no longer exists.",
                 "parameters": [
                     {
                         "name": "id",
@@ -11328,6 +13577,7 @@
                 "tags": [
                     "ous"
                 ],
+                "description": "Paginated. A client that needs the whole hierarchy (to build a tree) must follow the `pagination` envelope to the last page \u2014 `per_page` is capped at 100, so no single request is guaranteed to return every unit.",
                 "parameters": [
                     {
                         "name": "page",
@@ -14010,6 +16260,7 @@
                 "tags": [
                     "platform-ops"
                 ],
+                "description": "Downloads a plugin package from a store host that MUST be on the operator `plugins.store_allowed_hosts` allowlist (SSRF control; empty \u21d2 disabled), and requires the `plugins.store_enabled` master switch (default true) to also be on, then validates and stages it through the same hardened installer as an upload.",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -14212,6 +16463,7 @@
                 "tags": [
                     "platform-ops"
                 ],
+                "description": "Returns the operator `plugins.store_allowed_hosts` allowlist and whether installing from a store is enabled (both the allowlist AND the `plugins.store_enabled` master switch must be on). Read-only; makes no outbound request.",
                 "responses": {
                     "200": {
                         "description": "Allowed store hosts",
@@ -14288,6 +16540,7 @@
                 "tags": [
                     "platform-ops"
                 ],
+                "description": "Server-side proxy to a store's public catalogue for the admin UI. Query: `store_url` (a bare https origin that MUST be on the allowlist) and optional `q` (case-insensitive substring over slug/name/description/author/tags). The browser never contacts the store directly.",
                 "parameters": [
                     {
                         "name": "store_url",
@@ -15393,6 +17646,7 @@
                 "tags": [
                     "rbac"
                 ],
+                "description": "Returns both grant shapes: a null `profile_id` is the \"everyone at this resource\" grant, a set `profile_id` grants to that one profile. Always scoped to the caller's tenant, so a resource belonging to another tenant yields an empty list rather than an error.",
                 "parameters": [
                     {
                         "name": "resource_type",
@@ -15497,6 +17751,7 @@
                 "tags": [
                     "rbac"
                 ],
+                "description": "Granting a role that is already granted at that resource is a SUCCESS (200 with `created: false` and the existing grant id), not a conflict \u2014 mirroring POST /api/users/{id}/memberships. A grant WIDENS authority at one resource and is never a substitute for tenant membership: resolution still requires an active membership in the tenant.",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -15613,6 +17868,7 @@
                 "tags": [
                     "rbac"
                 ],
+                "description": "The cleanup an owner runs when it deletes the record itself. `resource_id` carries no foreign key, so core is never told a record disappeared and its grants outlive it \u2014 a later record reusing that id would silently inherit them. Takes the SAME parameters as the list route, so a caller can GET exactly what this removes. Returns the number of grants revoked; 0 is a successful no-op, never a 404, so the call is safe to make unconditionally from a delete path and safe to retry. Unlike the create route this does NOT ask the owning plugin to vouch for the resource: by cleanup time the record is usually already deleted, so a fails-closed check would refuse exactly the calls that matter. The tenant predicate still confines it to the caller's own grants.",
                 "parameters": [
                     {
                         "name": "resource_type",
@@ -15719,6 +17975,7 @@
                 "tags": [
                     "rbac"
                 ],
+                "description": "By id rather than by (resource, role, profile): over HTTP an omitted `profile_id` and an explicit null are indistinguishable, so a tuple-addressed revoke would let a dropped parameter silently revoke the everyone-grant instead of one profile's. The ids come from the list route.",
                 "parameters": [
                     {
                         "name": "id",
@@ -16667,6 +18924,82 @@
                     },
                     "404": {
                         "description": "Role not found or not manageable by the tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/routing-rules": {
+            "get": {
+                "operationId": "get_api_v1_routing_rules",
+                "summary": "List the routing rule kinds a route step may name on this instance",
+                "tags": [
+                    "documents"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Core's own kinds plus any a plugin registered",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RoutingRuleListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -17912,6 +20245,7 @@
                 "tags": [
                     "taxonomy"
                 ],
+                "description": "Refuses with 409 while any entity association still references one of the group's tags, reporting the affected counts, because the FK cascade would otherwise silently destroy associations belonging to other plugins. Pass force=true to delete them as well; a forced delete is recorded in the audit log.",
                 "parameters": [
                     {
                         "name": "id",
@@ -18429,6 +20763,7 @@
                 "tags": [
                     "taxonomy"
                 ],
+                "description": "Refuses with 409 while entity associations still reference the tag, reporting the affected count. Pass force=true to delete them as well; a forced delete is recorded in the audit log.",
                 "parameters": [
                     {
                         "name": "id",
@@ -20161,6 +22496,7 @@
                 "tags": [
                     "languages"
                 ],
+                "description": "What still needs translating. Missing keys have no rows, so a plain listing can only ever show work already done; this reports the gap between each language and the source language, per domain.",
                 "responses": {
                     "200": {
                         "description": "Per-language, per-domain coverage counts",
@@ -20749,6 +23085,75 @@
                 ]
             }
         },
+        "/api/v1/uikit/demo/flow-steps": {
+            "get": {
+                "operationId": "get_api_v1_uikit_demo_flow_steps",
+                "summary": "Demo process steps for the flow block example",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoFlowStepsResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoFlowStepsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:view permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/uikit/demo/metric": {
             "get": {
                 "operationId": "get_api_v1_uikit_demo_metric",
@@ -21244,6 +23649,712 @@
                     },
                     "405": {
                         "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/user-groups": {
+            "get": {
+                "operationId": "get_api_v1_user_groups",
+                "summary": "This tenant's user group DEFINITIONS, by name (paginated, no member counts)",
+                "tags": [
+                    "user-groups"
+                ],
+                "parameters": [
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "description": "1-indexed page (default 1)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 25, max 100)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The tenant's groups with pagination",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserGroupListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_user_groups",
+                "summary": "Define a user group: a name plus the rule that says who is in it",
+                "tags": [
+                    "user-groups"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UserGroupCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created group",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserGroupResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A group with that name already exists in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A missing or over-long name, a malformed kind, a kind nothing provides, a kind that needs a document, or a config the rule refused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/user-groups/preview": {
+            "post": {
+                "operationId": "post_api_v1_user_groups_preview",
+                "summary": "Preview an UNSAVED rule: how many people it resolves to right now, plus a sample",
+                "tags": [
+                    "user-groups"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UserGroupPreviewRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The count, a bounded sample, and the actor it was resolved against",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserGroupPreviewResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A malformed kind, a kind nothing provides, a kind that needs a document, or a config the rule refused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/user-groups/{id}": {
+            "delete": {
+                "operationId": "delete_api_v1_user_groups_id",
+                "summary": "Delete a group. Route steps naming it then fail LOUDLY by name, never silently",
+                "tags": [
+                    "user-groups"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The deleted group id",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserGroupDeleteResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Group not found in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "get": {
+                "operationId": "get_api_v1_user_groups_id",
+                "summary": "One group's definition (no membership \u2014 see /preview)",
+                "tags": [
+                    "user-groups"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The group",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserGroupResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Group not found in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_user_groups_id",
+                "summary": "Rename or redefine a group. Takes effect immediately, including for routes in flight",
+                "tags": [
+                    "user-groups"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UserGroupUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The updated group",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserGroupResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Group not found in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Another group in this tenant already has that name",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "'rule_kind' sent without 'rule_config' (or the reverse), an over-long name, or a config the rule refused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/user-groups/{id}/preview": {
+            "get": {
+                "operationId": "get_api_v1_user_groups_id_preview",
+                "summary": "How many people this group resolves to RIGHT NOW, plus a bounded sample",
+                "tags": [
+                    "user-groups"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The count, a bounded sample, and the actor it was resolved against",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserGroupPreviewResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Group not found in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The group's rule can no longer be resolved on this instance \u2014 for example the plugin that supplied its kind was removed",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -22442,6 +25553,31 @@
                     "data"
                 ]
             },
+            "CapabilityDenial": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "enum": [
+                            "no-resource",
+                            "no-route",
+                            "forbidden"
+                        ]
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "code",
+                    "reason",
+                    "detail"
+                ]
+            },
             "DataType": {
                 "type": "object",
                 "properties": {
@@ -23229,6 +26365,110 @@
                     "data"
                 ]
             },
+            "Document": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "document_template_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "template_name": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "origin_ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "content_url": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "artifacts": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentArtifact"
+                        }
+                    },
+                    "collection_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "starred": {
+                        "type": "boolean"
+                    },
+                    "sections": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/RecordSectionVerdict"
+                        }
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "template_name",
+                    "title",
+                    "created_at",
+                    "artifacts"
+                ]
+            },
+            "DocumentArtifact": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "document_id": {
+                        "type": "integer"
+                    },
+                    "content_type": {
+                        "type": "string"
+                    },
+                    "byte_size": {
+                        "type": "integer"
+                    },
+                    "checksum_sha256": {
+                        "type": "string"
+                    },
+                    "rendered_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "rendered_at": {
+                        "type": "string"
+                    },
+                    "content_url": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "document_id",
+                    "content_type",
+                    "byte_size",
+                    "checksum_sha256",
+                    "rendered_at",
+                    "content_url"
+                ]
+            },
             "DocumentBlock": {
                 "type": "object",
                 "properties": {
@@ -23265,6 +26505,10 @@
                         "type": "boolean"
                     },
                     "created_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
                         "type": "integer",
                         "nullable": true
                     },
@@ -23310,6 +26554,10 @@
                     },
                     "required_permission": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
                         "nullable": true
                     }
                 },
@@ -23368,8 +26616,158 @@
                     "required_permission": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
+                        "nullable": true
                     }
                 }
+            },
+            "DocumentCollection": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "profile_id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "system_key": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "item_count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "profile_id",
+                    "name",
+                    "created_at"
+                ]
+            },
+            "DocumentCollectionCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "name"
+                ]
+            },
+            "DocumentCollectionListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentCollection"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentCollectionMembershipResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "collection_id": {
+                                "type": "integer"
+                            },
+                            "document_id": {
+                                "type": "integer"
+                            },
+                            "in_collection": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "collection_id",
+                            "document_id",
+                            "in_collection"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentCollectionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentCollection"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentCollectionUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "name"
+                ]
+            },
+            "DocumentListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Document"
+                        }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
+                    },
+                    "view": {
+                        "type": "object",
+                        "properties": {
+                            "key": {
+                                "type": "string"
+                            },
+                            "ou_id": {
+                                "type": "integer",
+                                "nullable": true
+                            },
+                            "collection_id": {
+                                "type": "integer",
+                                "nullable": true
+                            }
+                        },
+                        "required": [
+                            "key"
+                        ]
+                    }
+                },
+                "required": [
+                    "data",
+                    "pagination",
+                    "view"
+                ]
             },
             "DocumentRenderRequest": {
                 "type": "object",
@@ -23387,8 +26785,321 @@
                         "type": "object",
                         "additionalProperties": true,
                         "nullable": true
+                    },
+                    "persist": {
+                        "type": "boolean",
+                        "default": false
+                    },
+                    "title": {
+                        "type": "string",
+                        "nullable": true
                     }
                 }
+            },
+            "DocumentRerenderRequest": {
+                "type": "object",
+                "properties": {
+                    "dataRows": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "sheet": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "nullable": true
+                    }
+                }
+            },
+            "DocumentResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/Document"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentRoute": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "document_id": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "created_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentRouteStep"
+                        }
+                    }
+                },
+                "required": [
+                    "id",
+                    "document_id",
+                    "title",
+                    "created_at",
+                    "steps"
+                ]
+            },
+            "DocumentRouteActionRequest": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "forwarded",
+                            "acknowledged",
+                            "returned",
+                            "noted"
+                        ]
+                    },
+                    "note": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "action"
+                ]
+            },
+            "DocumentRouteActionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentTrailEvent"
+                    },
+                    "resolved": {
+                        "type": "integer"
+                    },
+                    "delivered": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "data",
+                    "resolved",
+                    "delivered"
+                ]
+            },
+            "DocumentRouteCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "rule_kind": {
+                                    "type": "string"
+                                },
+                                "rule_config": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "nullable": true
+                                }
+                            },
+                            "required": [
+                                "rule_kind"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "steps"
+                ]
+            },
+            "DocumentRouteListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentRoute"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentRouteRecipient": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "document_id": {
+                        "type": "integer"
+                    },
+                    "route_id": {
+                        "type": "integer"
+                    },
+                    "step_id": {
+                        "type": "integer"
+                    },
+                    "profile_id": {
+                        "type": "integer"
+                    },
+                    "ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "parent_recipient_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_by_event_id": {
+                        "type": "integer"
+                    },
+                    "closed_by_event_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "open": {
+                        "type": "boolean"
+                    },
+                    "created_at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "document_id",
+                    "route_id",
+                    "step_id",
+                    "profile_id",
+                    "created_by_event_id",
+                    "open",
+                    "created_at"
+                ]
+            },
+            "DocumentRouteRecipientListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentRouteRecipient"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentRouteResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentRoute"
+                    },
+                    "resolved": {
+                        "type": "integer"
+                    },
+                    "delivered": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "data",
+                    "resolved",
+                    "delivered"
+                ]
+            },
+            "DocumentRouteStep": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "position": {
+                        "type": "integer"
+                    },
+                    "rule_kind": {
+                        "type": "string"
+                    },
+                    "rule_config": {
+                        "type": "object",
+                        "additionalProperties": true
+                    },
+                    "label": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "position",
+                    "rule_kind",
+                    "rule_config"
+                ]
+            },
+            "DocumentStarResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/DocumentCollection"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ]
+                    },
+                    "starred": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "data",
+                    "starred"
+                ]
+            },
+            "DocumentSubstrate": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "provenance": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "key",
+                    "description"
+                ]
             },
             "DocumentTemplate": {
                 "type": "object",
@@ -23423,6 +27134,10 @@
                         "type": "boolean"
                     },
                     "created_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
                         "type": "integer",
                         "nullable": true
                     },
@@ -23465,6 +27180,10 @@
                     },
                     "required_permission": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
                         "nullable": true
                     }
                 },
@@ -23520,8 +27239,162 @@
                     "required_permission": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
+                        "nullable": true
                     }
                 }
+            },
+            "DocumentTrailEvent": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "document_id": {
+                        "type": "integer"
+                    },
+                    "route_id": {
+                        "type": "integer"
+                    },
+                    "step_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "actor_profile_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "issued",
+                            "forwarded",
+                            "acknowledged",
+                            "returned",
+                            "noted"
+                        ]
+                    },
+                    "from_ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "to_ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "note": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "occurred_at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "document_id",
+                    "route_id",
+                    "action",
+                    "occurred_at"
+                ]
+            },
+            "DocumentTrailListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentTrailEvent"
+                        }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
+                    }
+                },
+                "required": [
+                    "data",
+                    "pagination"
+                ]
+            },
+            "DocumentView": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "group": {
+                        "type": "string"
+                    },
+                    "parameters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "required": {
+                                    "type": "boolean"
+                                }
+                            },
+                            "required": [
+                                "name",
+                                "required"
+                            ]
+                        }
+                    },
+                    "requires": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "available": {
+                        "type": "boolean"
+                    },
+                    "unavailable_reason": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "key",
+                    "label",
+                    "description",
+                    "group",
+                    "parameters",
+                    "requires",
+                    "available"
+                ]
+            },
+            "DocumentViewListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentView"
+                        }
+                    },
+                    "unavailable_substrates": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentSubstrate"
+                        }
+                    }
+                },
+                "required": [
+                    "data",
+                    "unavailable_substrates"
+                ]
             },
             "DomainVerificationChallenge": {
                 "type": "object",
@@ -23540,6 +27413,26 @@
                     "record_name",
                     "record_type",
                     "record_value"
+                ]
+            },
+            "DroppedFrontendFeature": {
+                "type": "object",
+                "properties": {
+                    "plugin": {
+                        "type": "string"
+                    },
+                    "featureId": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "reason": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "plugin",
+                    "featureId",
+                    "reason"
                 ]
             },
             "EmailOnlyRequest": {
@@ -23871,6 +27764,20 @@
                             "canDelete"
                         ]
                     },
+                    "capabilityReasons": {
+                        "type": "object",
+                        "properties": {
+                            "canCreate": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            },
+                            "canEdit": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            },
+                            "canDelete": {
+                                "$ref": "#/components/schemas/CapabilityDenial"
+                            }
+                        }
+                    },
                     "blocks": {
                         "type": "array",
                         "items": {
@@ -23891,7 +27798,8 @@
                     "action",
                     "embed",
                     "requiredPermission",
-                    "capabilities"
+                    "capabilities",
+                    "capabilityReasons"
                 ]
             },
             "FrontendFeatureListResponse": {
@@ -23901,6 +27809,12 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/FrontendFeature"
+                        }
+                    },
+                    "dropped": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DroppedFrontendFeature"
                         }
                     }
                 },
@@ -23971,6 +27885,39 @@
                         "type": "string"
                     }
                 }
+            },
+            "GroupRule": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "label",
+                    "source"
+                ]
+            },
+            "GroupRuleListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/GroupRule"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "HealthResponse": {
                 "type": "object",
@@ -24245,6 +28192,111 @@
                         "type": "boolean"
                     }
                 }
+            },
+            "InboxItem": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "subtitle": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "resource_type": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "resource_id": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "meta": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "title",
+                    "timestamp"
+                ]
+            },
+            "InboxItemListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/InboxItem"
+                        }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
+                    },
+                    "source": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "data",
+                    "pagination",
+                    "source"
+                ]
+            },
+            "InboxSource": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "origin": {
+                        "type": "string"
+                    },
+                    "item_fields": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "open_count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "key",
+                    "label",
+                    "origin",
+                    "item_fields",
+                    "open_count"
+                ]
+            },
+            "InboxSourceListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/InboxSource"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "InstallFromStoreRequest": {
                 "type": "object",
@@ -26704,6 +30756,49 @@
                     "data"
                 ]
             },
+            "RecordSectionDenial": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "enum": [
+                            "permission",
+                            "record"
+                        ]
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "detail": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "code",
+                    "reason",
+                    "detail"
+                ]
+            },
+            "RecordSectionVerdict": {
+                "type": "object",
+                "properties": {
+                    "state": {
+                        "type": "string",
+                        "enum": [
+                            "read-only",
+                            "editable"
+                        ]
+                    },
+                    "denial": {
+                        "$ref": "#/components/schemas/RecordSectionDenial"
+                    }
+                },
+                "required": [
+                    "state",
+                    "denial"
+                ]
+            },
             "RefreshResponse": {
                 "type": "object",
                 "properties": {
@@ -27260,6 +31355,12 @@
                         "items": {
                             "$ref": "#/components/schemas/Permission"
                         }
+                    },
+                    "sections": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/RecordSectionVerdict"
+                        }
                     }
                 },
                 "required": [
@@ -27269,8 +31370,7 @@
                     "parent_id",
                     "created_at",
                     "manageable",
-                    "global",
-                    "permissions"
+                    "global"
                 ]
             },
             "RoleDetailResponse": {
@@ -27449,6 +31549,39 @@
                         }
                     }
                 }
+            },
+            "RoutingRule": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "label",
+                    "source"
+                ]
+            },
+            "RoutingRuleListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/RoutingRule"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "SelectTenantRequest": {
                 "type": "object",
@@ -29421,6 +33554,46 @@
                     }
                 }
             },
+            "UiKitDemoFlowStep": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "name",
+                    "owner",
+                    "next"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "owner": {
+                        "type": "string"
+                    },
+                    "next": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "UiKitDemoFlowStepsResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/UiKitDemoFlowStep"
+                        }
+                    }
+                }
+            },
             "UiKitDemoMetricResponse": {
                 "type": "object",
                 "required": [
@@ -29465,6 +33638,7 @@
                             "role",
                             "status",
                             "joined",
+                            "documentId",
                             "manageable",
                             "canEdit"
                         ],
@@ -29480,6 +33654,10 @@
                             },
                             "joined": {
                                 "type": "string"
+                            },
+                            "documentId": {
+                                "type": "integer",
+                                "nullable": true
                             },
                             "manageable": {
                                 "type": "boolean"
@@ -29695,6 +33873,232 @@
                     "email",
                     "password"
                 ]
+            },
+            "UserGroup": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "rule_kind": {
+                        "type": "string"
+                    },
+                    "rule_config": {
+                        "type": "object",
+                        "additionalProperties": true
+                    },
+                    "created_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "name",
+                    "rule_kind",
+                    "rule_config",
+                    "created_at",
+                    "updated_at"
+                ]
+            },
+            "UserGroupCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "rule_kind": {
+                        "type": "string"
+                    },
+                    "rule_config": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                },
+                "required": [
+                    "name",
+                    "rule_kind"
+                ]
+            },
+            "UserGroupDeleteResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "integer"
+                            },
+                            "deleted": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "id",
+                            "deleted"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "UserGroupListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/UserGroup"
+                        }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
+                    }
+                },
+                "required": [
+                    "data",
+                    "pagination"
+                ]
+            },
+            "UserGroupPreviewMember": {
+                "type": "object",
+                "properties": {
+                    "profile_id": {
+                        "type": "integer"
+                    },
+                    "ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "display_name": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "profile_id",
+                    "ou_id",
+                    "display_name"
+                ]
+            },
+            "UserGroupPreviewRequest": {
+                "type": "object",
+                "properties": {
+                    "rule_kind": {
+                        "type": "string"
+                    },
+                    "rule_config": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                },
+                "required": [
+                    "rule_kind"
+                ]
+            },
+            "UserGroupPreviewResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "total": {
+                                "type": "integer"
+                            },
+                            "truncated": {
+                                "type": "boolean"
+                            },
+                            "sample_size": {
+                                "type": "integer"
+                            },
+                            "sample": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/UserGroupPreviewMember"
+                                }
+                            },
+                            "resolved_for": {
+                                "type": "object",
+                                "properties": {
+                                    "profile_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "ou_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "required": [
+                                    "profile_id",
+                                    "ou_id"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "total",
+                            "truncated",
+                            "sample_size",
+                            "sample",
+                            "resolved_for"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "UserGroupResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/UserGroup"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "UserGroupUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "rule_kind": {
+                        "type": "string"
+                    },
+                    "rule_config": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                }
             },
             "UserListResponse": {
                 "type": "object",

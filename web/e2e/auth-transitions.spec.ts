@@ -77,6 +77,12 @@ test.describe('Auth transitions', () => {
     // The sidebar must RE-FILTER on the identity switch: the gated link that
     // was hidden for the user REAPPEARS for the admin, and navigating to it now
     // resolves the full management view (no stale denied state survives).
+    //
+    // Delegations sits in the ACCESS group, which is closed unless the current
+    // page is in it (#1007) — so open the groups before asserting visibility.
+    // The count-0 assertions above need no such step: navLink is a CSS locator
+    // and counts a hidden link, so absence there still means RBAC removed it.
+    await shell.expandAllNavGroups();
     await expect(shell.navLink('Delegations')).toBeVisible();
     await shell.clickNav('Delegations');
     await page.waitForURL('**/admin/delegations');
@@ -106,7 +112,16 @@ test.describe('Auth transitions', () => {
     await expect(page).toHaveURL(/\/admin\/users$/);
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
     // Named: the users page also renders a pending-invitations table.
-    await expect(page.getByRole('table', { name: 'Users' })).toBeVisible();
+    const usersTable = page.getByRole('table', { name: 'Users' });
+    await expect(usersTable).toBeVisible();
+    // The ROW is the assertion that carries this test's meaning (#967). A
+    // `table` element on its own is rendered by DataTable's loading skeleton —
+    // before any request is made — so asserting only that was satisfied by a
+    // table that was still empty, and stayed green even when the users request
+    // came back 500. Waiting for a row instead waits for the one thing a
+    // surviving session is needed for: the authenticated GET /api/v1/users
+    // after the reload actually returned this admin's own record.
+    await expect(usersTable.getByRole('cell', { name: ADMIN.email })).toBeVisible();
     await new AppShell(page).expectLoggedInAs(ADMIN.email);
   });
 });

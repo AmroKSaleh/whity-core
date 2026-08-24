@@ -78,8 +78,15 @@ final class JobRunner
         /** @var array<string, mixed> $payload */
         $payload = is_array($job['payload']) ? $job['payload'] : [];
 
-        // Restore the job's origin tenant so the handler's queries are scoped.
+        // Restore the job's origin tenant so the handler's queries are scoped —
+        // which is also what puts the ENQUEUEING tenant on any audit row the
+        // handler causes, rather than the system tenant (#935).
         TenantContext::setTenantId((int) $job['tenant_id']);
+        // Name the unit of work for the audit trail. The NAME only, never the
+        // payload: payloads carry caller-supplied data and the trail is readable
+        // by any tenant admin with `audit:read` — the same rule #931 adopted for
+        // command arguments.
+        AuditContext::setJob($name);
         try {
             $result = $handler->handle($payload);
             $this->repo->markCompleted($id, $result);

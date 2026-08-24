@@ -119,6 +119,52 @@ final class TenantOwnedTables
         'document_templates' => '059_create_document_designer_tables.php',
         'document_blocks'    => '059_create_document_designer_tables.php',
 
+        // #947 item 1 — issued documents and their stored render output
+        // (migration 108). `documents` is the record; `document_artifacts` is
+        // the append-only set of immutable rendered files, with the tenant
+        // DENORMALISED from the parent document so the predicate guard polices
+        // an artifact read directly instead of trusting a join — the same trade
+        // `notification_deliveries`, `event_outbox` and `entity_tags` above
+        // already make. Every read and write on both binds tenant_id, and the
+        // handler additionally row-filters by
+        // {@see \Whity\Core\Document\DocumentVisibilityPolicy} (creator, or the
+        // tenant-wide documents:read:all grant).
+        'documents'          => '108_create_documents.php',
+        'document_artifacts' => '108_create_documents.php',
+
+        // #947 item 3 — the document ROUTING engine (migration 112). Four
+        // tables, all tenant-owned with an explicit `tenant_id` rather than one
+        // inferred through the document: the predicate guard has to be able to
+        // police an inbox read and a trail read DIRECTLY, and the inbox query
+        // ("my open rows") never joins `documents` at all in its count form.
+        // Same trade `notification_deliveries`, `entity_tags` and `event_outbox`
+        // above already make.
+        //
+        // `document_route_events` is the APPEND-ONLY trail
+        // ({@see \Whity\Core\Document\Routing\RouteEventRepository} has no
+        // update and no delete path), and `document_route_recipients` is the
+        // inbox — registered as an #881 source rather than owning a surface of
+        // its own.
+        'document_routes'            => '112_create_document_routing.php',
+        'document_route_steps'       => '112_create_document_routing.php',
+        'document_route_events'      => '112_create_document_routing.php',
+        'document_route_recipients'  => '112_create_document_routing.php',
+
+        // #999 — named USER GROUPS (migration 116). One row per group: a name
+        // plus the `rule_kind` + `rule_config` pair that says which people it
+        // contains. There is deliberately NO `user_group_members` table beside
+        // it: a stored membership list omits the instructor hired last week,
+        // still renders, and still reports success, which is the same argument
+        // `document_route_steps` above relies on for having nowhere to put a
+        // person.
+        //
+        // Tenant-owned with an explicit `tenant_id` rather than one inferred
+        // through anything, so the predicate guard polices a group read
+        // DIRECTLY. Every read and write binds it, and a group id from another
+        // tenant is reported as absent rather than forbidden — group ids are
+        // enumerable integers.
+        'user_groups'                => '116_create_user_groups.php',
+
         // WC-525 — admin-enforced 2FA policy registry (migration 061): tenant/OU/
         // user-scoped rows an admin sets to require 2FA enrollment. Every query
         // binds tenant_id so a policy can never leak across tenants.
@@ -236,6 +282,16 @@ final class TenantOwnedTables
         // type joins on `ou_types.tenant_id = organizational_units.tenant_id`
         // rather than on the id alone.
         'ou_types' => '102_create_ou_types.php',
+
+        // #978 (#947 item 5) — the document organizer's per-user collections
+        // (migration 114). Tenant-owned AND profile-owned: a collection is one
+        // person's filing of documents inside ONE tenant, so every read binds
+        // tenant_id AND profile_id and the guard polices the first of those.
+        // The item table carries its own tenant_id for the same reason
+        // `document_artifacts` does — the membership join must be verifiable
+        // here, not inferred from the collection it hangs off.
+        'document_collections' => '114_create_document_collections.php',
+        'document_collection_items' => '114_create_document_collections.php',
     ];
 
     /**

@@ -8,12 +8,19 @@
 #      pass, migrations + seed must run on real PostgreSQL, and the frontend
 #      types/tests/generated-artifact drift checks must pass on the tagged
 #      commit. A release is never gated weaker than a PR.
-#   2. image — build BOTH production container images and push them to GHCR
-#      under the same tags (vX.Y.Z and latest): the backend
+#   2. image — build ALL THREE production container images and push them to
+#      GHCR under the same tags (vX.Y.Z and latest): the backend
 #      (`ghcr.io/<repo>`, root Dockerfile `release` stage — code + no-dev
-#      vendor baked in) and the frontend (`ghcr.io/<repo>/web`, web/Dockerfile
-#      `runtime` stage — the built Next app). A deployment is not the product
-#      without both, so they ship together or not at all.
+#      vendor baked in), the frontend (`ghcr.io/<repo>/web`, web/Dockerfile
+#      `runtime` stage — the built Next app) and the document render tier
+#      (`ghcr.io/<repo>/render`, render-service/Dockerfile `runtime` stage —
+#      headless Chromium plus the designer's own renderer bundled from source).
+#      A deployment is not the product without the first two, so they ship
+#      together or not at all. The render tier is optional to RUN (a compose
+#      profile most deployments never start) but not optional to PUBLISH: its
+#      build context spans the app repo AND the web source, so it is the one
+#      image nobody downstream of this workflow can assemble from what we
+#      publish — see the `image` job and docs/wiki/Document-Render-Service.md.
 #   3. release — create the GitHub Release with auto-generated notes (the
 #      source archives GitHub attaches are the deploy artifact for
 #      checkout-based hosts; the GHCR images serve container-based ones).
@@ -154,6 +161,12 @@ jobs:
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
 
+      # A release must not ship an in-tree plugin whose screens silently do not
+      # register (#969) — loading successfully is not the same as contributing
+      # the UI the plugin declares.
+      - name: Plugin frontend-feature registration guard
+        run: php scripts/ci-plugin-frontend-features.php
+
       # A core release ships templates/tauri-desktop/ as the source an operator
       # builds their desktop app from, so a release cutting with a stale
       # vendored SDK hands every device a plugin contract older than the one
@@ -239,6 +252,14 @@ jobs:
       - name: Re-run migrations (idempotency on PostgreSQL)
         run: php public/index.php migrate run
 
+      # A release must not ship a route gated on a permission nobody holds (#990).
+      # On upgrade that is a capability an operator HAD and silently loses, on a
+      # deployment nobody is watching — the sovereign long-lived installs this
+      # platform sells into apply migrations incrementally, so the tag is the last
+      # point at which the grant and the gate can still be shipped together.
+      - name: Permission-holder guard
+        run: php scripts/ci-permission-holder-guard.php
+
   web:
     name: Frontend types, tests & generated-artifact drift
     runs-on: ubuntu-latest
@@ -315,21 +336,45 @@ jobs:
       packages: write
       security-events: write   # WC-d: upload the Trivy image-scan SARIF
 
-    # BOTH tiers of the product are published here, by ONE matrixed job, so they
+    # EVERY tier of the product is published here, by ONE matrixed job, so they
     # can never drift apart: identical gates, identical tags, identical scan.
     # A release that shipped only the PHP image left deployments assembled from
     # published artifacts with an API and no user interface (WHIT-588) — the
     # frontend was validated by the `web` job above and then thrown away.
     #
-    #   app — PHP/FrankenPHP backend, root Dockerfile, `release` stage.
-    #   web — Next.js frontend, web/Dockerfile, `runtime` stage.
+    #   app    — PHP/FrankenPHP backend, root Dockerfile, `release` stage.
+    #   web    — Next.js frontend, web/Dockerfile, `runtime` stage.
+    #   render — document/label PDF render tier (ADR 0012),
+    #            render-service/Dockerfile, `runtime` stage.
     #
     # `app` keeps the unsuffixed repository path it has always published under,
     # because existing deployments already pin `ghcr.io/<repo>:vX.Y.Z`; the
-    # frontend takes the `/web` sub-path beside it.
+    # frontend takes the `/web` sub-path beside it, and the render tier `/render`
+    # beside that.
+    #
+    # The render tier belongs HERE specifically, and not in an operator's own
+    # build, because of its build context (#947). render-service/Dockerfile takes
+    # the REPOSITORY ROOT: it bundles web/components/documents, web/lib/documents
+    # and packages/{ui,features}/src in from source so an exported PDF comes out
+    # of the same renderer the designer draws with (ADR 0012's entire premise).
+    # But render-service/ ships in the app image and that web source ships only
+    # in the web image, so NEITHER published artifact can build it. Until this
+    # leg existed, running the render tier meant hand-assembling a context from
+    # both images and redoing it on every core bump — and a miss there does not
+    # fail, it silently exports PDFs that no longer match the preview, which is
+    # the precise failure ADR 0012 exists to prevent. The tag is the pairing:
+    # `render:vX.Y.Z` is built from the same commit as `app:vX.Y.Z`, and the
+    # image reports the version it was built from on /health (asserted in
+    # `smoke`) so a mismatched pair is visible from outside the box.
+    #
+    # Note the render leg needs no context change: `context: .` below is already
+    # the repository root, which is exactly what that Dockerfile requires.
+    # `render-service/Dockerfile.dockerignore` narrows what is SENT, not what is
+    # reachable, and it re-includes those source trees verbatim — so the bundled
+    # sources are the same files the `web` job type-checked and built above.
     strategy:
-      # Do not cancel the sibling when one leg fails: a broken release wants
-      # both build logs in the same run. Either leg failing still fails every
+      # Do not cancel the siblings when one leg fails: a broken release wants
+      # every build log in the same run. Any leg failing still fails every
       # job that `needs: [image]`, so this weakens no gate.
       fail-fast: false
       matrix:
@@ -342,6 +387,10 @@ jobs:
             dockerfile: web/Dockerfile
             target: runtime
             suffix: /web
+          - image: render
+            dockerfile: render-service/Dockerfile
+            target: runtime
+            suffix: /render
 
     steps:
       - name: Checkout tag
@@ -372,7 +421,8 @@ jobs:
           # cannot resolve the commit itself and every /web-build field comes
           # back null — which is how v0.2.2 shipped an endpoint that answered
           # but could not identify the bundle it served. Harmless to the app
-          # image, which ignores it.
+          # image, which ignores it; the render image consumes it for the same
+          # reason the web image does, and reports it on /health.
           build-args: |
             WHITY_BUILD_COMMIT=${{ github.sha }}
           tags: |
@@ -417,6 +467,17 @@ jobs:
     # so the UI is proven by fetching a real page (/login) off the published web
     # image, wired to the app container the way a deployment wires it.
     #
+    # #947: the render tier gets the strongest check of the three, because
+    # "starts up" says the least about it. Its failure mode is not a crash — it
+    # is a container that answers /health perfectly while producing a blank or
+    # unshaped page, because the harness bundle did not build, Chromium is
+    # missing, or the Arabic fonts are not in the image. So it is proven by
+    # POSTing a real template and asserting the PDF that comes back: correct
+    # magic bytes, several distinct embedded font subsets (text was actually
+    # shaped, not left blank), and a plausible size. A render image that builds
+    # but cannot render is worse than no render image at all — it would pass a
+    # liveness probe in every deployment that pulled it.
+    #
     # Networking approach: GitHub Actions `services:` containers live on a
     # separate Docker-managed bridge that job-level `docker run` containers
     # CANNOT reach by container name — only the runner host can. To mirror a
@@ -447,6 +508,7 @@ jobs:
           {
             echo "name=ghcr.io/${GITHUB_REPOSITORY,,}"
             echo "web=ghcr.io/${GITHUB_REPOSITORY,,}/web"
+            echo "render=ghcr.io/${GITHUB_REPOSITORY,,}/render"
           } >> "$GITHUB_OUTPUT"
 
       # Isolated bridge so the app reaches Postgres by the container name
@@ -482,6 +544,7 @@ jobs:
         run: |
           docker pull "${{ steps.image.outputs.name }}:${{ needs.resolve.outputs.tag }}"
           docker pull "${{ steps.image.outputs.web }}:${{ needs.resolve.outputs.tag }}"
+          docker pull "${{ steps.image.outputs.render }}:${{ needs.resolve.outputs.tag }}"
 
       # Run migrations and seed inside the release image on the same network so
       # the app can reach Postgres by the container name `postgres`. APP_ENV is
@@ -643,12 +706,147 @@ jobs:
           fi
           echo "Bundle identity check passed."
 
+      # On the same bridge and under the container name `render`, because that
+      # is the hostname RENDER_SERVICE_URL defaults to in every compose file —
+      # the image is started the way a deployment starts it, not in a shape
+      # invented for the test. The checks below then call it directly on the
+      # published port rather than through the app: driving core's render
+      # endpoint would need a seeded template, a session and the
+      # documents.render_enabled flag, none of which say anything more about
+      # whether THIS IMAGE can render.
+      #
+      # The shared secret is compared in constant time and must be >= 32 chars
+      # or the service refuses every render. The value is throwaway; it never
+      # leaves this runner.
+      - name: Start render container
+        run: |
+          docker run -d \
+            --name render \
+            --network whity-smoke \
+            -p 8130:8130 \
+            -e RENDER_SHARED_SECRET=ci_smoke_render_shared_secret_32ch \
+            "${{ steps.image.outputs.render }}:${{ needs.resolve.outputs.tag }}"
+
+      - name: Wait for the render tier to answer /health
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8130/health || true)
+            echo "Attempt $i/30 — HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Render health check passed."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::The render image did not answer /health within 60 seconds."
+          docker logs render
+          docker ps -a
+          exit 1
+
+      # The pairing has to be CHECKABLE, not just asserted by the tag.
+      #
+      # Nothing stops an operator from running render:v0.2.9 against app:v0.2.7,
+      # and nothing about that combination looks wrong: both containers are
+      # healthy, exports still succeed, and the PDFs merely stop matching what
+      # the designer shows. So the image reports the CoreVersion::VERSION it was
+      # built from (render-service/scripts/write-build-info.js) — the same
+      # property /web-build gives the UI tier — and this asserts it equals the
+      # version being released. An image that cannot say what it is fails here.
+      - name: The render image must report the version it was built from
+        env:
+          EXPECTED: ${{ needs.resolve.outputs.version }}
+        run: |
+          BODY=$(curl -s --max-time 10 http://localhost:8130/health)
+          echo "$BODY"
+
+          REPORTED=$(python3 - "$BODY" <<'PY'
+          import json, sys
+          try:
+              print(json.loads(sys.argv[1]).get("core_version") or "")
+          except Exception:
+              print("")
+          PY
+          )
+
+          if [ "$REPORTED" != "$EXPECTED" ]; then
+            echo "::error::The render image reports core_version '${REPORTED}' but this release is ${EXPECTED}. The render tier would not pair with its own app image."
+            exit 1
+          fi
+          echo "Render tier identifies as ${REPORTED}."
+
+      # The actual proof: a real Puppeteer round-trip through the PUBLISHED
+      # image. Deliberately the same payload shape the PR gate uses
+      # (automated-tests.yml, `render-service` job) so the release is never
+      # gated weaker than a PR — text + KaTeX math + a bwip-js barcode +
+      # Arabic, the four things whose absence from the image is silent.
+      #
+      # Structural assertions only; exact golden-image pixel diffing is too
+      # fragile across environments. Several DISTINCT embedded font subsets is
+      # the signal that carries the most: a blank page embeds none, and a page
+      # whose fonts are missing from the image embeds one fallback.
+      - name: The render image must actually render a PDF
+        run: |
+          cat > "${RUNNER_TEMP}/render-payload.json" <<'PAYLOAD'
+          {
+            "template": {
+              "version": 2,
+              "page": { "widthMm": 100, "heightMm": 60, "marginMm": 2, "background": "#ffffff" },
+              "placeholders": [],
+              "pages": [
+                {
+                  "id": "p1",
+                  "elements": [
+                    { "id": "t1", "type": "text", "x": 2, "y": 2, "w": 96, "h": 12, "rotation": 0, "z": 1,
+                      "text": "مرحبا بالعالم",
+                      "style": { "fontSize": 18, "fontWeight": "normal", "fontStyle": "normal", "align": "center", "vAlign": "middle", "color": "#000000", "direction": "rtl" } },
+                    { "id": "m1", "type": "math", "x": 2, "y": 16, "w": 60, "h": 14, "rotation": 0, "z": 2,
+                      "expression": "E = mc^2", "block": false },
+                    { "id": "b1", "type": "barcode", "x": 2, "y": 32, "w": 60, "h": 20, "rotation": 0, "z": 3,
+                      "symbology": "code128", "value": "WHITY-RELEASE-SMOKE", "showText": true }
+                  ]
+                }
+              ]
+            },
+            "dataRows": [{}]
+          }
+          PAYLOAD
+
+          curl -fsS --max-time 120 -X POST http://localhost:8130/render \
+            -H 'Content-Type: application/json' \
+            -H 'X-Render-Secret: ci_smoke_render_shared_secret_32ch' \
+            --data @"${RUNNER_TEMP}/render-payload.json" \
+            -o "${RUNNER_TEMP}/render-output.pdf" || {
+              echo "::error::POST /render failed against the published render image."
+              docker logs render
+              exit 1
+            }
+
+          test -s "${RUNNER_TEMP}/render-output.pdf"
+          head -c 5 "${RUNNER_TEMP}/render-output.pdf" | grep -q '%PDF-'
+
+          font_count=$(grep -a -c 'BaseFont' "${RUNNER_TEMP}/render-output.pdf" || true)
+          echo "embedded BaseFont occurrences: ${font_count}"
+          if [ "${font_count}" -lt 2 ]; then
+            echo "::error::The rendered PDF embeds ${font_count} font subset(s) — the page rendered blank or unshaped."
+            docker logs render
+            exit 1
+          fi
+
+          size=$(stat -c%s "${RUNNER_TEMP}/render-output.pdf")
+          echo "PDF size: ${size} bytes"
+          if [ "${size}" -le 5000 ]; then
+            echo "::error::The rendered PDF is ${size} bytes — too small to contain the smoke template's content."
+            docker logs render
+            exit 1
+          fi
+          echo "Render round-trip passed."
+
       # Always clean up the containers and network, even on failure, so the
       # runner is left in a clean state for any subsequent jobs.
       - name: Tear down
         if: always()
         run: |
-          docker rm -f whity-web whity-app postgres 2>/dev/null || true
+          docker rm -f render whity-web whity-app postgres 2>/dev/null || true
           docker network rm whity-smoke 2>/dev/null || true
 
   release:

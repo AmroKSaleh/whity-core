@@ -11,9 +11,17 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Api\DocumentRenderApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentAccessPolicy;
+use Whity\Core\Document\DocumentArtifactRepository;
+use Whity\Core\Document\DocumentArtifactStore;
 use Whity\Core\Document\DocumentBlockRepository;
+use Whity\Core\Document\DocumentIssuer;
+use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
+use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Request;
 use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Core\Settings\SettingsRegistry;
@@ -21,6 +29,7 @@ use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\TenantSettingsRepository;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
+use Whity\Storage\LocalStorageDriver;
 
 /**
  * Real-engine tests for {@see DocumentRenderApiHandler} (ADR 0012 /
@@ -36,7 +45,11 @@ use Whity\Database\Database;
  *    resolved blockInstance references) and streams back the PDF bytes with
  *    the right Content-Type;
  *  - batch limits (max rows / max total render units / max template bytes)
- *    are enforced as 422s, sourced from settings (not hardcoded).
+ *    are enforced as 422s, sourced from settings (not hardcoded);
+ *  - persistence (#947 item 1) is OPT-IN: the default render writes nothing at
+ *    all — asserted as the absence of a document row AND of a storage
+ *    directory, since "returns PDF bytes" would pass either way — and
+ *    `persist: true` produces a record, an artifact and a JSON body.
  *
  * The actual whity_render Docker round-trip (a real Puppeteer render
  * producing real PDF bytes) is proven separately — see
@@ -63,6 +76,7 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
     private FakeRenderServiceClient $fakeRender;
     private SettingsService $settingsService;
     private DocumentTemplateRepository $templateRepo;
+    private string $storageRoot;
 
     protected function setUp(): void
     {
@@ -77,13 +91,32 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
             new TenantSettingsRepository($this->pdo)
         );
 
+        // #947 item 1 moved the render MECHANICS into DocumentRenderer and gave
+        // the handler an issuer for the opt-in `persist` path. The ephemeral
+        // behaviour every test below asserts is unchanged; the storage root is a
+        // throwaway directory that nothing here should ever write to, which
+        // {@see testEphemeralRenderWritesNothingToStorageOrTheDatabase} makes explicit.
+        $this->storageRoot = sys_get_temp_dir() . '/whity-doc-render-' . bin2hex(random_bytes(6));
+        $renderer = new DocumentRenderer(
+            new DocumentBlockRepository($this->pdo),
+            $this->settingsService,
+            $this->fakeRender
+        );
+        $documents = new DocumentRepository($this->pdo);
+        $artifacts = new DocumentArtifactRepository($this->pdo);
         $this->handler = new DocumentRenderApiHandler(
             $this->templateRepo,
-            new DocumentBlockRepository($this->pdo),
             new DocumentAccessPolicy(),
             new RoleChecker($db, new PermissionRegistry()),
             $this->settingsService,
-            $this->fakeRender
+            $renderer,
+            new DocumentIssuer(
+                $this->pdo,
+                $documents,
+                $artifacts,
+                new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot))
+            ),
+            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
         );
     }
 
@@ -91,6 +124,24 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
     {
         TenantContext::reset();
         RoleChecker::clearCache();
+        self::removeTree($this->storageRoot);
+    }
+
+    /** Remove a throwaway storage root, if the run created one. */
+    private static function removeTree(string $path): void
+    {
+        if (!is_dir($path)) {
+            return;
+        }
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($items as $item) {
+            /** @var \SplFileInfo $item */
+            $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+        }
+        @rmdir($path);
     }
 
     private DocumentRenderApiHandler $handler;
@@ -307,7 +358,149 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
         self::assertStringNotContainsString('simulated render-service failure', $res->getBody());
     }
 
+    // ── persistence (#947 item 1) ────────────────────────────────────────────
+
+    /**
+     * The default must stay the ephemeral one. The designer previews on every
+     * meaningful edit, and a preview that silently became a stored record would
+     * fill a tenant's storage with drafts — so this asserts the ABSENCE of a
+     * write, not merely the presence of PDF bytes.
+     */
+    public function testEphemeralRenderWritesNothingToStorageOrTheDatabase(): void
+    {
+        $this->enableRendering();
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Label', 'data' => $this->minimalTemplateData()]);
+
+        $res = $this->render(self::OWNER, $id);
+
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame('application/pdf', $res->getHeaders()['content-type'] ?? null);
+        self::assertSame(0, $this->countDocuments(), 'a preview render must not create a document record');
+        self::assertDirectoryDoesNotExist($this->storageRoot, 'a preview render must not touch storage at all');
+    }
+
+    /** `persist: false` is spelled out, not merely omitted — same outcome. */
+    public function testExplicitPersistFalseIsStillEphemeral(): void
+    {
+        $this->enableRendering();
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Label', 'data' => $this->minimalTemplateData()]);
+
+        $res = $this->render(self::OWNER, $id, ['persist' => false]);
+
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame(0, $this->countDocuments());
+    }
+
+    public function testPersistCreatesARecordAnArtifactAndReturnsJson(): void
+    {
+        $this->enableRendering();
+        $id = $this->createTemplate(self::OWNER, ['name' => 'My Label', 'data' => $this->minimalTemplateData()]);
+
+        $res = $this->render(self::OWNER, $id, ['persist' => true]);
+
+        self::assertSame(201, $res->getStatusCode());
+        self::assertSame(1, $this->countDocuments());
+
+        $body = json_decode($res->getBody(), true);
+        self::assertIsArray($body);
+        $doc = $body['data'];
+        self::assertSame(self::TENANT, $doc['tenant_id']);
+        self::assertSame($id, $doc['document_template_id']);
+        // The snapshot, so a deleted template still leaves a legible record.
+        self::assertSame('My Label', $doc['template_name']);
+        self::assertSame('My Label', $doc['title']);
+        self::assertSame(self::OWNER, $doc['created_by']);
+        self::assertCount(1, $doc['artifacts']);
+
+        $artifact = $doc['artifacts'][0];
+        self::assertSame('application/pdf', $artifact['content_type']);
+        self::assertSame(hash('sha256', $this->fakeRender->pdfBytes), $artifact['checksum_sha256']);
+        self::assertSame(strlen($this->fakeRender->pdfBytes), $artifact['byte_size']);
+        // VERSIONED, because this is a URL a browser fetches and the router
+        // serves these bytes at '/api/v1/...'. This assertion used to expect the
+        // unversioned form and passed for exactly as long as the viewer was
+        // broken (#1016) — it compared the presenter against itself rather than
+        // against the route table, so it could only ever agree with whatever the
+        // presenter happened to emit. Tests\Core\Document\DocumentContentUrlTest
+        // is the one that actually resolves these against the live routes.
+        self::assertSame(
+            "/api/v1/documents/{$doc['id']}/artifacts/{$artifact['id']}/content",
+            $artifact['content_url']
+        );
+
+        // The storage key is an internal address and must never reach a client.
+        self::assertArrayNotHasKey('storage_key', $artifact);
+    }
+
+    public function testPersistUsesAnExplicitTitleWhenSupplied(): void
+    {
+        $this->enableRendering();
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Contract Template', 'data' => $this->minimalTemplateData()]);
+
+        $res = $this->render(self::OWNER, $id, ['persist' => true, 'title' => 'Contract 2026-014']);
+
+        self::assertSame(201, $res->getStatusCode());
+        $doc = json_decode($res->getBody(), true)['data'];
+        self::assertSame('Contract 2026-014', $doc['title']);
+        // The provenance snapshot is the TEMPLATE's name, independent of the title.
+        self::assertSame('Contract Template', $doc['template_name']);
+    }
+
+    /**
+     * The persistence gate is checked BEFORE the render, so a refusal does not
+     * first burn a Chromium page it is going to throw away.
+     */
+    public function testPersistIsRefusedWith503WhenPersistenceIsDisabledAndNeverRenders(): void
+    {
+        $this->enableRendering();
+        $this->settingsService->setGlobal(SettingsRegistry::DOCUMENTS_PERSIST_ENABLED, 'false');
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Label', 'data' => $this->minimalTemplateData()]);
+
+        $res = $this->render(self::OWNER, $id, ['persist' => true]);
+
+        self::assertSame(503, $res->getStatusCode());
+        self::assertSame([], $this->fakeRender->calls);
+        self::assertSame(0, $this->countDocuments());
+    }
+
+    /**
+     * Turning persistence off must not take the preview down with it — they are
+     * separate settings precisely so an operator can keep one and drop the other.
+     */
+    public function testEphemeralRenderStillWorksWhilePersistenceIsDisabled(): void
+    {
+        $this->enableRendering();
+        $this->settingsService->setGlobal(SettingsRegistry::DOCUMENTS_PERSIST_ENABLED, 'false');
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Label', 'data' => $this->minimalTemplateData()]);
+
+        $res = $this->render(self::OWNER, $id);
+
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame('application/pdf', $res->getHeaders()['content-type'] ?? null);
+    }
+
+    /** Persisting is refused for the same reasons an ephemeral render is. */
+    public function testPersistCannotReachAnotherTenantsTemplate(): void
+    {
+        $this->enableRendering();
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Label', 'data' => $this->minimalTemplateData()]);
+
+        $res = $this->renderAs(self::OTHER_TENANT_ADMIN, self::OTHER_TENANT, $id, ['persist' => true]);
+
+        self::assertSame(404, $res->getStatusCode());
+        self::assertSame(0, $this->countDocuments());
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** How many document records exist, across every tenant. */
+    private function countDocuments(): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM documents');
+        $stmt->execute();
+
+        return (int) $stmt->fetchColumn();
+    }
 
     private function enableRendering(): void
     {

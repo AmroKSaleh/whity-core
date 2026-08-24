@@ -10,6 +10,8 @@
  * `web/lib/roles-adapter.ts`); this file only defines the shapes.
  */
 
+import type { RecordSectionVerdicts } from '../record/types';
+
 export interface Permission {
   id: number;
   name: string;
@@ -44,7 +46,33 @@ export interface Role {
 }
 
 export interface RoleWithPermissions extends Role {
-  permissions: Permission[];
+  /**
+   * The role's permission set — OPTIONAL since #910, and its absence is an
+   * authorization decision rather than a missing field.
+   *
+   * A caller without `permissions:read` does not receive this array, because the
+   * record page's permissions REGION is hidden for them and a hidden region is
+   * WITHHELD, not suppressed on the client. Shipping the rows and asking the
+   * browser not to draw them would make the gate a rendering instruction: still
+   * there for anyone who opened the network tab. The same server branch that
+   * leaves the region out of {@link RoleWithPermissions.sections} leaves this
+   * out, so the two cannot disagree.
+   */
+  permissions?: Permission[];
+  /**
+   * The server's per-region verdicts for THIS caller (#910).
+   *
+   * Keyed by region — `details`, `permissions`. A region the caller may not see
+   * is absent; a region they may see carries `read-only` (with a machine reason
+   * code) or `editable`. Absent entirely when the host does not resolve regions,
+   * which the record page reads as "every region hidden" — fail closed, the way
+   * `can()` answers while capabilities are in flight.
+   *
+   * Deliberately NOT flattened into booleans on this type: the record page feeds
+   * it to the shell's `sectionAccessFrom`, whose whole job is that the client
+   * does not recombine server answers into a decision the server never gave.
+   */
+  sections?: RecordSectionVerdicts;
 }
 
 /**
@@ -111,12 +139,34 @@ export type RoleActivityResult = RoleActivityEntry[] | 'forbidden';
  */
 export type { Transport, TransportResponse } from '../record/transport';
 
+/**
+ * The per-region verdict map, re-exported from the record slice so a consumer of
+ * `@amroksaleh/features/roles` needs one import rather than two.
+ */
+export type { RecordSectionDenial, RecordSectionVerdicts } from '../record/types';
+
 /** The fields a caller may set when creating or updating a role. */
 export interface RoleInput {
   name: string;
   description: string;
   permissions: number[];
 }
+
+/**
+ * The fields an UPDATE may carry — every one of them optional (#910).
+ *
+ * A record page whose regions are gated separately sends only the regions the
+ * caller may write: the details, the permission set, either, or both. The server
+ * refuses a key the caller's region gate does not allow rather than dropping it,
+ * so a client that always sent all three would turn a read-only REGION into a
+ * failed PAGE.
+ *
+ * Distinct from {@link RoleInput}, which CREATE still uses whole: a new role is
+ * not composed of regions somebody may or may not be allowed to fill in — it
+ * either gets created with a name, a description and a permission set, or it is
+ * not created.
+ */
+export type RoleUpdateInput = Partial<RoleInput>;
 
 /**
  * One tenant a system operator may create a role for (#888).
@@ -203,8 +253,14 @@ export interface RolesAdapter {
    * carries no scope fields and the server stamps the caller's own tenant.
    */
   createRole(input: RoleCreateInput): Promise<void>;
-  /** PATCH /roles/{id}; a 404 maps to 'not-manageable' (WC-110/WC-222). */
-  updateRole(id: number, input: RoleInput): Promise<'ok' | 'not-manageable'>;
+  /**
+   * PATCH /roles/{id}; a 404 maps to 'not-manageable' (WC-110/WC-222).
+   *
+   * Takes a PARTIAL body since #910 — see {@link RoleUpdateInput}. A 403 still
+   * throws, and should: it means the caller sent a region they may not write,
+   * which is a client bug the page should surface rather than absorb.
+   */
+  updateRole(id: number, input: RoleUpdateInput): Promise<'ok' | 'not-manageable'>;
   /** DELETE /roles/{id}; a 404 maps to 'not-manageable' (WC-110/WC-222). */
   deleteRole(id: number): Promise<'ok' | 'not-manageable'>;
   /** GET /me/capabilities — the caller's effective permission slugs, for building `can`. */
@@ -248,18 +304,20 @@ export interface RolesScreenProps {
   /** Optional notifier; web wires ToastProvider, desktop wires its own. */
   onNotify?: (message: string, type: 'success' | 'error') => void;
   /**
-   * Navigate to a role's RECORD PAGE (#882). The navigation seam: this package
-   * is mounted by a Next app, a Tauri shell and a Vite harness, none of which
-   * share a router, so the screen asks its host to navigate rather than
-   * importing one.
+   * Navigate to a role's RECORD PAGE. The navigation seam: this package is
+   * mounted by a Next app, a Tauri shell and a Vite harness, none of which share
+   * a router, so the screen asks its host to navigate rather than importing one.
    *
-   * OPTIONAL, and its absence is the fallback rather than a broken state: a host
-   * that supplies it routes Edit to the record page, a host that does not keeps
-   * today's edit MODAL, unchanged. That is what makes the record page additive —
-   * revertible by deleting one prop at one call site — and it is why the modal
-   * is still in this package.
+   * REQUIRED since #910, where it was optional under #882. It was optional
+   * because the edit MODAL was still the fallback, and the modal is now gone: a
+   * `max-w-3xl` dialog wrapping a `max-h-80` scroll region holding 53+
+   * permissions was the acute case that produced #882, and it cannot express the
+   * three per-region states #910 requires — a dialog has one gate, one set of
+   * inputs, and nowhere to say why half of them are absent. Making the seam
+   * required is the honest consequence: a host that mounts this screen must be
+   * able to navigate to a record, because that is where editing now happens.
    */
-  onOpenRecord?: (role: Role) => void;
+  onOpenRecord: (role: Role) => void;
   /**
    * Cross-tenant create seam (#888). Supplied only by a host whose caller may
    * choose where a new role lives; omitted, the Create modal has no scope picker
@@ -274,8 +332,21 @@ export interface RoleRecordScreenProps {
   adapter: RolesAdapter;
   /** The role this page is about — the route's dynamic segment, resolved by the host. */
   roleId: number;
-  /** Resolved, fail-closed capability check. */
-  can: (capability: string) => boolean;
+  /**
+   * NO `can` PROP, and its absence is the design (#910).
+   *
+   * It took one until #910: the screen read `can('roles:write')` and folded it
+   * with the record's `manageable` flag into a page-level binary. Both were
+   * server answers, but the FOLD was the client's, and a page whose regions are
+   * governed separately would have needed the client to invent one conjunction
+   * per region — a browser holding an opinion about authorization that the
+   * deployment never granted.
+   *
+   * `GET /roles/{id}` now carries a verdict per region instead, so there is
+   * nothing left for a capability check to decide here. It also means this page
+   * no longer has to wait for `/me/capabilities` before it can render: the
+   * record's own response is the whole answer.
+   */
   /** Optional translator; defaults to identity (keys render as literals) when omitted. */
   t?: TranslateFn;
   /** Optional notifier; web wires ToastProvider, desktop wires its own. */

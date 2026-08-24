@@ -166,6 +166,33 @@ final class CorePermissions
     public const DOCUMENTS_PUBLISH = 'documents:publish';
     public const DOCUMENTS_RENDER = 'documents:render';
 
+    // Issued DOCUMENTS, as opposed to the templates above (#947 item 1,
+    // migration 109). The four permissions above are the designer's; a document
+    // that has been rendered and stored is an ordinary business record, and the
+    // baseline rule for one is "you see what you raised". `documents:read:all`
+    // is the tenant-wide override — the auditor/administrator grant — evaluated
+    // by {@see \Whity\Core\Document\DocumentVisibilityPolicy}. Reusing
+    // DOCUMENTS_READ for issued documents would have handed every template
+    // author the tenant's whole output as a side effect of a capability they
+    // already held.
+    public const DOCUMENTS_READ_ALL = 'documents:read:all';
+
+    // Putting an issued document into CIRCULATION (#947 item 3, migration 113).
+    //
+    // One permission, and only for the act that STARTS a routing: choosing the
+    // steps a document follows and sending it. Acting on an item that reached
+    // you is deliberately NOT gated by a permission — being a recipient is the
+    // authorization, because the route named a rule, the rule resolved to you,
+    // and the engine wrote the row. A second permission on top would let a route
+    // resolve to somebody who then cannot answer it: the item sits open forever
+    // and the person holding it has no way to discover why.
+    //
+    // Reading a document's routes and trail stays on DOCUMENTS_READ plus the
+    // row filter. A separate `documents:trail:read` would be a second answer to
+    // the question DOCUMENTS_READ_ALL already answers, with no case that
+    // distinguishes them.
+    public const DOCUMENTS_ROUTE = 'documents:route';
+
     // Admin-enforced 2FA policy (WC-525): tenant/OU/user-scoped rows an admin
     // sets to require 2FA enrollment. Tenant-scoped.
     public const SECURITY_MANAGE = 'security:manage';
@@ -177,6 +204,36 @@ final class CorePermissions
     // to entities.
     public const TAGS_READ = 'tags:read';
     public const TAGS_MANAGE = 'tags:manage';
+
+    // Named USER GROUPS (#999, migration 116). A group is a named, reusable RULE
+    // over the tenant's people — "everyone holding the instructor role" stored
+    // once and referenced from many places — not a membership table. Tenant-scoped.
+    //
+    // TWO SLUGS, AND EACH ONE PASSES #987's TEST. That test is: a permission
+    // nobody would revoke separately is a second name for an existing one. Both
+    // survive it in both directions.
+    //
+    //   read  = list the tenant's groups, read one, and PREVIEW what a group
+    //           resolves to (a count plus a small sample, never the full list).
+    //           Grantable WITHOUT write, because a person composing a route must
+    //           be able to see the groups they may name without being able to
+    //           invent one — and withholdable on its own, because the names
+    //           themselves carry information ("Under investigation" is a
+    //           sentence, not a label).
+    //   write = create, rename, redefine and delete a group. Deliberately NOT
+    //           folded into `roles:write`: defining a group is naming a query,
+    //           not granting authority, so a coordinator who curates circulation
+    //           audiences can hold this while being kept out of RBAC entirely,
+    //           and a security administrator who edits RBAC need not hold it.
+    //
+    // There is no `groups:delete`. Unlike users/roles/tenants, deleting a group
+    // destroys a DEFINITION and no person, no history and no document — the
+    // routes it was named in keep running and report the missing group by name.
+    // An operator who would revoke deletion while granting redefinition has not
+    // narrowed anything: redefining a group to resolve to nobody is the same
+    // outcome reached by a different verb.
+    public const GROUPS_READ = 'groups:read';
+    public const GROUPS_WRITE = 'groups:write';
 
     // Generic async-job API (WC-jobs-api). Tenant-scoped submission + status.
     // submit = POST /api/jobs (enqueue an allow-listed job name for this tenant)
@@ -280,9 +337,13 @@ final class CorePermissions
             self::DOCUMENTS_WRITE,
             self::DOCUMENTS_PUBLISH,
             self::DOCUMENTS_RENDER,
+            self::DOCUMENTS_READ_ALL,
+            self::DOCUMENTS_ROUTE,
             self::SECURITY_MANAGE,
             self::TAGS_READ,
             self::TAGS_MANAGE,
+            self::GROUPS_READ,
+            self::GROUPS_WRITE,
             self::JOBS_SUBMIT,
             self::JOBS_READ,
             self::NOTIFICATIONS_MANAGE,

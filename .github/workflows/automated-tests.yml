@@ -375,25 +375,40 @@ jobs:
           key: phpstan-${{ github.sha }}
           restore-keys: phpstan-
 
+      # The paths and the memory limit live in ONE place — the `phpstan` script
+      # in composer.json — and this step, scripts/ci-local.sh and any hand-run
+      # all go through it (#934). They used to disagree three ways: 1G here,
+      # 512M in ci-local.sh, and PHP's 128M default in a plain dev container.
+      #
       # 1G, not 512M. PHPStan runs parallel workers and each holds its own
       # analysis state, so the ceiling is per-worker rather than total — 512M
       # was enough until the suite grew past it, at which point a worker
       # crashes and the whole job fails with "Result is incomplete because of
       # severe errors" rather than with a real finding. That reads exactly like
       # a code defect and is not one, which is the expensive part: the failure
-      # names a memory limit only if you open the log.
+      # names a memory limit only if you open the log. At 128M it is worse
+      # still — the summary line reads "Found 7 errors", and every one of them
+      # is a crashed worker rather than a finding.
       #
-      # The runner has ~7GB, so this is not near anything. It is also what the
-      # documented local invocation already uses, so a clean local run no
-      # longer disagrees with CI.
+      # The runner has ~7GB, so this is not near anything.
+      #
+      # `ops` is in the path list (see the composer script) because
+      # ops/health-watch-healthcheck.php is a container HEALTHCHECK: a probe
+      # that fatals is a probe that reports nothing, and nothing was analysing
+      # it (WC-766).
       - name: Run PHPStan
-        # `ops` is in the list because ops/health-watch-healthcheck.php is a
-        # container HEALTHCHECK: a probe that fatals is a probe that reports
-        # nothing, and nothing was analysing it (WC-766).
-        run: vendor/bin/phpstan analyse src tests plugins sdk ops --memory-limit=1G
+        run: composer phpstan
 
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
+
+      # Plugin frontend-feature registration guard (#969): the smoke step above
+      # proves a plugin LOADS, which is not the same as its screens surviving
+      # descriptor validation — three in-tree plugins contributed no screens at
+      # all while that step stayed green. Fail CI when a declared frontend
+      # feature does not register and is not a reviewed, reasoned dormancy.
+      - name: Plugin frontend-feature registration guard
+        run: php scripts/ci-plugin-frontend-features.php
 
       # Tenant-isolation static guard (WC-192): fail CI if any SELECT/UPDATE/
       # DELETE touches a tenant-owned table without a tenant_id predicate and
@@ -463,16 +478,22 @@ jobs:
   # leaving a plugin that declares `^1.30` bound to a contract nobody can
   # identify from the constraint, on devices, offline (#849).
   #
-  # Its own job rather than a step in `static-analysis`, for one reason: it
-  # reads GIT HISTORY, so it needs fetch-depth: 0. A shallow checkout does not
-  # error here — it answers `git log develop -- sdk/src/Sdk.php` with a SMALLER
-  # set of used versions, so a number that is already taken reads as free, which
-  # is the same silent false green the guard exists to remove. Keeping it in its
-  # own job keeps the full fetch off the other jobs, which do not need it.
+  # Its own job rather than a step in `static-analysis`, for one reason: these
+  # guards read GIT HISTORY, so they need fetch-depth: 0. A shallow checkout does
+  # not error — it answers with a SMALLER set than the real one, so a number that
+  # is already taken reads as free, which is the same silent false green the
+  # guards exist to remove. Keeping them in their own job keeps the full fetch off
+  # the other jobs, which do not need it.
   #
-  # No `composer install`: the guard reads two files and shells out to git.
-  sdk-version:
-    name: SDK version collision (against develop's history)
+  # BOTH hand-allocated numbers live here (#971). The migration prefix is the same
+  # shape of defect as Sdk::VERSION: two parallel branches each pick 106, neither
+  # can see the other, git does not conflict because the filenames differ, and the
+  # second PR's CI is honestly green against a base that predates the first. One
+  # full fetch serves both checks.
+  #
+  # No `composer install`: the guards read files and shell out to git.
+  history-guards:
+    name: Version and migration-number collisions (against develop's history)
     needs: changes
     if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.desktop_host == 'true'
     runs-on: ubuntu-latest
@@ -496,6 +517,9 @@ jobs:
 
       - name: SDK version-collision guard
         run: php scripts/ci-sdk-version-collision.php
+
+      - name: Migration-number collision guard
+        run: php scripts/ci-migration-number-collision.php
 
   # The English translation catalogue must stay a faithful projection of the
   # t() calls that produce it. A converted screen whose keys were never
@@ -611,6 +635,27 @@ jobs:
 
       - name: Re-run migrations (idempotency on PostgreSQL)
         run: php public/index.php migrate run
+
+      # Permission-holder guard (#990): fail CI when a route gates on a permission
+      # slug that NO role holds. Such a gate is not a permission check, it is a
+      # lockout — it refuses every caller including the administrator it was
+      # written for, from the moment it ships.
+      #
+      # It belongs in THIS job and no other: it is the only one with a migrated
+      # database, and who holds a permission is a fact only a database knows. It
+      # runs after migrate + seed because that is the state of a fresh install,
+      # which is the deployment that gets locked out (it has whatever the
+      # migrations granted and nothing an operator added by hand), and because the
+      # guard refuses to answer against a database not migrated to this tree —
+      # otherwise a branch that adds a gate AND its grant migration together would
+      # be reported as a lockout it had already fixed.
+      #
+      # `roles:read` is the case it exists for: in the catalogue from migration 013
+      # and held by nobody for ninety-eight migrations, invisible because nothing
+      # consulted it, and one re-gate away from taking every administrator off the
+      # roles screen (#977). #990 queues fourteen more re-gates of the same shape.
+      - name: Permission-holder guard
+        run: php scripts/ci-permission-holder-guard.php
 
       # JWT_SECRET and ENCRYPTION_KEY must match the .env written above so that
       # any test that bootstraps the app via public/index.php sees the same values.
@@ -1183,7 +1228,7 @@ jobs:
       - test
       - coverage
       - static-analysis
-      - sdk-version
+      - history-guards
       - i18n-catalogue
       - postgres-migrations
       - postgres-integration

@@ -44,6 +44,27 @@ final class RolesApiHandlerRealEngineTest extends TestCase
 {
     private PDO $pdo;
 
+    /**
+     * Three real permission ids, resolved by NAME rather than written down.
+     *
+     * These were the literals 1, 2, and 3 — "any three valid permission ids" —
+     * which held until migration 112 removed the dead `create`/`update`
+     * vocabulary and left holes at 2 and 3. The seeded id space is not a
+     * contract, and a test that assumes it is fails the next time the catalogue
+     * changes for a reason that has nothing to do with the test.
+     *
+     * `ous:read` rather than `roles:read` for the third: these tests also pass
+     * 'roles:read' BY NAME to exercise id/name de-duplication, so reusing it here
+     * would make the dedupe assertion pass for the wrong reason.
+     *
+     * Chosen so their ids ASCEND, because `linkedPermissionIds()` returns them
+     * sorted: every `[$a, $b, $c]` assertion below therefore keeps the shape it
+     * had when it said `[1, 2, 3]`.
+     */
+    private int $permA;
+    private int $permB;
+    private int $permC;
+
     protected function setUp(): void
     {
         RoleChecker::clearCache();
@@ -64,7 +85,11 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         // Pagination is read from $_GET first and the path query second, so a
         // stray superglobal left by another test would silently re-page these.
         $_GET = [];
-    }
+    
+        $this->permA = $this->permIdFor('users:read');
+        $this->permB = $this->permIdFor('users:delete');
+        $this->permC = $this->permIdFor('ous:read');
+}
 
     protected function tearDown(): void
     {
@@ -82,13 +107,13 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $response = $handler->create($this->authedRequest('POST', '/api/roles', [
             'name' => 'Editor',
             // The web UI sends numeric permission ids from GET /api/permissions.
-            'permissions' => [1, 3],
+            'permissions' => [$this->permA, $this->permC],
         ]));
 
         $this->assertSame(201, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
         $this->assertSame(2, $data['permissionCount'], 'Numeric ids must link the matching permissions.');
-        $this->assertSame([1, 3], $this->linkedPermissionIds((int) $data['id']));
+        $this->assertSame([$this->permA, $this->permC], $this->linkedPermissionIds((int) $data['id']));
     }
 
     public function testCreateWithPermissionNamesLinksThePermissions(): void
@@ -118,15 +143,20 @@ final class RolesApiHandlerRealEngineTest extends TestCase
 
         $response = $handler->create($this->authedRequest('POST', '/api/roles', [
             'name' => 'Mixed',
-            // id 1 == users:read (duplicate when 'users:read' name also given),
-            // 'roles:read' resolves by name to its migrated id, id 3 == users:update.
-            'permissions' => [1, 'users:read', 'roles:read', 3],
+            // permA is users:read (duplicate when 'users:read' name also given),
+            // 'roles:read' resolves by name; permC is a third distinct id.
+            'permissions' => [$this->permA, 'users:read', 'roles:read', $this->permC],
         ]));
 
         $this->assertSame(201, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
         $this->assertSame(3, $data['permissionCount'], 'Mixed array must de-duplicate id/name overlap.');
-        $this->assertSame([1, 3, $this->permIdFor('roles:read')], $this->linkedPermissionIds((int) $data['id']));
+        // Ascending: linkedPermissionIds() sorts, and permC (ous:read) now sits
+        // above roles:read where the old literal 3 sat below it.
+        $this->assertSame(
+            [$this->permA, $this->permIdFor('roles:read'), $this->permC],
+            $this->linkedPermissionIds((int) $data['id'])
+        );
     }
 
     public function testCreateDropsUnknownIdsAndNames(): void
@@ -136,13 +166,13 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $response = $handler->create($this->authedRequest('POST', '/api/roles', [
             'name' => 'Partial',
             // 999 / nope:perm do not exist and must be dropped, not fabricated.
-            'permissions' => [1, 999, 'nope:perm', 'users:read'],
+            'permissions' => [$this->permA, 999, 'nope:perm', 'users:read'],
         ]));
 
         $this->assertSame(201, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
         $this->assertSame(1, $data['permissionCount']);
-        $this->assertSame([1], $this->linkedPermissionIds((int) $data['id']));
+        $this->assertSame([$this->permA], $this->linkedPermissionIds((int) $data['id']));
     }
 
     public function testUpdateWithNumericPermissionIdsReplacesPermissions(): void
@@ -159,12 +189,12 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $roleId = (int) $created['id'];
 
         $response = $handler->update(
-            $this->authedRequest('PATCH', '/api/roles/' . $roleId, ['permissions' => [2, 3]]),
+            $this->authedRequest('PATCH', '/api/roles/' . $roleId, ['permissions' => [$this->permB, $this->permC]]),
             ['id' => (string) $roleId]
         );
 
         $this->assertSame(200, $response->getStatusCode());
-        $this->assertSame([2, 3], $this->linkedPermissionIds($roleId));
+        $this->assertSame([$this->permB, $this->permC], $this->linkedPermissionIds($roleId));
     }
 
     // ==================== Defect 2: created roles are deletable ====================
@@ -176,7 +206,7 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $created = json_decode(
             $handler->create($this->authedRequest('POST', '/api/roles', [
                 'name' => 'Disposable',
-                'permissions' => [1],
+                'permissions' => [$this->permA],
             ]))->getBody(),
             true
         )['data'];

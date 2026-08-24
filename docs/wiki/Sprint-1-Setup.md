@@ -89,6 +89,15 @@ This installs:
 - **phpstan/phpstan** - Static analysis
 - Framework code into `/vendor/`
 
+**This step is a prerequisite for the next one, not a convenience.** The dev
+image ships no `vendor/` and Compose bind-mounts your checkout over `/app`, so
+skipping it makes `db-init` exit `255` with `vendor/autoload.php not found`.
+
+**On Windows**, run it as `COMPOSER_MIRROR_PATH_REPOS=1 composer install`: the
+SDK is a Composer path repository, and the symlink Composer would otherwise
+create does not survive the bind mount into a Linux container. See
+[Installation](Installation.md) for the full explanation.
+
 ### 4. Start Docker Services
 
 ```bash

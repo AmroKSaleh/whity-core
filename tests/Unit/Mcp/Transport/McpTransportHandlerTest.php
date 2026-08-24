@@ -8,8 +8,41 @@ use PHPUnit\Framework\TestCase;
 use Whity\Core\Request;
 use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimitException;
+use Whity\Mcp\Transport\McpNotificationSource;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 use Whity\Mcp\Transport\McpTransportHandler;
+
+/**
+ * A dispatcher that also has server-initiated notifications to hand over (#952).
+ *
+ * A hand-written double rather than a mock: these tests care about whether the
+ * transport ASKED for the notifications at all, and a counter reads more plainly
+ * than an expectation for a call that is legitimately allowed to happen zero or
+ * one times.
+ */
+final class NotifyingDispatcherDouble implements McpRequestHandlerInterface, McpNotificationSource
+{
+    public int $drainCalls = 0;
+
+    /** @param list<string> $notifications */
+    public function __construct(
+        private readonly string $response,
+        private readonly array $notifications,
+    ) {}
+
+    public function handle(string $rawBody, ?string $bearerToken): string
+    {
+        return $this->response;
+    }
+
+    /** @return list<string> */
+    public function drainNotifications(): array
+    {
+        $this->drainCalls++;
+
+        return $this->notifications;
+    }
+}
 
 /**
  * WC-d279a9b3: contract tests for McpTransportHandler.
@@ -228,14 +261,136 @@ final class McpTransportHandlerTest extends TestCase
         self::assertStringNotContainsString('application/json', $contentType);
     }
 
-    // ── GET /mcp SSE stub ────────────────────────────────────────────────────
+    // ── POST /mcp server-initiated notifications (#952) ──────────────────────
 
-    public function testGetReturns501(): void
+    public function testPostFramesNotificationsAsAnEventStream_whenClientAcceptsSse(): void
+    {
+        $dispatcher = new NotifyingDispatcherDouble(
+            '{"jsonrpc":"2.0","id":1,"result":{}}',
+            ['{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}'],
+        );
+        $handler = new McpTransportHandler($dispatcher);
+
+        $response = $handler->handlePost($this->ssePost());
+
+        self::assertStringContainsString(
+            'text/event-stream',
+            $response->getHeaders()['content-type'] ?? '',
+        );
+        self::assertSame(
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\n"
+            . "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n",
+            $response->getBody(),
+        );
+    }
+
+    public function testPostPutsNotificationsBeforeTheResponse(): void
+    {
+        $dispatcher = new NotifyingDispatcherDouble(
+            '{"jsonrpc":"2.0","id":1,"result":{}}',
+            ['{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}'],
+        );
+        $handler = new McpTransportHandler($dispatcher);
+
+        $body = $handler->handlePost($this->ssePost())->getBody();
+
+        self::assertLessThan(
+            strpos($body, '"result"'),
+            strpos($body, 'list_changed'),
+            'a client applying frames in order must invalidate its cache before reading a result',
+        );
+    }
+
+    public function testPostFramesNotificationsAloneWhenTheRequestWasItselfANotification(): void
+    {
+        $dispatcher = new NotifyingDispatcherDouble(
+            '',
+            ['{"jsonrpc":"2.0","method":"notifications/prompts/list_changed"}'],
+        );
+        $handler = new McpTransportHandler($dispatcher);
+
+        $body = $handler->handlePost($this->ssePost())->getBody();
+
+        self::assertSame(
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/prompts/list_changed\"}\n\n",
+            $body,
+        );
+    }
+
+    public function testPostStaysJsonWhenNothingIsOwed(): void
+    {
+        $dispatcher = new NotifyingDispatcherDouble('{"jsonrpc":"2.0","id":1,"result":{}}', []);
+        $handler    = new McpTransportHandler($dispatcher);
+
+        $response = $handler->handlePost($this->ssePost());
+
+        self::assertStringContainsString(
+            'application/json',
+            $response->getHeaders()['content-type'] ?? '',
+        );
+        self::assertSame('{"jsonrpc":"2.0","id":1,"result":{}}', $response->getBody());
+    }
+
+    /**
+     * Draining CLAIMS the notifications, so the transport must not ask for them
+     * when it has nowhere to put them — a client that cannot read an event
+     * stream would otherwise consume the announcement and never see it.
+     */
+    public function testPostDoesNotDrainWhenTheClientCannotReadAnEventStream(): void
+    {
+        $dispatcher = new NotifyingDispatcherDouble(
+            '{"jsonrpc":"2.0","id":1,"result":{}}',
+            ['{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}'],
+        );
+        $handler = new McpTransportHandler($dispatcher);
+
+        $request = new Request('POST', '/mcp', [
+            'Content-Type'  => 'application/json',
+            'Authorization' => 'Bearer t',
+            'Accept'        => 'application/json',
+        ], '{}');
+
+        $response = $handler->handlePost($request);
+
+        self::assertSame(0, $dispatcher->drainCalls);
+        self::assertSame('{"jsonrpc":"2.0","id":1,"result":{}}', $response->getBody());
+    }
+
+    public function testPostToleratesADispatcherWithNoNotificationsToGive(): void
+    {
+        // The bootstrap stub and any other plain McpRequestHandlerInterface must
+        // keep working untouched.
+        $this->dispatcher->method('handle')->willReturn('{"jsonrpc":"2.0","id":1,"result":{}}');
+
+        $response = $this->handler->handlePost($this->ssePost());
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('{"jsonrpc":"2.0","id":1,"result":{}}', $response->getBody());
+    }
+
+    private function ssePost(): Request
+    {
+        return new Request('POST', '/mcp', [
+            'Content-Type'  => 'application/json',
+            'Authorization' => 'Bearer t',
+            'Accept'        => 'application/json, text/event-stream',
+        ], '{}');
+    }
+
+    // ── GET /mcp ─────────────────────────────────────────────────────────────
+
+    /**
+     * 405 is the MCP spec's answer for a server that offers no standing SSE
+     * stream. Now that the server advertises listChanged (#952) a client has a
+     * reason to try opening one, and it needs a defined answer rather than the
+     * 501 that used to be here.
+     */
+    public function testGetReturns405(): void
     {
         $request  = new Request('GET', '/mcp', [], '');
         $response = $this->handler->handleGet($request);
 
-        self::assertSame(501, $response->getStatusCode());
+        self::assertSame(405, $response->getStatusCode());
     }
 
     public function testGetDoesNotCallDispatcher(): void

@@ -206,6 +206,68 @@ final class SettingsRegistry
     public const DOCUMENTS_RENDER_MAX_PAGES = 'documents.render_max_pages';
     public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
 
+    // Whether a render may be PERSISTED as a document record + a stored
+    // artifact (#947 item 1). Distinct from DOCUMENTS_RENDER_ENABLED above,
+    // which asks whether the render CONTAINER exists at all; this asks whether
+    // the output may be written to the tenant's storage, which is the part that
+    // consumes space without bound.
+    //
+    // Tenant-overridable, unlike the master switch, and for the same reason the
+    // render ceilings are: on a multi-tenant instance one tenant can be issuing
+    // documents while another is only previewing labels, and an operator should
+    // be able to hold back the second without turning off the first.
+    //
+    // Default TRUE — deliberately opt-OUT where the master switch is opt-in.
+    // Rendering is already off by default, so an instance that reaches this key
+    // has explicitly turned the subsystem on; a second off-by-default gate
+    // would make a correctly-documented `persist: true` answer 503 on a
+    // correctly-configured deployment, discoverable only by reading this file.
+    // That is precisely the complaint #947 records about the master switch
+    // being silently global-only, and it should not be reproduced one key down.
+    public const DOCUMENTS_PERSIST_ENABLED = 'documents.persist_enabled';
+
+    // Routing ceilings (#947 item 3). Both resolve per-tenant, then global, then
+    // the registry default — the ordinary SettingsService::effective() chain, so
+    // neither number is ever written into the engine.
+    //
+    //   - routing_max_steps: how many steps one route may declare. Bounds
+    //     AUTHORING: a route is created complete, in one transaction, so the
+    //     step count is the size of that transaction.
+    //   - routing_max_recipients_per_step: how many people one step may resolve
+    //     to. Bounds DELIVERY, which is the unbounded one — a `role` rule
+    //     against a tenant-wide role fans out to however many people hold it,
+    //     and every one of them is an inbox row written inside the acting
+    //     person's request.
+    //
+    // Exceeding either is a 422 that NAMES the number, never a truncation.
+    // Delivering to the first 500 of 900 and reporting success is the
+    // stored-recipient-list failure #947 exists to prevent, reached by a
+    // different route: the run looks fine and a whole group never hears about
+    // the document. Tenant-overridable for the reason the render ceilings are —
+    // one tenant circulating institution-wide notices and another routing
+    // three-person approvals want genuinely different numbers.
+    public const DOCUMENTS_ROUTING_MAX_STEPS = 'documents.routing_max_steps';
+    public const DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP = 'documents.routing_max_recipients_per_step';
+
+    // How many people a USER GROUP preview SHOWS (#999). Not a ceiling on
+    // resolution — the count a preview reports is always exact — but the size of
+    // the sample beside it.
+    //
+    // A preview answers "does this rule mean who I think it means" with a number
+    // and a handful of faces: "resolves to 1,043 people right now, including
+    // these ten". It deliberately CANNOT be paged. A surface that renders 1,043
+    // rows has rebuilt the thousand-node problem the whole design exists to
+    // avoid, and offering `?page=2` over a group's members would be exactly that
+    // surface with a scrollbar. A client that needs a person-by-person list is
+    // asking a different question — "who holds this role" — and the users API
+    // already answers it, filtered and paginated, with its own permission on it.
+    //
+    // Tenant-overridable rather than global-only, for the reason the render and
+    // routing ceilings are: ten faces is enough to recognise a departmental group
+    // and not enough to recognise a faculty-wide one, and an operator running
+    // both should be able to raise one without raising the other.
+    public const GROUPS_PREVIEW_SAMPLE_SIZE = 'groups.preview_sample_size';
+
     // Bulk data-type lifecycle batch ceiling (WC-746). The largest number of ids
     // `POST /api/data-types/{type}/bulk` accepts in one request. An unbounded id
     // list is a denial-of-service with a polite name: every id costs a
@@ -366,6 +428,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_PASSWORD_RESET,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
+        self::DOCUMENTS_PERSIST_ENABLED,
         self::I18N_ENABLED,
     ];
 
@@ -525,6 +588,23 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
+        // Opt-OUT, not opt-in — see the constant's own note.
+        self::DOCUMENTS_PERSIST_ENABLED => 'true',
+        // 20 steps. Well past the longest real approval chain anybody described
+        // (raise -> unit head -> faculty -> registry -> archive is five), and low
+        // enough that a client looping over a step builder cannot commission a
+        // thousand-step transaction.
+        self::DOCUMENTS_ROUTING_MAX_STEPS => '20',
+        // 500 recipients per step — the same number the render row ceiling uses,
+        // deliberately: it is the point at which "this is a distribution" stops
+        // being a plausible reading of a single step, and an author who really
+        // means to reach a thousand people should say so by raising the limit.
+        self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => '500',
+        // Ten faces. Enough to recognise a group at a glance — "yes, those are
+        // the instructors" — and small enough that nobody mistakes the sample
+        // for the list. The COUNT beside it is exact and unbounded, which is
+        // where the real information is.
+        self::GROUPS_PREVIEW_SAMPLE_SIZE => '10',
         // 500 ids per bulk lifecycle request. Chosen to cover the motivating
         // screens — "empty the trash", "retire this selection" — in a single
         // call, while still bounding the work one request can commission. Each
@@ -817,6 +897,10 @@ final class SettingsRegistry
             self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
             self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
+            self::DOCUMENTS_PERSIST_ENABLED => self::validateBoolean($value, self::DOCUMENTS_PERSIST_ENABLED),
+            self::DOCUMENTS_ROUTING_MAX_STEPS => self::validateRoutingMaxSteps($value),
+            self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => self::validateRoutingMaxRecipients($value),
+            self::GROUPS_PREVIEW_SAMPLE_SIZE => self::validateGroupsPreviewSampleSize($value),
             self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
             // Error tracking. These five were declared with defaults, types,
             // enum options and a global-only marking, but never given a
@@ -1066,6 +1150,85 @@ final class SettingsRegistry
     {
         if ($value !== 'true' && $value !== 'false') {
             return "mcp.enabled must be 'true' or 'false'.";
+        }
+
+        return null;
+    }
+
+    /**
+     * Max steps one route may declare: a whole number, at least 1, capped at 200
+     * (a sanity ceiling on the ADMIN-set value itself — not the enforced
+     * default).
+     */
+    private static function validateRoutingMaxSteps(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.routing_max_steps must be a whole number.';
+        }
+        $steps = (int) $value;
+        if ($steps < 1) {
+            // Not zero. A route with no steps issues a document to nobody and
+            // records it as sent, which is the one outcome the engine refuses
+            // outright — so the ceiling must not be settable to a value that
+            // makes every route illegal instead.
+            return 'documents.routing_max_steps must be at least 1.';
+        }
+        if ($steps > 200) {
+            // A sanity bound on the ADMIN-set value, not on the enforced
+            // default: a route is written in ONE transaction, so this is a
+            // ceiling on how long that transaction may be held.
+            return 'documents.routing_max_steps must be 200 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Max people one step may resolve to: a whole number, at least 1, capped at
+     * 100000 (a sanity ceiling on the admin-set value itself).
+     */
+    /**
+     * How many people a group preview SHOWS: a whole number, at least 1, capped
+     * at 100.
+     *
+     * Zero is refused. A preview whose sample is empty says "1,043 people" and
+     * shows nobody, which is the one thing a sanity check must not do — the
+     * number is the part an author cannot verify, and the faces are how they
+     * verify it.
+     *
+     * 100 is the upper bound on the ADMIN-SET value, not a page size to be
+     * raised later. Past a hundred rows a sample has stopped being a sample and
+     * has become the member list the whole rule-not-list design exists to avoid
+     * rendering, and the cost is paid on a screen somebody opens to answer a
+     * yes/no question.
+     */
+    private static function validateGroupsPreviewSampleSize(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'groups.preview_sample_size must be a whole number.';
+        }
+        $size = (int) $value;
+        if ($size < 1) {
+            return 'groups.preview_sample_size must be at least 1.';
+        }
+        if ($size > 100) {
+            return 'groups.preview_sample_size must be 100 or fewer.';
+        }
+
+        return null;
+    }
+
+    private static function validateRoutingMaxRecipients(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.routing_max_recipients_per_step must be a whole number.';
+        }
+        $recipients = (int) $value;
+        if ($recipients < 1) {
+            return 'documents.routing_max_recipients_per_step must be at least 1.';
+        }
+        if ($recipients > 100000) {
+            return 'documents.routing_max_recipients_per_step must be 100000 or fewer.';
         }
 
         return null;

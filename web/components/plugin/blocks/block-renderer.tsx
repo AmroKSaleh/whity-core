@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import * as TablerIcons from '@tabler/icons-react';
 import type { Icon } from '@tabler/icons-react';
@@ -33,9 +34,11 @@ import type {
   DataStatBlock,
   DataTableBlock,
   DateInputBlock,
+  DocumentViewerBlock,
   DrawerBlock,
   FieldArrayBlock,
   FileInputBlock,
+  FlowBlock,
   FormBlock,
   GridBlock,
   HeadingBlock,
@@ -76,6 +79,8 @@ import type {
   AccessGateBlock,
 } from '@/lib/plugin-features';
 import { OU_SCOPE_KINDS, isOuScopeValue } from '@/lib/plugin-features';
+import { buildFlowModel } from '@/components/plugin/blocks/flow-model';
+import { DocumentViewer } from '@/components/plugin/blocks/document-viewer';
 import { Chart } from '@amroksaleh/ui/chart';
 import { DataTable as SharedDataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
@@ -125,6 +130,7 @@ import {
   type FormBlockContextValue,
   type FieldArrayValue,
 } from '@/components/plugin/blocks/form-context';
+import { resolveContextPath } from '@/components/plugin/blocks/context-path';
 import { submitPluginAction } from '@/lib/plugin-action-submit';
 import type { ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
@@ -990,15 +996,12 @@ function collectAccessGates(blocks: Block[] | undefined, into: CollectedGate[] =
  * `/api/v1/roles/`, a different route with a different gate. Being told whether
  * you may write the collection, and rendering an editor for one record on the
  * strength of it, is worse than being told nothing.
+ *
+ * The substitution itself is {@link resolveContextPath} — shared with
+ * `dataRecord.source` and a form's `dataSource.path` so the three cannot drift.
  */
 function resolveGateEndpoint(md: MasterDetail | null, endpoint: string): string | null {
-  const parts = endpoint.split(/(\{[^{}]*\})/);
-  const resolved = parts.map((part, index) => {
-    if (index % 2 === 0) return part;
-    const value = resolveContextRef(md, part.slice(1, -1));
-    return value === undefined || value === '' ? null : encodeURIComponent(value);
-  });
-  return resolved.some((part) => part === null) ? null : resolved.join('');
+  return resolveContextPath(endpoint, (ref) => resolveContextRef(md, ref));
 }
 
 /** The methods the host will resolve. Mirrors `BlockValidator::ACCESS_CHECK_METHODS`. */
@@ -1122,26 +1125,18 @@ function AccessGateRenderer({ block }: { block: AccessGateBlock }) {
  * see, take whatever the envelope held, and render it as "the record this page
  * is about". Not fetching is the only honest answer to "which record?" when
  * nothing has said.
+ *
+ * A form's `dataSource.path` resolves through the same {@link resolveContextPath}
+ * for exactly that reason (#949) — it is a read, and reads that guess are the
+ * ones that go wrong quietly.
  */
 function useResolvedRecordSource(
   baseSource: string,
   params?: SourceParam[]
 ): string | null {
   const md = useMasterDetail();
-  // Split on the tokens rather than replacing through a callback: a callback
-  // that recorded "something did not resolve" in a closure variable is a
-  // reassignment during render, which the React compiler refuses (and is right
-  // to — the same expression would read differently on a re-render). Splitting
-  // on a CAPTURING pattern puts every token at an odd index, so the whole thing
-  // becomes a map and a join with nothing mutable in it.
-  const parts = baseSource.split(/(\{[^{}]*\})/);
-  const resolvedParts = parts.map((part, index) => {
-    if (index % 2 === 0) return part;
-    const value = resolveContextRef(md, part.slice(1, -1));
-    return value === undefined || value === '' ? null : encodeURIComponent(value);
-  });
-  if (resolvedParts.some((part) => part === null)) return null;
-  const substituted = resolvedParts.join('');
+  const substituted = resolveContextPath(baseSource, (ref) => resolveContextRef(md, ref));
+  if (substituted === null) return null;
   if (!params || params.length === 0 || md === null) return substituted;
   const qs = params
     .map((p) => {
@@ -2574,6 +2569,198 @@ function InboxRenderer({ block }: { block: InboxBlock }) {
   );
 }
 
+// ---- graph renderer (#950) ----
+
+/**
+ * react-flow is heavy, touches browser-only APIs, and belongs to exactly one
+ * block type — so the canvas is loaded on demand and never server-rendered,
+ * the same arrangement the OU hub and the relations hub use for their graphs.
+ * A static import would put the graph library in the bundle of every plugin
+ * screen, including the great majority that draw no graph.
+ */
+const FlowCanvas = dynamic(() => import('@/components/plugin/blocks/flow-canvas'), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[28rem] w-full rounded-lg" />,
+});
+
+/**
+ * FlowRenderer — a set of nodes and the edges between them.
+ *
+ * Data-bound exactly like `dataTable`: one already-verified `source`, one fetch,
+ * then per-field mappings over each row. The mapping itself lives in
+ * {@link buildFlowModel} rather than here, because which rows become nodes and
+ * which references become edges is contract behaviour every platform renderer
+ * has to agree on.
+ *
+ * Read-only by construction: the contract carries no endpoint and no verb, so
+ * there is nothing on this block to submit. The affordances come from
+ * `nodeActions`, which is the SAME `RowAction` list a `dataTable` row carries
+ * and is rendered by the same three controls — so an `open` from a node and an
+ * `open` from a table row publish the clicked record identically, and an
+ * overlay cannot tell which one opened it.
+ *
+ * TRUNCATION IS ANNOUNCED, never silent (#950, inheriting #192). Above the
+ * ceiling the canvas draws the first N nodes in payload order and this renderer
+ * says so, with the numbers, above the diagram. A partial graph that looks
+ * complete is a worse failure than an unreadable one: a reader can see a tangle
+ * and stop trusting it, and cannot see an absence at all.
+ */
+function FlowRenderer({ block }: { block: FlowBlock }) {
+  type Rows = Record<string, unknown>[];
+  const t = useTranslation('plugin');
+  const md = useMasterDetail();
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
+    if (!Array.isArray(body) || body.length === 0) return null;
+    return body as Rows;
+  });
+
+  useRefetchOnSignal(
+    state.status === 'ready' || state.status === 'empty' ? state.refresh
+      : state.status === 'error' ? state.retry : undefined
+  );
+
+  // Everything below the early returns is a hook, so it is computed here — over
+  // an empty row set in every state but `ready`, which costs nothing and keeps
+  // the hook order identical across all four.
+  const rows = state.status === 'ready' ? state.data : EMPTY_ROWS;
+  const model = React.useMemo(() => buildFlowModel(rows, block), [rows, block]);
+
+  const refresh =
+    state.status === 'ready' || state.status === 'empty' ? state.refresh : undefined;
+  const nodeActions = block.nodeActions;
+
+  // The node's own click runs its FIRST `open` action. A diagram whose only
+  // affordance is a control inside the box is a diagram nobody clicks, and
+  // "click the node, get the detail" is what both existing graph views already
+  // do. It is the first `open` rather than a separate prop so there is exactly
+  // one place a node's affordances are declared: adding a second prop for the
+  // click would let the two disagree about what a node does.
+  //
+  // That action still renders as a LABELLED control as well, and the overlap is
+  // the point — the button is what makes the affordance discoverable, and the
+  // node click is the shortcut for someone who has already discovered it.
+  // Dropping the button would leave a graph whose only way in is a gesture
+  // nothing on screen suggests.
+  const primaryOpen = nodeActions?.find(
+    (action): action is Extract<RowAction, { open: string }> => 'open' in action
+  );
+
+  const activate = React.useCallback(
+    (row: Record<string, string>) => {
+      if (primaryOpen === undefined) return;
+      md?.openTarget(primaryOpen.open, row);
+    },
+    [primaryOpen, md]
+  );
+
+  const renderNodeActions = React.useCallback(
+    (row: Record<string, string>) => (
+      <>
+        {nodeActions?.map((action, i) =>
+          'href' in action ? (
+            <Button key={i} asChild variant="ghost" size="sm">
+              <Link href={applyRowTemplate(action.href, row)}>{action.label}</Link>
+            </Button>
+          ) : 'open' in action ? (
+            <RowOpenButton key={i} action={action} row={row} />
+          ) : (
+            <RowActionButton key={i} action={action} row={row} onMutated={refresh} />
+          )
+        )}
+      </>
+    ),
+    [nodeActions, refresh]
+  );
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" data-slot="block-data-loading">
+        <Skeleton className="h-[28rem] w-full rounded-lg" />
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-error"
+      >
+        <span>{t('blocks.data.loadError', 'Failed to load data.')}</span>
+        <Button type="button" variant="outline" size="sm" onClick={state.retry}>
+          {t('blocks.retry', 'Retry')}
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.status === 'empty' || model.nodes.length === 0) {
+    // A payload of rows that carry no usable id yields no nodes, and an empty
+    // canvas with a working refresh button is indistinguishable from a graph
+    // that has not arrived. Both go to the same empty state.
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-empty"
+      >
+        {/* The plugin's own `emptyText` wins; only our default is keyed. */}
+        <span>{block.emptyText ?? t('blocks.flow.empty', 'Nothing to diagram yet.')}</span>
+        {refresh !== undefined && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('blocks.data.refresh', 'Refresh')}
+            onClick={refresh}
+          >
+            <IconRefresh className="size-3.5" aria-hidden />
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1" data-slot="block-flow">
+      <div className="flex items-center justify-between gap-3">
+        {/* Stated in the flow of the page, not as a tooltip or a console
+            warning: the reader has to be able to see that what is drawn is
+            part of the graph without going looking for the fact. */}
+        {model.truncated ? (
+          <p className="text-xs text-muted-foreground" data-slot="block-flow-truncated">
+            {t(
+              'blocks.flow.truncated',
+              'Showing the first {shown} of {total} nodes — the rest are not drawn.',
+              { shown: String(model.nodes.length), total: String(model.total) }
+            )}
+          </p>
+        ) : (
+          <span />
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('blocks.data.refresh', 'Refresh')}
+          onClick={refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+      <FlowCanvas
+        model={model}
+        orientation={block.orientation}
+        hasSubtitle={block.nodeSubtitleField !== undefined}
+        onActivate={primaryOpen !== undefined ? activate : undefined}
+        renderNodeActions={
+          nodeActions !== undefined && nodeActions.length > 0 ? renderNodeActions : undefined
+        }
+      />
+    </div>
+  );
+}
+
 // ---- SP3 interactive renderers (WC-235) ----
 
 function InputLabel({ inputId, label, required, error }: { inputId: string; label: string; required?: boolean; error?: string }) {
@@ -3493,6 +3680,37 @@ function isBlockVisible(
   return true;
 }
 
+/**
+ * DocumentViewerRenderer — an issued document (#947 item 4).
+ *
+ * The block declares no path and this renderer takes none from it: the ids come
+ * out of the master-detail context and the fetching is the host's, against
+ * core's own `/api/v1/documents/*` under the caller's session. See the SDK
+ * contract for why that is structural rather than stylistic.
+ *
+ * `resolveContextRef` returning `undefined` means "nothing has said which
+ * document yet", which is a resting state and not a failure — it is passed
+ * through as `null` and the viewer renders the author's `emptyText`. The same
+ * miss on `artifactIdFrom` means the pin is not resolvable YET; it is also
+ * passed as null, so the viewer opens on the current artifact rather than
+ * refusing. A pin that resolves to an artifact the record does not have is the
+ * different case, and the viewer refuses that one.
+ */
+function DocumentViewerRenderer({ block }: { block: DocumentViewerBlock }) {
+  const md = useMasterDetail();
+  const documentId = resolveContextRef(md, block.documentIdFrom) ?? null;
+  const pinnedArtifactId =
+    isNonEmptyString(block.artifactIdFrom) ? resolveContextRef(md, block.artifactIdFrom) ?? null : null;
+
+  return (
+    <DocumentViewer
+      documentId={documentId}
+      pinnedArtifactId={pinnedArtifactId}
+      emptyText={block.emptyText}
+    />
+  );
+}
+
 // ---- dispatch: validate per the contract, then render or degrade ----
 
 /**
@@ -3758,6 +3976,14 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       ) : (
         <UnsupportedBlock type="inbox" />
       );
+    case 'flow':
+      return isNonEmptyString(block.source) &&
+        isNonEmptyString(block.nodeIdField) &&
+        isNonEmptyString(block.nodeLabelField) ? (
+        <FlowRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="flow" />
+      );
 
     case 'form':
       return Array.isArray(block.children) && isValidSubmitSpec(block.submit) ? <FormRenderer block={block} /> : <UnsupportedBlock type="form" />;
@@ -3787,6 +4013,12 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <BilingualTextRenderer block={block} /> : <UnsupportedBlock type="bilingualText" />;
     case 'referenceSelect':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isNonEmptyString(block.source) && isNonEmptyString(block.valueField) && isNonEmptyString(block.labelField) ? <ReferenceSelectRenderer block={block} /> : <UnsupportedBlock type="referenceSelect" />;
+    case 'documentViewer':
+      return isNonEmptyString(block.documentIdFrom) ? (
+        <DocumentViewerRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="documentViewer" />
+      );
     case 'ouScopePicker':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <OuScopePickerRenderer block={block} /> : <UnsupportedBlock type="ouScopePicker" />;
     case 'submitButton':

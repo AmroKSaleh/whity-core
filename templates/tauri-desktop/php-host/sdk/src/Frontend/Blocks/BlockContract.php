@@ -75,6 +75,35 @@ final class BlockContract
     public const MAX_NODES = 500;
 
     /**
+     * The most graph nodes a `flow` block will ever draw (#950, inheriting #192).
+     *
+     * This is a READABILITY ceiling, not a payload one, and it is in the
+     * contract rather than in a renderer because the two answers differ. #192 is
+     * open against the OU and relations graph views for exactly this: a canvas
+     * of several hundred boxes — most of them with no edges at all — is not a
+     * hard-to-read diagram, it is a diagram that has stopped conveying anything,
+     * and every renderer built on the same library inherits that the moment the
+     * data grows. Discovering it in a plugin's production deployment is the
+     * outcome this constant exists to prevent.
+     *
+     * So the ceiling is DECLARED and the behaviour above it is DEFINED: a
+     * renderer draws the first `maxNodes` nodes in payload order — the plugin's
+     * own ordering, so the truncation cuts where the author would cut — together
+     * with the edges among them, and SAYS SO on screen. Silently dropping the
+     * tail would make a partial graph indistinguishable from a complete one,
+     * which is worse than the tangle: a reader cannot see what is missing.
+     *
+     * A block may LOWER it via `flow.maxNodes` and may not raise it. That
+     * direction is deliberate. A plugin knows things this contract does not —
+     * that its steps carry long labels, that a phone renders it — and lowering
+     * is that knowledge being applied. Raising is a plugin asserting that its
+     * 400-node graph is legible, on every platform and screen this tree may
+     * render on, which it cannot know; a dataset that large wants `dataTable`
+     * beside the diagram, not a bigger diagram.
+     */
+    public const FLOW_MAX_NODES = 150;
+
+    /**
      * Props EVERY block type carries, merged into each rule by {@see rules()}.
      *
      * `visibleWhen` used to be declared type by type — on `section`, `card` and
@@ -446,6 +475,77 @@ final class BlockContract
                 'params'         => ['type' => 'sourceParamList', 'required' => false],
             ]],
 
+            // ---- graph block (#950) ----
+            // A SET OF NODES AND THE EDGES BETWEEN THEM — the one shape the
+            // other 47 types cannot express. `dataTable` lists a process's
+            // steps, `form`/`fieldArray` edit them, `timeline` shows what has
+            // already happened to one; none of them draws the picture, and for
+            // an ordered or branching process the picture is usually the thing
+            // that makes it legible to the person who is not going to read a
+            // table. So every product with a workflow either shipped a bespoke
+            // React screen or shipped no diagram.
+            //
+            // This exposes the renderer core already runs rather than adding
+            // one: `@xyflow/react` is an in-tree dependency with two working
+            // consumers (the OU hub's hierarchy view and the relations family
+            // graph), and both of those are the same composition — selectable
+            // node cards, a per-node action menu, connecting disabled.
+            //
+            // ONE FETCH, ROWS THAT ARE NODES. Data-bound exactly like
+            // `dataTable`: one ownership-checked `source` returning a
+            // collection, then per-field mappings. A row IS a node; there is no
+            // second endpoint for edges, because a block that needed two
+            // sources would need two ownership checks, two loading states and a
+            // join the renderer would have to invent. The edges come off the
+            // node rows instead, as references to OTHER nodes' ids:
+            //
+            //   - `edgeFromField` — the field holding the id(s) this node is
+            //     reached FROM. A parent pointer: `'edgeFromField' => 'parentId'`
+            //     is the OU hierarchy, unchanged.
+            //   - `edgeToField` — the field holding the id(s) this node leads
+            //     TO. A next pointer: `'edgeToField' => 'nextStepId'` is an
+            //     ordered process, and this is the shape #947's routing steps
+            //     already have.
+            //   - Either field's value may be a LIST, which is how a step
+            //     branches to more than one successor without a second source.
+            //   - NEITHER declared: the nodes are a LINEAR SEQUENCE in payload
+            //     order. The common case — an ordered list of steps — costs the
+            //     plugin no edge modelling at all.
+            //
+            // A reference to an id no row declared is DROPPED rather than
+            // materialised as a node. The alternative is a graph containing
+            // boxes the plugin never described, labelled with a raw id.
+            //
+            // READ-ONLY, and read-only by construction: no endpoint, no verb,
+            // nothing for a renderer to submit — the same property `timeline`
+            // has. Editing is a form opened FROM a node, which is why the
+            // affordance is `nodeActions` of the SAME `rowActionList` kind
+            // `dataTable.rowActions` uses, resolved by the same validator and
+            // rendered through the same code path. A node's actions are a row's
+            // actions; declaring them twice in two shapes is how the two
+            // spellings drift. Clicking the node itself runs its first `open`
+            // action, if it has one — a diagram whose only affordance is a
+            // dropdown is a diagram nobody clicks, and "click the node, get the
+            // detail" is what both existing consumers already do.
+            //
+            // `maxNodes` is the #192 inheritance, carried deliberately: see
+            // {@see self::FLOW_MAX_NODES} for the ceiling, why it may only be
+            // lowered, and what a renderer must do above it.
+            'flow' => ['container' => false, 'props' => [
+                'source'            => ['type' => 'apiPath',       'required' => true],
+                'nodeIdField'       => ['type' => 'string',        'required' => true],
+                'nodeLabelField'    => ['type' => 'string',        'required' => true],
+                'nodeSubtitleField' => ['type' => 'string',        'required' => false],
+                'edgeFromField'     => ['type' => 'string',        'required' => false],
+                'edgeToField'       => ['type' => 'string',        'required' => false],
+                'orientation'       => ['type' => 'enum',          'required' => false,
+                    'values' => ['horizontal', 'vertical']],
+                'nodeActions'       => ['type' => 'rowActionList', 'required' => false],
+                'maxNodes'          => ['type' => 'int',           'required' => false],
+                'emptyText'         => ['type' => 'string',        'required' => false],
+                'params'            => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+
             // ---- record blocks (#883) ----
             // The RECORD-BOUND primitive. Every other data-bound leaf in this
             // contract assumes a COLLECTION at `source`: `dataTable` renders
@@ -606,6 +706,98 @@ final class BlockContract
             'accessGate' => ['container' => true, 'props' => [
                 'id'    => ['type' => 'blockId',     'required' => true],
                 'check' => ['type' => 'accessCheck', 'required' => true],
+            ]],
+
+            // ---- document blocks (#947 item 4) ----
+            // AN ISSUED DOCUMENT, SHOWN WHERE THE WORK HAPPENS.
+            //
+            // #947 item 1 gave core `documents` and `document_artifacts`: a
+            // record with an identity, and one immutable file per render hanging
+            // off it. Nothing could SHOW one. A plugin whose record has an issued
+            // work order could link to it at best, and a link out of the record
+            // is where the reader stops reading the record.
+            //
+            // WHY THIS IS A TYPE AND NOT A COMPOSITION. Composing existing types
+            // is cheaper and is the house preference, and it is not available
+            // here — not because the pieces are missing but because the gate that
+            // makes them safe forbids it. Every `source`/`recordPath` prop in
+            // this contract is ownership-checked by the host loader against the
+            // routes the DECLARING plugin registered, so `/api/v1/documents/{id}`
+            // — core's — cannot be named by any plugin. A `dataRecord` aimed
+            // there drops the whole feature. The only composition that would
+            // work is a plugin republishing core's documents through a route of
+            // its own, which is a second copy of an auditable record's read path,
+            // gated by whatever that plugin decided. That is the exact trade
+            // `ouScopePicker` already refused for the OU tree, and the refusal is
+            // worth more here: the thing being republished is the audit trail.
+            //
+            // So, like `ouScopePicker`, this type declares NO `source`. The host
+            // reads `GET /api/v1/documents/{id}` and the artifact content routes
+            // under the CALLER'S OWN session and the `documents:read` gate those
+            // routes already carry, and a plugin has no prop with which to point
+            // the viewer anywhere else. A caller who may not read the document is
+            // refused by core, in core, exactly as they would be anywhere else.
+            //
+            // WHICH DOCUMENT. `documentIdFrom` is a `contextPath` — the same
+            // `{selector}` / `{blockId}.{field}` addressing every other binding
+            // uses — so the id comes from the record on screen (`dataRecord`
+            // publishing a `document_id` fact, a row an `open` action published,
+            // or `record` on a record route). It is PLUMBING in #895's sense,
+            // not a statement about the record, which is why it is deliberately
+            // NOT in the validator's fact-binding guard: it selects which
+            // resource is fetched, exactly as `params.from` and a source token
+            // do, and the server stays authoritative over the answer.
+            //
+            // THERE IS NO LITERAL `documentId` TWIN, and that is a considered
+            // departure from the `heading`/`text`/`badge`/`stat` rule that a
+            // literal stays required with the `...From` twin additive. That rule
+            // exists because an unresolved title should still render A title:
+            // a generic heading is worse than a bound one and better than none.
+            // Invert it here and the fallback is not a duller version of the
+            // right answer, it is A DIFFERENT DOCUMENT — the wrong record,
+            // rendered with full confidence, which is the single worst thing
+            // this subsystem can do. Nothing renders until something has said
+            // which document, and `emptyText` is what an author says in the
+            // meantime.
+            //
+            // WHICH ARTIFACT — the question a re-render creates. A document with
+            // three renders has three sets of bytes, all still fetchable, all
+            // still true of the moment they were issued. Two answers, and the
+            // block picks between them:
+            //
+            //  - `artifactIdFrom` DECLARED — the viewer shows exactly that
+            //    artifact and nothing else. This is the binding an audit trail
+            //    needs: an event that says "this is what circulated on the 4th"
+            //    must be able to show what circulated on the 4th, not what the
+            //    document says today.
+            //  - `artifactIdFrom` ABSENT — the viewer shows the CURRENT artifact,
+            //    the newest, and SAYS SO on screen along with how many others
+            //    exist and how to reach them. Showing the newest silently was the
+            //    alternative and is the one thing a viewer of an auditable record
+            //    must not do: a corrected document then reads as though it had
+            //    always said that, and the reader has no way to learn otherwise.
+            //
+            // The renderer never falls back BETWEEN those two. A pinned artifact
+            // that is not on the record is an explicit failure state, because
+            // quietly showing the current one instead would answer a question
+            // about the past with a fact about the present.
+            //
+            // WHAT THIS TYPE DELIBERATELY DOES NOT OFFER:
+            //  - No prop to hide the version history. A plugin that could
+            //    suppress "this document was corrected twice" would be deciding
+            //    what a reader of an audit record may know, which is not a
+            //    presentation choice.
+            //  - No prop to suppress the download. The caller has already been
+            //    served the bytes by the time anything renders; a switch there
+            //    would remove an affordance, not an access.
+            //  - No height, width or zoom. Props are semantic here, never
+            //    presentational, and a page's aspect ratio is a fact about the
+            //    document the renderer can read rather than one a declaration
+            //    should assert on every platform this tree may render on.
+            'documentViewer' => ['container' => false, 'props' => [
+                'documentIdFrom' => ['type' => 'contextPath', 'required' => true],
+                'artifactIdFrom' => ['type' => 'contextPath', 'required' => false],
+                'emptyText'      => ['type' => 'string',      'required' => false],
             ]],
 
             // ---- interactive blocks (SP3, WC-233) ----

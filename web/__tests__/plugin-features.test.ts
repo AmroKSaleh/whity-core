@@ -39,13 +39,16 @@ describe('fetchPluginFeatures', () => {
   it('requests GET /api/frontend/features and returns the data array', async () => {
     apiClientMock.mockResolvedValue(stubResponse(true, 200, { data: [FEATURE] }));
 
-    const features = await fetchPluginFeatures();
+    const { features, dropped } = await fetchPluginFeatures();
 
     expect(apiClientMock).toHaveBeenCalledWith(
       '/api/v1/frontend/features',
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
     expect(features).toEqual([FEATURE]);
+    // #953: no `dropped` key on the envelope means the caller may not read
+    // the refusals, which reaches the client as an empty list.
+    expect(dropped).toEqual([]);
     // The server-computed write capabilities (issue #199) are carried through.
     expect(features[0].capabilities).toEqual({
       canCreate: true,
@@ -57,13 +60,13 @@ describe('fetchPluginFeatures', () => {
   it('returns an empty list on a non-ok response', async () => {
     apiClientMock.mockResolvedValue(stubResponse(false, 403, { error: 'nope' }));
 
-    await expect(fetchPluginFeatures()).resolves.toEqual([]);
+    await expect(fetchPluginFeatures()).resolves.toEqual({ features: [], dropped: [] });
   });
 
   it('returns an empty list when the body has no data array', async () => {
     apiClientMock.mockResolvedValue(stubResponse(true, 200, {}));
 
-    await expect(fetchPluginFeatures()).resolves.toEqual([]);
+    await expect(fetchPluginFeatures()).resolves.toEqual({ features: [], dropped: [] });
   });
 
   it('returns an empty list when the body is not JSON', async () => {
@@ -75,12 +78,12 @@ describe('fetchPluginFeatures', () => {
       },
     } as unknown as Response);
 
-    await expect(fetchPluginFeatures()).resolves.toEqual([]);
+    await expect(fetchPluginFeatures()).resolves.toEqual({ features: [], dropped: [] });
   });
 
   it('returns an empty list when the request itself rejects', async () => {
     apiClientMock.mockRejectedValue(new Error('network down'));
 
-    await expect(fetchPluginFeatures()).resolves.toEqual([]);
+    await expect(fetchPluginFeatures()).resolves.toEqual({ features: [], dropped: [] });
   });
 });

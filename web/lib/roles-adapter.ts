@@ -22,8 +22,8 @@ import type {
   RoleAssignment,
   RoleAssignmentsPage,
   RoleCreateInput,
-  RoleInput,
   RoleScope,
+  RoleUpdateInput,
   RoleWithPermissions,
   RolesAdapter,
   Transport,
@@ -212,7 +212,7 @@ export function createRolesAdapter(transport: Transport): RolesAdapter {
       }
     },
 
-    async updateRole(id: number, input: RoleInput): Promise<'ok' | 'not-manageable'> {
+    async updateRole(id: number, input: RoleUpdateInput): Promise<'ok' | 'not-manageable'> {
       const { status, body } = await transport.request('PATCH', `/api/v1/roles/${id}`, input);
       // 404 ⇒ the role is a global base role not manageable by this tenant
       // (WC-110/WC-222).

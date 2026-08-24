@@ -81,18 +81,29 @@ final class SettingsApiRealEngineTest extends TestCase
         $data = $this->decode($response)['data'];
         self::assertSame('Whity', $data['effective']['site_name']);
         self::assertSame('UTC', $data['effective']['timezone']);
-        // 10 tenant-overridable text keys: site_name, timezone, locale,
+        // 12 tenant-overridable text keys: site_name, timezone, locale,
         // support_email, mcp.enabled, auth.desktop_login_max_hours, the three
         // render batch limits (documents.render_max_rows/_max_pages/
         // _max_template_bytes — ADR 0012, meaningfully per-tenant) and
         // data_types.bulk_max_ids (WC-746, the bulk lifecycle batch ceiling —
         // per-tenant for the same reason: one tenant's trash is not another's)
         // and auth.invitation_ttl_days (WHIT-417 — how long an invitation stays
-        // valid is a tenant's own onboarding policy, not a platform constant).
+        // valid is a tenant's own onboarding policy, not a platform constant)
+        // and documents.persist_enabled (#947 item 1 — whether a render may be
+        // STORED is about the storage this tenant consumes, unlike the render
+        // container itself).
         // The instance-governance / storage / mail / billing keys — and the
         // documents.render_enabled MASTER SWITCH itself — are GLOBAL-ONLY
         // (WC-696206d8) and excluded from the per-tenant surface.
-        self::assertCount(11, $data['registry']);
+        // 14 since #947 item 3 added documents.routing_max_steps and
+        // documents.routing_max_recipients_per_step - both per-tenant
+        // overridable, for the same reason the render ceilings are.
+        // 15 since #999 added groups.preview_sample_size - how many people a
+        // USER GROUP preview SHOWS beside its exact count. Per-tenant because
+        // ten faces is enough to recognise a departmental group and not enough
+        // to recognise a faculty-wide one, and an operator running both should be
+        // able to raise one without raising the other.
+        self::assertCount(15, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

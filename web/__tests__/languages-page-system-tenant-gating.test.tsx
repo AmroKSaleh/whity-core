@@ -10,6 +10,17 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+/**
+ * #882: the list routes to `/admin/languages/[id]` now — the row's name opens
+ * the language's record page, which is where a language can finally be renamed.
+ * `useRouter` outside a mounted app router throws, so the route seam is stubbed
+ * here the way every other page test stubs its providers.
+ */
+const push = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push }),
+}));
+
 const mockApiGet = jest.fn();
 const mockApiPatch = jest.fn();
 jest.mock('@/lib/api/client', () => ({
@@ -38,9 +49,12 @@ jest.mock('@/lib/toast-context', () => ({
 import LanguagesPage from '@/app/(protected)/admin/languages/page';
 import { LANGUAGES_MANAGE } from '@/lib/capabilities';
 
+// `direction` is part of the published Language shape (migration 090) and the
+// list now STATES it, so the fixture carries it rather than leaving the column
+// to fall back for want of a field the API always sends.
 const LANGUAGES = [
-  { id: 1, code: 'en', name: 'English', enabled: true, created_at: '2026-01-01', updated_at: '2026-01-01' },
-  { id: 2, code: 'ar', name: 'العربية', enabled: false, created_at: '2026-01-01', updated_at: '2026-01-01' },
+  { id: 1, code: 'en', name: 'English', direction: 'ltr', enabled: true, created_at: '2026-01-01', updated_at: '2026-01-01' },
+  { id: 2, code: 'ar', name: 'العربية', direction: 'rtl', enabled: false, created_at: '2026-01-01', updated_at: '2026-01-01' },
 ];
 
 function grant(...perms: string[]) {
@@ -99,5 +113,45 @@ describe('LanguagesPage system-tenant-only gating (WC-583)', () => {
       )
     );
     expect(addToast).toHaveBeenCalledWith(expect.stringContaining('enabled'), 'success');
+  });
+});
+
+/**
+ * #882/#884: what moved OFF this list, and what deliberately stayed.
+ *
+ * The direction control used to be a hand-styled native `<select>` in a table
+ * cell — not because a cell is where a language's writing direction belongs, but
+ * because there was nowhere else to put it. Now there is a record page, and a
+ * control that re-mirrors the entire interface for every speaker of a language
+ * is a poor fit for a one-click cell with no context and no confirmation.
+ *
+ * The enable/disable switch STAYED, and that asymmetry is the point of #884
+ * being a decision per screen: turning several languages on before an instance
+ * goes live is a job about the whole catalogue, not about one language.
+ */
+describe('LanguagesPage after the record page (#882)', () => {
+  beforeEach(() => {
+    grant(LANGUAGES_MANAGE);
+    mockUseAuth.mockReturnValue({ user: { tenant_id: 0 } });
+  });
+
+  it("opens the language's record from the row's own name", async () => {
+    const user = userEvent.setup();
+    render(<LanguagesPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'العربية' }));
+
+    expect(push).toHaveBeenCalledWith('/admin/languages/2');
+  });
+
+  it('states the direction instead of offering it as an inline cell control', async () => {
+    render(<LanguagesPage />);
+
+    await screen.findByText('English');
+    // No combobox anywhere in the table: the only remaining inline write is the
+    // enabled switch.
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getByText('Right to left')).toBeInTheDocument();
+    expect(screen.getAllByRole('switch')).toHaveLength(2);
   });
 });

@@ -209,7 +209,10 @@ job_phpstan() {
     printf '\033[0;33m    note: running against the working copy; untracked files are analysed too.\n'
     printf '          Use --clean for a CI-faithful result.\033[0m\n'
   fi
-  run_in_ci vendor/bin/phpstan analyse src tests plugins sdk ops --memory-limit=512M
+  # Paths and memory limit come from the composer script, so this cannot
+  # drift from CI again (#934: this line said 512M while the workflow said
+  # 1G and a plain dev container inherited PHP's 128M default).
+  run_in_ci composer phpstan
 }
 
 # ---------------------------------------------------------------------------
@@ -259,6 +262,12 @@ INITIAL_SUPERUSER_PASSWORD=superuser123'
 
   log "Re-run migrations (idempotency on PostgreSQL)"
   run_in_ci_with_pg "${PG_ENV[@]}" php public/index.php migrate run
+
+  # #990: needs a MIGRATED database, which is why it runs here and not beside the
+  # static guards in job_unit. It refuses to answer against a database that is not
+  # migrated to this tree, so it has to come after the two steps above.
+  log "Permission-holder guard"
+  run_in_ci_with_pg "${PG_ENV[@]}" php scripts/ci-permission-holder-guard.php
 
   log "Run Integration suite on real PostgreSQL"
   run_in_ci_with_pg "${PG_ENV[@]}" vendor/bin/phpunit --testsuite Integration

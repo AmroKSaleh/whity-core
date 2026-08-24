@@ -7,6 +7,7 @@ export type {
   Transport,
   TransportResponse,
   RoleInput,
+  RoleUpdateInput,
   RoleCreateInput,
   RoleScope,
   RoleScopeSeam,
@@ -20,5 +21,7 @@ export type {
   RoleActivityEntry,
   RoleActivityResult,
   Permission,
+  RecordSectionDenial,
+  RecordSectionVerdicts,
 } from "./types"
 export { ROLES_WRITE, ROLES_DELETE } from "./capabilities"

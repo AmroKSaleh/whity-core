@@ -7,7 +7,9 @@ namespace Whity\Mcp\JsonRpc;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\McpFeatureDisabledException;
+use Whity\Mcp\Notifications\ListChangedNotifier;
 use Whity\Mcp\RateLimit\McpRateLimiter;
+use Whity\Mcp\Transport\McpNotificationSource;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 
 /**
@@ -27,8 +29,27 @@ use Whity\Mcp\Transport\McpRequestHandlerInterface;
  * principal's tenant ID and reset in a finally block, guaranteeing no tenant
  * bleed across FrankenPHP persistent-worker requests.
  */
-final class Dispatcher implements McpRequestHandlerInterface
+final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSource
 {
+    /**
+     * Client identity (token jti) of the request currently being handled, or
+     * null when the request was unauthenticated or auth is disabled.
+     *
+     * Worker-persistent by necessity — the dispatcher is a worker singleton and
+     * the transport reads this AFTER handle() returns — so it is cleared at the
+     * top of every handle() before anything can throw. That ordering is what
+     * stops one request's client identity from leaking into the next.
+     */
+    private ?string $notifyClientKey = null;
+
+    /**
+     * Whether the request currently being handled contained an `initialize`.
+     *
+     * Such a client is about to fetch every list anyway, so it is marked current
+     * instead of being told the lists changed. Reset alongside the client key.
+     */
+    private bool $notifySuppressed = false;
+
     /**
      * @param array<string, MethodHandler>    $handlers          Keyed by method name.
      * @param TokenValidator|null             $tokenValidator    When provided, every request must carry
@@ -41,16 +62,27 @@ final class Dispatcher implements McpRequestHandlerInterface
      *                                                            after auth; a false return throws
      *                                                            McpFeatureDisabledException (HTTP 403).
      *                                                            Null disables the per-tenant check.
+     * @param ListChangedNotifier|null        $listChangedNotifier When provided, the dispatcher records which
+     *                                                            client made the call so the transport can
+     *                                                            drain any owed `list_changed` notifications
+     *                                                            (#952); null disables the signal entirely.
      */
     public function __construct(
         private readonly array $handlers,
         private readonly ?TokenValidator $tokenValidator    = null,
         private readonly ?McpRateLimiter $rateLimiter       = null,
         private readonly ?\Closure $tenantMcpEnabled        = null,
+        private readonly ?ListChangedNotifier $listChangedNotifier = null,
     ) {}
 
     public function handle(string $rawBody, ?string $bearerToken): string
     {
+        // Cleared first, before any path that can throw or return early: these
+        // two survive the request on a worker singleton, and a stale client key
+        // would push the previous caller's notifications to this one.
+        $this->notifyClientKey  = null;
+        $this->notifySuppressed = false;
+
         // Auth check: validated before JSON parsing so that an unauthenticated
         // caller learns nothing about the request shape.
         $principal = null;
@@ -76,6 +108,14 @@ final class Dispatcher implements McpRequestHandlerInterface
                 // Rate limit check after auth. McpRateLimitException is NOT caught
                 // here — it propagates to McpTransportHandler which returns HTTP 429.
                 $this->rateLimiter?->checkAndRecord($principal->tenantId, $principal->userId);
+
+                // #952: the token's jti is the closest thing this transport has to
+                // a client identity — there is no MCP session — and it is stable
+                // for as long as the client keeps the connection its cached tool
+                // list belongs to. Recorded only past auth, the tenant gate and the
+                // rate limiter, so an unauthenticated caller cannot make the server
+                // write notification bookkeeping on its behalf.
+                $this->notifyClientKey = $principal->jti;
             }
 
             try {
@@ -166,6 +206,10 @@ final class Dispatcher implements McpRequestHandlerInterface
             return $isNotification ? null : $this->makeError($id, ErrorCode::INVALID_REQUEST, 'Invalid Request');
         }
 
+        if ($method === 'initialize') {
+            $this->notifySuppressed = true;
+        }
+
         if (!isset($this->handlers[$method])) {
             return $isNotification ? null : $this->makeError($id, ErrorCode::METHOD_NOT_FOUND, 'Method not found');
         }
@@ -181,6 +225,34 @@ final class Dispatcher implements McpRequestHandlerInterface
         }
 
         return $isNotification ? null : $this->makeSuccess($id, $result);
+    }
+
+    // ── Server-initiated notifications (#952) ─────────────────────────────────
+
+    /**
+     * Notifications owed to the client of the request just handled.
+     *
+     * Draining is one-shot: the client key is taken so a second call in the same
+     * request cannot re-claim (and therefore re-send) the same notifications.
+     *
+     * @return list<string>
+     */
+    public function drainNotifications(): array
+    {
+        $clientKey             = $this->notifyClientKey;
+        $this->notifyClientKey = null;
+
+        if ($clientKey === null || $this->listChangedNotifier === null) {
+            return [];
+        }
+
+        if ($this->notifySuppressed) {
+            $this->listChangedNotifier->markSeen($clientKey);
+
+            return [];
+        }
+
+        return $this->listChangedNotifier->drainFor($clientKey);
     }
 
     // ── Response builders ─────────────────────────────────────────────────────

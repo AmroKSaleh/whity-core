@@ -6,6 +6,8 @@ namespace Whity\Core\Queue;
 
 use Psr\Log\LoggerInterface;
 use Throwable;
+use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Hooks\HookManager;
 use Whity\Core\PluginLoader;
 use Whity\Core\Router;
 
@@ -22,20 +24,36 @@ use Whity\Core\Router;
  * loader there would re-run every plugin's constructor and answer from a
  * different lifecycle state than the one serving requests.
  *
- * The plugins register into a throwaway Router with no permission registry, hook
- * manager or role seeder, mirroring {@see \Whity\Cli\Commands\HealthWatchCommand}:
- * nothing in the worker process serves HTTP, so the only capability being
- * harvested is the job declaration.
+ * The plugins register into a throwaway Router with no permission registry and
+ * no role seeder: nothing in the worker process serves HTTP, so routes and role
+ * seeding are not capabilities it needs.
+ *
+ * A HOOK MANAGER, however, is not an HTTP concern and the worker does need one
+ * (#935). Job handlers dispatch events — core CRUD through the hook map
+ * {@see AuditLogger::subscribe()} binds, plugins through their declared events
+ * ({@see \Whity\Sdk\PluginEventsInterface}) — and with no manager wired here
+ * those dispatches reached no listener, so a job wrote no audit row at all.
+ * Silently: a dispatch nobody listens to is indistinguishable from one whose
+ * listeners did nothing, and a job runs unattended, so there is nobody present
+ * to notice the row that never appeared.
  */
 final class PluginJobs
 {
     /**
-     * @param string|null $pluginDir Defaults to the host's own plugins directory.
+     * @param string|null      $pluginDir   Defaults to the host's own plugins directory.
+     * @param HookManager|null $hooks       The worker's hook manager, so a job's
+     *                                      events reach their listeners (#935).
+     * @param AuditLogger|null $auditLogger Writer that plugin-declared events are
+     *                                      subscribed to. Wired together with the
+     *                                      hook manager or not at all — a logger
+     *                                      with no manager has nothing to hear.
      */
     public static function register(
         JobRegistry $registry,
         ?string $pluginDir = null,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        ?HookManager $hooks = null,
+        ?AuditLogger $auditLogger = null
     ): void {
         $pluginDir ??= dirname(__DIR__, 3) . '/plugins';
 
@@ -43,7 +61,20 @@ final class PluginJobs
         // notification delivery and error alerting among them. Discovery failing
         // is a degraded worker, never a dead one.
         try {
-            $loader = new PluginLoader($pluginDir, new Router(''), null, null, $logger);
+            $loader = new PluginLoader(
+                $pluginDir,
+                new Router(''),
+                null,
+                $hooks,
+                $logger,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                $auditLogger
+            );
             $loader->load();
             $loader->collectJobs($registry);
         } catch (Throwable $e) {

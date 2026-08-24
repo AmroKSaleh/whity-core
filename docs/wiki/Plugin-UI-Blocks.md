@@ -229,6 +229,90 @@ and still cannot state it as a property of the record (#895).
 
 ---
 
+## Record pages — one record, with an address (#948)
+
+A plugin feature is served at `/admin/x/{featureId}`. **One record of it is served at
+`/admin/x/{featureId}/{recordId}`**, and the host seeds that second segment into the
+master-detail context under the reserved name `record`. That is the whole mechanism: no new
+block type, no extra descriptor key, and nothing for a plugin to import.
+
+```php
+// The list, and the link out of it.
+['type' => 'dataTable',
+    'source'  => '/api/acme/widgets',
+    'columns' => [['key' => 'name', 'label' => 'Name']],
+    // {field} placeholders are substituted from the row.
+    'rowActions' => [['label' => 'Open', 'href' => '/admin/x/acme-widgets/{id}']],
+]
+
+// The record page's own tree reads the route's record the ordinary way.
+['type' => 'dataRecord',
+    'id'     => 'widget',
+    'source' => '/api/acme/widgets/{record}',
+    'fields' => [['field' => 'name', 'label' => 'Name']],
+    'children' => [['type' => 'recordFields', 'from' => 'widget']],
+]
+```
+
+**Unbound is a state, not an error.** On the feature page nothing has named a record, so
+`{record}` does not resolve and the `dataRecord` renders its empty text instead of fetching
+`/api/acme/widgets` — the collection — and presenting whatever came back as "the record this
+page is about". The same tree therefore renders correctly at both addresses: a master-detail
+pane where the selection comes from a click, a record page where it comes from the URL.
+
+**A `screen:'crud'` feature gets a record page with nothing declared at all.** The host
+derives it from the OpenAPI document the plugin already publishes: the row's Edit action
+navigates to `/admin/x/{featureId}/{recordId}`, and the page renders the record's own fields
+— as a form when the caller may `PATCH` it, and as a description list, with the reason, when
+they may not.
+
+**An id the resource does not know keeps its URL and says so.** The host cannot answer
+"does this record exist?" — only the plugin's own endpoint can — so a record page never
+redirects and never 404s the address away. What renders is the page with a stated cause,
+which is the difference between "you may not see this" and "this is broken".
+
+## Issued documents — `documentViewer` (#947 item 4)
+
+Core holds issued documents: a `documents` record with an identity, and one **immutable**
+artifact per render appended to it. `documentViewer` shows one inside a plugin's screen.
+
+```php
+['type' => 'documentViewer',
+ 'documentIdFrom' => 'work-order.documentId',   // REQUIRED: a context reference
+ 'artifactIdFrom' => 'trail-event.artifactId',  // optional: PIN one version
+ 'emptyText'      => 'No work order issued yet.'],
+```
+
+**It declares no `source`, and that is the point.** Every `source`/`recordPath` in this
+contract is ownership-checked against the routes the *declaring* plugin registered, so core's
+`/api/v1/documents/{id}` cannot be named by a plugin — the same reason `ouScopePicker` has no
+`source`. The host fetches core's own document routes under the caller's session and the
+`documents:read` gate they already carry. There is no prop with which to point it elsewhere.
+
+**No literal twin for `documentIdFrom`.** The four literal leaves (`heading`, `text`,
+`badge`, `stat`) keep a required literal beside their `...From` twin because an unresolved
+binding should still render *a* title. Here the fallback would be a *different document*, so
+nothing renders until something names one and `emptyText` is what the reader sees meanwhile.
+
+**Which artifact is on screen is always stated.** Without `artifactIdFrom` the viewer opens
+on the **current** artifact and says so, with the count of the others and a picker for them;
+an earlier artifact carries a warning naming the newer one. With `artifactIdFrom` it opens on
+that artifact — the binding an append-only trail wants, so "what circulated on the 4th" shows
+what circulated on the 4th — and a pin the record does not have is a **refusal**, never a
+silent substitution of the current version.
+
+**Renderer rules.** Fetch the record, then the chosen artifact's bytes, with the caller's
+session; frame the bytes from a same-origin blob (an API response cannot be framed — core
+sends `frame-ancestors 'none'` on every one). State the version on every render. Never draw
+an empty frame: a browser that cannot display a PDF inline, an artifact whose media type no
+frame can draw, a document that is missing or invisible, a record with no stored file, and a
+failed storage read are five different sentences. There is no prop to hide the version history or the download, and none for height
+or zoom.
+
+**Preview is not view.** The designer previews an unsaved template. This views a persisted
+artifact, and its only input is a document id — nothing accepts raw bytes or a template, so
+the record chrome can never wrap something that was never issued.
+
 ## Writing a new renderer (web / mobile / desktop)
 
 A renderer is a recursive function `render(block)` that switches on `block.type`, maps each

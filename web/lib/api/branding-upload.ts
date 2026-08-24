@@ -2,11 +2,13 @@
  * Client-side upload/clear helpers for branding assets (WC-233 Slice 5).
  *
  * The branding upload endpoints use `multipart/form-data`, which the
- * openapi-typescript generated client cannot express via its typed path
- * (requestBody is `never` in the schema because the spec declares the route
- * without a typed body). We apply the same narrow-cast pattern used in
- * `plugin-upload.ts`: rather than weakening the whole client, we recast
- * `api.POST` to a precise function type for the upload paths only.
+ * openapi-typescript generated client cannot express via its typed path:
+ * the spec now declares the body (#954 — it always had one, under a key the
+ * generator never read), and openapi-typescript types it as `{ file: string }`,
+ * which cannot express the real `FormData`/`File` we must send. Same situation
+ * as `plugin-upload.ts`, and the same remedy: rather than weakening the whole
+ * client, recast `api.POST` to a precise function type for the upload paths
+ * only.
  *
  * `clearBrandingAsset` and `setBrandingHost` use the same narrow-cast idiom
  * (through `unknown`) to avoid `as never` on the call site, which would make

@@ -37,7 +37,7 @@ final class DocumentTemplateRepository
     public function listForTenant(int $tenantId): array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
              FROM document_templates WHERE tenant_id = :tenant_id ORDER BY updated_at DESC, id DESC'
         );
         $stmt->execute([':tenant_id' => $tenantId]);
@@ -53,7 +53,7 @@ final class DocumentTemplateRepository
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
              FROM document_templates WHERE id = :id AND tenant_id = :tenant_id'
         );
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
@@ -65,15 +65,15 @@ final class DocumentTemplateRepository
     /**
      * @param array{name: string, data: array<string,mixed>, scope?: string,
      *              required_permission?: ?string, is_system?: bool, created_by?: ?int,
-     *              starter_key?: ?string} $rec
+     *              owner_ou_id?: ?int, starter_key?: ?string} $rec
      * @return int The new row id.
      */
     public function create(int $tenantId, array $rec): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_templates
-                 (tenant_id, name, data, scope, required_permission, is_system, created_by, starter_key, created_at, updated_at)
-             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, :starter_key, NOW(), NOW())'
+                 (tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at)
+             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, :owner_ou_id, :starter_key, NOW(), NOW())'
         );
         $stmt->execute([
             ':tenant_id'           => $tenantId,
@@ -83,6 +83,7 @@ final class DocumentTemplateRepository
             ':required_permission' => $rec['required_permission'] ?? null,
             ':is_system'           => ($rec['is_system'] ?? false) ? 1 : 0,
             ':created_by'          => $rec['created_by'] ?? null,
+            ':owner_ou_id'         => $rec['owner_ou_id'] ?? null,
             ':starter_key'         => $rec['starter_key'] ?? null,
         ]);
 
@@ -115,7 +116,7 @@ final class DocumentTemplateRepository
      * Update the mutable fields of a template, scoped to the tenant.
      *
      * @param array{name?: string, data?: array<string,mixed>, scope?: string,
-     *              required_permission?: ?string} $fields
+     *              required_permission?: ?string, owner_ou_id?: ?int} $fields
      * @return int Rows affected (0 when not found / wrong tenant).
      */
     public function update(int $id, int $tenantId, array $fields): int
@@ -138,6 +139,10 @@ final class DocumentTemplateRepository
             $set[] = 'required_permission = :required_permission';
             $params[':required_permission'] = $fields['required_permission'];
         }
+        if (array_key_exists('owner_ou_id', $fields)) {
+            $set[] = 'owner_ou_id = :owner_ou_id';
+            $params[':owner_ou_id'] = $fields['owner_ou_id'];
+        }
         if ($set === []) {
             return 0;
         }
@@ -153,9 +158,30 @@ final class DocumentTemplateRepository
 
     /**
      * Delete a template, scoped to the tenant. Returns rows affected.
+     *
+     * DOCUMENTS ISSUED FROM IT ARE DETACHED, NOT DELETED (#947 item 1). The
+     * whole point of storing a rendered document is that it survives the
+     * template it came from — `documents.document_template_id` is therefore
+     * `ON DELETE SET NULL` (migration 108) and `documents.template_name` holds
+     * the snapshot that keeps the record legible afterwards.
+     *
+     * The detach is done EXPLICITLY here rather than left to the constraint,
+     * for the reason migration 102 records for `organizational_units.ou_type_id`:
+     * SQLite honours `ON DELETE` only under `PRAGMA foreign_keys = ON`, which is
+     * off by default, so on the offline/desktop engine the column would keep
+     * pointing at a template that no longer exists. Doing it in SQL here means
+     * both engines finish in the same state and the CI tenant-predicate scanner
+     * can see the statement is scoped. The constraint stays as the backstop for
+     * anything that deletes a template by another route.
      */
     public function delete(int $id, int $tenantId): int
     {
+        $detach = $this->db->prepare(
+            'UPDATE documents SET document_template_id = NULL
+              WHERE document_template_id = :id AND tenant_id = :tenant_id'
+        );
+        $detach->execute([':id' => $id, ':tenant_id' => $tenantId]);
+
         $stmt = $this->db->prepare(
             'DELETE FROM document_templates WHERE id = :id AND tenant_id = :tenant_id'
         );

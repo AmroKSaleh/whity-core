@@ -20,6 +20,11 @@ import { createAuthedApi, deleteGreetingsMatching } from './support/api';
  *                           delegate holds hello:view but NOT hello:manage, so
  *                           it sees a READ-ONLY screen (no write controls).
  *
+ * #948: editing is a NAVIGATION to /admin/x/hello-greetings/{id} rather than a
+ * dialog over the list, so the admin lifecycle below also pins the three
+ * properties a modal never had — a hard reload on the record URL, a save that
+ * stays put, and the back button returning to the list.
+ *
  * NOTE: the dev stack also carries an extra Announcements plugin that CI will
  * not have — nothing here asserts on announcements, only on hello-greetings.
  *
@@ -58,6 +63,11 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     }
 
     // admin (role grant) and delegate (delegated hello:view) get the screen.
+    // The `plugins` group is closed unless the current page is in it
+    // (#1007). The count-0 branch above needs no such step: navLink is a
+    // CSS locator and counts a hidden link, so absence there still means
+    // the role genuinely cannot see it.
+    await roleSession.shell.expandAllNavGroups();
     const link = roleSession.shell.navLink('Greetings');
     await expect(link).toBeVisible();
     const listResponse = page.waitForResponse(
@@ -110,15 +120,36 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     const row = page.getByRole('row').filter({ hasText: message });
     await expect(row).toBeVisible();
 
-    // Edit: the dialog arrives pre-filled with the row's current data.
+    // Edit is a NAVIGATION, not an overlay (#948): the record has an address,
+    // and that address is where it is edited.
     await row.getByRole('button', { name: 'Row actions' }).click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
-    const editDialog = page.getByRole('dialog');
-    await expect(editDialog.getByText('Edit Greetings')).toBeVisible();
-    await expect(editDialog.locator('#crud-field-message')).toHaveValue(message);
-    await editDialog.locator('#crud-field-message').fill(editedMessage);
-    await editDialog.getByRole('button', { name: 'Save changes' }).click();
+    await page.waitForURL(/\/admin\/x\/hello-greetings\/\d+$/);
+    const recordUrl = page.url();
+
+    // The record page names itself after the RECORD (its title field), not
+    // after the resource, and arrives pre-filled from the record's own values.
+    await expect(page.getByRole('heading', { name: message })).toBeVisible();
+    await expect(page.locator('#crud-field-message')).toHaveValue(message);
+
+    // THE DEEP LINK, which is the whole point and the half a client-side
+    // navigation would pass on its own: a HARD RELOAD of the record URL renders
+    // the same record, because the id comes from the route rather than from the
+    // click that got here.
+    await page.reload();
+    await expect(page.getByRole('heading', { name: message })).toBeVisible();
+    await expect(page.locator('#crud-field-message')).toHaveValue(message);
+
+    await page.locator('#crud-field-message').fill(editedMessage);
+    await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(toastWithText(page, 'Record updated successfully')).toBeVisible();
+    // A save is not a reason to leave the page the caller navigated to.
+    expect(page.url()).toBe(recordUrl);
+
+    // And the browser's own back button returns to the list, which is what
+    // having an address buys over a modal.
+    await page.goBack();
+    await page.waitForURL('**/admin/x/hello-greetings');
 
     const editedRow = page.getByRole('row').filter({ hasText: editedMessage });
     await expect(editedRow).toBeVisible();
@@ -189,17 +220,33 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     const seededRow = page.getByRole('row').filter({ hasText: message });
     await expect(seededRow).toBeVisible();
 
-    // FIXED BEHAVIOR (WC-175 #199): the schema-driven CRUD screen now derives
-    // its write capabilities from the server-provided feature.capabilities, not
-    // the OpenAPI spec. The delegate holds hello:view but NOT hello:manage, so
-    // the screen is read-only — the Create button is gone, and the seeded row
-    // exposes no "Row actions" menu (Edit/Delete are not rendered for a
-    // read-only caller, even though a real row is present).
-    await expect(
-      page.getByRole('button', { name: 'Create', exact: true })
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole('button', { name: 'Row actions' })
-    ).toHaveCount(0);
+    // The screen derives its write capabilities from the server-provided
+    // feature.capabilities, not the OpenAPI spec (WC-175 #199). The delegate
+    // holds hello:view but NOT hello:manage, so every write control is denied.
+    //
+    // DENIED IS DISABLED, NOT ABSENT (#951). This assertion used to require a
+    // count of ZERO for both controls, and that was the defect: an omitted
+    // control made "you lack the permission" indistinguishable from "the route
+    // does not exist" and from "the plugin author declared it wrong" — a
+    // correct read-only screen and a broken one rendered identically. So the
+    // check is now stronger than the absence it replaced: the control must be
+    // PRESENT, DISABLED, and carrying its reason.
+    const createButton = page.getByRole('button', { name: 'Create', exact: true });
+    await expect(createButton).toBeVisible();
+    await expect(createButton).toBeDisabled();
+
+    // The row-actions menu likewise stays put when both item actions are
+    // denied; it used to vanish wholesale, which is the same erasure one level
+    // up — a row with no menu at all reads as a row that never had one.
+    const rowActions = seededRow.getByRole('button', { name: 'Row actions' });
+    await expect(rowActions).toBeVisible();
+    await rowActions.click();
+    for (const label of ['Edit', 'Delete']) {
+      await expect(
+        page.getByRole('menuitem', { name: label }),
+        `${label} must be offered and disabled, not hidden`
+      ).toBeDisabled();
+    }
+    await page.keyboard.press('Escape');
   });
 });

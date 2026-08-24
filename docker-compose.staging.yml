@@ -115,9 +115,14 @@ services:
   # Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
   # Track 2) — mirrors the dev compose `render` service (see docker-compose.yml
   # for the full rationale). Opt-in: `docker compose -p whity-staging -f
-  # docker-compose.staging.yml --profile render up -d --build`. The secret is
-  # REQUIRED (not defaulted) once this profile is actually started — staging is
-  # prod-like, so no insecure dev fallback here.
+  # docker-compose.staging.yml --profile render up -d --build`. There is no
+  # insecure dev fallback for the secret here — staging is prod-like — but the
+  # `:?` fail-fast guard used for the secrets above cannot be used for it:
+  # Compose interpolates EVERY service in the file, profile or no profile, so
+  # `:?` made every plain `-f docker-compose.staging.yml` command (including
+  # `config`, `ps` and a two-tier `up`) fail on a service it was never asked to
+  # start. The service enforces it instead — it warns loudly at boot and
+  # refuses every POST /render with 401 until the secret is >= 32 chars.
   render:
     build:
       context: .
@@ -125,7 +130,7 @@ services:
     container_name: whity_staging_render
     environment:
       PORT: "8130"
-      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:?RENDER_SHARED_SECRET must be set to run the render profile}
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-}
     ports:
       - "${RENDER_PORT_HOST:-8130}:8130"
     profiles:

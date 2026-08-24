@@ -17,6 +17,8 @@ use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Health\HealthProbeRegistry;
 use Whity\Core\Health\InvalidHealthProbeException;
 use Whity\Core\Ou\InvalidOuTypeException;
+use Whity\Core\Document\Routing\InvalidRoutingRuleException;
+use Whity\Core\Document\Routing\RoutingRuleRegistry;
 use Whity\Core\Ou\OuTypeRegistry;
 use Whity\Sdk\Health\PluginHealthProbesInterface;
 use Whity\Core\DataType\DataTypeRegistry;
@@ -30,6 +32,7 @@ use Whity\Core\Settings\PluginSettingsRegistry;
 use Whity\Sdk\Settings\PluginSettingsInterface;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Ou\PluginOuTypesInterface;
+use Whity\Sdk\Routing\PluginRoutingRulesInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 use Whity\Sdk\Tenant\PluginTablesInterface;
 use Whity\Core\Hooks\HookManager;
@@ -118,6 +121,8 @@ class PluginLoader
      */
     private ?OuTypeRegistry $ouTypeRegistry = null;
 
+    private ?RoutingRuleRegistry $routingRuleRegistry = null;
+
     /**
      * Optional catalogue of plugin-contributed status-page probes.
      *
@@ -156,10 +161,15 @@ class PluginLoader
      * Optional audit writer that plugin-declared events are subscribed to
      * ({@see \Whity\Sdk\PluginEventsInterface}, SDK 1.29).
      *
-     * Null in hosts that have not wired one (the CLI, the plugin smoke test),
-     * where declarations are skipped rather than failing — the same behaviour a
-     * null permission registry has. Wired together with the hook manager or not
-     * at all: a logger with no hook manager has nothing to subscribe to.
+     * Null in hosts that have not wired one (the plugin smoke test), where
+     * declarations are skipped rather than failing — the same behaviour a null
+     * permission registry has. Wired together with the hook manager or not at
+     * all: a logger with no hook manager has nothing to subscribe to.
+     *
+     * The CLI wired one in #931 and the `queue:work` worker in #935, so the two
+     * unattended paths now record what they do. This list is worth keeping
+     * accurate: while it named the CLI, it read as a deliberate exemption rather
+     * than a gap, which is part of why the worker's went unnoticed.
      */
     private ?AuditLogger $auditLogger = null;
 
@@ -183,6 +193,23 @@ class PluginLoader
     private ?PluginRoleSeeder $roleSeeder;
 
     /**
+     * Optional host callback fired after the set of registered plugin
+     * capabilities changes (#952).
+     *
+     * The host wires this to whatever it memoized off the registry — the MCP
+     * catalogue is the reason it exists. A worker that reloads plugins but keeps
+     * serving a tool list derived before the reload is not merely slow to catch
+     * up: it is a server that announces a change and then answers with the old
+     * answer, which is worse than never announcing at all.
+     *
+     * Null in hosts that memoize nothing (the CLI, the plugin smoke test), which
+     * is why it is a nullable seam rather than a constructor requirement.
+     *
+     * @var (\Closure(string): void)|null
+     */
+    private ?\Closure $registryChangeListener = null;
+
+    /**
      * @var array<PluginInterface> Registered plugins
      */
     private array $plugins = [];
@@ -195,7 +222,13 @@ class PluginLoader
      * disabled via the admin API. The plugin instance is retained so a disabled
      * plugin can be re-registered (re-enabled) without re-reading it from disk.
      *
-     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}>
+     * `droppedFrontendFeatures` records the descriptors this plugin declared
+     * and did NOT get (#953). It is kept beside the ones that survived for the
+     * same reason the survivors are kept at all: an administrator asking "why
+     * is that screen not in my navigation?" has no other place to look, and
+     * until now the answer existed only in a container log.
+     *
+     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, droppedFrontendFeatures: list<array{plugin: string, featureId: string|null, reason: string}>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}>
      */
     private array $registeredPlugins = [];
 
@@ -358,6 +391,7 @@ class PluginLoader
      * @param PluginSettingsRegistry|null $pluginSettingsRegistry Optional catalogue of plugin-declared settings
      * @param AuditLogger|null $auditLogger Optional audit writer for plugin-declared events
      * @param OuTypeRegistry|null $ouTypeRegistry Optional catalogue of plugin-contributed OU types
+     * @param RoutingRuleRegistry|null $routingRuleRegistry Optional catalogue of plugin-contributed document routing rules
      */
     public function __construct(
         string $pluginDir,
@@ -372,13 +406,15 @@ class PluginLoader
         ?DataTypeRegistry $dataTypeRegistry = null,
         ?PluginSettingsRegistry $pluginSettingsRegistry = null,
         ?AuditLogger $auditLogger = null,
-        ?OuTypeRegistry $ouTypeRegistry = null
+        ?OuTypeRegistry $ouTypeRegistry = null,
+        ?RoutingRuleRegistry $routingRuleRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
         $this->permissionRegistry = $permissionRegistry;
         $this->resourceTypeRegistry = $resourceTypeRegistry;
         $this->ouTypeRegistry = $ouTypeRegistry;
+        $this->routingRuleRegistry = $routingRuleRegistry;
         $this->healthProbeRegistry = $healthProbeRegistry;
         $this->tableOwnershipRegistry = $tableOwnershipRegistry;
         $this->dataTypeRegistry = $dataTypeRegistry;
@@ -400,6 +436,61 @@ class PluginLoader
     public function enableCache(?string $cacheFile = null): void
     {
         $this->cacheFile = $cacheFile ?? ($this->pluginDir . '/plugin_manifest.json');
+    }
+
+    /**
+     * Register the host callback fired when the registered capability set changes.
+     *
+     * Fires on: a {@see reload()} that actually rebuilt the registry (which is
+     * also how an install and an update arrive, via PluginInstaller), an
+     * administrative {@see disablePlugin()}, and a {@see reEnablePlugin()}.
+     * {@see uninstallPlugin()} inherits it through the disable it performs.
+     *
+     * Deliberately does NOT fire on: the initial {@see load()} at worker boot —
+     * nothing has been memoized yet, and with eight FrankenPHP workers booting,
+     * a boot-time announcement would be eight announcements of nothing; a
+     * {@see reload()} that found no disk change; or a plugin tripping the runtime
+     * error boundary, which leaves its capabilities registered and
+     * short-circuited, so its declarations are unchanged even though its
+     * behaviour is not.
+     *
+     * The listener is invoked inside an error boundary: a host that fails to
+     * refresh its own caches gets a log line, and the plugin operation that
+     * triggered it still completes.
+     *
+     * @param (\Closure(string): void)|null $listener Receives the triggering
+     *        operation's name, for logging. Null unregisters.
+     * @return void
+     */
+    public function onRegistryChanged(?\Closure $listener): void
+    {
+        $this->registryChangeListener = $listener;
+    }
+
+    /**
+     * Fire the registry-change listener, absorbing anything it throws.
+     *
+     * Same contract the loader applies to plugins: one participant's failure
+     * costs itself its effect and costs the host nothing. A listener that throws
+     * must not abort a reload half-way through, and must not turn the admin
+     * request that triggered it into a 500.
+     *
+     * @param string $trigger The operation that changed the registry.
+     * @return void
+     */
+    private function announceRegistryChange(string $trigger): void
+    {
+        if ($this->registryChangeListener === null) {
+            return;
+        }
+
+        try {
+            ($this->registryChangeListener)($trigger);
+        } catch (Throwable $e) {
+            $this->logWarning(
+                "Registry-change listener failed after {$trigger}: " . $e->getMessage()
+            );
+        }
     }
 
     /**
@@ -623,6 +714,11 @@ class PluginLoader
         $this->loadDiscovered($this->discover());
 
         $this->fingerprint = $current;
+
+        // Announced only after the registry is whole again: a listener that reads
+        // the catalogue must not see it mid-rebuild, with the old plugins already
+        // unregistered and the new ones not yet in.
+        $this->announceRegistryChange('reload');
 
         return true;
     }
@@ -1360,12 +1456,26 @@ class PluginLoader
      * - A descriptor with a missing or empty `name` is dropped with a warning.
      * - A getMcpPrompts() call that throws is caught, logged, and treated as
      *   if the plugin contributed nothing; remaining plugins still run.
+     * - A plugin that is administratively disabled, auto-failed, or otherwise
+     *   not active contributes NOTHING, exactly as in {@see collectJobs()}. A
+     *   disabled plugin whose prompts an AI agent could still list and fetch
+     *   would still be part of the platform's surface, which is not what
+     *   disabling one means — and it is what made prompts/list keep advertising
+     *   a plugin after it was turned off (#952).
      */
     public function collectMcpPrompts(PromptRegistry $registry): void
     {
         foreach ($this->registeredPlugins as $pluginKey => $info) {
             $plugin = $info['plugin'];
             if (!$plugin instanceof PluginMcpInterface) {
+                continue;
+            }
+
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
                 continue;
             }
             try {
@@ -1551,6 +1661,7 @@ class PluginLoader
             'namespacePrefix' => $candidate['namespacePrefix'],
             'hooks' => [],
             'frontendFeatures' => [],
+            'droppedFrontendFeatures' => [],
             'themeOverrideRoute' => null,
         ];
         // Mark administratively disabled so reEnablePlugin() re-registers its
@@ -1711,6 +1822,7 @@ class PluginLoader
             );
             $this->registeredPlugins[$pluginKey]['hooks'] = $registered['hooks'];
             $this->registeredPlugins[$pluginKey]['frontendFeatures'] = $registered['frontendFeatures'];
+            $this->registeredPlugins[$pluginKey]['droppedFrontendFeatures'] = $registered['droppedFrontendFeatures'];
             $this->registeredPlugins[$pluginKey]['themeOverrideRoute'] = $registered['themeOverrideRoute'];
             unset($this->administrativelyDisabled[$pluginKey]);
         }
@@ -1721,6 +1833,8 @@ class PluginLoader
             $this->clearDisableSignal($pluginKey, $info['plugin']->getName());
         }
         unset($this->discoveredDisabledByDisk[$pluginKey]);
+
+        $this->announceRegistryChange('enable');
 
         return true;
     }
@@ -1751,6 +1865,12 @@ class PluginLoader
         if ($info !== null) {
             $this->persistDisableSignal($pluginKey, $info['plugin']->getName());
         }
+
+        // Announced from here rather than from disableInMemory(): that helper also
+        // runs once per already-disabled plugin during loadDiscovered(), and a
+        // boot is not a change (see onRegistryChanged()). uninstallPlugin() goes
+        // through this method, so it is covered without announcing twice.
+        $this->announceRegistryChange('disable');
 
         return true;
     }
@@ -2657,6 +2777,7 @@ class PluginLoader
             'namespacePrefix' => $namespacePrefix,
             'hooks' => $registered['hooks'],
             'frontendFeatures' => $registered['frontendFeatures'],
+            'droppedFrontendFeatures' => $registered['droppedFrontendFeatures'],
             'themeOverrideRoute' => $registered['themeOverrideRoute'],
         ];
 
@@ -2677,7 +2798,7 @@ class PluginLoader
      * @param PluginInterface $plugin The plugin instance to register.
      * @param string $namespacePrefix The plugin namespace prefix.
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
-     * @return array{hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}
+     * @return array{hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, droppedFrontendFeatures: list<array{plugin: string, featureId: string|null, reason: string}>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}
      */
     private function registerCapabilities(
         PluginInterface $plugin,
@@ -2850,6 +2971,42 @@ class PluginLoader
             }
         }
 
+        // 2a-pre-bis. Register declared DOCUMENT ROUTING RULES (#947 item 3).
+        //     Same shape as (2a) and (2a-pre): an OPTIONAL interface, so a plugin
+        //     contributing no rule kinds implements nothing and is skipped, and
+        //     the source is $plugin->getName() — supplied here, never taken from
+        //     the plugin's own return value — so a kind is namespaced under its
+        //     real owner.
+        //
+        //     That is what stops two plugins colliding on `committee`, and what
+        //     stops any plugin minting a BARE kind and shadowing core's `role` or
+        //     `role_below_actor`. A route step already stored naming `role`
+        //     therefore cannot be re-pointed by installing a plugin, which
+        //     matters more here than in most catalogues: the step decides WHO
+        //     RECEIVES a document, so a shadowed kind would silently redirect a
+        //     circulation.
+        //
+        //     Registering a rule does NOT create any route, step or recipient. It
+        //     makes the kind nameable by whoever composes a route and supplies the
+        //     resolver the engine calls when a step naming it is reached.
+        //
+        //     Two boundaries, because two different things can go wrong: a
+        //     malformed DECLARATION is a logged warning (the plugin keeps serving,
+        //     it simply contributes no rules), while a getRoutingRules() that
+        //     THROWS is plugin code misbehaving and goes through the lifecycle
+        //     error boundary that can eventually fail the plugin.
+        if ($this->routingRuleRegistry !== null && $plugin instanceof PluginRoutingRulesInterface) {
+            try {
+                $this->routingRuleRegistry->register($plugin->getName(), $plugin->getRoutingRules());
+            } catch (InvalidRoutingRuleException $e) {
+                $this->logWarning(
+                    "Plugin {$pluginKey} declares an invalid routing rule: " . $e->getMessage()
+                );
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getRoutingRules');
+            }
+        }
+
         // 2a-bis. Register declared STATUS-PAGE PROBES (WC-status-probes). Same
         //     shape as (2a): an OPTIONAL interface, so a plugin with no
         //     dependency worth watching implements nothing and is skipped; the
@@ -3018,7 +3175,7 @@ class PluginLoader
         //    (WC-169). Inside the same per-plugin error boundary philosophy:
         //    invalid descriptors are dropped with a warning, a throwing
         //    declaration contributes nothing, and the plugin keeps loading.
-        $frontendFeatures = $this->collectFrontendFeatures(
+        $collected = $this->collectFrontendFeatures(
             $plugin,
             $pluginKey,
             $registeredGetRoutes,
@@ -3037,7 +3194,8 @@ class PluginLoader
 
         return [
             'hooks' => $registeredHooks,
-            'frontendFeatures' => $frontendFeatures,
+            'frontendFeatures' => $collected['features'],
+            'droppedFrontendFeatures' => $collected['dropped'],
             'themeOverrideRoute' => $themeOverrideRoute,
         ];
     }
@@ -3141,7 +3299,10 @@ class PluginLoader
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
      * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
      * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
-     * @return list<array<string, mixed>> The validated, normalized descriptors.
+     * @return array{
+     *     features: list<array<string, mixed>>,
+     *     dropped: list<array{plugin: string, featureId: string|null, reason: string}>
+     * } The validated, normalized descriptors, and the ones that were refused (#953).
      */
     private function collectFrontendFeatures(
         PluginInterface $plugin,
@@ -3151,7 +3312,7 @@ class PluginLoader
         array $registeredWriteRoutes = []
     ): array {
         if (!$plugin instanceof PluginFrontendInterface) {
-            return [];
+            return ['features' => [], 'dropped' => []];
         }
 
         // A throwing declaration must not break the plugin (or its peers):
@@ -3163,10 +3324,11 @@ class PluginLoader
             $ownPermissions = $plugin->getPermissions();
         } catch (Throwable $e) {
             $this->handlePluginThrowable($pluginKey, $e, 'frontend feature declaration');
-            return [];
+            return ['features' => [], 'dropped' => []];
         }
 
         $validated = [];
+        $dropped = [];
         foreach ($declared as $descriptor) {
             $normalized = $this->validateFrontendFeature(
                 $descriptor,
@@ -3175,14 +3337,15 @@ class PluginLoader
                 $ownPermissions,
                 $registeredGetRoutes,
                 $registeredActionRoutes,
-                $registeredWriteRoutes
+                $registeredWriteRoutes,
+                $dropped
             );
             if ($normalized !== null) {
                 $validated[] = $normalized;
             }
         }
 
-        return $validated;
+        return ['features' => $validated, 'dropped' => $dropped];
     }
 
     /**
@@ -3260,6 +3423,11 @@ class PluginLoader
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
      * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
      * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
+     * @param list<array{plugin: string, featureId: string|null, reason: string}> $dropped
+     *        Collects every refusal, by reference (#953). Every rule in this
+     *        method reports through the one `$drop` closure, so recording there
+     *        captures the whole catalogue at once — and a rule added later
+     *        cannot forget to surface itself.
      * @return array<string, mixed>|null The normalized descriptor, or null when dropped.
      */
     private function validateFrontendFeature(
@@ -3269,13 +3437,21 @@ class PluginLoader
         array $ownPermissions,
         array $registeredGetRoutes,
         array $registeredActionRoutes = [],
-        array $registeredWriteRoutes = []
+        array $registeredWriteRoutes = [],
+        array &$dropped = []
     ): ?array {
-        $drop = function (string $reason, ?string $id) use ($pluginKey): null {
+        $drop = function (string $reason, ?string $id) use ($pluginKey, $pluginName, &$dropped): null {
             $idLabel = $id !== null ? "'{$id}'" : '(no id)';
             $this->logWarning(
                 "Plugin {$pluginKey} frontend feature {$idLabel} dropped: {$reason}"
             );
+            // The log line stays exactly as it was — operators grep for it —
+            // and the same fact is also kept where an administrator can be
+            // shown it without opening a container log (#953). The plugin's
+            // declared NAME is recorded rather than its FQCN key, so this
+            // matches the `plugin` field every served feature already carries.
+            $dropped[] = ['plugin' => $pluginName, 'featureId' => $id, 'reason' => $reason];
+
             return null;
         };
 
@@ -3906,6 +4082,44 @@ class PluginLoader
         }
 
         return $features;
+    }
+
+    /**
+     * Every frontend feature descriptor that was REFUSED, and why (#953).
+     *
+     * The mirror image of {@see getFrontendFeatures()}, and gated identically:
+     * a plugin that is administratively disabled or not in the active lifecycle
+     * state contributes nothing, so this never reports screens the operator
+     * already knows are switched off.
+     *
+     * A dropped descriptor is a defect in the plugin's declaration, not a
+     * per-caller decision, so the list is the same for everyone. Deciding WHO
+     * may read it is the caller's business — {@see \Whity\Api\FrontendFeaturesApiHandler}
+     * serves it only to a plugin administrator — because the reasons quote
+     * route paths and permission names, which are diagnostics for whoever can
+     * fix the plugin and noise to everybody else.
+     *
+     * @return list<array{plugin: string, featureId: string|null, reason: string}>
+     */
+    public function getDroppedFrontendFeatures(): array
+    {
+        $dropped = [];
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            foreach ($info['droppedFrontendFeatures'] as $entry) {
+                $dropped[] = $entry;
+            }
+        }
+
+        return $dropped;
     }
 
     /**
