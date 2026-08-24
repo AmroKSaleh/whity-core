@@ -49,6 +49,14 @@ export interface ViewRailProps {
  * TranslationKeyExtractor). The `default` branch is what keeps the rail correct
  * when a later feature or a plugin registers a folder this build has never
  * heard of — it renders the server's label instead of a blank chip.
+ *
+ * That branch already carried the three routing folders once: they arrived from
+ * the server a release after this file was written and rendered correctly in
+ * English with no change here, which is what the fallback is for. They have
+ * cases now because falling back is not the same as being TRANSLATED, and an
+ * Arabic-first deployment reading "Awaiting me" in English is a folder half
+ * shipped. A key that is never extracted is never seeded, never reaches
+ * /admin/translations, and is finished by a translator who never saw it.
  */
 export function viewLabel(t: ReturnType<typeof useTranslation>, view: DocumentView): string {
   switch (view.key) {
@@ -60,6 +68,12 @@ export function viewLabel(t: ReturnType<typeof useTranslation>, view: DocumentVi
       return t('organizer.view.raisedByMyUnit', 'Raised by my unit');
     case 'below-my-unit':
       return t('organizer.view.belowMyUnit', 'Everything below my unit');
+    case 'awaiting-me':
+      return t('organizer.view.awaitingMe', 'Awaiting me');
+    case 'acted-on-by-me':
+      return t('organizer.view.actedOnByMe', 'Acted on by me');
+    case 'passed-through-my-unit':
+      return t('organizer.view.passedThroughMyUnit', 'Passed through my unit');
     case 'starred':
       return t('organizer.view.starred', 'Starred');
     case 'collection':

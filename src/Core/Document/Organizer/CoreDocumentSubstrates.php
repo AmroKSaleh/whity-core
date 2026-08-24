@@ -7,32 +7,31 @@ namespace Whity\Core\Document\Organizer;
 /**
  * The fact sources core knows about, declared in one place (#978).
  *
- * Two kinds of entry live here and the difference is the point:
+ * Every entry is declared at COLUMN granularity wherever a column is what
+ * matters, because `documents` and `document_route_events` exist on any migrated
+ * installation and a table-level declaration would resolve for the wrong reason
+ * — reporting a fact source present because its TABLE is, while the column the
+ * folder actually reads is not there.
  *
- *  - PRESENT ones, backed by columns migration 108 and 111 create. Each is
- *    declared at COLUMN granularity where the column is what matters, because
- *    `documents` will still exist when routing ships and a table-level
- *    declaration would resolve for the wrong reason.
+ * THE ROUTING ONES WERE DECLARED A RELEASE BEFORE ANY VIEW READ THEM
+ * ------------------------------------------------------------------
+ * {@see ROUTING_RECIPIENTS} and {@see ROUTING_TRAIL} were registered by #978
+ * while #947 item 3's tables existed and no folder was computed from them, on
+ * the principle that a resolvable substrate is a FACT SOURCE and not a folder.
+ * Their three folders needed predicates on {@see DocumentCriteria} and
+ * registrations in {@see CoreDocumentViews}, and item 3's arrival did not
+ * conjure those; registering the views ahead of their predicates would have been
+ * a stub with a label, live the day the substrate resolved.
  *
- *  - The ROUTING ones, {@see ROUTING_RECIPIENTS} and {@see ROUTING_TRAIL}, which
- *    #947 item 3 (migration 112) supplies. They resolve on any installation that
- *    has run it — and NO VIEW READS THEM YET, which is the distinction worth
- *    holding on to: a resolvable substrate is a fact source, not a folder.
+ * Those three folders now exist. What has NOT changed is the rule — a view is
+ * absent unless everything it names resolves — and this file is still where the
+ * naming is measured rather than asserted.
  *
- *    Item 5's three routing folders — "awaiting me", "acted on by me", "passed
- *    through my unit" — each still need a predicate on {@see DocumentCriteria}
- *    and a registration in {@see CoreDocumentViews}. Item 3's arrival does not
- *    conjure them, and registering them ahead of their predicates would be a
- *    stub with a label: see {@see DocumentViewRegistry}.
- *
- * WHY THEY ARE DECLARED AT ALL BEFORE ANY VIEW READS THEM
- * ------------------------------------------------------
- * So the follow-up is a view registration and nothing else. The alternative —
- * declare the substrate in the same change that adds the views — is fine too,
- * and this is here because it is the half that can be verified NOW: the
- * real-engine test asserts these keys resolve against the real schema, so a
- * later rename of `document_route_recipients` fails a build instead of silently
- * emptying a folder.
+ * Declaring the substrates early was worth it for one reason: it is the half
+ * that could be verified before the views existed. The real-engine test asserts
+ * these keys resolve against the real schema, so a rename of
+ * `document_route_recipients` fails a build instead of silently emptying a
+ * folder — which it would now do to somebody's inbox.
  *
  * THE TABLE NAMES ARE THE REAL ONES, AND THAT IS THE POINT
  * -------------------------------------------------------
@@ -61,13 +60,33 @@ final class CoreDocumentSubstrates
     public const COLLECTIONS = 'documents.collections';
 
     /**
+     * There is an organizational HIERARCHY to walk (migration 030) — the fact
+     * behind every "and everything beneath it" folder.
+     *
+     * Declared separately from {@see ORIGIN_OU} even though that one already
+     * names `organizational_units`, because the two are different claims and one
+     * folder needs the tree without needing the origin column at all: "passed
+     * through my unit" reads `document_route_events`, not `documents`. Folding
+     * the tree into the origin substrate a second time would make that folder
+     * disappear whenever `documents.origin_ou_id` did, for no reason a reader
+     * could reconstruct, and would report the wrong missing thing in the
+     * operator-facing diagnostic.
+     *
+     * ORIGIN_OU is deliberately NOT narrowed to match. It ships as #978 wrote
+     * it, and the only installation the two declarations could disagree about is
+     * one with an `organizational_units` table and no `parent_id` on it, which
+     * no migration produces.
+     */
+    public const OU_TREE = 'ou.tree';
+
+    /**
      * Recipient rows: who a document is currently awaiting (#947 item 3,
-     * migration 112). The substrate behind an "awaiting me" folder.
+     * migration 112). The substrate behind {@see CoreDocumentViews::AWAITING_ME}.
      */
     public const ROUTING_RECIPIENTS = 'routing.recipients';
 
     /**
-     * The append-only routing trail: who acted, and which unit they acted from
+     * The append-only routing trail: who acted, and between which units
      * (#947 item 3, migration 112). The substrate behind "acted on by me" and
      * "passed through my unit" — two folders, one fact source, which is why
      * this is separate from {@see ROUTING_RECIPIENTS} rather than one coarse
@@ -119,16 +138,32 @@ final class CoreDocumentSubstrates
             '#947 item 3 (migration 112)',
         ));
 
-        // The trail needs `document_route_events` AND the units column on it:
-        // "passed through my unit" is a query over `from_ou_id` specifically, and
-        // a table-only declaration would resolve on a trail that did not record
-        // the unit — which is a folder that runs and answers nothing.
+        // The trail needs `document_route_events` AND both units columns on it:
+        // "passed through my unit" is a query over `from_ou_id` OR `to_ou_id` —
+        // migration 112 records a TRANSITION, and a unit that only ever received
+        // is invisible to a `from`-only reading — while a table-only declaration
+        // would resolve on a trail that recorded no unit at all, which is a
+        // folder that runs and answers nothing.
         $registry->register(new DocumentSubstrate(
             self::ROUTING_TRAIL,
-            'Routing keeps an append-only trail of who acted on a document and which unit they '
-                . 'acted from.',
-            ['document_route_events.actor_profile_id', 'document_route_events.from_ou_id'],
+            'Routing keeps an append-only trail of who acted on a document and between which units.',
+            [
+                'document_route_events.actor_profile_id',
+                'document_route_events.from_ou_id',
+                'document_route_events.to_ou_id',
+            ],
             '#947 item 3 (migration 112)',
+        ));
+
+        // The downward walk reads `parent_id`, so that is what is measured. A
+        // bare `organizational_units` would resolve on a flat table and leave
+        // "passed through my unit" answering about one unit while claiming to
+        // answer about a subtree.
+        $registry->register(new DocumentSubstrate(
+            self::OU_TREE,
+            'Organizational units form a hierarchy that can be walked downward.',
+            ['organizational_units.parent_id'],
+            'migration 030',
         ));
     }
 }

@@ -668,6 +668,33 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_READ,
     ];
     $items[] = [
+        'id' => 'inbox',
+        'label' => 'Inbox',
+        'href' => '/admin/inbox',
+        'icon' => 'inbox',
+        'group' => 'admin',
+        // Near the top on purpose: this is the surface a person opens daily,
+        // where the entries below it are things they go looking for.
+        'order' => 1.5,
+        // #978, consuming #881. DELIBERATELY UNGATED — no requiredPermission and
+        // no requiredRole.
+        //
+        // It mirrors GET /api/me/inbox, which is session-gated and
+        // unpermissioned, exactly like /api/me/notifications and
+        // /api/me/sessions: an inbox row already names exactly one person, so a
+        // tenant-wide permission has no work left to do. Gating the nav entry on
+        // anything would hide the page from people whose work is IN it —
+        // migration 113 makes the same argument about acting on a route ("being
+        // a recipient IS the authorization"), and a hidden inbox would strand
+        // every item routed to somebody who cannot browse the document library.
+        //
+        // The page is a consumer of the #881 SOURCE REGISTRY rather than a
+        // routing screen, which is why the label is "Inbox" and not "Documents
+        // awaiting you": routing is one registered source of possibly several,
+        // and #947 refused it a surface of its own precisely so this entry never
+        // has to become one entry per source.
+    ];
+    $items[] = [
         'id' => 'documents',
         'label' => 'Document Designer',
         'href' => '/admin/documents',
@@ -2049,14 +2076,20 @@ $documentVisibilityPolicy = new \Whity\Core\Document\DocumentVisibilityPolicy(
 // looked like when it first answered. #701 already cost this codebase that bug
 // once, in the permission cache.
 //
-// A view is absent unless the facts it reads exist, so the three folders #947
-// item 5 derives from ROUTING are still not registered — and note what that
-// means now that item 3 HAS landed above: its tables make the `routing.engine`
-// substrate resolvable, but a resolvable substrate is not a folder. Each of
-// those three needs a predicate on DocumentCriteria and a view registration of
-// its own, which is item 5 follow-up work rather than something routing's
-// arrival supplies. Registering them here to be filtered out would have been a
-// stub with a label, and the filter would have stopped hiding them today.
+// A view is absent unless the facts it reads exist. All six of #947 item 5's
+// folders are registered now, the three ROUTING ones included, and nothing here
+// mentions them: they appear because migration 112's tables make
+// `routing.recipients` and `routing.trail` resolve, and they vanish on an
+// installation that has not run it. That is the whole reason this is a registry
+// measured against the live schema rather than an `if` in a handler — the three
+// arrived a release after this block was written, and this block did not change.
+//
+// Note what did NOT make them appear. Item 3 landing made their substrates
+// resolvable, and for a whole release that produced no folders, because a
+// resolvable substrate is a fact source and not a view. Each needed a predicate
+// on DocumentCriteria and a registration of its own. Registering them here
+// ahead of those predicates would have been a stub with a label, live the day
+// the substrate resolved.
 $documentSubstrates = new \Whity\Core\Document\Organizer\DocumentSubstrateRegistry(
     new \Whity\Core\Document\Organizer\PdoSchemaPresence($db->getPdo())
 );

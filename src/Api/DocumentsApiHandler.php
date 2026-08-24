@@ -68,13 +68,13 @@ use Whity\Storage\StorageException;
  * about the document.
  *
  * {@see views()} is what makes that honest from the outside: it returns the
- * folders this installation can actually COMPUTE. Three of item 5's six —
- * "awaiting me", "acted on by me", "passed through my unit" — are NOT among
- * them. #947 item 3 has landed, so the routing facts they read exist and their
- * substrates resolve; what does not exist is the three predicates and the three
- * view registrations, which are item 5 work. A resolvable fact source is not a
- * folder. An empty "Awaiting me" would state *"nothing awaits you"*, which is
- * false and which the reader cannot check.
+ * folders this installation can actually COMPUTE. All six of item 5's are built,
+ * and three of them — "awaiting me", "acted on by me", "passed through my unit"
+ * — are absent on an installation that has not run migration 112, because the
+ * routing facts they read are not recorded there. Nothing in this handler tests
+ * for that; it asks {@see DocumentViewRegistry} what exists and reports it. An
+ * empty "Awaiting me" would state *"nothing awaits you"*, which is false and
+ * which the reader cannot check, so the folder is not offered at all.
  *
  * What IS here beyond reading is the re-render, because it is the observable
  * half of the immutability guarantee: {@see rerender()} appends a NEW artifact
