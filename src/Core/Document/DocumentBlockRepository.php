@@ -34,7 +34,7 @@ final class DocumentBlockRepository
     public function listForTenant(int $tenantId): array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at
              FROM document_blocks WHERE tenant_id = :tenant_id ORDER BY updated_at DESC, id DESC'
         );
         $stmt->execute([':tenant_id' => $tenantId]);
@@ -50,7 +50,7 @@ final class DocumentBlockRepository
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, created_at, updated_at
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at
              FROM document_blocks WHERE id = :id AND tenant_id = :tenant_id'
         );
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
@@ -91,8 +91,9 @@ final class DocumentBlockRepository
      * The seeder-only "which starters has this tenant already got" lookup —
      * mirrors {@see DocumentTemplateRepository::starterKeysForTenant()} (see
      * its docblock for the rationale: a stable identity distinct from the
-     * user-renameable `name`, seeder-internal, not part of the public API
-     * response shape).
+     * user-renameable `name`, and why it stays keys-only now that
+     * {@see DocumentRecordTrait::normalizeRow()} carries `starter_key` on the
+     * rows themselves).
      *
      * @return list<string>
      */

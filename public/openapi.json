@@ -26714,6 +26714,10 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "starter_key": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "created_at": {
                         "type": "string"
                     },
@@ -27489,6 +27493,10 @@
                     },
                     "owner_ou_id": {
                         "type": "integer",
+                        "nullable": true
+                    },
+                    "starter_key": {
+                        "type": "string",
                         "nullable": true
                     },
                     "created_at": {

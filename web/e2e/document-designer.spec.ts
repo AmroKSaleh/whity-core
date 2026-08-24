@@ -93,6 +93,28 @@ function blockInsertIds(page: Page): Promise<string[]> {
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid') ?? ''));
 }
 
+/** The two blocks every tenant has out of the box, by the name both sources give them. */
+const STARTER_HEADER = 'Company header';
+const STARTER_FOOTER = 'Company footer';
+
+/**
+ * A starter block in the rail, located by NAME rather than by the client's
+ * symbolic id.
+ *
+ * The id is not stable across environments and must not be asserted on. The
+ * client ships `sys-header`/`sys-footer` as a fallback library so the Blocks
+ * panel is never empty, and the SERVER seeds the same two blocks for every
+ * tenant (#1012) with real numeric ids. The designer dedupes them by NAME and
+ * prefers the server row, so `doc-block-insert-sys-header` exists on a tenant
+ * that was never seeded and does NOT exist on one that was — and a spec naming
+ * it asserts which of the two this environment happens to be rather than that
+ * the block is there. The name is the same either way, and being there is the
+ * requirement.
+ */
+function starterBlock(page: Page, name: string) {
+  return page.locator('[data-testid^="doc-block-insert-"]').filter({ hasText: name }).first();
+}
+
 /**
  * Save the current selection as a block and return the testid of the block it
  * created.
@@ -106,7 +128,7 @@ async function saveSelectionAsBlock(page: Page): Promise<string> {
   // The library is fetched on mount. Wait for a starter that is always present
   // before snapshotting, or "before" is empty and every existing block — the
   // system starters included — looks newly created.
-  await expect(page.getByTestId('doc-block-insert-sys-header')).toBeVisible();
+  await expect(starterBlock(page, STARTER_HEADER)).toBeVisible();
   const before = new Set(await blockInsertIds(page));
   await chooseMenu(page, 'format', 'save-as-block');
   await expect(page.getByRole('status').filter({ hasText: 'Saved block' })).toBeVisible();
@@ -700,12 +722,14 @@ test.describe('Document & Label Designer', () => {
   test('starter blocks: company header/footer are available out of the box', async ({ page }) => {
     await page.goto('/admin/documents');
 
-    // The Blocks panel is populated on a fresh document (System starters).
-    await expect(page.getByTestId('doc-block-insert-sys-header')).toBeVisible();
-    await expect(page.getByTestId('doc-block-insert-sys-footer')).toBeVisible();
+    // The Blocks panel is populated on a fresh document (System starters) —
+    // whether they came from the per-tenant seed or the client fallback, which
+    // is why these are located by name. See starterBlock().
+    await expect(starterBlock(page, STARTER_HEADER)).toBeVisible();
+    await expect(starterBlock(page, STARTER_FOOTER)).toBeVisible();
 
     // Insert the header → an instance carrying the company name renders.
-    await page.getByTestId('doc-block-insert-sys-header').click();
+    await starterBlock(page, STARTER_HEADER).click();
     await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(1);
     await expect(page.getByTestId('doc-page').getByText('Acme Corp').first()).toBeVisible();
   });
@@ -713,8 +737,11 @@ test.describe('Document & Label Designer', () => {
   test('Insert ▸ Block offers the same library as the side rail', async ({ page }) => {
     await page.goto('/admin/documents');
 
-    // The starter header is reachable without opening the rail at all.
-    await chooseSubmenu(page, 'insert', 'insert-block', 'insert-block-sys-header');
+    // The starter header is reachable without opening the rail at all. By its
+    // menu LABEL, which is the block's name, for the reason starterBlock() gives.
+    await openMenu(page, 'insert');
+    await page.getByTestId('menu-item-insert-block').click();
+    await page.getByRole('menuitem', { name: STARTER_HEADER }).click();
     await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(1);
     await expect(page.getByTestId('doc-page').getByText('Acme Corp').first()).toBeVisible();
   });

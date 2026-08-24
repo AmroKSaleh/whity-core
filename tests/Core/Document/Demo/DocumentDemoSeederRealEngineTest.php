@@ -392,6 +392,130 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         );
     }
 
+    // ── 1b. #1024: blocks are POINTERS, and the demo has to contain some ─────
+
+    /**
+     * ONE BLOCK, INSTANCED BY TEMPLATES IN MORE THAN ONE UNIT.
+     *
+     * The regression this pins is that the dataset placed blocks and instanced
+     * them NOWHERE — zero `blockInstance` elements across every seeded template.
+     * A demo whose whole purpose is to make behaviour visible then showed the
+     * block library as though blocks were standalone documents: every usage count
+     * zero, the delete guard never engaged, the disclosure never populated. It did
+     * not merely omit synced patterns, it taught that blocks are copies.
+     *
+     * Asserted through the SAME repository query the `/usage` endpoint runs
+     * ({@see DocumentTemplateRepository::referencingTemplates()}), not through a
+     * re-scan of the JSON here, so a fixture that stopped satisfying the actual
+     * scanner could not pass this.
+     */
+    public function testOneBlockIsInstancedByTemplatesInMoreThanOneUnit(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $referencing = $this->templates->referencingTemplates($this->blockId('demo-faculty-letterhead'), self::TENANT);
+
+        self::assertGreaterThan(
+            1,
+            count($referencing),
+            'Propagation needs somewhere to propagate to: a block instanced once demonstrates nothing.'
+        );
+
+        $units = array_unique(array_map(static fn (array $row): ?int => $row['owner_ou_id'], $referencing));
+        self::assertGreaterThan(
+            1,
+            count($units),
+            'The referencing templates must sit in different units, or the reach half of the story is missing.'
+        );
+    }
+
+    /**
+     * THE CIVIL SECRETARY IS TOLD "2 templates, 1 you cannot see".
+     *
+     * The case worth seeding permanently, because it is the one that stops
+     * somebody editing a block believing they can see everything it affects. She
+     * can see the site-safety block — it is filed in her department — and exactly
+     * one of the two templates that instance it; the other is at Mechanical
+     * Engineering, out of her reach entirely.
+     *
+     * Computed the way {@see \Whity\Api\DocumentBlocksApiHandler::usage()}
+     * computes it — unfiltered total, filtered list, hidden as the difference —
+     * rather than by asserting on a literal the fixture could drift away from.
+     */
+    public function testTheCivilSecretaryIsToldOneOfTheTwoUsersIsHiddenFromHer(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+        $blockId = $this->blockId('demo-civil-safety-notice');
+
+        self::assertSame(
+            ['total' => 2, 'hidden' => 1],
+            $this->usageFor(DemoOrganisationSeeder::CIVIL_SECRETARY, $blockId),
+            'Her row must read "2 templates, 1 you cannot see" — a real number, not a zero.'
+        );
+
+        // And the disclosure is a DIFFERENCE, not a constant: the two people who
+        // reach the whole faculty are told the same total with nothing hidden, so
+        // the number above is about her reach rather than about the endpoint.
+        foreach ([DemoOrganisationSeeder::DEAN, DemoOrganisationSeeder::FACULTY_SECRETARY] as $email) {
+            self::assertSame(
+                ['total' => 2, 'hidden' => 0],
+                $this->usageFor($email, $blockId),
+                $email . ' reaches both units and must be told nothing is hidden.'
+            );
+        }
+    }
+
+    /**
+     * Every pointer the demo lays down resolves to a block that is actually there.
+     *
+     * A `blockInstance` carrying an id nothing matches renders as an orphan
+     * placeholder in the designer and counts towards nothing — a fixture that
+     * looked seeded and demonstrated the broken case instead of the working one.
+     * Cheap to get wrong (an id written before the block exists) and invisible
+     * without this.
+     */
+    public function testEveryBlockInstanceInTheDemoPointsAtABlockThatExists(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $blockIds = [];
+        foreach ($this->blocks->listForTenant(self::TENANT) as $block) {
+            $blockIds[(string) $block['id']] = true;
+        }
+
+        $found = 0;
+        foreach ($this->templates->listForTenant(self::TENANT) as $template) {
+            foreach (self::collectBlockIds($template['data']) as $referenced) {
+                $found++;
+                self::assertArrayHasKey(
+                    $referenced,
+                    $blockIds,
+                    'Template "' . $template['name'] . '" points at block ' . $referenced . ', which does not exist.'
+                );
+            }
+        }
+
+        self::assertGreaterThan(0, $found, 'The whole point of #1024 is that there ARE pointers.');
+    }
+
+    /**
+     * And at least one template instances nothing.
+     *
+     * The used-by-nothing state is what makes a delete safe, and a fixture in
+     * which every template references something renders it nowhere.
+     */
+    public function testAtLeastOneSeededTemplateInstancesNoBlockAtAll(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $withoutPointers = array_filter(
+            $this->templates->listForTenant(self::TENANT),
+            static fn (array $row): bool => self::collectBlockIds($row['data']) === [],
+        );
+
+        self::assertNotSame([], $withoutPointers);
+    }
+
     // ── 2. routing states that differ from each other ────────────────────────
 
     /**
@@ -723,6 +847,71 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
+    /**
+     * A demo block's id from its stable `starter_key`.
+     *
+     * By key rather than by name because the key is the identity — and because
+     * the row carries it again (#1013), which is what let the seeder point a
+     * template at a block in the first place.
+     */
+    private function blockId(string $starterKey): int
+    {
+        foreach ($this->blocks->listForTenant(self::TENANT) as $row) {
+            if (($row['starter_key'] ?? null) === $starterKey) {
+                return (int) $row['id'];
+            }
+        }
+
+        self::fail('The demo must seed a block with starter_key "' . $starterKey . '".');
+    }
+
+    /**
+     * `total` and `hidden` for one caller, computed exactly as
+     * {@see \Whity\Api\DocumentBlocksApiHandler::usage()} computes them: the
+     * unfiltered set of referencing templates, and the same set through
+     * {@see DocumentAccessPolicy}.
+     *
+     * @return array{total: int, hidden: int}
+     */
+    private function usageFor(string $email, int $blockId): array
+    {
+        $referencing = $this->templates->referencingTemplates($blockId, self::TENANT);
+        // ROWS, not names: two templates may legitimately share a name, and a
+        // count of distinct names would then quietly understate `hidden` — which
+        // is the one number this whole fixture exists to make non-zero.
+        $visible = $this->visibleRows($email, $referencing);
+
+        return ['total' => count($referencing), 'hidden' => count($referencing) - count($visible)];
+    }
+
+    /**
+     * The block ids a template body references, by the same recursive-descent
+     * walk both production scanners use (PHP's
+     * {@see DocumentTemplateRepository::referencingTemplates()} and the
+     * TypeScript `collectBlockIds`).
+     *
+     * @param mixed $node
+     * @return list<string>
+     */
+    private static function collectBlockIds(mixed $node): array
+    {
+        if (!is_array($node)) {
+            return [];
+        }
+
+        $out = [];
+        if (($node['type'] ?? null) === 'blockInstance' && array_key_exists('blockId', $node)) {
+            $out[] = (string) $node['blockId'];
+        }
+        foreach ($node as $value) {
+            foreach (self::collectBlockIds($value) as $id) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
+    }
+
     /** @return list<string> Sorted, so set comparisons are order-independent. */
     private function visibleTemplateNames(string $email): array
     {
@@ -745,8 +934,27 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
      */
     private function visibleNames(string $email, array $rows): array
     {
+        $names = array_map(
+            static fn (array $row): string => (string) $row['name'],
+            $this->visibleRows($email, $rows),
+        );
+        sort($names);
+
+        return $names;
+    }
+
+    /**
+     * The same filter, before the names are taken off it — so a caller that needs
+     * to COUNT what a person may see is not counting distinct names.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function visibleRows(string $email, array $rows): array
+    {
         $profileId = $this->profileId($email);
-        $visible = (new DocumentAccessPolicy())->filterVisible(
+
+        return (new DocumentAccessPolicy())->filterVisible(
             $rows,
             $profileId,
             ScopedPermissionSet::forProfile(
@@ -759,11 +967,6 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
                 new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
             ))->reachFor(self::TENANT, $profileId),
         );
-
-        $names = array_map(static fn (array $row): string => (string) $row['name'], $visible);
-        sort($names);
-
-        return $names;
     }
 
     /**

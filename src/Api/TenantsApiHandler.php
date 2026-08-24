@@ -14,6 +14,7 @@ use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Core\Tenant\TenantProvisioner;
 use Whity\Sdk\Hooks\HookVetoException;
 use PDO;
 
@@ -295,23 +296,16 @@ class TenantsApiHandler
             }
 
             try {
-                // Insert tenant
-                $stmt = $this->db->prepare('
-                    INSERT INTO tenants (name, slug, created_at)
-                    VALUES (?, ?, NOW())
-                ');
-                $stmt->execute([$name, $slug]);
-                $tenantId = $this->db->lastInsertId();
-
-                // Dispatch synchronous hook after tenant is created. This runs
-                // BEFORE the administrator is provisioned so a listener that
-                // seeds tenant-scoped roles has done so by the time the initial
-                // role is resolved.
-                $this->hookManager->dispatch('tenant.created', [
-                    'id' => (int)$tenantId,
-                    'name' => $name,
-                    'slug' => $slug,
-                ]);
+                // Insert the tenant, announce it, and give it the core
+                // provisioning every tenant gets — one call, because this used to
+                // be an INSERT plus a dispatch here and an INSERT with no
+                // dispatch in the seeder, and the difference between the two is
+                // the whole of #1012. The announcement still happens BEFORE the
+                // administrator is provisioned, so a listener that seeds
+                // tenant-scoped roles has done so by the time the initial role is
+                // resolved.
+                $tenantId = TenantProvisioner::withCoreSteps($this->db, $this->hookManager)
+                    ->create($name, $slug);
 
                 $adminSummary = null;
                 if ($admin !== null) {
