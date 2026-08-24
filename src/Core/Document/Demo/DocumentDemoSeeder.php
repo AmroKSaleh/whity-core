@@ -50,8 +50,11 @@ use Whity\Core\RBAC\CorePermissions;
  *   | One document raised in a department and    | "passed through my unit" as distinct     |
  *   | forwarded through the faculty              | from "raised by my unit"                 |
  *   | Templates and blocks placed at three       | #1004: two holders of ONE role, standing |
- *   | different units, one permission-tagged     | in different units, seeing different     |
+ *   | different units, two permission-tagged     | in different units, seeing different     |
  *   |                                            | sets — and the permission gate on top    |
+ *   | A template gated on a capability the       | that a technician sees less than the     |
+ *   | secretary holds and the technician does    | SECRETARY BESIDE HER, not merely less    |
+ *   | not, both standing in one unit             | than the dean two levels up              |
  *   | A starred collection AND a custom one      | that starring IS a collection (migration |
  *   |                                            | 114) rather than a second concept        |
  *   | One document with TWO artifacts            | #986's "version N of M" and its          |
@@ -159,6 +162,7 @@ final class DocumentDemoSeeder
     private const TPL_CIVIL_WORKS_ORDER = 'demo-civil-works-order';
     private const TPL_MECHANICAL_REPORT = 'demo-mechanical-test-report';
     private const TPL_CIVIL_CONTRACT = 'demo-civil-contract-restricted';
+    private const TPL_CIVIL_REQUISITION = 'demo-civil-requisition-drafters-only';
 
     private const BLOCK_FACULTY_LETTERHEAD = 'demo-faculty-letterhead';
     private const BLOCK_CIVIL_SAFETY = 'demo-civil-safety-notice';
@@ -221,9 +225,18 @@ final class DocumentDemoSeeder
                 ),
                 sprintf(
                     'Designer: the shipped starter set (unplaced, so everyone sees it) + %d templates '
-                    . 'and %d blocks placed at specific units, one of them permission-tagged.',
+                    . 'and %d blocks placed at specific units, %d of the templates permission-tagged.',
                     count($templateIds),
                     $blockCount,
+                    // Counted, never typed. A literal here was already one
+                    // template out of date the moment a second tagged row was
+                    // added, and it would have gone out of date SILENTLY —
+                    // which is the exact failure the seed exists to spare its
+                    // reader. Same argument as {@see DemoOrganisation::units()}.
+                    count(array_filter(
+                        self::templateDeclarations(),
+                        static fn (array $spec): bool => $spec['permission'] !== null,
+                    )),
                 ),
                 sprintf('Documents: %d, each with a route the engine issued and resolved.', count($documentIds)),
             ],
@@ -234,7 +247,7 @@ final class DocumentDemoSeeder
     // ── templates and blocks, placed (#1004 / migration 117) ─────────────────
 
     /**
-     * Four templates at three different units.
+     * Five templates at three different units.
      *
      * The set is built so that reach ALONE separates the two secretaries and so
      * that the permission gate is separately visible:
@@ -253,16 +266,93 @@ final class DocumentDemoSeeder
      *     placement (the civil one stands there, the faculty one reaches it) and
      *     visible to NEITHER, because neither holds the tag. That is the second
      *     predicate on its own, with placement held constant — the case that
-     *     shows why {@see DocumentAccessPolicy} needs both.
+     *     shows why {@see DocumentAccessPolicy} needs both;
+     *   - the civil requisition, at Civil Engineering and tagged
+     *     `documents:write`: see below — it is the only row here that separates
+     *     two people STANDING IN THE SAME UNIT.
+     *
+     * WHY A SECOND TAGGED TEMPLATE, WITH A DIFFERENT TAG
+     * -------------------------------------------------
+     * {@see DocumentAccessPolicy}'s own docblock states the claim the tag is for:
+     * "the permission gate is what still keeps a technician standing in the same
+     * faculty from seeing contract templates". With only the publish-tagged
+     * contract, the fixture did not show that, and it was measured rather than
+     * assumed: `civil-technician@` and `civil-secretary@` saw EXACTLY the same
+     * five templates and three blocks. Both stand in Civil Engineering, so reach
+     * cannot separate them; the only tag in the set was `documents:publish`,
+     * which NEITHER holds, so the gate could not either. Two people in one
+     * office, one of whom is meant to see less, whose screens were identical.
+     *
+     * "A technician sees fewer templates" was therefore true only against the
+     * DEAN — two levels up, in another unit, holding four more permissions —
+     * where a difference proves nothing in particular because everything about
+     * them differs. The comparison a customer makes is between the two people
+     * sitting next to each other, and it is the comparison this row restores.
+     *
+     * `documents:write` is the tag, chosen because it is the one capability the
+     * demo secretary holds and the demo technician does not
+     * ({@see DemoOrganisationSeeder::seedRoles()}) — so the difference is one
+     * permission wide, which is what makes it readable. It also reads as the
+     * right rule in prose: a template you draft FROM belongs to the people who
+     * draft.
+     *
+     * Authored by the head of the department it is filed in, unlike the contract
+     * above: the head holds `documents:write`, so this row IS visible to its own
+     * author, and the contract's deliberately awkward authorship stays the one
+     * place that case is made rather than becoming the pattern.
      *
      * @return array<string, int> starter_key => template id
      */
     private function seedTemplates(DemoOrganisation $org): array
     {
         $tenantId = $org->tenantId;
+        $declared = self::templateDeclarations();
 
-        /** @var array<string, array{name: string, ou: string, author: string, permission: ?string, heading: string, lines: list<string>}> $declared */
-        $declared = [
+        $existing = array_fill_keys($this->templates->starterKeysForTenant($tenantId), true);
+
+        $ids = [];
+        foreach ($declared as $starterKey => $spec) {
+            $found = $this->findTemplateByName($tenantId, $spec['name']);
+            if (isset($existing[$starterKey]) && $found !== null) {
+                $ids[$starterKey] = $found;
+                continue;
+            }
+
+            $ids[$starterKey] = $this->templates->create($tenantId, [
+                'name' => $spec['name'],
+                'data' => self::templateBody($spec['name'], $spec['heading'], $spec['lines']),
+                // `tenant` rather than `system`: a system-scoped row skips the
+                // `required_permission` gate entirely
+                // ({@see DocumentAccessPolicy::canView()}), which would make BOTH
+                // tagged templates in {@see templateDeclarations()} visible to
+                // everybody and quietly delete half of what this fixture is for.
+                'scope' => DocumentAccessPolicy::SCOPE_TENANT,
+                'required_permission' => $spec['permission'],
+                'is_system' => false,
+                'starter_key' => $starterKey,
+                'created_by' => $org->person($spec['author']),
+                'owner_ou_id' => $org->ou($spec['ou']),
+            ]);
+        }
+
+        return $ids;
+    }
+
+    /**
+     * The template set as data, so the SEED and the REPORT read one declaration.
+     *
+     * Split out for exactly one reason: the summary line names how many of these
+     * carry a `required_permission`, and the only way for that number to stay
+     * true without anybody maintaining it is for it to be counted from the same
+     * array the rows are written from. Static and side-effect-free — the `ou` and
+     * `author` values are {@see DemoOrganisationSeeder} KEYS, resolved against a
+     * {@see DemoOrganisation} at write time, so nothing here needs a database.
+     *
+     * @return array<string, array{name: string, ou: string, author: string, permission: ?string, heading: string, lines: list<string>}>
+     */
+    private static function templateDeclarations(): array
+    {
+        return [
             self::TPL_FACULTY_CIRCULAR => [
                 'name' => 'Demo faculty circular',
                 'ou' => DemoOrganisationSeeder::OU_FACULTY,
@@ -302,36 +392,22 @@ final class DocumentDemoSeeder
                 'heading' => 'CONTRACT',
                 'lines' => ['Contract: {{contract_no}}', 'Counterparty: {{counterparty}}'],
             ],
+            self::TPL_CIVIL_REQUISITION => [
+                'name' => 'Demo civil purchase requisition (drafters only)',
+                'ou' => DemoOrganisationSeeder::OU_DEPT_CIVIL,
+                'author' => DemoOrganisationSeeder::CIVIL_HEAD,
+                // The one row in this fixture that separates two people standing
+                // in the SAME unit: the civil secretary holds `documents:write`
+                // and the civil technician beside her does not.
+                'permission' => CorePermissions::DOCUMENTS_WRITE,
+                'heading' => 'PURCHASE REQUISITION',
+                'lines' => [
+                    'Requisition: {{requisition_no}}',
+                    'Department: {{department}}',
+                    'Estimated cost: {{amount}}',
+                ],
+            ],
         ];
-
-        $existing = array_fill_keys($this->templates->starterKeysForTenant($tenantId), true);
-
-        $ids = [];
-        foreach ($declared as $starterKey => $spec) {
-            $found = $this->findTemplateByName($tenantId, $spec['name']);
-            if (isset($existing[$starterKey]) && $found !== null) {
-                $ids[$starterKey] = $found;
-                continue;
-            }
-
-            $ids[$starterKey] = $this->templates->create($tenantId, [
-                'name' => $spec['name'],
-                'data' => self::templateBody($spec['name'], $spec['heading'], $spec['lines']),
-                // `tenant` rather than `system`: a system-scoped row skips the
-                // `required_permission` gate entirely
-                // ({@see DocumentAccessPolicy::canView()}), which would make the
-                // publish-tagged template above visible to everybody and quietly
-                // delete half of what this fixture is for.
-                'scope' => DocumentAccessPolicy::SCOPE_TENANT,
-                'required_permission' => $spec['permission'],
-                'is_system' => false,
-                'starter_key' => $starterKey,
-                'created_by' => $org->person($spec['author']),
-                'owner_ou_id' => $org->ou($spec['ou']),
-            ]);
-        }
-
-        return $ids;
     }
 
     /**

@@ -33,6 +33,7 @@ use Whity\Core\Group\GroupResolver;
 use Whity\Core\Group\GroupRuleResolver;
 use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Ou\OuReachResolver;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
 use Whity\Core\RBAC\ResourceTypeRegistry;
@@ -57,6 +58,9 @@ use Whity\Database\Database;
  * trivially if the fixture drifted into producing only one of them:
  *
  *   - the two secretaries' template sets (identical role, identical permission);
+ *   - the technician's template set against the secretary's IN THE SAME UNIT —
+ *     the one comparison the fixture used to fail, where reach is held constant
+ *     and only the capability differs;
  *   - an awaiting document against an acted-on one;
  *   - within ONE document, an acted recipient beside an unacted one at the same
  *     step — the state #1000's per-step counts exist for;
@@ -65,7 +69,11 @@ use Whity\Database\Database;
  *     different answers at the same anchor.
  *
  * Plus idempotency, which is the property `seed` is run against dev databases
- * on the strength of.
+ * on the strength of, and two guards on the fixture's LEGIBILITY: that every
+ * demo role can name a unit, a person and a role rather than printing their ids,
+ * and that no designer row is gated on a permission every demo role holds —
+ * which is what stops the next well-meant grant flattening the distinctions
+ * above without failing anything.
  *
  * ENGINE. {@see SchemaFromMigrations::make()} returns real PostgreSQL when
  * PHPUNIT_PG_DSN is set and SQLite otherwise, and both are worth having here:
@@ -231,11 +239,145 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
     {
         $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
 
-        $tagged = $this->taggedTemplateName();
+        $tagged = $this->taggedTemplateName(CorePermissions::DOCUMENTS_PUBLISH);
 
         self::assertNotContains($tagged, $this->visibleTemplateNames(DemoOrganisationSeeder::CIVIL_SECRETARY));
         self::assertNotContains($tagged, $this->visibleTemplateNames(DemoOrganisationSeeder::FACULTY_SECRETARY));
         self::assertContains($tagged, $this->visibleTemplateNames(DemoOrganisationSeeder::DEAN));
+    }
+
+    /**
+     * The comparison a customer actually makes: the technician and the secretary
+     * WHO SIT IN THE SAME OFFICE.
+     *
+     * This is the case the fixture used to get wrong, and it was measured rather
+     * than assumed: before the `documents:write`-tagged template existed,
+     * `civil-technician@` and `civil-secretary@` saw byte-identical template and
+     * block sets. Reach cannot separate them — they stand in one unit — and the
+     * only tag in the set was `documents:publish`, which neither holds.
+     * "Technicians don't see contract templates" was therefore true only against
+     * the DEAN, two levels up and four permissions richer, where a difference
+     * demonstrates nothing in particular.
+     *
+     * Asserted as a strict superset, like the two secretaries above, so it states
+     * the property rather than pinning a count.
+     */
+    public function testTheTechnicianSeesLessThanTheSecretaryStandingBesideHer(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $secretary = $this->visibleTemplateNames(DemoOrganisationSeeder::CIVIL_SECRETARY);
+        $technician = $this->visibleTemplateNames(DemoOrganisationSeeder::CIVIL_TECHNICIAN);
+
+        self::assertSame(
+            $this->ouOf(DemoOrganisationSeeder::CIVIL_SECRETARY),
+            $this->ouOf(DemoOrganisationSeeder::CIVIL_TECHNICIAN),
+            'The demonstration is only worth anything if the two stand in the SAME unit — '
+            . 'otherwise reach could be doing the work and the tag would prove nothing.'
+        );
+
+        self::assertSame(
+            [],
+            array_diff($technician, $secretary),
+            "The technician's set must be contained in the secretary's: she holds every "
+            . 'capability he does.'
+        );
+        self::assertNotSame(
+            [],
+            array_diff($secretary, $technician),
+            'The secretary must see at least one template the technician beside her does not, '
+            . 'or the permission gate is invisible to anybody comparing two people in one office.'
+        );
+
+        // And it is the write-tagged row specifically, not some accident of
+        // placement: naming it is what stops this test passing for the wrong
+        // reason if the tag is ever dropped from that template.
+        $tagged = $this->taggedTemplateName(CorePermissions::DOCUMENTS_WRITE);
+        self::assertContains($tagged, $secretary);
+        self::assertNotContains($tagged, $technician);
+    }
+
+    // ── 1b. the demo is LEGIBLE: names, not ids ──────────────────────────────
+
+    /**
+     * Every demo role can name a unit, a person and a role.
+     *
+     * Not a document permission and therefore easy to forget, which is what
+     * happened: the organizer's "raised from" column, the record page's trail and
+     * the routing screen's recipient list all resolve foreign keys through
+     * `GET /api/v1/ous`, `/users` and `/roles`, and a role holding only
+     * `documents:*` gets a 403 from each — so every persona read `Unit #2`,
+     * `Account #10`, `Role #5` under a banner naming the permission it lacked.
+     * A dataset whose whole subject is an OU hierarchy shaping what people see
+     * cannot present that hierarchy as three integers.
+     *
+     * ALL FIVE, deliberately — see {@see DemoOrganisationSeeder}'s
+     * DIRECTORY_PERMISSIONS for why withholding them from the technician (the
+     * tempting exception) would wreck the comparison the test above makes.
+     *
+     * Resolved BY NAME. #992 removed eight slugs and left holes at ids 2, 3, 6,
+     * 7, 10, 11, 14 and 15, so an id is not stable across installs, never mind
+     * meaningful in a test.
+     */
+    public function testEveryDemoRoleCanNameUnitsPeopleAndRoles(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $needed = [CorePermissions::OUS_READ, CorePermissions::USERS_READ, CorePermissions::ROLES_READ];
+
+        foreach ($this->demoRoleIds() as $roleName => $roleId) {
+            $held = $this->permissionsOfRole($roleId);
+            foreach ($needed as $permission) {
+                self::assertContains(
+                    $permission,
+                    $held,
+                    "The demo role '{$roleName}' cannot list {$permission}, so every screen it "
+                    . 'lands on prints ids where names belong.'
+                );
+            }
+        }
+    }
+
+    /**
+     * The directory grants above cannot have flattened what the fixture
+     * discriminates on — checked, rather than argued.
+     *
+     * The whole value of this dataset is that two people see different things.
+     * A permission granted to EVERY demo role is, by construction, incapable of
+     * telling any two of them apart — so if a designer row were ever gated on
+     * one, that row would silently stop discriminating and every screen would
+     * still render perfectly. This is the guard against the next well-meant
+     * grant, not against the ones just added.
+     */
+    public function testNoDesignerRowIsGatedOnAPermissionEveryDemoRoleHolds(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $roleIds = $this->demoRoleIds();
+        $holders = [];
+        foreach ($roleIds as $roleId) {
+            foreach ($this->permissionsOfRole($roleId) as $permission) {
+                $holders[$permission] = ($holders[$permission] ?? 0) + 1;
+            }
+        }
+
+        $tags = $this->taggedPermissions();
+        self::assertNotSame([], $tags, 'The fixture must gate at least one designer row on a permission.');
+
+        foreach ($tags as $permission) {
+            self::assertLessThan(
+                count($roleIds),
+                $holders[$permission] ?? 0,
+                "Every demo role holds '{$permission}', so gating a designer row on it hides that "
+                . 'row from nobody — the fixture would look like it discriminates and would not.'
+            );
+            self::assertGreaterThan(
+                0,
+                $holders[$permission] ?? 0,
+                "No demo role holds '{$permission}', so the row it gates is visible to nobody and "
+                . 'the demo shows an empty gate rather than a working one.'
+            );
+        }
     }
 
     /** Blocks are placed too, because {@see DocumentAccessPolicy} governs both tables. */
@@ -624,18 +766,114 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         return $names;
     }
 
-    private function taggedTemplateName(): string
+    /**
+     * The template gated on ONE named permission.
+     *
+     * Takes the slug rather than returning "the tagged one": there are two
+     * tagged templates now, gating two different capabilities, and an
+     * unqualified `SELECT … WHERE required_permission IS NOT NULL` would return
+     * whichever row the engine happened to hand back first — a test that passes
+     * or fails on row order.
+     */
+    private function taggedTemplateName(string $permission): string
     {
         $stmt = $this->pdo->prepare(
             'SELECT name FROM document_templates
-              WHERE tenant_id = :tenant_id AND required_permission IS NOT NULL'
+              WHERE tenant_id = :tenant_id AND required_permission = :permission'
         );
-        $stmt->execute([':tenant_id' => self::TENANT]);
+        $stmt->execute([':tenant_id' => self::TENANT, ':permission' => $permission]);
         $name = $stmt->fetchColumn();
 
-        self::assertNotFalse($name, 'The fixture must place one permission-tagged template.');
+        self::assertNotFalse($name, "The fixture must place a template gated on '{$permission}'.");
 
         return (string) $name;
+    }
+
+    /**
+     * Every permission any designer row in this tenant is gated on.
+     *
+     * Templates AND blocks, because migration 117 gave both tables the column
+     * and {@see DocumentAccessPolicy} is applied to both — a guard that read only
+     * templates would go quiet the first time a block was tagged.
+     *
+     * @return list<string>
+     */
+    private function taggedPermissions(): array
+    {
+        $found = [];
+        foreach (['document_templates', 'document_blocks'] as $table) {
+            $stmt = $this->pdo->prepare(
+                "SELECT DISTINCT required_permission FROM {$table}
+                  WHERE tenant_id = :tenant_id AND required_permission IS NOT NULL"
+            );
+            $stmt->execute([':tenant_id' => self::TENANT]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $permission) {
+                $found[(string) $permission] = true;
+            }
+        }
+
+        return array_keys($found);
+    }
+
+    /**
+     * The demo roles, by the `demo-` prefix the seeder guarantees.
+     *
+     * By prefix rather than by listing the five constants, so a sixth demo role
+     * is covered by the legibility and discrimination guards on the day it is
+     * added rather than on the day somebody remembers to extend a list here.
+     *
+     * @return array<string, int> role name => id
+     */
+    private function demoRoleIds(): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT id, name FROM roles WHERE tenant_id = :tenant_id AND name LIKE 'demo-%' ORDER BY name"
+        );
+        $stmt->execute([':tenant_id' => self::TENANT]);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(string) $row['name']] = (int) $row['id'];
+        }
+
+        self::assertNotSame([], $out, 'The fixture must create demo roles.');
+
+        return $out;
+    }
+
+    /**
+     * The permission SLUGS one role holds, joined through the catalogue.
+     *
+     * Never an id comparison: #992 deleted eight slugs and left holes in the low
+     * id range, so `permission_id = 4` is neither stable across installs nor
+     * readable in a failure message. Same pattern as
+     * {@see \Tests\Api\RolePermissionDeltaRealEngineTest}.
+     *
+     * @return list<string>
+     */
+    private function permissionsOfRole(int $roleId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT p.name
+               FROM role_permissions rp
+               JOIN permissions p ON p.id = rp.permission_id
+              WHERE rp.role_id = :role_id'
+        );
+        $stmt->execute([':role_id' => $roleId]);
+
+        return array_map(static fn ($name): string => (string) $name, $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /** The unit a person's single primary membership names. */
+    private function ouOf(string $email): ?int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT ou_id FROM memberships WHERE tenant_id = :tenant_id AND profile_id = :profile_id'
+        );
+        $stmt->execute([':tenant_id' => self::TENANT, ':profile_id' => $this->profileId($email)]);
+        $ouId = $stmt->fetchColumn();
+
+        return $ouId === false || $ouId === null ? null : (int) $ouId;
     }
 
     private function profileId(string $email): int
