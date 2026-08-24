@@ -21,11 +21,16 @@ use Whity\Core\Document\Organizer\DocumentViewContext;
 use Whity\Core\Document\Organizer\DocumentViewPresenter;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Document\Routing\RouteEventRepository;
+use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\Ou\OuSubtree;
 use Whity\Core\Ou\PrimaryMembershipOu;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
 use Whity\Core\Document\Render\RenderServiceUnavailableException;
+use Whity\Core\RBAC\CorePermissions;
+use Whity\Core\RBAC\RecordSectionRequirement;
+use Whity\Core\RBAC\RecordSectionResolver;
 use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -120,6 +125,27 @@ final class DocumentsApiHandler
         // standing there, so this path cannot become a way to reach a template
         // the designer's own list would not have shown.
         private readonly OuReachResolver $ouReach,
+        // ── #993: the record page's per-region authorization ─────────────────
+        //
+        // All three OPTIONAL, and all three defaulting to "absent" rather than
+        // to a stub, following {@see RolesApiHandler}'s own optional resolver.
+        // A host built without them makes no region claims at all — `show()`
+        // omits `sections` entirely and the response is byte-identical to what
+        // it was before this PR — which is what keeps the two existing handler
+        // tests, and any embedder that wires documents without routing, working
+        // unchanged. It also means the client's fail-closed rule (no verdicts ⇒
+        // every region hidden) is the ONLY reading of an absent key, so a
+        // half-wired deployment degrades to "nothing to show" rather than to
+        // "everything editable".
+        private readonly ?RecordSectionResolver $sectionResolver = null,
+        // The two routing reads the record page's record-scoped predicates need.
+        // Documents already depend on routing for visibility (a recipient may
+        // read what was sent to them — see DocumentVisibilityPolicy), so this is
+        // an existing edge, not a new one. Null fails the predicates CLOSED:
+        // "you may not act" and "there is no trail" are the safe answers when
+        // the host cannot tell.
+        private readonly ?RouteEventRepository $routeEvents = null,
+        private readonly ?RouteRecipientRepository $routeRecipients = null,
     ) {
     }
 
@@ -309,14 +335,24 @@ final class DocumentsApiHandler
             $callerId
         );
 
-        return Response::json([
-            'data' => DocumentPresenter::document(
-                $document,
-                $this->artifacts->listForDocument($documentId, $tenantId),
-                $filing[$documentId] ?? [],
-                $starred === null ? null : (int) $starred['id']
-            ),
-        ]);
+        $data = DocumentPresenter::document(
+            $document,
+            $this->artifacts->listForDocument($documentId, $tenantId),
+            $filing[$documentId] ?? [],
+            $starred === null ? null : (int) $starred['id']
+        );
+
+        // #993: the record page's per-region verdicts. Only `show()` carries
+        // them — the LIST deliberately does not, and that asymmetry is the same
+        // one `collection_ids` already has: a verdict is an answer about ONE
+        // record and a caller, and computing 25 of them per page to render a
+        // table that gates nothing would be work nobody reads.
+        $verdicts = $this->resolveRecordSections($tenantId, $callerId, $document);
+        if ($verdicts !== null) {
+            $data['sections'] = $verdicts;
+        }
+
+        return Response::json(['data' => $data]);
     }
 
     /**
@@ -456,6 +492,270 @@ final class DocumentsApiHandler
                 $this->artifacts->listForDocument((int) $document['id'], $tenantId)
             ),
         ], 201);
+    }
+
+    // ── #993: the record page's regions ─────────────────────────────────────
+
+    /**
+     * The three regions of the document record page, declared once (#910/#975).
+     *
+     * A document record answers three different questions and the operator's
+     * requirement — *"some parts have permissions, not always everything is
+     * allowed"* — is the reason they are three declarations rather than one:
+     * reading the document, reading what has happened to it, and being the
+     * person it is currently with are separate facts with separate answers.
+     *
+     * WHY ALL THREE `readPermission`s ARE NULL, which is the decision most worth
+     * arguing. It is tempting to gate the trail on `audit:read` and the pending
+     * queue on `documents:route`, and both would read as tighter. Both would
+     * also be gates with a BYPASS ONE PATH SEGMENT AWAY: `GET /{id}/trail` and
+     * `GET /{id}/recipients` are registered on `documents:read`, so a caller
+     * refused the region would simply call the route and be served. The
+     * resolver's own {@see RecordSectionResolver::mayRead()} docblock names that
+     * failure exactly, and #975's fifth invariant is that a region's dedicated
+     * route must carry the same gate as the region. Narrowing those two routes
+     * is a real policy change — it would take the trail away from a recipient
+     * who was sent the document, which is precisely the audience that most needs
+     * to see where it has been — and it belongs to whoever owns routing, not to
+     * a record page. So `null` here is the honest, documented statement the
+     * field is for: *the route that served the record is the only read gate*,
+     * and that route is `documents:read` plus {@see DocumentVisibilityPolicy}.
+     *
+     * The consequence is that a caller who gets a payload at all sees all three
+     * regions, and the mechanism does its work on the WRITE side, where the
+     * three answers genuinely differ:
+     *
+     *  - `document`   — `documents:render`, plus a record predicate. Correcting
+     *                   an issued document is the one write it HAS.
+     *  - `trail`      — no permission (appending a note is open to anyone who
+     *                   can read the document — see DocumentRouter::act, where
+     *                   `noted` is handled before the recipient check), plus a
+     *                   record predicate: there must be a route to append to.
+     *  - `recipients` — no permission either. Being a recipient IS the
+     *                   authorization, which is a fact about the RECORD and the
+     *                   caller, so it is a record predicate and not a slug. This
+     *                   is the one region whose verdict a grant cannot change,
+     *                   and telling it apart from a permission refusal is what
+     *                   {@see RecordSectionResolver::CODE_RECORD} exists for.
+     *
+     * @return list<RecordSectionRequirement>
+     */
+    private static function recordSections(): array
+    {
+        return [
+            new RecordSectionRequirement(
+                key: 'document',
+                readPermission: null,
+                writePermission: CorePermissions::DOCUMENTS_RENDER,
+                recordScoped: true,
+                deniedReason: 'You can read this document. Issuing a corrected version of it '
+                    . 'is not something your account can do.',
+            ),
+            new RecordSectionRequirement(
+                key: 'trail',
+                readPermission: null,
+                writePermission: null,
+                recordScoped: true,
+                // No `deniedReason`: with no write permission declared, a
+                // PERMISSION refusal is unreachable for this region, and copy
+                // for a branch that cannot be taken is copy nobody can check.
+                // The record refusal supplies the sentence instead.
+            ),
+            new RecordSectionRequirement(
+                key: 'recipients',
+                readPermission: null,
+                writePermission: null,
+                recordScoped: true,
+            ),
+        ];
+    }
+
+    /**
+     * The audience-safe sentence for each region's RECORD refusal.
+     *
+     * One per region because the three refusals are three different facts, and
+     * {@see RecordSectionResolver::resolve()} takes one sentence per call — see
+     * {@see self::resolveRecordSections()} for why that is called three times.
+     *
+     * Written for the person reading the screen, naming no identifier and no
+     * slug: a `record` refusal cannot be fixed by a grant, so there is nothing
+     * operator-grade to add (which is why the resolver sends `detail: null` for
+     * this code).
+     */
+    private const RECORD_DENIED_REASONS = [
+        'document' => 'The template this document was issued from is no longer available, '
+            . 'so no corrected version can be issued. The versions already issued are unaffected.',
+        'trail' => 'This document has not been put into circulation, so there is no trail to add to.',
+        'recipients' => 'This document is not awaiting you. You are reading it as a record '
+            . 'rather than as something to act on.',
+    ];
+
+    /**
+     * The per-region verdicts for this caller and this document, or null when
+     * this host does not resolve regions at all (#910/#975).
+     *
+     * WHY THIS CALLS `resolve()` ONCE PER REGION. The resolver takes ONE record
+     * predicate and ONE record sentence per call, which is right for a role —
+     * `roleManageableByTenant()` is a single fact about the row. A document has
+     * three independent ones: whether it can be re-issued at all, whether it
+     * has a trail, and whether it is with this caller. The alternative was
+     * widening `resolve()` to take a predicate MAP, which would have changed a
+     * class shared with the roles record page to suit one caller and forced
+     * every existing site to pass a map to say the one thing it means. Calling a
+     * pure function three times costs three cheap reads and leaves the shared
+     * contract alone; the requirement LIST is still declared once, in
+     * {@see self::recordSections()}, so "which regions does this record have"
+     * remains answerable in one place.
+     *
+     * The two absences are different and both are meaningful, exactly as in
+     * {@see RolesApiHandler}: `null` means this host makes no region claims, so
+     * the response carries no `sections` key and behaves as it did before. An
+     * empty ARRAY means regions WERE resolved and this caller was granted none —
+     * a record with a header and no body.
+     *
+     * @param array<string, mixed> $document
+     * @return array<string, array{state: string, denial: array{code: string, reason: string,
+     *         detail: string|null}|null}>|null
+     */
+    private function resolveRecordSections(
+        int $tenantId,
+        int $callerId,
+        array $document
+    ): ?array {
+        if ($this->sectionResolver === null) {
+            return null;
+        }
+
+        // The operator-grade half of a denial names a permission SLUG, and
+        // `permissions:read` is the permission that governs seeing permission
+        // slugs at all — the same gate {@see RolesApiHandler} chose, for the
+        // same reason rather than by analogy. A caller without it being told
+        // "this needs 'documents:render'" would be reading the RBAC catalogue
+        // through a denial message.
+        $includeDetail = $this->roleChecker->hasPermissionForProfile(
+            $callerId,
+            CorePermissions::PERMISSIONS_READ,
+            $tenantId
+        );
+
+        $predicates = [
+            'document' => $this->documentIsReissuable($tenantId, $callerId, $document),
+            'trail' => $this->documentHasTrail($tenantId, $document),
+            'recipients' => $this->documentIsAwaiting($tenantId, $callerId, $document),
+        ];
+
+        $verdicts = [];
+        foreach (self::recordSections() as $requirement) {
+            $verdicts += $this->sectionResolver->resolve(
+                [$requirement],
+                $callerId,
+                $tenantId,
+                $predicates[$requirement->key] ?? false,
+                self::RECORD_DENIED_REASONS[$requirement->key] ?? null,
+                $includeDetail
+            );
+        }
+
+        return $verdicts;
+    }
+
+    /**
+     * Whether a corrected version of this document could be issued at all.
+     *
+     * The same three conditions {@see self::rerender()} enforces, asked in
+     * advance rather than restated: rendering enabled, persisting enabled, and
+     * a template still readable by this caller. Deliberately the same three, so
+     * the page cannot offer a control the route would refuse with a 409 or a
+     * 503 — which is the whole point of a record predicate, and the reason this
+     * is not simply `true`.
+     *
+     * It is NOT a permission question. A caller holding `documents:render` on a
+     * document whose template was deleted is refused by the record, and #975
+     * separates the two codes precisely because an operator told "you lack a
+     * permission" would go looking for a grant that could not have helped.
+     *
+     * @param array<string, mixed> $document
+     */
+    private function documentIsReissuable(int $tenantId, int $callerId, array $document): bool
+    {
+        $effective = $this->settings->effective($tenantId);
+        if (($effective[SettingsRegistry::DOCUMENTS_RENDER_ENABLED] ?? 'false') !== 'true') {
+            return false;
+        }
+        if (($effective[SettingsRegistry::DOCUMENTS_PERSIST_ENABLED] ?? 'true') !== 'true') {
+            return false;
+        }
+
+        $templateId = $document['document_template_id'];
+        $template = is_int($templateId) ? $this->templates->findById($templateId, $tenantId) : null;
+
+        // #1004 made template visibility two-part: the permission gate AND the
+        // OU reach predicate. Passing only the first here would let the record
+        // page re-issue from a template the designer's own list withholds,
+        // which is the one thing that scoping exists to prevent.
+        return $template !== null
+            && $this->templatePolicy->canView(
+                $template,
+                $callerId,
+                $this->permissionResolver($callerId, $tenantId),
+                $this->ouReach->reachFor($tenantId, $callerId),
+            );
+    }
+
+    /**
+     * Whether this document has a trail to append to.
+     *
+     * Asked of the EVENTS rather than of the routes, because an event is what a
+     * note becomes and `issue()` always appends one — so "has a route" and "has
+     * at least one event" cannot disagree, and the events table is the one the
+     * region actually renders.
+     *
+     * This is the predicate behind the empty state the page must not fake. A
+     * document nobody has circulated has no trail, and a region that showed an
+     * empty list would be stating *"nothing has happened to this"* — true only
+     * by accident, and indistinguishable from a trail that failed to load.
+     *
+     * @param array<string, mixed> $document
+     */
+    private function documentHasTrail(int $tenantId, array $document): bool
+    {
+        // Fail closed on an unwired host: "there is no trail" is the safe answer
+        // when this deployment cannot tell, and it renders as a region that
+        // explains itself rather than as one offering a write that would fail.
+        return $this->routeEvents !== null
+            && $this->routeEvents->countForDocument((int) $document['id'], $tenantId) > 0;
+    }
+
+    /**
+     * Whether this document is currently awaiting THIS caller.
+     *
+     * An OPEN recipient row — `closed_by_event_id IS NULL`, migration 112's
+     * partial unique index — for this profile on this document. A closed row is
+     * something already done, so counting it would tell a reader the document is
+     * with them when they have already dealt with it.
+     *
+     * Filtered here rather than through a new repository method on purpose: a
+     * document's recipient list is bounded by its own fan-out, the region
+     * renders the same rows anyway, and adding a query to a routing repository
+     * for a documents-side question is how two nearly-identical "is it open"
+     * predicates end up in the codebase disagreeing about the same index.
+     *
+     * @param array<string, mixed> $document
+     */
+    private function documentIsAwaiting(int $tenantId, int $callerId, array $document): bool
+    {
+        if ($this->routeRecipients === null) {
+            return false;
+        }
+
+        foreach ($this->routeRecipients->listForDocument((int) $document['id'], $tenantId) as $recipient) {
+            if ($recipient['closed_by_event_id'] === null
+                && (int) $recipient['profile_id'] === $callerId) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────

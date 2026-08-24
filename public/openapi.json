@@ -25631,6 +25631,12 @@
                     },
                     "starred": {
                         "type": "boolean"
+                    },
+                    "sections": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/RecordSectionVerdict"
+                        }
                     }
                 },
                 "required": [

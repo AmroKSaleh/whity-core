@@ -2133,7 +2133,21 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     // The designer's OU-reach predicate (migration 117): the ISSUE path reads
     // a template, and must withhold one filed at a unit the caller has no
     // standing at exactly as the designer's list does.
-    $ouReachResolver
+    $ouReachResolver,
+    // #993: the document RECORD PAGE gates its regions separately — who may
+    // re-issue the document, who may add to its trail, and whether it is
+    // currently awaiting this caller are three different questions — and the
+    // server answers all three. Without this resolver `GET /api/documents/{id}`
+    // carries no `sections` key and the client fails closed on the missing map,
+    // which is the same shape #910 gave the roles record page.
+    new \Whity\Core\RBAC\RecordSectionResolver($roleChecker),
+    // The two routing reads the record-scoped predicates need. The SAME
+    // instances the routing handler below is given, not fresh ones: a second
+    // repository over the same table is a second place the "open recipient"
+    // rule could be spelled, and migration 112's partial unique index is the
+    // only definition of open there should ever be.
+    $routeEventRepository,
+    $routeRecipientRepository
 );
 // `/api/documents/views` is registered BEFORE the `{id:\d+}` routes and cannot
 // collide with them: the id constraint is digits-only, so `views` was never a
