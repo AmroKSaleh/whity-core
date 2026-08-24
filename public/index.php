@@ -696,7 +696,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'group' => 'overview',
         // Near the top on purpose: this is the surface a person opens daily,
         // where the entries below it are things they go looking for.
-        'order' => 1.5,
+        'order' => 2,
         // #978, consuming #881. DELIBERATELY UNGATED — no requiredPermission and
         // no requiredRole.
         //
@@ -721,7 +721,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'href' => '/admin/documents',
         'icon' => 'file-text',
         'group' => 'documents',
-        'order' => 9.2,
+        'order' => 2,
         // WC-docdesigner: the document/label template designer. Mirrors GET
         // /api/document-templates (DocumentTemplatesApiHandler), gated on
         // documents:read. The nav item carries the requirement so a
@@ -735,7 +735,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'href' => '/admin/document-library',
         'icon' => 'folders',
         'group' => 'documents',
-        'order' => 9.3,
+        'order' => 1,
         // #978 (#947 item 5): the ORGANIZER, which browses issued documents —
         // as distinct from the entry above it, which is the template DESIGNER.
         // Two entries rather than one screen with tabs: designing a template and
@@ -755,7 +755,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'href' => '/admin/registrations',
         'icon' => 'user-check',
         'group' => 'documents',
-        'order' => 9.5,
+        'order' => 3,
         // WC-password-reset-2fa-recovery: unified admin page (tabs: Signup /
         // Password reset / 2FA auth reset — see web/app/(protected)/admin/
         // approval-gating/). The first tab, at this href, is the WC-235
@@ -799,7 +799,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'href' => '/admin/languages',
         'icon' => 'language',
         'group' => 'system',
-        'order' => 9.6,
+        'order' => 2,
         // WC-583: languages are a GLOBAL catalogue (no tenant_id column at
         // all) — create/update/enable/disable is a SYSTEM-TENANT-ONLY
         // PLATFORM capability (mirrors the Feature Flags/Email/Storage
@@ -814,7 +814,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'href' => '/admin/translations',
         'icon' => 'world',
         'group' => 'system',
-        'order' => 9.7,
+        'order' => 3,
         // WC-583: translation rows ARE tenant-scoped (system default vs a
         // tenant's own override) — unlike Languages above, every tenant
         // holding translations:manage may reach this page to edit its own
