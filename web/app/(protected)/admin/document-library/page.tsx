@@ -1,31 +1,14 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Input } from '@/components/ui/input';
 import { Button } from '@amroksaleh/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@amroksaleh/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { IconFilePlus, IconStar, IconStarFilled, IconTrash } from '@tabler/icons-react';
+import { IconFilePlus } from '@tabler/icons-react';
 import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 import { useRouter } from 'next/navigation';
 import { useCapabilities } from '@/hooks/useCapabilities';
@@ -35,17 +18,36 @@ import {
   type CreatableTemplate,
 } from '@/components/documents/create-document-dialog';
 import { ViewRail, viewLabel, viewDescription } from './view-rail';
+import { LibraryToolbar } from './library-toolbar';
+import { DocumentGrid } from './document-grid';
+import {
+  DocumentActions,
+  DocumentTitle,
+  StarButton,
+  type DocumentItemHandlers,
+} from './document-item';
+import {
+  CreateCollectionDialog,
+  DeleteCollectionDialog,
+  FileIntoCollectionDialog,
+  RenameCollectionDialog,
+} from './collection-dialogs';
+import { useLibraryEmptyState } from './library-empty-state';
 import type {
+  AppliedSort,
   DocumentCollection,
   DocumentListResponse,
   DocumentRow,
+  DocumentSortField,
   DocumentView,
   DocumentViewsResponse,
+  LibraryLayout,
+  SortDirection,
 } from './types';
 
 /**
- * The document organizer (#978, implementing #947 item 5) — a Drive-shaped
- * browser over documents that stores no folder tree.
+ * The document library (#947 item 5) — a Drive-shaped browser over documents
+ * that stores no folder tree.
  *
  * WHY THERE IS NO TREE ON THIS SCREEN
  * -----------------------------------
@@ -57,20 +59,63 @@ import type {
  * thing is the user's own filing: collections, which claim nothing about where a
  * document lives.
  *
+ * A FOLDER IS NOT A DIRECTORY, AND THIS SCREEN MUST NOT IMPLY OTHERWISE
+ * ---------------------------------------------------------------------
+ * The browser shape this change adds — a list/grid switch, a sort, per-row
+ * filing — is borrowed from a file manager, and a file manager's central claim
+ * is CONTAINMENT: a file is in exactly one place, and moving it out of one
+ * place puts it in another. Nothing here works that way, and every control was
+ * chosen so that it cannot be read as if it did.
+ *
+ *  - One document appears in SEVERAL folders at once. "Awaiting me", "Passed
+ *    through my unit" and "All documents" can all list the same row, truthfully.
+ *  - There is no move, no cut/paste, and no drag between rail entries. The only
+ *    two writes on a row are the star and "Add to collection…", and both are
+ *    ADDITIVE — the wording is "add to", never "move to", and every dialog says
+ *    out loud that filing changes nothing about where the document lives or who
+ *    else can see it.
+ *  - "Remove from this collection" is offered only INSIDE a collection, where
+ *    the thing being removed from is a list somebody wrote. It is never offered
+ *    in a derived folder, because there is nothing there to remove a document
+ *    from: a person who "removed" something from "Awaiting me" would expect that
+ *    to mean they had dealt with it, and it cannot mean that. What empties that
+ *    folder is acting on the document, on the record page.
+ *  - There are no breadcrumbs, deliberately, and this is the control most
+ *    obviously suggested by the words "browse like a file manager". A breadcrumb
+ *    asserts a PATH — that this folder is inside that one, and that the document
+ *    is inside this one. Both halves are false here: the rail is flat, and the
+ *    folders overlap rather than nest. The rail's own selected entry plus the
+ *    sentence under it says which query is running, which is the true version of
+ *    what a breadcrumb would have said falsely.
+ *
  * THE RAIL IS SERVER-DRIVEN, AND THAT IS THE POINT
  * ------------------------------------------------
  * This screen does not know which folders exist. It renders what
  * `GET /api/v1/documents/views` returns, which is the folders this installation
- * can actually COMPUTE. Three of the six #947 item 5 specifies are absent: the
- * routing facts they read exist now that item 3 has landed, but each folder
- * still needs a server-side predicate and registration, so the server omits
- * them and this screen shows nothing in their place. An empty "Awaiting me"
- * would state "nothing awaits you" — false, unfalsifiable from the outside, and
- * indistinguishable from having nothing to do.
+ * can actually COMPUTE. The three routing-derived folders proved it: they were
+ * registered server-side in #995 and appeared here with no change to this file.
+ * A hardcoded rail would have needed editing, and would have shipped three empty
+ * folders in the meantime — an empty "Awaiting me" states "nothing awaits you",
+ * which is false, unfalsifiable from the outside, and indistinguishable from
+ * having nothing to do.
  *
- * The consequence worth stating: when those three ARE built, they appear here
- * with no change to this file. A hardcoded rail would have needed editing, and
- * would have shipped three empty folders in the meantime.
+ * THE FOUR WAYS THIS SCREEN SHOWS NOTHING, AND WHY THEY LOOK DIFFERENT
+ * -------------------------------------------------------------------
+ * #987 built a three-way distinction into the rail and it is undone in one line
+ * by a tidy empty state. Held apart here as:
+ *
+ *  1. A folder whose facts this installation does not record is ABSENT — the
+ *     server never sends it, the rail renders nothing for it, and the footnote
+ *     names the missing fact source in prose that is not clickable.
+ *  2. A folder this caller cannot ANCHOR is listed, DISABLED, carrying the
+ *     server's own reason (422 on request, surfaced verbatim below).
+ *  3. A folder that matched nothing is an ordinary empty state — and
+ *     {@link libraryEmptyState} splits that further, because "the folder is
+ *     empty", "your search matched nothing" and "what you filed is no longer
+ *     readable" are three different facts.
+ *  4. A control the caller cannot USE is disabled with its reason, never hidden
+ *     (#951): renaming the built-in starred collection, reversing the default
+ *     order, filing when the collection list could not be read.
  *
  * WHAT IS NOT REUSED, AND WHY
  * ---------------------------
@@ -79,9 +124,7 @@ import type {
  * JavaScript and describes its UI as data for the block renderer to interpret.
  * This is a core admin page, so it composes the same underlying components
  * directly — `DataTable` in server-pagination mode, the OU list — exactly as the
- * roles, users and tag-group pages do. Declaring a core screen as blocks would
- * route it through a renderer built to interpret a plugin's manifest, for no
- * gain.
+ * roles, users and tag-group pages do.
  */
 
 /** The tenant's own units, for the anchor selector. */
@@ -94,13 +137,30 @@ interface OuOption {
 const DEFAULT_VIEW = 'all';
 
 /**
- * The anchor selector's "my own unit" sentinel.
+ * Where the layout choice is remembered.
  *
- * A `Select` cannot carry an empty-string value (Radix reserves it for "no
- * selection"), and the absence of `ou_id` on the wire is a real, meaningful
- * choice — "resolve my unit server-side" — rather than a blank.
+ * `wc:<screen>:<thing>`, the convention the units and relations screens already
+ * use. localStorage rather than a profile column because core has no per-user
+ * preference store, and a migration plus an endpoint to remember a two-state
+ * toggle would be a schema change to record something nobody misses on a new
+ * machine. The consequence is stated rather than hidden: this follows the
+ * BROWSER, not the account.
  */
-const MINE = '__mine__';
+const LAYOUT_STORAGE_KEY = 'wc:document-library:layout';
+
+function storedLayout(): LibraryLayout {
+  if (typeof window === 'undefined') {
+    return 'list';
+  }
+  // A try/catch because a browser with site data blocked THROWS on access
+  // rather than returning null, and a library that fails to render because it
+  // could not read a cosmetic preference is worse than one that opens as a list.
+  try {
+    return window.localStorage.getItem(LAYOUT_STORAGE_KEY) === 'grid' ? 'grid' : 'list';
+  } catch {
+    return 'list';
+  }
+}
 
 export default function DocumentLibraryPage() {
   const { apiClient } = useAuth();
@@ -123,10 +183,24 @@ export default function DocumentLibraryPage() {
   // the URL and the results disagree for a few hundred milliseconds.
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
+
+  // Sort. `sortDirection` is null until the caller overrides it, because the
+  // DEFAULT direction belongs to the server: A→Z for the text columns,
+  // newest-first for the date. Holding a client-side default here would make one
+  // of the three columns open the wrong way round, and holding the server's rule
+  // in two places would let them drift.
+  const [sortField, setSortField] = useState<DocumentSortField | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection | null>(null);
+
+  const [layout, setLayout] = useState<LibraryLayout>(storedLayout);
+
   const [creatingDocument, setCreatingDocument] = useState(false);
   const [creatingCollection, setCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
+  const [renamingCollection, setRenamingCollection] = useState<DocumentCollection | null>(null);
+  const [renameName, setRenameName] = useState('');
   const [deletingCollection, setDeletingCollection] = useState<DocumentCollection | null>(null);
+  const [filingDocument, setFilingDocument] = useState<DocumentRow | null>(null);
   const [busy, setBusy] = useState(false);
 
   // ── the rail ────────────────────────────────────────────────────────────
@@ -159,7 +233,7 @@ export default function DocumentLibraryPage() {
    * ever be wrong in one direction, and it would be the visible one.
    *
    * A partial walk is treated as a FAILURE rather than presented as the whole
-   * library, for the reason the unit list above already gives: a picker missing
+   * library, for the reason the unit list below already gives: a picker missing
    * templates silently tells somebody they cannot raise the document they came
    * to raise.
    */
@@ -211,14 +285,19 @@ export default function DocumentLibraryPage() {
     return all.find((v) => v.key === viewKey) ?? null;
   }, [views.data, viewKey]);
 
-  const takesAnchor = useMemo(
-    () => selectedView?.parameters.some((p) => p.name === 'ou_id') ?? false,
-    [selectedView]
-  );
+  // Memoised so the `?? []` does not mint a new array every render and
+  // invalidate the two useMemos below (which the lint rule catches, and which
+  // would recompute the rail's props on every keystroke in the search box).
+  const collectionList = useMemo(() => collections.data ?? [], [collections.data]);
 
   const starredCollection = useMemo(
-    () => (collections.data ?? []).find((c) => c.system_key === 'starred') ?? null,
-    [collections.data]
+    () => collectionList.find((c) => c.system_key === 'starred') ?? null,
+    [collectionList]
+  );
+
+  const openCollection = useMemo(
+    () => collectionList.find((c) => c.id === collectionId) ?? null,
+    [collectionList, collectionId]
   );
 
   // ── the page of documents ───────────────────────────────────────────────
@@ -228,6 +307,14 @@ export default function DocumentLibraryPage() {
     if (anchorOuId !== null) params.set('ou_id', String(anchorOuId));
     if (collectionId !== null) params.set('collection_id', String(collectionId));
     if (appliedSearch !== '') params.set('q', appliedSearch);
+    if (sortField !== null) {
+      params.set('sort', sortField);
+      // Sent only when the caller overrode it. The server refuses `direction`
+      // without `sort` for a reason worth honouring here rather than working
+      // around: the unnamed default order is a surrogate key, and reversing it
+      // would publish that key as a sortable column.
+      if (sortDirection !== null) params.set('direction', sortDirection);
+    }
 
     const response = await apiClient(`/api/v1/documents?${params.toString()}`);
     if (!response.ok) {
@@ -239,7 +326,13 @@ export default function DocumentLibraryPage() {
       throw new Error(body?.error ?? t('organizer.error.list', 'Failed to load documents'));
     }
     return (await response.json()) as DocumentListResponse;
-  }, [apiClient, viewKey, collectionId, anchorOuId, page, appliedSearch]);
+  }, [apiClient, viewKey, collectionId, anchorOuId, page, appliedSearch, sortField, sortDirection]);
+
+  // `refetch` is stable (useFetch memoises it with no deps); the fetch RESULT
+  // object is not, so the mutations below depend on these rather than on
+  // `documents`/`collections` and are not rebuilt on every render.
+  const refetchDocuments = documents.refetch;
+  const refetchCollections = collections.refetch;
 
   // Every navigation resets the page in the SAME event that changes the folder,
   // rather than in an effect reacting to it. Page 4 of one folder is rarely page
@@ -268,76 +361,161 @@ export default function DocumentLibraryPage() {
     setPage(1);
   }, []);
 
+  const changeSortField = useCallback((field: DocumentSortField | null) => {
+    setSortField(field);
+    // Cleared, not carried over: `desc` means newest-first on a date and Z→A on
+    // a title, so keeping the previous direction across a field change hands the
+    // caller an order they did not ask for. Null lets the server apply the
+    // default for the new field, and the response says which it chose.
+    setSortDirection(null);
+    setPage(1);
+  }, []);
+
+  const chooseLayout = useCallback((next: LibraryLayout) => {
+    setLayout(next);
+    try {
+      window.localStorage.setItem(LAYOUT_STORAGE_KEY, next);
+    } catch {
+      // Site data blocked. The choice still applies for this visit; only
+      // remembering it fails, and refusing to switch layout would be a worse
+      // answer to a storage problem.
+    }
+  }, []);
+
+  // The order the server APPLIED, which is what the direction control reflects.
+  // Falling back to the requested field with `desc` covers the first render only.
+  const appliedSort: AppliedSort = documents.data?.sort ?? {
+    field: sortField,
+    direction: sortDirection ?? 'desc',
+  };
+
+  const toggleSortDirection = useCallback(() => {
+    setSortDirection(appliedSort.direction === 'asc' ? 'desc' : 'asc');
+    setPage(1);
+  }, [appliedSort.direction]);
+
   // ── mutations ───────────────────────────────────────────────────────────
 
-  const toggleStar = useCallback(
-    async (row: DocumentRow) => {
+  /**
+   * One place for every write on this screen.
+   *
+   * Each of them is: disable the controls, call, surface the server's own
+   * sentence on failure, refresh what the change can be seen in. Written once
+   * because six copies of that shape is six chances for one of them to swallow
+   * an error or to forget that a filing change also changes a rail count.
+   */
+  const mutate = useCallback(
+    async (
+      path: string,
+      method: 'PUT' | 'POST' | 'PATCH' | 'DELETE',
+      fallbackMessage: string,
+      body?: unknown
+    ): Promise<boolean> => {
       setBusy(true);
       try {
-        const response = await apiClient(`/api/v1/documents/${row.id}/star`, {
-          method: row.starred ? 'DELETE' : 'PUT',
+        const response = await apiClient(path, {
+          method,
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         });
         if (!response.ok) {
-          throw new Error(t('organizer.error.star', 'Failed to update the star'));
+          const failure = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(failure?.error ?? fallbackMessage);
         }
-        documents.refetch();
-        // The rail shows a count, and the starred collection may have just come
-        // into existence — it is created on first use.
-        collections.refetch();
+        refetchDocuments();
+        // The rail shows a count and the starred collection may have just come
+        // into existence — it is created on first star, not seeded.
+        refetchCollections();
+        return true;
       } catch (error) {
         addToast(error instanceof Error ? error.message : String(error), 'error');
+        return false;
       } finally {
         setBusy(false);
       }
     },
-    [apiClient, addToast, documents, collections, t]
+    [apiClient, addToast, refetchDocuments, refetchCollections]
+  );
+
+  const toggleStar = useCallback(
+    (row: DocumentRow) => {
+      void mutate(
+        `/api/v1/documents/${row.id}/star`,
+        row.starred ? 'DELETE' : 'PUT',
+        t('organizer.error.star', 'Failed to update the star')
+      );
+    },
+    [mutate, t]
   );
 
   const createCollection = useCallback(async () => {
-    setBusy(true);
-    try {
-      const response = await apiClient('/api/v1/document-collections', {
-        method: 'POST',
-        body: JSON.stringify({ name: newCollectionName }),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? t('organizer.error.createCollection', 'Failed to create the collection'));
-      }
+    const created = await mutate(
+      '/api/v1/document-collections',
+      'POST',
+      t('organizer.error.createCollection', 'Failed to create the collection'),
+      { name: newCollectionName }
+    );
+    if (created) {
       setCreatingCollection(false);
       setNewCollectionName('');
-      collections.refetch();
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : String(error), 'error');
-    } finally {
-      setBusy(false);
     }
-  }, [apiClient, addToast, collections, newCollectionName, t]);
+  }, [mutate, newCollectionName, t]);
+
+  const renameCollection = useCallback(async () => {
+    if (renamingCollection === null) return;
+    const renamed = await mutate(
+      `/api/v1/document-collections/${renamingCollection.id}`,
+      'PATCH',
+      t('organizer.error.renameCollection', 'Failed to rename the collection'),
+      { name: renameName }
+    );
+    if (renamed) {
+      setRenamingCollection(null);
+    }
+  }, [mutate, renamingCollection, renameName, t]);
 
   const deleteCollection = useCallback(async () => {
     if (deletingCollection === null) return;
-    setBusy(true);
-    try {
-      const response = await apiClient(`/api/v1/document-collections/${deletingCollection.id}`, {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? t('organizer.error.deleteCollection', 'Failed to delete the collection'));
-      }
+    const deleted = await mutate(
+      `/api/v1/document-collections/${deletingCollection.id}`,
+      'DELETE',
+      t('organizer.error.deleteCollection', 'Failed to delete the collection')
+    );
+    if (deleted) {
+      // The open folder just stopped existing. Navigating away is the honest
+      // move: leaving `collection_id` pointing at a deleted row would answer
+      // 404, which reads as "you cannot open collections".
       if (collectionId === deletingCollection.id) {
         selectView(DEFAULT_VIEW);
       }
       setDeletingCollection(null);
-      collections.refetch();
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : String(error), 'error');
-    } finally {
-      setBusy(false);
     }
-  }, [apiClient, addToast, collections, collectionId, deletingCollection, selectView, t]);
+  }, [mutate, collectionId, deletingCollection, selectView, t]);
 
-  // ── the table ───────────────────────────────────────────────────────────
+  const toggleFiling = useCallback(
+    (targetCollectionId: number, next: boolean) => {
+      if (filingDocument === null) return;
+      void mutate(
+        `/api/v1/document-collections/${targetCollectionId}/documents/${filingDocument.id}`,
+        next ? 'PUT' : 'DELETE',
+        t('organizer.error.file', 'Failed to change what this document is filed in')
+      );
+    },
+    [mutate, filingDocument, t]
+  );
+
+  const removeFromOpenCollection = useCallback(
+    (row: DocumentRow) => {
+      if (collectionId === null) return;
+      void mutate(
+        `/api/v1/document-collections/${collectionId}/documents/${row.id}`,
+        'DELETE',
+        t('organizer.error.unfile', 'Failed to remove the document from this collection')
+      );
+    },
+    [mutate, collectionId, t]
+  );
+
+  // ── rows ────────────────────────────────────────────────────────────────
 
   const ouName = useCallback(
     (ouId: number | null) => {
@@ -357,58 +535,58 @@ export default function DocumentLibraryPage() {
     [ous.data, t]
   );
 
+  // Filing needs the collection list — to show what is already true, and to
+  // offer somewhere to file. When it could not be read the control is disabled
+  // carrying that sentence rather than hidden (#951).
+  const filingDisabledReason = collections.error
+    ? t('organizer.error.collections', 'Failed to load your collections')
+    : null;
+
+  const itemHandlers: DocumentItemHandlers = useMemo(
+    () => ({
+      busy,
+      filingDisabledReason,
+      onToggleStar: toggleStar,
+      onFileInto: setFilingDocument,
+      // Offered ONLY inside an ordinary collection. In the starred folder the
+      // star on the row already removes it, and two controls for one effect can
+      // disagree on screen.
+      onRemoveFromOpenCollection: collectionId !== null ? removeFromOpenCollection : undefined,
+    }),
+    [busy, filingDisabledReason, toggleStar, collectionId, removeFromOpenCollection]
+  );
+
   const columns: DataTableColumn<DocumentRow>[] = useMemo(
     () => [
       {
         id: 'title',
         header: t('organizer.table.title', 'Title'),
+        // No `enableSorting`. The shared table sorts CLIENT-side, which in
+        // server-pagination mode would sort the twenty five rows it was handed
+        // and present the result as a sorted library. Sorting is the toolbar's,
+        // and it is the server's — see LibraryToolbar.
         cell: (row) => (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void toggleStar(row)}
-              aria-pressed={row.starred === true}
-              aria-label={
-                row.starred
-                  ? t('organizer.table.unstar', 'Remove star')
-                  : t('organizer.table.star', 'Star this document')
-              }
-              className="text-muted-foreground hover:text-foreground disabled:opacity-50"
-            >
-              {row.starred ? <IconStarFilled size={16} /> : <IconStar size={16} />}
-            </button>
-            {/* #993: the title opens the document's RECORD, not its bytes.
-                It used to be a new-tab link to `content_url` — the current
-                artifact — which answered "let me read it" and nothing else: no
-                version history, no trail, no way back, and a superseded
-                document indistinguishable from a current one because the raw
-                file carries none of that. The record page is the surface that
-                says which version this is and what has happened to it, and the
-                file is still one click away from there.
-
-                A real `<Link>`, not an onClick: middle-click, ctrl-click and
-                "copy link address" are what makes a row with an address
-                different from a row that opens a modal. */}
-            <Link
-              href={`/admin/document-library/${row.id}`}
-              className="font-medium text-primary hover:underline"
-              data-testid={`document-row-${row.id}`}
-            >
-              {row.title}
-            </Link>
+          <div className="flex min-w-0 items-center gap-2">
+            <StarButton row={row} busy={busy} onToggleStar={toggleStar} />
+            <DocumentTitle row={row} />
           </div>
         ),
       },
       {
         id: 'template_name',
-        accessorKey: 'template_name',
         header: t('organizer.table.template', 'Template'),
+        cell: (row) => (
+          <span dir="auto" className="truncate">
+            {row.template_name}
+          </span>
+        ),
       },
       {
         id: 'origin_ou_id',
         header: t('organizer.table.raisedFrom', 'Raised from'),
-        cell: (row) => ouName(row.origin_ou_id),
+        cell: (row) => (
+          <span dir="auto">{ouName(row.origin_ou_id)}</span>
+        ),
       },
       {
         id: 'created_at',
@@ -423,12 +601,22 @@ export default function DocumentLibraryPage() {
         cell: (row) => String(row.artifacts.length),
       },
     ],
-    [busy, ouName, t, toggleStar]
+    [busy, locale, ouName, t, toggleStar]
   );
 
   const listError = documents.error;
   const rows = documents.data?.data ?? [];
   const pagination = documents.data?.pagination ?? null;
+
+  const emptyState = useLibraryEmptyState({
+    viewKey,
+    collection: openCollection,
+    starredCollectionExists: starredCollection !== null,
+    searchApplied: appliedSearch !== '',
+    total: pagination?.total ?? 0,
+  });
+
+  const tableLabel = t('organizer.table.label', 'Documents');
 
   return (
     <div>
@@ -469,7 +657,7 @@ export default function DocumentLibraryPage() {
           // real the moment the server answered, and a browser that still shows
           // the old page while the dialog reports success is a browser the
           // author has to be told to reload.
-          documents.refetch();
+          refetchDocuments();
         }}
       />
 
@@ -482,76 +670,46 @@ export default function DocumentLibraryPage() {
       <div className="flex gap-8">
         <ViewRail
           views={views.data?.data ?? []}
-          collections={collections.data ?? []}
+          collections={collectionList}
           unavailableSubstrates={views.data?.unavailable_substrates ?? []}
           selectedViewKey={viewKey}
           selectedCollectionId={collectionId}
           onSelectView={selectView}
           onSelectCollection={selectCollection}
           onCreateCollection={() => setCreatingCollection(true)}
+          createDisabledReason={filingDisabledReason}
         />
 
         <div className="min-w-0 flex-1">
-          <div className="mb-4 flex flex-wrap items-end gap-3">
-            <form
-              className="flex items-end gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                applySearch(search.trim());
-              }}
-            >
-              <Input
-                label={t('organizer.search.label', 'Search titles')}
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('organizer.search.placeholder', 'Invoice, minutes, …')}
-              />
-              <Button type="submit" variant="outline" size="sm">
-                {t('organizer.search.submit', 'Search')}
-              </Button>
-            </form>
-
-            {takesAnchor && (
-              <div className="flex flex-col gap-1 text-sm">
-                <span className="font-medium">{t('organizer.anchor.label', 'Unit')}</span>
-                <Select
-                  value={anchorOuId === null ? MINE : String(anchorOuId)}
-                  onValueChange={(value) => selectAnchor(value === MINE ? null : Number(value))}
-                >
-                  <SelectTrigger className="h-9 w-56">
-                    <SelectValue placeholder={t('organizer.anchor.mine', 'My own unit')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* Not "all units": this means "whichever unit the server
-                        says is mine", which is a different and more honest
-                        default than a client-side guess at one. A sentinel
-                        string rather than '' because SelectItem treats an empty
-                        value as no value. */}
-                    <SelectItem value={MINE}>{t('organizer.anchor.mine', 'My own unit')}</SelectItem>
-                    {(ous.data ?? []).map((ou) => (
-                      <SelectItem key={ou.id} value={String(ou.id)}>
-                        {ou.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {collectionId !== null && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  const target = (collections.data ?? []).find((c) => c.id === collectionId);
-                  if (target) setDeletingCollection(target);
-                }}
-              >
-                <IconTrash size={14} className="me-2" aria-hidden />
-                {t('organizer.collection.delete', 'Delete this collection')}
-              </Button>
-            )}
-          </div>
+          <LibraryToolbar
+            search={search}
+            onSearchChange={setSearch}
+            onSearchSubmit={() => applySearch(search.trim())}
+            appliedSearch={appliedSearch}
+            onSearchClear={() => {
+              setSearch('');
+              applySearch('');
+            }}
+            anchorOuId={anchorOuId}
+            onAnchorChange={selectAnchor}
+            ous={ous.data ?? []}
+            selectedView={selectedView}
+            sortField={sortField}
+            sortDirection={appliedSort.direction}
+            onSortFieldChange={changeSortField}
+            onSortDirectionToggle={toggleSortDirection}
+            layout={layout}
+            onLayoutChange={chooseLayout}
+            openCollection={openCollection}
+            starredFolderOpen={viewKey === 'starred'}
+            onRenameCollection={() => {
+              if (openCollection === null) return;
+              setRenameName(openCollection.name);
+              setRenamingCollection(openCollection);
+            }}
+            onDeleteCollection={() => setDeletingCollection(openCollection)}
+            collectionsUnavailableReason={filingDisabledReason}
+          />
 
           {ous.error && (
             <p className="mb-3 text-sm text-muted-foreground">
@@ -564,9 +722,9 @@ export default function DocumentLibraryPage() {
 
           {selectedView && (
             <p className="mb-3 text-sm text-muted-foreground">
-              {collectionId !== null
-                ? ((collections.data ?? []).find((c) => c.id === collectionId)?.name ?? '')
-                : viewLabel(t, selectedView)}
+              <span dir="auto">
+                {openCollection !== null ? openCollection.name : viewLabel(t, selectedView)}
+              </span>
               {' — '}
               {viewDescription(t, selectedView)}
             </p>
@@ -579,28 +737,33 @@ export default function DocumentLibraryPage() {
             <p className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
               {listError}
             </p>
+          ) : layout === 'grid' ? (
+            <DocumentGrid
+              rows={rows}
+              isLoading={documents.loading}
+              emptyState={emptyState}
+              pagination={pagination}
+              onPageChange={setPage}
+              handlers={itemHandlers}
+              ouName={ouName}
+              ariaLabel={tableLabel}
+            />
           ) : (
             <DataTable<DocumentRow>
               columns={columns}
               data={rows}
               getRowId={(row) => String(row.id)}
               isLoading={documents.loading}
-              ariaLabel={t('organizer.table.label', 'Documents')}
+              ariaLabel={tableLabel}
+              rowActions={(row) => <DocumentActions row={row} handlers={itemHandlers} />}
               emptyState={{
-                title:
-                  viewKey === 'starred' && starredCollection === null
-                    ? t('organizer.empty.starredTitle', 'You have not starred anything yet')
-                    : t('organizer.empty.title', 'No documents in this folder'),
-                description:
-                  viewKey === 'starred' && starredCollection === null
-                    ? t(
-                        'organizer.empty.starredHelp',
-                        'Use the star beside a document to keep it here. Only you can see it.'
-                      )
-                    : t(
-                        'organizer.empty.help',
-                        'This folder is a query over what documents record. Nothing matched it — no document is hidden from it.'
-                      ),
+                title: emptyState.title,
+                description: emptyState.description,
+                action: emptyState.pastTheEnd ? (
+                  <Button variant="outline" size="sm" onClick={() => setPage(1)}>
+                    {t('organizer.empty.pastEndAction', 'Go to the first page')}
+                  </Button>
+                ) : undefined,
               }}
               // Server-driven: the API already paginated, so the table renders
               // controls and calls back rather than re-slicing a page it was
@@ -621,58 +784,46 @@ export default function DocumentLibraryPage() {
         </div>
       </div>
 
-      <Dialog open={creatingCollection} onOpenChange={(open) => setCreatingCollection(open)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('organizer.collection.newTitle', 'New collection')}</DialogTitle>
-            <DialogDescription>
-              {t(
-                'organizer.collection.newHelp',
-                'A collection is yours alone. Filing a document says nothing about where it lives, and nobody else can see your collections.'
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <Input
-            label={t('organizer.collection.name', 'Name')}
-            value={newCollectionName}
-            maxLength={160}
-            onChange={(event) => setNewCollectionName(event.target.value)}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreatingCollection(false)}>
-              {t('organizer.cancel', 'Cancel')}
-            </Button>
-            <Button
-              disabled={busy || newCollectionName.trim() === ''}
-              onClick={() => void createCollection()}
-            >
-              {t('organizer.collection.create', 'Create')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CreateCollectionDialog
+        open={creatingCollection}
+        onOpenChange={setCreatingCollection}
+        name={newCollectionName}
+        onNameChange={setNewCollectionName}
+        busy={busy}
+        onSubmit={() => void createCollection()}
+      />
 
-      <Dialog open={deletingCollection !== null} onOpenChange={(open) => !open && setDeletingCollection(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('organizer.collection.deleteTitle', 'Delete this collection?')}</DialogTitle>
-            <DialogDescription>
-              {t(
-                'organizer.collection.deleteHelp',
-                'The documents in it are untouched — a collection holds pointers, not files. Only your own grouping is removed.'
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeletingCollection(null)}>
-              {t('organizer.cancel', 'Cancel')}
-            </Button>
-            <Button variant="destructive" disabled={busy} onClick={() => void deleteCollection()}>
-              {t('organizer.collection.confirmDelete', 'Delete')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RenameCollectionDialog
+        collection={renamingCollection}
+        onClose={() => setRenamingCollection(null)}
+        name={renameName}
+        onNameChange={setRenameName}
+        busy={busy}
+        onSubmit={() => void renameCollection()}
+      />
+
+      <DeleteCollectionDialog
+        collection={deletingCollection}
+        onClose={() => setDeletingCollection(null)}
+        busy={busy}
+        onSubmit={() => void deleteCollection()}
+      />
+
+      <FileIntoCollectionDialog
+        // Re-read from the freshly fetched page rather than held: filing writes
+        // and then refetches, so the row in state is the state BEFORE the write
+        // and its checkboxes would not move.
+        documentRow={
+          filingDocument === null
+            ? null
+            : (rows.find((row) => row.id === filingDocument.id) ?? filingDocument)
+        }
+        onClose={() => setFilingDocument(null)}
+        collections={collectionList}
+        busy={busy}
+        onToggle={toggleFiling}
+        onCreateNew={() => setCreatingCollection(true)}
+      />
     </div>
   );
 }

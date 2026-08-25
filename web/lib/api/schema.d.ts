@@ -4007,6 +4007,12 @@ export interface components {
                 ou_id?: number | null;
                 collection_id?: number | null;
             };
+            sort: {
+                /** @enum {string|null} */
+                field: "title" | "created_at" | "template_name" | null;
+                /** @enum {string} */
+                direction: "asc" | "desc";
+            };
         };
         DocumentRenderRequest: {
             dataRows?: {
@@ -11670,6 +11676,10 @@ export interface operations {
                 collection_id?: number;
                 /** @description Case-insensitive substring of the document title */
                 q?: string;
+                /** @description Order by one of "title", "created_at" or "template_name". Omit for the order documents were recorded in, newest first. An unknown value is a 400 rather than an ignored parameter, so a client can never draw a sort indicator on a column the rows are not ordered by. */
+                sort?: string;
+                /** @description "asc" or "desc". Defaults per field — ascending for the two text columns, descending for created_at — and the order actually applied is echoed back in `sort`. Requires `sort`. */
+                direction?: string;
             };
             header?: never;
             path?: never;
@@ -11686,7 +11696,7 @@ export interface operations {
                     "application/json": components["schemas"]["DocumentListResponse"];
                 };
             };
-            /** @description A required view parameter is missing, or ou_id is not a unit in this tenant */
+            /** @description A required view parameter is missing, ou_id is not a unit in this tenant, or the sort is not one this list offers */
             400: {
                 headers: {
                     [name: string]: unknown;

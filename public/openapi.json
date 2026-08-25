@@ -7129,6 +7129,24 @@
                         "schema": {
                             "type": "string"
                         }
+                    },
+                    {
+                        "name": "sort",
+                        "in": "query",
+                        "required": false,
+                        "description": "Order by one of \"title\", \"created_at\" or \"template_name\". Omit for the order documents were recorded in, newest first. An unknown value is a 400 rather than an ignored parameter, so a client can never draw a sort indicator on a column the rows are not ordered by.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "direction",
+                        "in": "query",
+                        "required": false,
+                        "description": "\"asc\" or \"desc\". Defaults per field \u2014 ascending for the two text columns, descending for created_at \u2014 and the order actually applied is echoed back in `sort`. Requires `sort`.",
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {
@@ -7143,7 +7161,7 @@
                         }
                     },
                     "400": {
-                        "description": "A required view parameter is missing, or ou_id is not a unit in this tenant",
+                        "description": "A required view parameter is missing, ou_id is not a unit in this tenant, or the sort is not one this list offers",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -28491,12 +28509,39 @@
                         "required": [
                             "key"
                         ]
+                    },
+                    "sort": {
+                        "type": "object",
+                        "properties": {
+                            "field": {
+                                "type": "string",
+                                "nullable": true,
+                                "enum": [
+                                    "title",
+                                    "created_at",
+                                    "template_name",
+                                    null
+                                ]
+                            },
+                            "direction": {
+                                "type": "string",
+                                "enum": [
+                                    "asc",
+                                    "desc"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "field",
+                            "direction"
+                        ]
                     }
                 },
                 "required": [
                     "data",
                     "pagination",
-                    "view"
+                    "view",
+                    "sort"
                 ]
             },
             "DocumentRenderRequest": {
