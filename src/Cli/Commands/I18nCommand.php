@@ -23,9 +23,17 @@ use Whity\Database\Database;
  *   whity-cli i18n:coverage           # per-domain translated/missing, no database
  *
  * The order matters, and so does the direction. `extract` reads code and writes
- * a file; `sync` reads that file and writes rows. Nothing ever flows back: the
- * database holds human work — an edited English string, a finished Arabic
- * translation — and no command here overwrites it.
+ * a file; `sync` reads that file and writes rows. Nothing ever flows back.
+ *
+ * `sync` INSERTS new keys and REFRESHES rows that still say what the file last
+ * said — that second half is #1057, and without it a correction to an existing
+ * string never reached an install that had already been seeded, because the
+ * runtime prefers a stored row over the English in the call site. What it will
+ * not touch is human work: an English string edited in the console, or a
+ * finished Arabic translation, is reported as divergent and left, because saving
+ * a string in /admin/translations clears the row's `source_managed` flag and
+ * `sync`'s UPDATE requires it. Run `--dry-run` first to read every sentence it
+ * would change.
  *
  * `--language=` DOES NOT MACHINE-TRANSLATE, and it is worth being explicit about
  * that, because a flag named for a language on a command that seeds strings
@@ -263,6 +271,7 @@ final class I18nCommand implements NamedSubcommand
      * @param array{
      *     language: array{code: string, id: int},
      *     inserted: list<array{domain: string, key: string, text: string}>,
+     *     updated: list<array{domain: string, key: string, from: string, to: string}>,
      *     present: int,
      *     divergent: list<array{domain: string, key: string, database: string, source: string}>,
      *     dead: list<array{domain: string, key: string, text: string}>,
@@ -274,16 +283,34 @@ final class I18nCommand implements NamedSubcommand
     {
         $code = $report['language']['code'];
         printf(
-            "\n%s [%s]: %d key(s) %s, %d already present (untouched).\n",
+            "\n%s [%s]: %d key(s) %s, %d key(s) %s, %d already present.\n",
             $report['dryRun'] ? 'DRY RUN' : 'Synced',
             $code,
             count($report['inserted']),
             $report['dryRun'] ? 'would insert' : 'inserted',
+            count($report['updated']),
+            $report['dryRun'] ? 'would refresh' : 'refreshed',
             $report['present']
         );
 
         foreach (self::groupByDomain($report['inserted']) as $domain => $keys) {
             printf("  + %-24s %d key(s)\n", $domain, count($keys));
+        }
+
+        // Printed key by key with both texts, not summarised. A refresh is the
+        // one thing this command does that CHANGES what a user already reads, so
+        // an operator running --dry-run before a deploy has to be able to see
+        // every sentence it would change, not a count of them.
+        if ($report['updated'] !== []) {
+            printf(
+                "\n%d key(s) whose source text changed and whose row nobody had edited — %s to match\n"
+                . "the committed file. This is how a correction reaches an install that was already seeded:\n",
+                count($report['updated']),
+                $report['dryRun'] ? 'would be refreshed' : 'refreshed'
+            );
+            foreach ($report['updated'] as $row) {
+                printf("  ~ %s / %s\n      was: %s\n      now: %s\n", $row['domain'], $row['key'], $row['from'], $row['to']);
+            }
         }
 
         if ($report['divergent'] !== []) {
