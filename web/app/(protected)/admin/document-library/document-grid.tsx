@@ -128,8 +128,11 @@ export function DocumentGrid({
               {/* min-w-0 is what lets the title truncate instead of stretching
                   the card past the grid track. */}
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <div className="flex min-w-0 items-center gap-2">
-                  <DocumentTitle row={row} />
+                <div className="flex min-w-0 items-start gap-2">
+                  {/* Two lines here, one in the list — see DocumentTitle for
+                      what opening the page showed about a card that clips a
+                      name harder than the column it was meant to improve on. */}
+                  <DocumentTitle row={row} lines={2} />
                 </div>
                 <p dir="auto" className="truncate text-xs text-muted-foreground">
                   {row.template_name}

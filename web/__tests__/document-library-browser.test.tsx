@@ -461,6 +461,32 @@ describe('the layout switch', () => {
   });
 
   /**
+   * The card gives a title TWO lines; the table row gives it one.
+   *
+   * Pinned as a class rather than as rendered width because jsdom has no layout
+   * — and that is exactly why this defect survived every test until the page was
+   * opened. CSS truncation does not change `textContent`, so the grid assertions
+   * above passed while each card showed "Demo tenant-wide r…". The class is the
+   * mechanism, so the class is what is asserted; the alternative is no coverage
+   * at all for the one thing the grid exists to do.
+   */
+  it('lets a card title use two lines, so the grid does not clip harder than the list', async () => {
+    render(<DocumentLibraryPage />);
+    // The row, not the table: DataTable renders its skeleton inside a <table>
+    // that already carries the aria-label, so waiting on the table alone can win
+    // the race and find no rows at all.
+    expect(await screen.findByTestId('document-row-1')).toHaveClass('truncate');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Grid' }));
+    const grid = await screen.findByRole('list', { name: 'Documents' });
+    const card = within(grid).getByTestId('document-row-1');
+    expect(card).toHaveClass('line-clamp-2');
+    expect(card).not.toHaveClass('truncate');
+    // The whole title stays reachable on hover even when the clamp bites.
+    expect(card).toHaveAttribute('title', 'Invoice 42');
+  });
+
+  /**
    * An empty GRID says the same thing an empty list says.
    *
    * WITH A POSITIVE CONTROL, because "the folder is empty" and "the grid never
@@ -656,6 +682,66 @@ describe('managing a collection', () => {
 });
 
 // ── 7. the server's own refusal survives to the screen ─────────────────────
+
+/**
+ * A caller who cannot read the folders at all gets the reason and NOTHING to
+ * operate.
+ *
+ * Found by opening the page as the fixture user, who does not hold
+ * `documents:read`: the rail was empty behind "Failed to load the document
+ * folders", the list said "Insufficient permissions", and between those two
+ * sentences sat a Search box, a Sort selector and a list/grid switch — three
+ * live controls over nothing, each of which re-fires a request that 403s.
+ *
+ * The positive control matters more than usual here, because every assertion in
+ * this test is an ABSENCE: a page that threw on render, or that never finished
+ * loading, would satisfy all of them. So the banner and the list's own sentence
+ * must both be present first — only then does the missing chrome mean anything.
+ */
+it('offers no search, sort or layout switch to a caller who cannot read the folders', async () => {
+  installApi({
+    views: { ok: false, status: 403, body: { error: 'Insufficient permissions' } },
+    documents: () => ({ ok: false, status: 403, body: { error: 'Insufficient permissions' } }),
+  });
+
+  render(<DocumentLibraryPage />);
+
+  // Positive control: this render happened, and it reached both failure paths.
+  expect(await screen.findByText('Failed to load the document folders')).toBeInTheDocument();
+  expect(await screen.findByText('Insufficient permissions')).toBeInTheDocument();
+
+  // Only now is the absence evidence.
+  expect(screen.queryByLabelText('Sort by')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Grid' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'List' })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Search titles')).not.toBeInTheDocument();
+});
+
+/**
+ * …but a folder that merely cannot be ANCHORED keeps the toolbar, because the
+ * anchor selector in it is the remedy.
+ *
+ * This is the case a blunter fix breaks: a 422 empties the list exactly like a
+ * 403 does, so "hide the chrome when the list is empty" would take away the one
+ * control that resolves the error and leave the reader stuck on a sentence with
+ * nothing to act on.
+ */
+it('keeps the toolbar when the FOLDER is unanchorable, since the anchor picker is the fix', async () => {
+  installApi({
+    documents: () => ({
+      ok: false,
+      status: 422,
+      body: { error: 'You do not belong to an organizational unit. Select one to use this folder.' },
+    }),
+  });
+
+  render(<DocumentLibraryPage />);
+  await screen.findByText(/You do not belong to an organizational unit/);
+
+  // The rail loaded, so the browser chrome is still meaningful.
+  expect(screen.getByLabelText('Sort by')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Grid' })).toBeInTheDocument();
+});
 
 it("shows the server's reason for a folder this caller cannot anchor, not a generic failure", async () => {
   const reason = 'You do not belong to an organizational unit. Select one to use this folder.';

@@ -125,22 +125,48 @@ export function StarButton({
  * `dir="auto"` because a title is TENANT DATA in an unknown script: an Arabic
  * title inside an English interface (or the reverse) renders its punctuation and
  * any embedded digits at the wrong end without a bidi isolate, and the `dir`
- * attribute is what creates one. `truncate` needs `min-w-0` on the flex parent,
- * which is why the layouts below supply it.
+ * attribute is what creates one. `truncate`/`line-clamp` both need `min-w-0` on
+ * the flex parent, which is why the layouts below supply it.
+ *
+ * WHY THE GRID GETS TWO LINES AND THE LIST GETS ONE
+ * ------------------------------------------------
+ * Found by opening the page, and not findable any other way. The grid exists
+ * because "a name gets the width of a card instead of the width of a column
+ * shared with four others" — that is the argument in {@link DocumentGrid}'s own
+ * docblock. On the seeded demo it did the OPPOSITE: the list rendered
+ * "Demo tenant-wide registry notice" in full, and the card clipped the same
+ * title to "Demo tenant-wide r…". A card is narrower than a table's title
+ * column, so a single truncated line in a card is strictly worse than the list
+ * it was meant to improve on, and the layout switch became a way to see less.
+ *
+ * No test could have caught it. CSS truncation does not change `textContent`, so
+ * `getByText('Demo tenant-wide registry notice')` passes on a node showing seven
+ * characters of it, and every assertion in the jest suite stayed green.
+ *
+ * Two lines rather than unbounded: a card in a fixed grid track cannot grow
+ * without dragging its whole row taller, and a document titled with a paragraph
+ * would do exactly that. `line-clamp-2` still ends in an ellipsis when it must,
+ * and the full string stays in `title=` for the hover.
  *
  * The `data-testid` is #993's and is kept BYTE FOR BYTE: the record-page e2e spec
  * reaches the record through `document-row-{id}`, so renaming it here would break
  * a spec in another file that has nothing to do with this change. It is on the
  * link in both layouts, which is what lets one selector work in either.
  */
-export function DocumentTitle({ row }: { row: DocumentRow }) {
+export function DocumentTitle({ row, lines = 1 }: { row: DocumentRow; lines?: 1 | 2 }) {
   return (
     <Link
       href={`/admin/document-library/${row.id}`}
       dir="auto"
       title={row.title}
       data-testid={`document-row-${row.id}`}
-      className="truncate font-medium text-primary hover:underline"
+      className={[
+        'font-medium text-primary hover:underline',
+        // Written as two whole literals, not `line-clamp-${lines}`: Tailwind
+        // scans source text for class names, so an interpolated one is never
+        // emitted and the card would silently fall back to no clamping at all.
+        lines === 2 ? 'line-clamp-2 break-words' : 'truncate',
+      ].join(' ')}
     >
       {row.title}
     </Link>
