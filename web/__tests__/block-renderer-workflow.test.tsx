@@ -25,6 +25,7 @@ import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import type { Block } from '@/lib/plugin-features';
 import { apiClient } from '@/lib/api-client';
 import { ToastProvider } from '@/lib/toast-context';
+import { DateDisplayProvider } from '@amroksaleh/features/datetime';
 
 jest.mock('@/lib/api-client', () => ({ apiClient: jest.fn() }));
 const mockApiClient = apiClient as jest.MockedFunction<typeof apiClient>;
@@ -148,12 +149,57 @@ describe('timeline block', () => {
 
     expect(await screen.findByText('Anika Patel')).toBeInTheDocument();
     expect(screen.getByText('approved the request')).toBeInTheDocument();
-    expect(screen.getByText('2026-08-17 09:12')).toBeInTheDocument();
+    // #1068: the declared timestamp field is FORMATTED now, not `String(…)`d
+    // onto the screen. The raw wire string reaching a reader — unlocalised,
+    // in whatever shape the plugin's database returned — is what this
+    // assertion used to pin, and what the one date path exists to stop.
+    //
+    // Matched loosely rather than exactly: the formatted result depends on the
+    // runner's locale and zone, and an exact string here would be a test that
+    // fails in a different CI region for no product reason.
+    expect(screen.queryByText('2026-08-17 09:12')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/2026/)).toHaveLength(2);
     expect(screen.getByText('Within limit.')).toBeInTheDocument();
     expect(screen.getByText('in review')).toBeInTheDocument();
     expect(screen.getAllByText('approved').length).toBeGreaterThan(0);
     // The second event carries no note and no `from`; neither renders empty.
     expect(screen.getByText('Bjorn Larsen')).toBeInTheDocument();
+  });
+
+  /**
+   * #1068: a plugin's own timestamps are covered too — the issue names plugin
+   * screens explicitly, and a tenant that hides dates on the document organizer
+   * has not asked to keep them on a plugin's list of the same work.
+   *
+   * The event still renders: the actor, the verb, the note and the from/to
+   * badges are what the row is for, and the order is still the information.
+   */
+  it('drops the timestamp, and nothing else, when the tenant hides dates', async () => {
+    render(
+      <ToastProvider>
+        <DateDisplayProvider hidden>
+          <BlockRenderer
+            blocks={[
+              {
+                type: 'timeline',
+                source: '/api/v1/tasks/1/events',
+                actorField: 'actor',
+                actionField: 'action',
+                timestampField: 'at',
+                noteField: 'note',
+                fromField: 'from',
+                toField: 'to',
+              } as Block,
+            ]}
+          />
+        </DateDisplayProvider>
+      </ToastProvider>
+    );
+
+    expect(await screen.findByText('Anika Patel')).toBeInTheDocument();
+    expect(screen.getByText('approved the request')).toBeInTheDocument();
+    expect(screen.getByText('Within limit.')).toBeInTheDocument();
+    expect(screen.queryByText(/2026/)).not.toBeInTheDocument();
   });
 
   it('preserves declaration order — the order IS the information', async () => {
