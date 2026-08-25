@@ -49,6 +49,12 @@ final class SettingsRegistryTest extends TestCase
              // ceilings are, and NOT governance: it grants nobody anything, it
              // says how many of the people already asked have to say yes.
              'documents.routing_approval_quorum',
+             // #1054: which channels a routing notification goes out on. The
+             // operator's half of a deliberate split — a route STEP declares
+             // that its people are told rather than asked, and how they are
+             // reached is configuration, or moving a tenant from in-app to
+             // e-mail would mean re-authoring every route that mentions it.
+             'documents.routing_notification_channels',
              'documents.qr_enabled', 'documents.qr_public_detail',
              // #999: how many people a USER GROUP preview SHOWS beside its
              // (always exact) count. Tenant-overridable — see the governance
@@ -176,7 +182,11 @@ final class SettingsRegistryTest extends TestCase
         self::assertFalse(SettingsRegistry::isGlobalOnly('documents.qr_public_detail'));
         self::assertSame('minimal', SettingsRegistry::defaultFor('documents.qr_public_detail'));
         // 18: 16 on develop (#1014's quorum was the sixteenth) plus these two.
-        self::assertCount(18, SettingsRegistry::tenantTextKeys());
+        // 19 since #1054 added documents.routing_notification_channels.
+        self::assertContains('documents.routing_notification_channels', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_notification_channels'));
+        self::assertSame('in_app', SettingsRegistry::defaultFor('documents.routing_notification_channels'));
+        self::assertCount(19, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -301,7 +311,8 @@ final class SettingsRegistryTest extends TestCase
         $describe = SettingsRegistry::describe();
         // 58 since #1014 added documents.routing_approval_quorum.
         // 60 since #1036 added documents.qr_enabled + documents.qr_public_detail.
-        self::assertCount(60, $describe);
+        // 61 since #1054 added documents.routing_notification_channels.
+        self::assertCount(61, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

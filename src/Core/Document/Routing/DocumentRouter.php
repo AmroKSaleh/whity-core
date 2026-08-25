@@ -329,6 +329,11 @@ final class DocumentRouter
 
         $this->broadcast('document.routed', $tenantId, $documentId, [
             'route_id' => $routeId,
+            // The ROUTE's title, which defaults to the document's own. Carried so
+            // a subscriber can name the thing in a notification without a second
+            // query — and, more to the point, without one that could read a title
+            // the document has since been given.
+            'title' => $title,
             'action' => RouteAction::ISSUED,
             'actor_profile_id' => $actorId,
             'step_count' => count($written),
@@ -402,7 +407,7 @@ final class DocumentRouter
                 );
             }
 
-            return $this->appendNote($tenantId, $actorId, $routeId, $documentId, $note);
+            return $this->appendNote($tenantId, $actorId, $routeId, $documentId, (string) $route['title'], $note);
         }
 
         if (!in_array($action, RouteAction::recipientActions(), true)) {
@@ -609,6 +614,7 @@ final class DocumentRouter
 
         $this->broadcast('document.route_acted', $tenantId, $documentId, [
             'route_id' => $routeId,
+            'title' => (string) $route['title'],
             'action' => $action,
             'actor_profile_id' => $actorId,
             'step_id' => (int) $step['id'],
@@ -957,6 +963,7 @@ final class DocumentRouter
         int $actorId,
         int $routeId,
         int $documentId,
+        string $title,
         ?string $note,
     ): array {
         if ($note === null || trim($note) === '') {
@@ -991,6 +998,7 @@ final class DocumentRouter
 
         $this->broadcast('document.route_acted', $tenantId, $documentId, [
             'route_id' => $routeId,
+            'title' => $title,
             'action' => RouteAction::NOTED,
             'actor_profile_id' => $actorId,
             'step_id' => $open !== null ? (int) $open['step_id'] : null,

@@ -2764,6 +2764,30 @@ $notificationDispatcher = new \Whity\Core\Notification\NotificationDispatcher(
 );
 $notificationDispatcher->subscribe($hookManager);
 
+// 13b-quinquies-bis. ROUTING NOTIFICATIONS (#1054) — the subscriber that turns a
+// routing broadcast into notifications.
+//
+// Registered HERE rather than beside the router at 13a-nonies-ter, because it
+// needs the dispatcher, and the dispatcher is built in this block. The order does
+// not matter to the router: it emits through the hook manager, and a listener
+// bound at any point before the first request is bound in time.
+//
+// WHY THE ENGINE DOES NOT CALL THIS DIRECTLY. A notification is a CONSEQUENCE of
+// a routing act, it may fail without the act being wrong, and the next consumer
+// somebody wants must not mean editing the engine. So routing broadcasts and this
+// subscribes — which is also what lets a plugin add its own consumer beside this
+// one without core knowing about it.
+//
+// The channels are the TENANT's (`documents.routing_notification_channels`,
+// per-tenant then global then the registry default), never the route step's: a
+// step declares that its people are told rather than asked, and how they are
+// reached is operator configuration.
+$routingNotifications = new \Whity\Core\Document\Routing\RoutingNotifications(
+    $notificationDispatcher,
+    $settingsService
+);
+$routingNotifications->subscribe($hookManager);
+
 // In-app notification INBOX (WC-notifications, 6e10d9ea). Self-scoped to the
 // caller's (tenant, profile) — session-gated, no RBAC permission (like
 // /api/me/sessions). Reads the notifications the dispatcher persisted.

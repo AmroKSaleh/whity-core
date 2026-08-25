@@ -113,7 +113,12 @@ final class SettingsApiRealEngineTest extends TestCase
         // organisation publishes verifiable documents) and
         // documents.qr_public_detail (what a stranger holding one is
         // told). Both per-tenant, both defaulting closed.
-        self::assertCount(18, $data['registry']);
+        // 19 since #1054 added documents.routing_notification_channels - which
+        // channels a routing notification is offered on. Per-tenant because it
+        // says how an organisation reaches its people, which is exactly what two
+        // tenants on one instance answer differently; the route step says only
+        // that its people are told rather than asked.
+        self::assertCount(19, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

@@ -93,6 +93,11 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.routing_max_steps',
             'documents.routing_max_recipients_per_step',
             'documents.routing_approval_quorum',
+            // #1054: which channels a routing notification is offered on.
+            // Tenant-overridable because it is a fact about how an
+            // organisation reaches its people, not about what a route means
+            // — which is why it is here and not a field on a route step.
+            'documents.routing_notification_channels',
             // #1036: QR verification on documents. Two keys, both
             // per-tenant, both defaulting closed — the switch is off and
             // the public page discloses the minimum. This pin firing on
@@ -223,6 +228,12 @@ final class SettingsRegistryCorePinTest extends TestCase
             // changes who can authorise a document, so it should be a
             // deliberate edit rather than a number that drifted.
             'documents.routing_approval_quorum' => 'all',
+            // #1054. `in_app` alone. Routing sent no notifications at all
+            // before it, so whatever this says starts happening on every
+            // existing route the day a deployment upgrades — and an e-mail
+            // is a send that costs money and reaches people outside the
+            // app. A tenant that wants it writes `in_app,email` once.
+            'documents.routing_notification_channels' => 'in_app',
             // #1036. OFF, because turning it on publishes an
             // unauthenticated verification surface for this tenant's
             // documents; MINIMAL, because that is the level that cannot
