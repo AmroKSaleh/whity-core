@@ -93,6 +93,7 @@ import { DocumentViewer } from '@/components/plugin/blocks/document-viewer';
 
 import { DocumentTrail, unitName } from './trail';
 import { OpenRecipients } from './recipients';
+import { DocumentQrPanel } from './qr';
 import type {
   Directory,
   DocumentRecord,
@@ -205,18 +206,39 @@ const documentFactsFor =
  */
 function localizeDenial(
   t: Translate,
-  region: 'document' | 'trail' | 'recipients'
+  region: 'document' | 'trail' | 'recipients' | 'qr'
 ): (code: string) => string | null {
   return (code) => {
     if (code === 'permission') {
-      return region === 'document'
-        ? t(
-            'record.document.readOnly.permission',
-            'You can read this document. Issuing a corrected version of it needs a capability your account does not have.'
-          )
-        : null;
+      if (region === 'document') {
+        return t(
+          'record.document.readOnly.permission',
+          'You can read this document. Issuing a corrected version of it needs a capability your account does not have.'
+        );
+      }
+      if (region === 'qr') {
+        return t(
+          'record.qr.readOnly.permission',
+          'You can see this document’s verification code and how often it has been scanned. Issuing a new one, or withdrawing it, needs a capability your account does not have.'
+        );
+      }
+      return null;
     }
     if (code === 'record') {
+      if (region === 'qr') {
+        // DELIBERATELY CAUSE-NEUTRAL, and this is the one denial sentence on
+        // this page that had to be. The server's `qr` record predicate is false
+        // for three different reasons — this installation issues no codes at
+        // all, it has no public address configured, or the switch is off for
+        // this template or organisation — and naming one of them here would be
+        // a confident sentence that is wrong in two states out of three. The
+        // PANEL has `configured` and `enabled` in hand and names the actual
+        // cause, in the reader's own language, a few lines further down.
+        return t(
+          'record.qr.readOnly.record',
+          'No verification code can be issued for this document as things stand. The reason is below.'
+        );
+      }
       if (region === 'document') {
         return t(
           'record.document.readOnly.record',
@@ -298,6 +320,7 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
     'recipients',
     localizeDenial(t, 'recipients')
   );
+  const qrAccess = sectionAccessFrom(record?.sections, 'qr', localizeDenial(t, 'qr'));
 
   const recipientsVisible = recipientsAccess.state !== 'hidden';
 
@@ -611,6 +634,49 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
     </div>
   );
 
+  /**
+   * The verification-code panel, built ONCE and used as both renderings.
+   *
+   * The same element object for `editor` and `readOnly` is deliberate: it is one
+   * subtree, so `RecordSection`'s ternary can never swap one instance for
+   * another and remount a panel mid-interaction — which would throw away an open
+   * confirm and the payload behind it. What the two states differ by is
+   * `canWrite`, and that is a prop, not a different component.
+   *
+   * It is NOT fetched here. The panel owns its own request, so a hidden region
+   * makes no request by construction — `RecordSection` returns null and the
+   * effect never runs — rather than by this screen remembering a boolean. See
+   * the panel's own docblock for the other half of that decision.
+   */
+  const qrBody = (
+    <div className="space-y-3">
+      {!resolvedDirectory.peopleAvailable && <DirectoryNotice kind="people" t={t} />}
+      <DocumentQrPanel
+        documentId={record.id}
+        documentTitle={record.title}
+        // Counted from the artifacts the server sent, like the stat strip above:
+        // position IS issue order in this subsystem, and there is no revision
+        // column to disagree with.
+        versionCount={record.artifacts.length}
+        directory={resolvedDirectory}
+        canWrite={qrAccess.state === 'editable'}
+        apiClient={apiClient}
+      />
+    </div>
+  );
+
+  const qrSection: RecordSectionSpec = {
+    key: 'qr',
+    title: t('record.qr.title', 'Verification code'),
+    description: t(
+      'record.qr.subtitle',
+      'A printed code lets anyone confirm this document is genuine. It identifies the document; it never grants access to it.'
+    ),
+    access: qrAccess,
+    editor: qrBody,
+    readOnly: qrBody,
+  };
+
   const recipientsSection: RecordSectionSpec = {
     key: 'recipients',
     title: t('record.recipients.title', 'Where it is now'),
@@ -639,7 +705,9 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
       // No page-level `access` either: with regions, the shell DERIVES the one
       // page-level answer it still needs from the regions themselves, so the
       // header and the body cannot disagree.
-      sections={[documentSection, trailSection, recipientsSection]}
+      // The server's own declaration order (`DocumentsApiHandler::recordSections`):
+      // what it is, what happened to it, where it is now, and what confirms it.
+      sections={[documentSection, trailSection, recipientsSection, qrSection]}
     />
   );
 }

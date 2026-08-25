@@ -130,3 +130,82 @@ export interface Directory {
   peopleAvailable: boolean;
   unitsAvailable: boolean;
 }
+
+/**
+ * The live verification code, as `GET /api/v1/documents/{id}/qr` sends it
+ * (#1036, panelled by #1052).
+ *
+ * `verification_url` is the PUBLIC page — never an API route. The panel draws
+ * the symbol from this exact string rather than composing one, so what a phone
+ * camera reads and what the server minted cannot drift apart.
+ */
+export interface QrLiveCode {
+  reference: string;
+  verification_url: string;
+  issued_at: string | null;
+  /** The profile that issued it, or null when nothing recorded one. */
+  issued_by: number | null;
+}
+
+/**
+ * A code this document carried and no longer honours.
+ *
+ * `reason` is typed loosely for the reason `TrailAction`'s server-sent twin is:
+ * a newer server growing a third verb must render as itself rather than as a
+ * blank cell. The two the schema CHECK-constrains today are `withdrawn` —
+ * somebody decided this code is not to be trusted, and nothing replaces it —
+ * and `superseded` — a newer code was minted, so the paper in hand is an older
+ * printing. They mean opposite things to the person holding the sheet.
+ *
+ * Carries the human REFERENCE and never the token: the reference is a prefix,
+ * is not accepted as a credential anywhere, and exists so a holder can match the
+ * sheet in their hand to a row on the screen.
+ */
+export interface QrRetiredCode {
+  reference: string;
+  issued_at: string | null;
+  revoked_at: string;
+  revoked_by: number | null;
+  reason: string;
+}
+
+/**
+ * One recorded scan.
+ *
+ * `scanner_profile_id` is null for a PUBLIC scan, and that null is the whole
+ * privacy posture rather than a missing lookup: there is no address column, no
+ * user-agent column, no device and no location, so there is nothing else this
+ * type could carry. A panel that rendered "unknown visitor" here would be
+ * implying an identity the database has no room for.
+ *
+ * `outcome` is `verified` or `refused` today and typed loosely for the same
+ * reason `reason` above is.
+ */
+export interface QrScan {
+  id: number;
+  document_id: number;
+  qr_token_id: number;
+  scanner_profile_id: number | null;
+  outcome: string;
+  scanned_at: string;
+}
+
+/**
+ * The whole `qr` region payload.
+ *
+ * `enabled` and `configured` are SEPARATE because "this tenant switched it off"
+ * and "this instance was never told its own public address" are different
+ * problems with different fixes, and one flag for both sends somebody to the
+ * wrong settings page.
+ *
+ * Both lists are capped and carry an exact `total` beside them. A truncated list
+ * with no total reads as the whole list — the same failure as rendering an
+ * unreadable count as zero (#1022).
+ */
+export interface DocumentQrPanelData {
+  enabled: boolean;
+  configured: boolean;
+  token: QrLiveCode | null;
+  retired: { total: number; recent: QrRetiredCode[] };
+  scans: { total: number; recent: QrScan[] };
+}
