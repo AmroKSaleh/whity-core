@@ -100,6 +100,12 @@ final class RouteTemplatePresenter
             'label' => $step['label'],
             'decision' => $step['decision'],
             'decision_quorum' => $step['decision_quorum'],
+            // #1054. The editor has to be able to redraw a delivery stage as a
+            // delivery stage: it is the one property that changes what happens to
+            // everybody the stage reaches, and a canvas that could not show it
+            // would let an author "correct" it away by saving a graph that never
+            // carried it.
+            'satisfied_by' => $step['satisfied_by'],
             'canvas_x' => $step['canvas_x'],
             'canvas_y' => $step['canvas_y'],
         ];

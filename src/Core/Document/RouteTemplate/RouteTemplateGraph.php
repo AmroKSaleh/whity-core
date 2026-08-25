@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Document\RouteTemplate;
 
 use InvalidArgumentException;
+use Whity\Core\Document\Routing\RouteSatisfaction;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
 
 /**
@@ -40,6 +41,21 @@ use Whity\Core\Document\Routing\RoutingRuleRegistry;
  * ordinal and a rejection ends the chain, which is exactly #1014's stated
  * behaviour and what makes a linear approval route need no edges whatsoever.
  *
+ * A STAGE MAY BE SATISFIED BY DELIVERY, AND THEN IT MAY NOT BE A GATE (#1054)
+ * ---------------------------------------------------------------------------
+ * `satisfied_by` says whether the people at a stage are ASKED for anything or
+ * simply TOLD. It is refused in combination with `decision` here for the reason
+ * the engine refuses it — a gate needs somebody holding the item to answer it,
+ * and a delivery stage closes every item the moment it is sent — and refusing it
+ * at authoring time is what stops the canvas from being able to draw an approval
+ * nobody can ever give.
+ *
+ * The vocabulary is read from {@see RouteSatisfaction} DIRECTLY rather than
+ * mirrored into {@see RouteTemplateContract}. That class exists only because
+ * #1014 and #1027 were built on separate branches and its own docblock says the
+ * mirrors should go now that both are merged; adding a third one would be
+ * creating the drift surface it is waiting to have removed.
+ *
  * WHY CYCLES ARE ALLOWED
  * ----------------------
  * A reject edge pointing BACK to an earlier step — "send it to the author to
@@ -71,7 +87,7 @@ final class RouteTemplateGraph
      * @param mixed $steps    The raw `steps` value from the request body.
      * @param mixed $edges    The raw `edges` value from the request body.
      * @param int   $maxSteps The tenant's effective `documents.routing_max_steps`.
-     * @return array{steps: list<array{position: int, rule_kind: string, rule_config: array<string, mixed>, label: ?string, decision: bool, decision_quorum: ?string, canvas_x: int, canvas_y: int}>, edges: list<array{from: int, to: int, verdict: string}>}
+     * @return array{steps: list<array{position: int, rule_kind: string, rule_config: array<string, mixed>, label: ?string, decision: bool, decision_quorum: ?string, satisfied_by: string, canvas_x: int, canvas_y: int}>, edges: list<array{from: int, to: int, verdict: string}>}
      */
     public function validate(mixed $steps, mixed $edges, int $maxSteps): array
     {
@@ -90,7 +106,7 @@ final class RouteTemplateGraph
     }
 
     /**
-     * @return list<array{position: int, rule_kind: string, rule_config: array<string, mixed>, label: ?string, decision: bool, decision_quorum: ?string, canvas_x: int, canvas_y: int}>
+     * @return list<array{position: int, rule_kind: string, rule_config: array<string, mixed>, label: ?string, decision: bool, decision_quorum: ?string, satisfied_by: string, canvas_x: int, canvas_y: int}>
      */
     private function validateSteps(mixed $steps, int $maxSteps): array
     {
@@ -204,6 +220,30 @@ final class RouteTemplateGraph
                 );
             }
 
+            // #1054. WHETHER ANYBODY AT THIS STAGE IS ASKED FOR ANYTHING.
+            $satisfiedBy = $step['satisfied_by'] ?? RouteSatisfaction::fallback();
+            if (!is_string($satisfiedBy) || !RouteSatisfaction::isValid($satisfiedBy)) {
+                throw RouteTemplateRejectedException::because(sprintf(
+                    "Step %d: 'satisfied_by' must be one of %s — it says whether the people at this stage "
+                    . 'are asked to act or simply told.',
+                    $position,
+                    implode(', ', RouteSatisfaction::all()),
+                ));
+            }
+            if ($satisfiedBy === RouteSatisfaction::DELIVERY && $decision === true) {
+                // The one pair that cannot mean anything, refused for the reason
+                // the engine refuses it: a decision needs somebody holding the
+                // item to answer it, and a delivery stage closes every item the
+                // moment it is sent. Stored, it would be an approval on the
+                // canvas that nobody could ever give.
+                throw RouteTemplateRejectedException::because(sprintf(
+                    'Step %d is marked both as a decision and as satisfied by delivery. It cannot be '
+                    . 'both — a decision needs somebody holding the item to answer it, and a delivery '
+                    . 'stage closes every item the moment it is sent. Drop one of the two.',
+                    $position,
+                ));
+            }
+
             $quorum = $step['decision_quorum'] ?? null;
             if ($quorum !== null) {
                 if (!is_string($quorum) || !RouteTemplateContract::isQuorum($quorum)) {
@@ -233,6 +273,7 @@ final class RouteTemplateGraph
                 'label' => is_string($label) ? $label : null,
                 'decision' => $decision,
                 'decision_quorum' => is_string($quorum) ? $quorum : null,
+                'satisfied_by' => $satisfiedBy,
                 'canvas_x' => self::coordinate($step['canvas_x'] ?? 0, $position, 'canvas_x'),
                 'canvas_y' => self::coordinate($step['canvas_y'] ?? 0, $position, 'canvas_y'),
             ];
