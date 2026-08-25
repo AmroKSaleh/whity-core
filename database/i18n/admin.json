@@ -21,7 +21,6 @@
         "aiPrincipals.credential.description": "Copy the token now — it will not be shown again.",
         "aiPrincipals.credential.done": "Done",
         "aiPrincipals.credential.expires": "Expires",
-        "aiPrincipals.credential.expiresUnknown": "unknown",
         "aiPrincipals.credential.name": "Name",
         "aiPrincipals.credential.scopes": "Scopes",
         "aiPrincipals.credential.title": "AI Principal Created",

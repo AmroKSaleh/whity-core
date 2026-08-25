@@ -71,7 +71,14 @@ final class SettingsRegistryTest extends TestCase
              // WC-i18n-feature-flag. The master switch for the whole interface
              // language surface; ENABLED by default (see SettingsRegistry).
              'i18n.enabled',
-             'auth.invitation_ttl_days'],
+             'auth.invitation_ttl_days',
+             // #1068: whether dates and times are shown on screen at all.
+             // Tenant-overridable and NOT governance — it grants nobody
+             // anything and takes nothing away, it says what the interface
+             // volunteers. Appended rather than slotted in beside the other
+             // `ui.`-shaped keys because there are none: this opens the
+             // namespace, and appending keeps the diff to one line.
+             'ui.hide_dates'],
             SettingsRegistry::keys()
         );
     }
@@ -181,12 +188,39 @@ final class SettingsRegistryTest extends TestCase
         self::assertContains('documents.qr_public_detail', SettingsRegistry::tenantTextKeys());
         self::assertFalse(SettingsRegistry::isGlobalOnly('documents.qr_public_detail'));
         self::assertSame('minimal', SettingsRegistry::defaultFor('documents.qr_public_detail'));
+        // #1068 added a THIRD level, `undated`, BELOW the default. The pin is
+        // here rather than only in the core pin file because this is the
+        // assertion that says the default did not move when it was added: a
+        // quieter level must not change what an existing tenant discloses.
+        self::assertNull(SettingsRegistry::validate('documents.qr_public_detail', 'undated'));
+        self::assertSame(
+            ['undated', 'minimal', 'stage'],
+            SettingsRegistry::optionsFor('documents.qr_public_detail')
+        );
         // 18: 16 on develop (#1014's quorum was the sixteenth) plus these two.
         // 19 since #1054 added documents.routing_notification_channels.
         self::assertContains('documents.routing_notification_channels', SettingsRegistry::tenantTextKeys());
         self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_notification_channels'));
         self::assertSame('in_app', SettingsRegistry::defaultFor('documents.routing_notification_channels'));
-        self::assertCount(19, SettingsRegistry::tenantTextKeys());
+
+        // 20 since #1068 added ui.hide_dates. Tenant-overridable rather than
+        // global-only, and the distinction is real: it grants nobody anything
+        // and takes nothing away — a reader who could see a document before
+        // can see it now — so it is a preference, not governance. Two tenants
+        // on one instance answer it differently, which is the test every
+        // per-tenant key in this list passes.
+        //
+        // DEFAULT FALSE, so an instance that never sets it renders exactly the
+        // dates it renders today.
+        self::assertContains('ui.hide_dates', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('ui.hide_dates'));
+        self::assertSame('false', SettingsRegistry::defaultFor('ui.hide_dates'));
+        self::assertSame('bool', SettingsRegistry::typeFor('ui.hide_dates'));
+        // NOT a feature flag: that tab is instance-wide capability toggles with
+        // no per-tenant surface, and a tenant-overridable key sitting there
+        // would give an operator a switch that looks global and is not.
+        self::assertFalse(SettingsRegistry::isFeatureFlag('ui.hide_dates'));
+        self::assertCount(20, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -312,7 +346,8 @@ final class SettingsRegistryTest extends TestCase
         // 58 since #1014 added documents.routing_approval_quorum.
         // 60 since #1036 added documents.qr_enabled + documents.qr_public_detail.
         // 61 since #1054 added documents.routing_notification_channels.
-        self::assertCount(61, $describe);
+        // 62 since #1068 added ui.hide_dates.
+        self::assertCount(62, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

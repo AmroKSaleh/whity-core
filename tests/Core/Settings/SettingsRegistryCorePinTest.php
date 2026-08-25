@@ -116,6 +116,11 @@ final class SettingsRegistryCorePinTest extends TestCase
             'error_tracking.retention_days',
             'i18n.enabled',
             'auth.invitation_ttl_days',
+            // #1068. This pin firing on the key was the pin working; it is
+            // added here deliberately. A DISPLAY key: every timestamp keeps
+            // being written, keeps being queryable, keeps its place in the
+            // audit trail. Only the screen changes.
+            'ui.hide_dates',
         ];
     }
 
@@ -257,6 +262,11 @@ final class SettingsRegistryCorePinTest extends TestCase
             // issuing an invitation is the one that knows how long its own
             // people need to act on it.
             'auth.invitation_ttl_days' => '7',
+            // #1068. OFF. The opposite default would blank every timestamp on
+            // every screen of every deployment at upgrade time, for a
+            // preference most of them have not expressed — which is the same
+            // argument i18n.enabled won above, pointing the other way.
+            'ui.hide_dates' => 'false',
         ];
     }
 
@@ -299,6 +309,11 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['documents.qr_enabled', 'true', true],
             ['documents.qr_enabled', 'yes', false],
             ['documents.qr_public_detail', 'stage', true],
+            // #1068's third level, BELOW the default: `minimal` with the date
+            // withheld, so a tenant that wants no date on the PUBLIC page can
+            // say so on this key rather than acquiring it as a side effect of
+            // ui.hide_dates, which deliberately does not reach that page.
+            ['documents.qr_public_detail', 'undated', true],
             ['documents.qr_public_detail', 'everything', false],
             ['auth.self_registration_enabled', 'false', true],
             ['auth.self_registration_enabled', 'yes', false],
@@ -357,6 +372,14 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['auth.invitation_ttl_days', '0', false],
             ['auth.invitation_ttl_days', '91', false],
             ['auth.invitation_ttl_days', 'a week', false],
+            // #1068. The literal 'true'/'false' contract, for the reason
+            // i18n.enabled has its own line below: a key that quietly began
+            // accepting '1' would read back as unset and display as ON while
+            // the product behaved as OFF.
+            ['ui.hide_dates', 'true', true],
+            ['ui.hide_dates', 'false', true],
+            ['ui.hide_dates', '1', false],
+            ['ui.hide_dates', 'yes', false],
             ['branding_favicon', 'anything', false],
             ['not_a_setting_at_all', 'x', false],
         ];
