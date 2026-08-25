@@ -44,6 +44,31 @@ jest.mock('@/lib/toast-context', () => ({
   useToast: () => ({ addToast }),
 }));
 
+/**
+ * The screen's two non-fetch dependencies, both added by changes that landed
+ * while this file sat on a branch.
+ *
+ * `useRouter` is #1023's — "New document" can hand the caller straight to the
+ * routing screen — and an unmocked one throws "expected app router to be
+ * mounted" before a single assertion runs.
+ *
+ * `useCapabilities` gates the New button. It is given BOTH capabilities by
+ * default so the button is present in the tests that are not about it: the
+ * alternative, letting it fail closed, would hide a control every layout
+ * assertion below renders around, and the absence would look like a layout bug.
+ */
+jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }));
+
+const heldCapabilities = new Set<string>(['documents:render', 'documents:route']);
+jest.mock('@/hooks/useCapabilities', () => ({
+  useCapabilities: () => ({
+    loading: false,
+    permissions: [...heldCapabilities],
+    has: (slug: string) => heldCapabilities.has(slug),
+    hasPermission: (slug: string) => heldCapabilities.has(slug),
+  }),
+}));
+
 import DocumentLibraryPage from '@/app/(protected)/admin/document-library/page';
 import { libraryEmptyState } from '@/app/(protected)/admin/document-library/library-empty-state';
 import type {
@@ -143,6 +168,7 @@ function installApi(options: {
   views?: Handled;
   collections?: Handled;
   ous?: Handled;
+  templates?: Handled;
   documents?: (url: string) => Handled;
   mutation?: Handled;
 } = {}) {
@@ -163,6 +189,20 @@ function installApi(options: {
     }
     if (url.startsWith('/api/v1/documents/views')) {
       return answer(options.views ?? { ok: true, body: { data: VIEWS, unavailable_substrates: [] } });
+    }
+    // #1023's template picker walks EVERY page through fetchAllPages, and treats
+    // a partial walk as a failure — so this answers with a complete envelope
+    // rather than a bare array.
+    if (url.startsWith('/api/v1/document-templates')) {
+      return answer(
+        options.templates ?? {
+          ok: true,
+          body: {
+            data: [{ id: 1, name: 'Invoice template', data: { placeholders: [] } }],
+            pagination: { page: 1, perPage: 100, total: 1, totalPages: 1 },
+          },
+        }
+      );
     }
     if (url.startsWith('/api/v1/document-collections')) {
       return answer(options.collections ?? { ok: true, body: { data: [Q3, STARRED] } });
@@ -204,6 +244,9 @@ function lastListUrl(): string {
 beforeEach(() => {
   jest.clearAllMocks();
   window.localStorage.clear();
+  heldCapabilities.clear();
+  heldCapabilities.add('documents:render');
+  heldCapabilities.add('documents:route');
   installApi();
 });
 
@@ -378,6 +421,80 @@ describe('the layout switch', () => {
     render(<DocumentLibraryPage />);
 
     await waitFor(() => expect(screen.getByRole('table', { name: 'Documents' })).toBeInTheDocument());
+  });
+
+  /**
+   * The title goes to the document's RECORD, in BOTH layouts.
+   *
+   * #993 moved it there from `content_url` — the current artifact, which answers
+   * "let me read it" and nothing else: no version history, no trail, and a
+   * superseded document indistinguishable from a current one. This branch was
+   * written before that landed and still linked the bytes, so the destination is
+   * pinned here rather than left to survive the next merge on trust.
+   *
+   * Both layouts, in one test, because "the grid quietly links somewhere else"
+   * is the exact failure a second rendering of the same row produces — and it is
+   * invisible to anyone who only ever opens the list.
+   */
+  it('links the title to the record page in both layouts, not to the file', async () => {
+    render(<DocumentLibraryPage />);
+    await waitFor(() => expect(screen.getByRole('table', { name: 'Documents' })).toBeInTheDocument());
+
+    const inList = screen.getByTestId('document-row-1');
+    expect(inList).toHaveAttribute('href', '/admin/document-library/1');
+    // The negative half: the artifact URL must not be what the title opens.
+    expect(inList).not.toHaveAttribute('href', '/api/v1/documents/1/content');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Grid' }));
+    const grid = await screen.findByRole('list', { name: 'Documents' });
+    expect(within(grid).getByTestId('document-row-1')).toHaveAttribute(
+      'href',
+      '/admin/document-library/1'
+    );
+
+    // The file is still reachable — from the row menu, which is where it moved.
+    await userEvent.click(within(grid).getAllByRole('button', { name: 'Document actions' })[0]);
+    expect(await screen.findByRole('menuitem', { name: /Open the rendered file/ })).toHaveAttribute(
+      'href',
+      '/api/v1/documents/1/content'
+    );
+  });
+
+  /**
+   * An empty GRID says the same thing an empty list says.
+   *
+   * WITH A POSITIVE CONTROL, because "the folder is empty" and "the grid never
+   * rendered" produce identical assertions: `queryBy…` finds nothing either way,
+   * and a grid that crashed, or that was never reached because the layout switch
+   * silently failed, would pass an emptiness check forever. So the same render
+   * must also show something that is definitely there — the empty state's own
+   * sentence, and the toolbar around it.
+   */
+  it('renders an empty grid as an empty state, not as a grid that failed to appear', async () => {
+    installApi({
+      documents: () => ({
+        ok: true,
+        body: {
+          data: [],
+          pagination: { page: 1, perPage: 25, total: 0, totalPages: 0 },
+          view: { key: 'all', ou_id: null, collection_id: null },
+          sort: { field: null, direction: 'desc' },
+        },
+      }),
+    });
+
+    render(<DocumentLibraryPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Grid' }));
+
+    // The positive control: this render definitely happened and definitely
+    // reached the grid layout.
+    expect(await screen.findByText('No documents in this folder')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grid' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+
+    // Only now is the absence meaningful.
+    expect(screen.queryByRole('list', { name: 'Documents' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('document-row-1')).not.toBeInTheDocument();
   });
 });
 
