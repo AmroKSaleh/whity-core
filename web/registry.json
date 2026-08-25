@@ -740,6 +740,43 @@
       ]
     },
     {
+      "name": "audience-group-picker",
+      "type": "registry:ui",
+      "title": "Audience Group Picker",
+      "description": "Choose one user group for a routing step, with the membership snapshot it currently resolves to.",
+      "files": [
+        {
+          "path": "../packages/ui/src/audience-group-picker.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "registryDependencies": [
+        "@whity/badge",
+        "@whity/button",
+        "@whity/select"
+      ]
+    },
+    {
+      "name": "audience-people-picker",
+      "type": "registry:ui",
+      "title": "Audience People Picker",
+      "description": "Search-and-chip multi-person picker for the hand-picked case, where no computed rule expresses the audience.",
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/audience-people-picker.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "registryDependencies": [
+        "@whity/badge",
+        "@whity/button",
+        "@whity/input"
+      ]
+    },
+    {
       "name": "page-header",
       "type": "registry:ui",
       "title": "Page Header",

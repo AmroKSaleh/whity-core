@@ -144,6 +144,31 @@ export const DOCUMENTS_PUBLISH = 'documents:publish';
 export const DOCUMENTS_RENDER = 'documents:render';
 
 /**
+ * User groups — the named rules that say which people a set contains (#999).
+ *
+ * Two slugs because the server draws the line in two places, and for a reason
+ * worth keeping visible on the client: `groups:read` covers seeing definitions
+ * and asking who a SAVED one resolves to, while `groups:write` additionally
+ * covers `POST /api/v1/user-groups/preview` — resolving an arbitrary rule the
+ * caller just composed. That endpoint answers questions about the organisation
+ * that no stored group asks, so somebody who may only read definitions must not
+ * be able to probe "how many people hold role 4" by inventing rules.
+ *
+ * BOTH ARE HELD on a freshly migrated, freshly seeded install — verified before
+ * gating anything on them, which is the check `roles:read` failed for months.
+ * Migration 116 grants them by CAPABILITY (whoever held `roles:write` or
+ * `documents:route` when it ran) rather than to the `admin` role by name.
+ *
+ * That grant is a snapshot and not a standing implication, which matters here:
+ * a role that acquires `documents:route` AFTER 116 has run — every role the
+ * document demo seeds, for instance — holds it without holding `groups:read`.
+ * So a group picker must degrade with a stated reason rather than assume the
+ * two travel together.
+ */
+export const GROUPS_READ = 'groups:read';
+export const GROUPS_WRITE = 'groups:write';
+
+/**
  * Narrow an unknown `/api/me/capabilities` payload to its permission slugs.
  *
  * Returns `[]` for any shape that does not match `{ data: { permissions:

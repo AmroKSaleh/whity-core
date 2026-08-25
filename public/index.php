@@ -647,6 +647,24 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredRole' => 'admin',
     ];
     $items[] = [
+        'id' => 'user-groups',
+        'label' => 'User Groups',
+        'href' => '/admin/user-groups',
+        'icon' => 'users-group',
+        'group' => 'access',
+        'order' => 6,
+        // #1015: mirrors GET /api/user-groups, which is where the page's primary
+        // fetch goes, so the link and the screen behind it cannot disagree about
+        // who belongs here.
+        //
+        // In `access` beside Users, Roles and Delegations rather than in
+        // `documents`, even though routing is what named groups were built for: a
+        // group is a statement about PEOPLE, it is reusable by anything that needs
+        // an audience, and filing it under the first consumer would make the
+        // second one look like an intruder.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::GROUPS_READ,
+    ];
+    $items[] = [
         'id' => 'audit-logs',
         'label' => 'Audit Logs',
         'href' => '/admin/audit-logs',
