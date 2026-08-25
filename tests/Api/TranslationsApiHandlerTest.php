@@ -386,6 +386,15 @@ final class TranslationsApiHandlerTest extends TestCase
         // asserts about the GAP are independent of how much of the catalogue
         // ships. `greeting`/`farewell`/`notFound` are keys no catalogue has, so
         // they are the whole of the gap it constructs.
+        // The gap BEFORE this test creates one. Measured rather than assumed:
+        // the committed catalogues are not guaranteed to be at parity, because a
+        // key legitimately ships in English before anybody has translated it
+        // (#1036 added twenty-six such keys to `documents` the day it landed).
+        // Pinning the absolute number instead was pinning "the catalogues are at
+        // parity today", which is a fact about the calendar rather than about
+        // this handler, and it broke on the next English key anyone added.
+        $baselineMissing = $this->arabicMissing();
+
         $this->translationRepository->create($this->englishLanguageId, 'common', 'greeting', 'Hello', null);
         $this->translationRepository->create($this->englishLanguageId, 'common', 'farewell', 'Bye', null);
         $this->translationRepository->create($this->englishLanguageId, 'errors', 'notFound', 'Not found', null);
@@ -400,14 +409,29 @@ final class TranslationsApiHandlerTest extends TestCase
         $byLanguage = array_column($body['languages'], null, 'language_code');
         $this->assertSame(0, $byLanguage['en']['missing'], 'the source language is complete by construction');
         $this->assertSame($byLanguage['en']['total'], $byLanguage['ar']['total'], 'the universe of keys is the source language, not what Arabic happens to have');
-        $this->assertSame(2, $byLanguage['ar']['missing']);
+        // THE GAP IS THE SUBJECT, AND THE DELTA IS WHAT IS STABLE. This test
+        // created exactly two keys English has and Arabic does not
+        // (`common.farewell`, `errors.notFound`), so the language-wide gap must
+        // grow by exactly two — however large the catalogues are, and whether or
+        // not they happen to be at parity when this runs.
+        $this->assertSame($baselineMissing + 2, $byLanguage['ar']['missing']);
 
-        // THE GAP IS THE SUBJECT, AND THE GAP IS STABLE. `missing` stays a
-        // literal because it counts exactly what this test made missing:
-        // migration 121 seeds every committed catalogue in BOTH languages, so
-        // every seeded key is translated on both sides and cancels out of the
-        // difference. `farewell` is the one English key with no Arabic, and it
-        // stays 1 however large the catalogue grows.
+        // AND the language total must equal the sum of its own domains. The
+        // delta above cannot catch a CONSTANT-OFFSET bug — subtract one from
+        // every language total and the difference between two readings is
+        // unchanged, which was confirmed by mutating the handler and watching
+        // this test stay green. This line is what makes that mutation fail:
+        // it derives the expected total from the per-domain breakdown in the
+        // same payload, which the offending expression does not feed.
+        $this->assertSame(
+            array_sum(array_column($byLanguage['ar']['domains'], 'missing')),
+            $byLanguage['ar']['missing'],
+            "a language's gap is the sum of its domains' gaps"
+        );
+
+        // The PER-DOMAIN numbers below are still literals, and legitimately so:
+        // they are about `common`, `errors` and `auth`, which this test owns
+        // outright. An untranslated key in some other domain cannot move them.
         //
         // `total` and `translated` are NOT stable, and asserting them as
         // literals was really asserting that the `common` domain was otherwise
@@ -441,6 +465,25 @@ final class TranslationsApiHandlerTest extends TestCase
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * How many keys Arabic is missing right now, read through the same route
+     * under test.
+     *
+     * Deliberately the handler's own answer rather than a second query that
+     * re-implements the difference: this is a BASELINE, not an assertion. The
+     * assertion is the DELTA across it, so a bug in the handler's counting
+     * cancels out of the baseline and shows up in the delta — which is the only
+     * number this test claims to know.
+     */
+    private function arabicMissing(): int
+    {
+        $response = $this->handler->coverage($this->req(0, 930, 'GET', null, '/api/translations/coverage'));
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $languages = array_column(json_decode($response->getBody(), true)['data']['languages'], null, 'language_code');
+
+        return (int) $languages['ar']['missing'];
+    }
 
     /** The id of a seeded language, for fixtures in a language other than English. */
     private function languageId(string $code): int
