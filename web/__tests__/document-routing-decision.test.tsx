@@ -243,22 +243,32 @@ describe('three approvers under a quorum of `all`', () => {
   it('tells the FIRST approver their approval is recorded and the step is not', async () => {
     const banner = await approveAndRead(null);
 
-    expect(banner).toHaveAttribute('data-decided', 'pending');
-    // It names what the reader themselves did…
-    expect(banner.textContent).toMatch(/your approval is recorded/i);
-    // …and refuses to say the step did it.
-    expect(banner.textContent).toMatch(/not approved yet/i);
-    expect(banner.textContent).toMatch(/still waiting on the other people/i);
+    // THE SENTENCE FIRST, deliberately. A mutation that renders the caller's own
+    // verdict must fail on what a PERSON reads, not on a machine attribute a
+    // reader never sees and not on some incidental fixture line that would have
+    // broken anyway — otherwise the test could be passing for a reason that has
+    // nothing to do with the behaviour it is named for.
+    //
+    // It refuses to say the step did what the reader did…
     expect(banner.textContent).not.toMatch(/this step is approved/i);
     expect(banner.textContent).not.toMatch(/document has moved on/i);
+    // …says instead what is actually true…
+    expect(banner.textContent).toMatch(/not approved yet/i);
+    expect(banner.textContent).toMatch(/still waiting on the other people/i);
+    // …and names what the reader themselves did, which is the one approval that
+    // HAS happened.
+    expect(banner.textContent).toMatch(/your approval is recorded/i);
+    // The machine-readable half of the same claim, last: a second lock, not the
+    // one carrying the weight.
+    expect(banner).toHaveAttribute('data-decided', 'pending');
   });
 
   it('says the same to the SECOND approver — two of three still concludes nothing', async () => {
     const banner = await approveAndRead(null);
 
-    expect(banner).toHaveAttribute('data-decided', 'pending');
-    expect(banner.textContent).toMatch(/not approved yet/i);
     expect(banner.textContent).not.toMatch(/this step is approved/i);
+    expect(banner.textContent).toMatch(/not approved yet/i);
+    expect(banner).toHaveAttribute('data-decided', 'pending');
   });
 
   it('and only the THIRD is told the document is approved and has moved', async () => {
@@ -312,10 +322,10 @@ describe('rejecting', () => {
     await waitFor(() => expect(outcome()).not.toBeNull());
     const banner = outcome() as HTMLElement;
 
-    expect(banner).toHaveAttribute('data-decided', 'pending');
-    expect(banner.textContent).toMatch(/your rejection is recorded/i);
-    expect(banner.textContent).toMatch(/not settled yet/i);
     expect(banner.textContent).not.toMatch(/can no longer be approved/i);
+    expect(banner.textContent).toMatch(/not settled yet/i);
+    expect(banner.textContent).toMatch(/your rejection is recorded/i);
+    expect(banner).toHaveAttribute('data-decided', 'pending');
   });
 
   it('says the document ENDS HERE when the route draws no rejection path', async () => {
