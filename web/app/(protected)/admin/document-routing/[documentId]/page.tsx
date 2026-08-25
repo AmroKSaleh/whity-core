@@ -435,7 +435,23 @@ export default function DocumentRoutingPage() {
         <p className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
           {routes.error}
         </p>
-      ) : routes.loading ? (
+      ) : routes.loading && routes.data === null ? (
+        /*
+          FIRST LOAD ONLY, and this gate is the reason to say so twice.
+
+          `useFetch` raises `loading` on every refetch, and an act triggers one
+          for BOTH requests. Gating on `loading` alone replaced the entire route
+          list — every card, every act panel — with the word "Loading…" the
+          instant somebody approved, which threw away the sentence the panel
+          exists to show them ("your approval is recorded; this step is not
+          approved yet") before anybody could read it.
+
+          The recipients gate below had the identical defect and was fixed first;
+          this one sat two lines away and stayed green through 1,794 unit tests,
+          because the panel's own tests mount the panel and never the host. It
+          was found by opening the page (#1041). `document-routing-refresh.test.tsx`
+          now holds both.
+        */
         <p className="text-sm text-muted-foreground">{t('routing.loading', 'Loading…')}</p>
       ) : routeList.length === 0 ? (
         /*

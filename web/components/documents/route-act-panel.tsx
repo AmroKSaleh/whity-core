@@ -478,6 +478,39 @@ export function RouteActPanel({
       </div>
 
       {/*
+        THE ANSWER GOES FIRST.
+
+        It was under the buttons until this was looked at in a browser, and the
+        state that exposed the mistake is the one right after acting: the row
+        closes, so the panel falls back to the no-open-item rendering — a heading
+        that says "Nothing on this route is awaiting you" and three disabled
+        controls each repeating why. The one sentence the person needed ("your
+        approval is recorded; this step is not approved yet") was below all of
+        that, off the bottom of a 1000px viewport.
+
+        Ordering it above the controls is not cosmetics. What you just did, and
+        what it concluded, outrank a list of things you may no longer do.
+      */}
+      {outcome !== null && (
+        <Alert
+          variant={
+            outcome.decided === 'approved'
+              ? 'success'
+              : outcome.decided === 'rejected'
+                ? 'destructive'
+                : 'warning'
+          }
+          data-slot="route-act-outcome"
+          // The machine-readable half of the same claim, so a test can pin
+          // "the step concluded nothing" without pinning a sentence.
+          data-decided={outcome.decided ?? 'pending'}
+          data-submitted={outcome.submitted}
+        >
+          <AlertDescription>{decisionMessage(outcome)}</AlertDescription>
+        </Alert>
+      )}
+
+      {/*
         THE QUORUM, AND ONLY WHERE IT MEANS ANYTHING.
 
         `all`, `any` and `majority` are the same rule for a cohort of one, which
@@ -587,13 +620,33 @@ export function RouteActPanel({
         {(isDecision
           ? (['forwarded', 'returned'] as const)
           : (['forwarded', 'acknowledged', 'returned'] as const)
-        ).map((action) => (
+        ).map((action, index, shown) => (
           <ActButton
             key={action}
             action={action}
             availability={availability[action]}
             busy={busy === action}
             disabledByNote={overLimit}
+            /*
+              ONE VISIBLE COPY PER SENTENCE.
+
+              #951's rule is that a denied control carries its reason, and each
+              button keeps its own `title` and its own `sr-only role="note"` —
+              those are per-control and must stay. What does NOT have to repeat
+              is the VISIBLE paragraph: when several controls are denied for the
+              SAME cause (which is exactly the no-open-item case, where all three
+              share one sentence) the screen printed a 40-word explanation three
+              times in a row, and the thing the person actually wanted to read
+              was underneath it.
+
+              Repeating a sentence does not make it more findable; it makes
+              everything around it less findable.
+            */
+            showReasonText={
+              shown
+                .slice(0, index)
+                .every((earlier) => availability[earlier].reason !== availability[action].reason)
+            }
             onClick={() => void submit(action)}
             t={t}
           />
@@ -620,25 +673,6 @@ export function RouteActPanel({
         </Button>
       </div>
 
-      {outcome !== null && (
-        <Alert
-          variant={
-            outcome.decided === 'approved'
-              ? 'success'
-              : outcome.decided === 'rejected'
-                ? 'destructive'
-                : 'warning'
-          }
-          data-slot="route-act-outcome"
-          // The machine-readable half of the same claim, so a test can pin
-          // "the step concluded nothing" without pinning a sentence.
-          data-decided={outcome.decided ?? 'pending'}
-          data-submitted={outcome.submitted}
-        >
-          <AlertDescription>{decisionMessage(outcome)}</AlertDescription>
-        </Alert>
-      )}
-
       {refusal !== null && (
         <Alert variant="destructive" data-slot="route-act-refusal">
           <AlertDescription>{refusal}</AlertDescription>
@@ -653,6 +687,15 @@ interface ActButtonProps {
   availability: ActionAvailability;
   busy: boolean;
   disabledByNote: boolean;
+  /**
+   * Whether to print the reason under THIS control.
+   *
+   * False when an earlier control in the same row has already printed the same
+   * sentence. The `title` and the `sr-only` note are unaffected: they belong to
+   * the control, and a screen reader landing on the third button still hears why
+   * it is disabled.
+   */
+  showReasonText: boolean;
   onClick: () => void;
   t: (key: string, fallback?: string, vars?: Record<string, string | number>) => string;
 }
@@ -670,7 +713,15 @@ interface ActButtonProps {
  * The wrapping span is load-bearing: a disabled button emits no pointer events
  * of its own, so a `title` on the button itself never fires.
  */
-function ActButton({ action, availability, busy, disabledByNote, onClick, t }: ActButtonProps) {
+function ActButton({
+  action,
+  availability,
+  busy,
+  disabledByNote,
+  showReasonText,
+  onClick,
+  t,
+}: ActButtonProps) {
   const labels: Record<RecipientActionName, string> = {
     forwarded: t('routing.act.forward', 'Forward'),
     // Still not "Approve": on a circulation step this act says "this goes no
@@ -688,7 +739,14 @@ function ActButton({ action, availability, busy, disabledByNote, onClick, t }: A
     <div className="flex flex-col">
       <span className="inline-flex" title={reason ?? undefined}>
         <Button
-          variant={action === 'returned' ? 'outline' : 'default'}
+          /*
+            A DENIED CONTROL IS NEVER THE PRIMARY ONE. A solid primary button at
+            50% opacity still reads as the thing to press — which on a decision
+            step put a blue "Forward" next to Approve and Reject and made the one
+            act the engine REFUSES there the most eye-catching of the three.
+            #951 asks for visible-and-explained, not visible-and-inviting.
+          */
+          variant={action === 'returned' || !availability.allowed ? 'outline' : 'default'}
           disabled={disabled}
           aria-disabled={disabled}
           onClick={disabled ? undefined : onClick}
@@ -702,7 +760,7 @@ function ActButton({ action, availability, busy, disabledByNote, onClick, t }: A
           </span>
         )}
       </span>
-      {reason !== null && (
+      {reason !== null && showReasonText && (
         <p className="mt-1 max-w-xs text-xs text-muted-foreground">{reason}</p>
       )}
     </div>

@@ -309,6 +309,38 @@ describe('RouteActPanel', () => {
     expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Return to sender' })).toBeDisabled();
     expect(screen.getAllByText(/you have no open item on this route/i).length).toBeGreaterThan(0);
+
+    // EVERY control still carries the reason for assistive technology — that is
+    // #951 and it is per-control by definition.
+    const notes = screen
+      .getAllByText(/you have no open item on this route/i)
+      .filter((n) => n.getAttribute('role') === 'note');
+    expect(notes).toHaveLength(3);
+
+    // But the VISIBLE paragraph is printed ONCE, not once per button. All three
+    // are denied for the same cause and the same 40-word sentence three times in
+    // a row buried what the person had actually come to read (#1041). Repeating
+    // a sentence does not make it more findable.
+    const visible = screen
+      .getAllByText(/you have no open item on this route/i)
+      .filter((n) => n.tagName === 'P');
+    expect(visible).toHaveLength(1);
+  });
+
+  it('never gives a DENIED control the primary fill', () => {
+    // A solid primary button at 50% opacity still reads as the thing to press.
+    // On a decision step that made "Forward" — the one act the engine refuses
+    // there — the most eye-catching control on the panel.
+    renderPanel([recipient({ id: 1, step_id: 13, parent_recipient_id: 99 })]);
+
+    const forward = screen.getByRole('button', { name: 'Forward' });
+    expect(forward).toBeDisabled();
+    expect(forward).toHaveAttribute('data-variant', 'outline');
+    // …while an available one keeps it.
+    expect(screen.getByRole('button', { name: 'Acknowledge' })).toHaveAttribute(
+      'data-variant',
+      'default'
+    );
   });
 
   it('still allows a note when nothing is open — the trail’s correction path', async () => {

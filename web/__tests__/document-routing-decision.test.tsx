@@ -293,6 +293,23 @@ describe('three approvers under a quorum of `all`', () => {
     expect(String(message)).not.toMatch(/this step is approved/i);
   });
 
+  it('puts the answer ABOVE the controls, not below them', async () => {
+    // Found by looking at the screen rather than at the DOM. Acting closes the
+    // row, so the panel falls back to its no-open-item rendering — a heading
+    // reading "Nothing on this route is awaiting you" over three disabled
+    // controls — and the outcome was underneath all of it, off the bottom of a
+    // 1000px viewport. The sentence a person came for cannot be the last thing
+    // on the page.
+    const banner = await approveAndRead(null);
+    // Anchored on a control that is unambiguously part of the button row.
+    const approve = document.querySelector('[data-slot="route-act-verdict-approved"]');
+
+    expect(approve).not.toBeNull();
+    const controlsComeAfter =
+      banner.compareDocumentPosition(approve as Node) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(Boolean(controlsComeAfter)).toBe(true);
+  });
+
   it('tints the settling approval as a success, and says so once', async () => {
     await approveAndRead('approved', { resolved: 1, delivered: 1 });
     expect(addToast).toHaveBeenCalledTimes(1);
