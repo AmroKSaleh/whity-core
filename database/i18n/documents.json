@@ -534,6 +534,7 @@
         "routing.names.partial": "People’s names could not all be loaded, so some recipients are shown by id.",
         "routing.profile.byId": "Profile #{id}",
         "routing.profile.you": "{name} (you)",
+        "routing.recipients.loading": "Working out who this reached…",
         "routing.role.byId": "Role #{id}",
         "routing.route.raised": "Raised {when}",
         "routing.rule.role": "Everyone holding {role}",
