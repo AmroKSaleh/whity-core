@@ -293,9 +293,10 @@ final class RoutingNotificationsRealEngineTest extends TestCase
      */
     private function notifications(): array
     {
-        $rows = $this->pdo
-            ->query('SELECT recipient_profile_id, type FROM notifications ORDER BY id ASC')
-            ->fetchAll(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->prepare('SELECT recipient_profile_id, type FROM notifications ORDER BY id ASC');
+        $stmt->execute();
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map(
             static fn (array $r): array => [(int) $r['recipient_profile_id'], (string) $r['type']],
@@ -306,9 +307,12 @@ final class RoutingNotificationsRealEngineTest extends TestCase
     /** @return list<string> */
     private function channelsUsed(): array
     {
-        $rows = $this->pdo
-            ->query('SELECT DISTINCT channel FROM notification_deliveries ORDER BY channel ASC')
-            ->fetchAll(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->prepare(
+            'SELECT DISTINCT channel FROM notification_deliveries ORDER BY channel ASC'
+        );
+        $stmt->execute();
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map(static fn (array $r): string => (string) $r['channel'], $rows);
     }

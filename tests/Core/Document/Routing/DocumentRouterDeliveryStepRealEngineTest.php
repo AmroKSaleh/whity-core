@@ -684,7 +684,11 @@ final class DocumentRouterDeliveryStepRealEngineTest extends TestCase
         return array_values($ids);
     }
 
-    /** Everybody still holding an open item on a document. @return list<int> */
+    /**
+     * Everybody still holding an open item on a document.
+     *
+     * @return list<int>
+     */
     private function openProfiles(int $documentId): array
     {
         return $this->profilesIn(array_values(array_filter(

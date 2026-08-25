@@ -4070,6 +4070,8 @@ export interface components {
                 decision_quorum?: "all" | "any" | "majority" | null;
                 on_approved?: number | null;
                 on_rejected?: number | null;
+                /** @enum {string} */
+                satisfied_by?: "act" | "delivery";
             }[];
         };
         DocumentRouteEdge: {
@@ -4119,6 +4121,8 @@ export interface components {
             decision: boolean;
             /** @enum {string|null} */
             decision_quorum?: "all" | "any" | "majority" | null;
+            /** @enum {string} */
+            satisfied_by: "act" | "delivery";
         };
         DocumentStarResponse: {
             data: components["schemas"]["DocumentCollection"] | null;
@@ -5307,6 +5311,8 @@ export interface components {
             label?: string | null;
             decision: boolean;
             decision_quorum?: string | null;
+            /** @enum {string} */
+            satisfied_by?: "act" | "delivery";
             canvas_x?: number;
             canvas_y?: number;
         };

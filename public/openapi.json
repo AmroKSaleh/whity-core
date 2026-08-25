@@ -28676,6 +28676,13 @@
                                 "on_rejected": {
                                     "type": "integer",
                                     "nullable": true
+                                },
+                                "satisfied_by": {
+                                    "type": "string",
+                                    "enum": [
+                                        "act",
+                                        "delivery"
+                                    ]
                                 }
                             },
                             "required": [
@@ -28863,6 +28870,13 @@
                             "majority"
                         ],
                         "nullable": true
+                    },
+                    "satisfied_by": {
+                        "type": "string",
+                        "enum": [
+                            "act",
+                            "delivery"
+                        ]
                     }
                 },
                 "required": [
@@ -28870,7 +28884,8 @@
                     "position",
                     "rule_kind",
                     "rule_config",
-                    "decision"
+                    "decision",
+                    "satisfied_by"
                 ]
             },
             "DocumentStarResponse": {
@@ -33601,6 +33616,13 @@
                     "decision_quorum": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "satisfied_by": {
+                        "type": "string",
+                        "enum": [
+                            "act",
+                            "delivery"
+                        ]
                     },
                     "canvas_x": {
                         "type": "integer"

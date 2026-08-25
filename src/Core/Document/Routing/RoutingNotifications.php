@@ -269,9 +269,9 @@ final class RoutingNotifications
             }
         }
 
-        $default = SettingsRegistry::defaults()[SettingsRegistry::DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS] ?? '';
-
-        return is_string($default) ? self::split($default) : [];
+        return self::split(
+            SettingsRegistry::defaults()[SettingsRegistry::DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS] ?? ''
+        );
     }
 
     /**

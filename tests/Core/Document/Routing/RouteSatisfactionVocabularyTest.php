@@ -41,32 +41,6 @@ final class RouteSatisfactionVocabularyTest extends TestCase
 {
     private const MIGRATION = __DIR__ . '/../../../../database/migrations/124_add_route_step_satisfaction.php';
 
-    /** @return list<string> */
-    private static function valuesIn(string $source, string $pattern): array
-    {
-        $matched = preg_match_all($pattern, $source, $m);
-        self::assertNotFalse($matched, "migration 124 must still carry the constraint matched by {$pattern}");
-        self::assertGreaterThan(
-            0,
-            $matched,
-            "migration 124 must still carry the constraint matched by {$pattern}"
-        );
-
-        // `?? ''` rather than assertArrayHasKey: PHPStan reasons about
-        // preg_match_all's return shape rather than about a runtime assertion, so
-        // the coalesce is what narrows it. The emptiness check below is the real
-        // guard — a match with no capture would otherwise compare [] against []
-        // and pass while checking nothing.
-        $list = $m[1][0] ?? '';
-        self::assertNotSame('', $list, 'the constraint must expose its value list');
-
-        preg_match_all("/'([a-z_]+)'/", $list, $values);
-        $out = $values[1];
-        sort($out);
-
-        return $out;
-    }
-
     private static function source(): string
     {
         $source = file_get_contents(self::MIGRATION);
