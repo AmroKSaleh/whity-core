@@ -217,7 +217,7 @@ therefore *prunes files it did not expect*. `is_file()` is what makes `ar/`
 invisible to the generated half of the pipeline, so one ordinary `i18n:extract`
 cannot delete every translation anyone has ever written. A unit test pins it.
 
-Migration `120_seed_translation_catalogues` seeds every committed catalogue at
+Migration `121_seed_translation_catalogues` seeds every committed catalogue at
 `migrate run`, because that is the one step every install performs and nothing
 ever ran `i18n:sync` on its own.
 
@@ -350,7 +350,7 @@ as long as they did is that the gap was not a number anybody could see.
 | `scripts/ci-i18n-catalog-drift.php` | the CI gate |
 | `database/i18n/*.json` | the English catalogue — generated, committed, never hand-edited |
 | `database/i18n/<code>/*.json` | one language each — hand-written, committed, never generated |
-| `database/migrations/120_seed_translation_catalogues.php` | seeds every committed catalogue at `migrate run` |
+| `database/migrations/121_seed_translation_catalogues.php` | seeds every committed catalogue at `migrate run` |
 | `packages/features/src/i18n/` | the React side: `useTranslation`, the provider, direction |
 | `docs/wiki/Internationalization.md` | this page |
 

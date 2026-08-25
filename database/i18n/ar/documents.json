@@ -552,6 +552,7 @@
         "routing.names.partial": "تعذّر تحميل أسماء بعض الأشخاص، لذا يُعرَض بعض المستلِمين بمعرّفاتهم.",
         "routing.profile.byId": "الملف الشخصي رقم {id}",
         "routing.profile.you": "{name} (أنت)",
+        "routing.recipients.loading": "جارٍ تحديد من وصل إليهم هذا…",
         "routing.role.byId": "الدور رقم {id}",
         "routing.route.raised": "صدر في {when}",
         "routing.rule.role": "كل من يحمل دور {role}",

@@ -216,7 +216,7 @@ exactly the same reason English is seeded from a file: strings that exist only
 in a database cannot be reviewed in a diff, cannot ship in the image, and do not
 survive the database being rebuilt.
 
-Migration `120_seed_translation_catalogues` does the same thing at `migrate
+Migration `121_seed_translation_catalogues` does the same thing at `migrate
 run`, so a fresh install arrives already seeded in every committed language.
 This command remains the way to seed a catalogue added *after* that migration
 ran, and the way to seed an already-deployed database.
