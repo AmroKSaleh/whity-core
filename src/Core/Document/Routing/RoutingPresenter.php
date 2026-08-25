@@ -129,6 +129,17 @@ final class RoutingPresenter
             // circulation.
             'decision' => DbBool::of($step['decision'] ?? false),
             'decision_quorum' => $step['decision_quorum'] ?? null,
+            // #1054. WHETHER ANYBODY IS ASKED TO ACT at this step. Published
+            // for the same reason `decision` is, and the cost of omitting it is
+            // sharper: a client that cannot tell a delivery step apart offers
+            // Forward / Acknowledge / Return on a step where every one of them
+            // is a 422, to a person whose item was closed the instant it was
+            // created. It also lets a trail reader say "delivered to the
+            // faculty" where it would otherwise say "sent to 300 people",
+            // leaving each of them looking like somebody who has not replied.
+            'satisfied_by' => is_string($step['satisfied_by'] ?? null)
+                ? (string) $step['satisfied_by']
+                : RouteSatisfaction::fallback(),
         ];
     }
 
