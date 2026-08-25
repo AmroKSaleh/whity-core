@@ -58,7 +58,8 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { useAuth } from '@/lib/auth-context';
@@ -76,7 +77,7 @@ const DOCUMENT_ROUTING_SOURCE = 'document_routing';
 
 export default function InboxPage() {
   const t = useTranslation('documents');
-  const locale = useFormattingLocale();
+  const dates = useDateDisplay();
   const { apiClient } = useAuth();
   const router = useRouter();
 
@@ -225,18 +226,20 @@ export default function InboxPage() {
           return <Badge variant={variant}>{row.status}</Badge>;
         },
       },
-      {
-        id: 'timestamp',
-        header: t('inbox.column.arrived', 'Arrived'),
-        cell: (row) =>
-          row.timestamp === null ? null : (
-            <span className="text-xs text-muted-foreground">
-              {new Date(row.timestamp).toLocaleString(locale)}
-            </span>
-          ),
-      },
+      // #1068: the "Arrived" column goes when this tenant hides dates. The
+      // inbox still lists what is waiting, from which source, in what state,
+      // newest first — and "why did this sit for three days" is precisely the
+      // question the tenants who asked for this setting want off the screen.
+      ...dates.dateColumns<InboxItem>([
+        {
+          id: 'timestamp',
+          header: t('inbox.column.arrived', 'Arrived'),
+          value: (row) => row.timestamp,
+          className: 'text-xs text-muted-foreground',
+        },
+      ]),
     ],
-    [t, router]
+    [t, router, dates]
   );
 
   if (sources.error !== null) {

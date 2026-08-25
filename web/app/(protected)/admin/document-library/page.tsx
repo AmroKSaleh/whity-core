@@ -9,7 +9,8 @@ import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import { IconFilePlus } from '@tabler/icons-react';
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { useRouter } from 'next/navigation';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { DOCUMENTS_RENDER, DOCUMENTS_ROUTE } from '@/lib/capabilities';
@@ -166,7 +167,7 @@ export default function DocumentLibraryPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const t = useTranslation('documents');
-  const locale = useFormattingLocale();
+  const dates = useDateDisplay();
   const router = useRouter();
   // UI hints only — the server is authoritative on both. `has()` fails CLOSED, so
   // a payload it could not parse hides the New button rather than dangling an
@@ -588,11 +589,17 @@ export default function DocumentLibraryPage() {
           <span dir="auto">{ouName(row.origin_ou_id)}</span>
         ),
       },
-      {
-        id: 'created_at',
-        header: t('organizer.table.created', 'Created'),
-        cell: (row) => new Date(row.created_at).toLocaleString(locale),
-      },
+      // #1068: the "Created" column goes when this tenant hides dates. The
+      // organizer is a file manager — title, template, unit and version count
+      // are what a reader browses by — and the sort menu still offers "Date
+      // created", which orders the rows without printing the value.
+      ...dates.dateColumns<DocumentRow>([
+        {
+          id: 'created_at',
+          header: t('organizer.table.created', 'Created'),
+          value: (row) => row.created_at,
+        },
+      ]),
       {
         id: 'artifacts',
         header: t('organizer.table.versions', 'Versions'),
@@ -601,7 +608,7 @@ export default function DocumentLibraryPage() {
         cell: (row) => String(row.artifacts.length),
       },
     ],
-    [busy, locale, ouName, t, toggleStar]
+    [busy, dates, ouName, t, toggleStar]
   );
 
   const listError = documents.error;

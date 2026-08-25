@@ -20,6 +20,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
+import type { DateDisplay } from '@amroksaleh/features/datetime';
 
 type ComponentStatus = 'operational' | 'degraded' | 'down' | 'unknown';
 
@@ -93,20 +95,30 @@ const LABEL: Record<ComponentStatus, { key: string; text: string }> = {
  * Relative age, as one translatable unit per magnitude rather than a number
  * glued to a suffix — the unit letter and the word order both move between
  * languages, so `{n}` has to sit inside the string rather than in front of it.
+ *
+ * The BUCKETING moved to the shared date path (#1068) and only the words stayed
+ * here, because the four thresholds were duplicated character-for-character on
+ * the error-tracking screen and the two would have drifted. Going through
+ * `dates` is also what makes relative phrasing honour `ui.hide_dates`: "3m ago"
+ * is a date said less precisely, not a middle ground, so it is hidden exactly as
+ * an absolute timestamp is — hence the `null`, which every caller renders as no
+ * line at all.
  */
-function formatWhen(t: TranslateFn, iso: string | null): string {
+function formatWhen(t: TranslateFn, dates: DateDisplay, iso: string | null): string | null {
+  if (dates.hidden) return null;
   if (!iso) return t('when.never', 'never');
-  const then = new Date(iso.replace(' ', 'T') + (iso.includes('Z') || iso.includes('+') ? '' : 'Z'));
-  if (Number.isNaN(then.getTime())) return t('when.unknown', 'unknown');
-  const seconds = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
-  if (seconds < 90) return t('when.seconds', '{n}s ago', { n: seconds });
-  if (seconds < 5400) return t('when.minutes', '{n}m ago', { n: Math.round(seconds / 60) });
-  if (seconds < 172800) return t('when.hours', '{n}h ago', { n: Math.round(seconds / 3600) });
-  return t('when.days', '{n}d ago', { n: Math.round(seconds / 86400) });
+
+  return dates.relative(iso, {
+    seconds: (n) => t('when.seconds', '{n}s ago', { n }),
+    minutes: (n) => t('when.minutes', '{n}m ago', { n }),
+    hours: (n) => t('when.hours', '{n}h ago', { n }),
+    days: (n) => t('when.days', '{n}d ago', { n }),
+  }) ?? t('when.unknown', 'unknown');
 }
 
 export default function StatusPage() {
   const t = useTranslation('status');
+  const dates = useDateDisplay();
   const [data, setData] = useState<StatusPayload | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -170,9 +182,11 @@ export default function StatusPage() {
                   'The status service could not be reached from your browser.'
                 )}
               </p>
-            ) : data ? (
+            ) : data && formatWhen(t, dates, data.generated_at) !== null ? (
               <p className="text-sm text-muted-foreground">
-                {t('updated', 'Updated {when}', { when: formatWhen(t, data.generated_at) })}
+                {t('updated', 'Updated {when}', {
+                  when: formatWhen(t, dates, data.generated_at) ?? '',
+                })}
               </p>
             ) : null}
           </div>
@@ -193,11 +207,22 @@ export default function StatusPage() {
                   <li key={component.key} className="flex items-center justify-between gap-4 px-5 py-4">
                     <div className="min-w-0">
                       <p className="truncate font-medium">{component.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {t('components.checked', 'checked {when}', {
-                          when: formatWhen(t, component.checked_at),
-                        })}
-                      </p>
+                      {/*
+                        #1068: the freshness line goes when dates are hidden.
+                        The component's NAME, its state badge and its uptime
+                        percentage are all still here — which is what somebody
+                        who cannot sign in opens this page to see.
+                      */}
+                      {(() => {
+                        const checked = formatWhen(t, dates, component.checked_at);
+                        if (checked === null) return null;
+
+                        return (
+                          <p className="text-xs text-muted-foreground">
+                            {t('components.checked', 'checked {when}', { when: checked })}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <div className="flex shrink-0 items-center gap-3">
                       {component.uptime !== null ? (
@@ -260,9 +285,21 @@ export default function StatusPage() {
                           })}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {new Date(incident.started_at).toLocaleString()}
-                      </p>
+                      {/*
+                        #1068: the start time goes; the DURATION above it stays.
+                        The two are different kinds of fact — one is a point in
+                        time this tenant has asked not to show, the other is how
+                        long an outage lasted, which is the incident itself and
+                        the only reason the row is on the page.
+                      */}
+                      {(() => {
+                        const started = dates.dateTime(incident.started_at);
+                        if (started === null) return null;
+
+                        return (
+                          <p className="mt-1 text-xs text-muted-foreground">{started}</p>
+                        );
+                      })()}
                     </li>
                   ))}
                 </ul>

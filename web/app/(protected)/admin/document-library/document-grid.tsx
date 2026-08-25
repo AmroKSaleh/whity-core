@@ -1,6 +1,7 @@
 'use client';
 
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { Button } from '@amroksaleh/ui/button';
 import { EmptyState } from '@amroksaleh/ui/empty-state';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
@@ -48,11 +49,13 @@ import type { DocumentRow, Pagination as PaginationMeta } from './types';
  * because a card's own direction follows the interface while the title inside it
  * follows the title.
  *
- * The date is formatted through `useFormattingLocale()` rather than the
- * browser's default, which is what the list column already does. Left bare it
- * renders Gregorian Latin digits inside an otherwise Arabic card — the interface
- * says one thing and the number says another, on the same line — and the
- * difference is invisible to anybody testing in English.
+ * The date goes through `useDateDisplay()`, the one sanctioned path (#1068):
+ * that supplies the reader's resolved language rather than the browser's — left
+ * bare it renders Gregorian Latin digits inside an otherwise Arabic card, which
+ * is invisible to anybody testing in English — and it is also where
+ * `ui.hide_dates` is honoured. When it is on, the whole `<dt>/<dd>` pair goes
+ * and the grid falls to two facts per card rather than three, which is a
+ * tidier card than one with a labelled blank in it.
  */
 export function DocumentGrid({
   rows,
@@ -75,7 +78,7 @@ export function DocumentGrid({
   ariaLabel: string;
 }) {
   const t = useTranslation('documents');
-  const locale = useFormattingLocale();
+  const dates = useDateDisplay();
 
   if (isLoading) {
     return (
@@ -149,12 +152,17 @@ export function DocumentGrid({
                   {ouName(row.origin_ou_id)}
                 </dd>
               </div>
-              <div className="min-w-0">
-                <dt className="font-medium">{t('organizer.table.created', 'Created')}</dt>
-                <dd className="truncate">
-                  {new Date(row.created_at).toLocaleDateString(locale)}
-                </dd>
-              </div>
+              {(() => {
+                const created = dates.date(row.created_at);
+                if (created === null) return null;
+
+                return (
+                  <div className="min-w-0">
+                    <dt className="font-medium">{t('organizer.table.created', 'Created')}</dt>
+                    <dd className="truncate">{created}</dd>
+                  </div>
+                );
+              })()}
               <div className="min-w-0">
                 <dt className="font-medium">{t('organizer.table.versions', 'Versions')}</dt>
                 <dd>{row.artifacts.length}</dd>
