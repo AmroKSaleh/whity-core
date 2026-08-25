@@ -331,9 +331,11 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
 
         $this->call($this->qrHandler->resolveToken(...), self::OWNER, ['token' => $token]);
 
-        $row = $this->pdo->query(
+        $statement = $this->pdo->query(
             'SELECT scanner_profile_id, outcome FROM document_qr_scans ORDER BY id DESC LIMIT 1'
-        )->fetch(PDO::FETCH_ASSOC);
+        );
+        self::assertNotFalse($statement);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
 
         self::assertIsArray($row);
         self::assertSame(self::OWNER, (int) $row['scanner_profile_id']);

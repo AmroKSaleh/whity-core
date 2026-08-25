@@ -188,7 +188,7 @@ final class VerificationPresenter
     {
         if ($detailLevel !== self::DETAIL_STAGE
             || $tokenRow === null
-            || ($tokenRow['revoked_at'] ?? null) === null) {
+            || !isset($tokenRow['revoked_at'])) {
             return ['verified' => false, 'reason' => self::REASON_UNRECOGNISED];
         }
 
@@ -197,7 +197,7 @@ final class VerificationPresenter
         return [
             'verified' => false,
             'reason' => QrRevocationReason::isKnown($reason) ? $reason : self::REASON_UNRECOGNISED,
-            'revoked_on' => self::dateOnly($tokenRow['revoked_at'] ?? null),
+            'revoked_on' => self::dateOnly($tokenRow['revoked_at']),
         ];
     }
 

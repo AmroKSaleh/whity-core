@@ -285,8 +285,7 @@ final class DocumentVerificationApiRealEngineTest extends TestCase
 
         $this->verify($token);
 
-        $row = $this->pdo->query('SELECT * FROM document_qr_scans ORDER BY id DESC LIMIT 1')
-            ->fetch(PDO::FETCH_ASSOC);
+        $row = $this->queryOne('SELECT * FROM document_qr_scans ORDER BY id DESC LIMIT 1');
 
         self::assertIsArray($row);
         self::assertNull($row['scanner_profile_id']);
@@ -310,9 +309,9 @@ final class DocumentVerificationApiRealEngineTest extends TestCase
 
         $this->verify($token);
 
-        self::assertSame('refused', $this->pdo->query(
-            'SELECT outcome FROM document_qr_scans ORDER BY id DESC LIMIT 1'
-        )->fetchColumn());
+        $row = $this->queryOne('SELECT outcome FROM document_qr_scans ORDER BY id DESC LIMIT 1');
+        self::assertIsArray($row);
+        self::assertSame('refused', $row['outcome']);
     }
 
     /**
@@ -327,7 +326,7 @@ final class DocumentVerificationApiRealEngineTest extends TestCase
     {
         $this->verify(str_repeat('f', 64));
 
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM document_qr_scans')->fetchColumn());
+        self::assertSame(0, $this->scanCount());
     }
 
     /**
@@ -345,10 +344,33 @@ final class DocumentVerificationApiRealEngineTest extends TestCase
         $this->verify($token);
         $this->verify($token);
 
-        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM document_qr_scans')->fetchColumn());
+        self::assertSame(1, $this->scanCount());
     }
 
     // ── fixtures ─────────────────────────────────────────────────────────────
+
+    /**
+     * One row, or null — with the `PDOStatement|false` that PDO can return
+     * turned into a failed assertion rather than a fatal on a false.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function queryOne(string $sql): ?array
+    {
+        $statement = $this->pdo->query($sql);
+        self::assertNotFalse($statement, 'the fixture query must prepare');
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    private function scanCount(): int
+    {
+        $statement = $this->pdo->query('SELECT COUNT(*) FROM document_qr_scans');
+        self::assertNotFalse($statement);
+
+        return (int) $statement->fetchColumn();
+    }
 
     private function verify(string $token): Response
     {

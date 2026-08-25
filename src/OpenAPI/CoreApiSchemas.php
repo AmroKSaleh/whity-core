@@ -6975,25 +6975,6 @@ final class CoreApiSchemas
     }
 
     /**
-     * Per-user document collections and the star (#978, implementing #947
-     * item 5).
-     *
-     * Every route is gated on `documents:read`, INCLUDING the writes, and a
-     * `documents:organize` beside it was rejected: a permission earns its
-     * existence by being withholdable from somebody who holds its neighbours,
-     * and there is no administrator who wants a colleague to read documents but
-     * not to keep a private note of which ones matter. A collection is
-     * invisible to everyone else, confers nothing, and dies with its owner.
-     *
-     * What IS enforced is ownership — a collection is looked up by
-     * (id, tenant, profile), so another person's id is NOT FOUND rather than
-     * forbidden, since collection ids are enumerable — and document visibility
-     * on the way in, so the filing endpoints cannot be used to discover which
-     * document ids exist.
-     *
-     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
-     */
-    /**
      * QR verification on documents (#1036) — the public scan surface, and the
      * authenticated code management beside it.
      *
@@ -7010,7 +6991,7 @@ final class CoreApiSchemas
      * another route, so a named component would be a second place to look for a
      * thing that is only ever read here.
      *
-     * @return list<array<string, mixed>>
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
     private static function documentQrRoutes(): array
     {
@@ -7217,6 +7198,25 @@ final class CoreApiSchemas
         ];
     }
 
+    /**
+     * Per-user document collections and the star (#978, implementing #947
+     * item 5).
+     *
+     * Every route is gated on `documents:read`, INCLUDING the writes, and a
+     * `documents:organize` beside it was rejected: a permission earns its
+     * existence by being withholdable from somebody who holds its neighbours,
+     * and there is no administrator who wants a colleague to read documents but
+     * not to keep a private note of which ones matter. A collection is
+     * invisible to everyone else, confers nothing, and dies with its owner.
+     *
+     * What IS enforced is ownership — a collection is looked up by
+     * (id, tenant, profile), so another person's id is NOT FOUND rather than
+     * forbidden, since collection ids are enumerable — and document visibility
+     * on the way in, so the filing endpoints cannot be used to discover which
+     * document ids exist.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
     private static function documentCollectionRoutes(): array
     {
         $notFound = self::errorResponse('Collection not found, or not the caller\'s');
