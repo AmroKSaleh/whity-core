@@ -332,7 +332,12 @@ export function RouteActPanel({
       return o.delivered > 0
         ? t(
             'routing.act.decision.approved.moved',
-            'Approved. This step is approved and the document has moved on: the next step resolved to {resolved} people and reached {delivered}.',
+            // NOT "the next step". An approval with an `approved` edge goes where
+            // the edge points, which can be any step in the route including one
+            // BEHIND this one; only an approval with no edge falls through to the
+            // next authoring ordinal. The response says how many people were
+            // reached, not which step reached them, so this says exactly that.
+            'Approved. This step is approved and the document has moved on: the step it went to resolved to {resolved} people and reached {delivered}.',
             { resolved: o.resolved, delivered: o.delivered }
           )
         : t(
@@ -349,7 +354,13 @@ export function RouteActPanel({
         )
       : t(
           'routing.act.decision.rejected.ends',
-          'Rejected. This step can no longer be approved, and the route draws no path for a rejection — so the document ends here. A rejection never falls through to where an approval would have sent it.'
+          // "along this chain", not "the document ends here". A document can
+          // carry several routes at once and other chains of THIS route can still
+          // be open — this panel is inside one route's card and can only speak
+          // for the chain the reader is standing in. The wider claim was true of
+          // the demo document it was first read on, which is exactly how a
+          // sentence like that survives review.
+          'Rejected. This step can no longer be approved, and the route draws no path for a rejection — so the document goes no further along this chain. A rejection never falls through to where an approval would have sent it.'
         );
   };
 

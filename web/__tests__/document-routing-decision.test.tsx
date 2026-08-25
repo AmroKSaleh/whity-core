@@ -277,6 +277,10 @@ describe('three approvers under a quorum of `all`', () => {
     expect(banner).toHaveAttribute('data-decided', 'approved');
     expect(banner.textContent).toMatch(/this step is approved/i);
     expect(banner.textContent).toMatch(/document has moved on/i);
+    // "the step it went to", never "the next step": an `approved` edge can point
+    // anywhere in the route, and the response does not say which step it was.
+    expect(banner.textContent).toMatch(/the step it went to/i);
+    expect(banner.textContent).not.toMatch(/the next step/i);
     // Both counts, because they answer different questions.
     expect(banner.textContent).toContain('4');
     expect(banner.textContent).not.toMatch(/not approved yet/i);
@@ -361,7 +365,11 @@ describe('rejecting', () => {
     const banner = outcome() as HTMLElement;
 
     expect(banner).toHaveAttribute('data-decided', 'rejected');
-    expect(banner.textContent).toMatch(/the document ends here/i);
+    // Scoped to the CHAIN, not to the document: other chains of this route, and
+    // other routes on the same document, may still be open, and this panel
+    // cannot see them.
+    expect(banner.textContent).toMatch(/goes no further along this chain/i);
+    expect(banner.textContent).not.toMatch(/the document ends here/i);
     expect(banner.textContent).toMatch(/never falls through to where an approval would have sent it/i);
   });
 
@@ -377,7 +385,7 @@ describe('rejecting', () => {
     const banner = outcome() as HTMLElement;
 
     expect(banner.textContent).toMatch(/gone where the route sends a rejection/i);
-    expect(banner.textContent).not.toMatch(/ends here/i);
+    expect(banner.textContent).not.toMatch(/goes no further/i);
   });
 });
 
