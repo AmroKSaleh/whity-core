@@ -1187,6 +1187,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/routes/from-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply a route template to a document: copy its stages and branches into a live route */
+        post: operations["post_api_v1_documents_id_routes_from_template"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/routes/{routeId}/actions": {
         parameters: {
             query?: never;
@@ -4018,6 +4035,8 @@ export interface components {
             document_id: number;
             title: string;
             created_by?: number | null;
+            template_id?: number | null;
+            template_name?: string | null;
             created_at: string;
             steps: components["schemas"]["DocumentRouteStep"][];
             edges: components["schemas"]["DocumentRouteEdge"][];
@@ -4060,6 +4079,10 @@ export interface components {
             to_step_id: number;
             /** @enum {string} */
             verdict: "approved" | "rejected";
+        };
+        DocumentRouteFromTemplateRequest: {
+            template_id: number;
+            title?: string | null;
         };
         DocumentRouteListResponse: {
             data: components["schemas"]["DocumentRoute"][];
@@ -12732,6 +12755,95 @@ export interface operations {
                 };
             };
             /** @description No steps, a step naming an unregistered rule kind, a config the rule refused, or a step/recipient ceiling exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_documents_id_routes_from_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentRouteFromTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description The issued route with the copied steps and edges, its template provenance, and how many recipients the first step resolved to and delivered */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRouteResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller may route documents but may not read route templates (route_templates:read) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not visible to the caller, or no such template in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A design with no stages, a branch leaving a stage that produces no verdict, a rule kind nothing registers any more, or more stages than the tenant's documents.routing_max_steps allows right now */
             422: {
                 headers: {
                     [name: string]: unknown;

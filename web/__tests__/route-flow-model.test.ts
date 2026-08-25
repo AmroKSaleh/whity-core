@@ -197,6 +197,32 @@ describe('resolveTransitions — convergence', () => {
     expect(resolveTransitions(graphOf([step(1), step(2), step(3)])).merges).toEqual([]);
   });
 
+  it('marks the exact stage the instantiation tests drive a real document into', () => {
+    // TIES THE LABEL TO A MEASUREMENT (#1031). This is the same four-stage graph
+    // `RouteTemplateInstantiationRealEngineTest` applies to a real document and
+    // then drives, act by act — stage 2 is a gate whose approval jumps to 4 and
+    // whose rejection goes to the rework stage 3, which continues into 4 by
+    // position. Two arrivals at stage 4.
+    //
+    // It is asserted HERE so the PHP side is not testing a claim about a canvas
+    // it cannot see: the note that stage carries is "Paths merge here — settles
+    // once", and the two PHP tests over this graph show it settling once for one
+    // rule kind and TWICE for another. What the note is short of is the
+    // distinction its own docblock draws — once per COHORT, and a cohort is a
+    // chain only while both arrivals reach the same people.
+    const { merges } = resolveTransitions(
+      graphOf(
+        [step(1), step(2, { decision: true }), step(3), step(4, { decision: true })],
+        [
+          { from: 2, to: 4, verdict: 'approved' },
+          { from: 2, to: 3, verdict: 'rejected' },
+        ]
+      )
+    );
+
+    expect(merges).toEqual([4]);
+  });
+
   it('does not count a stage reached once as a merge', () => {
     const { merges } = resolveTransitions(
       graphOf([step(1), step(2, { decision: true })], [{ from: 2, to: 1, verdict: 'rejected' }])

@@ -147,14 +147,27 @@ final class DocumentRouter
      *        `on_rejected`. The last two name a target by its 1-BASED POSITION in
      *        this list, because ids do not exist until the steps are written and
      *        a position is the only handle an author has while composing.
+     * @param ?int    $templateId   #1031: the route TEMPLATE this step list was
+     *        converted from, or null for a route composed by hand. Recorded, not
+     *        consulted — nothing downstream reads back through it, which is what
+     *        makes the instance a snapshot rather than a view of a live design.
+     * @param ?string $templateName The design's name AT THE MOMENT OF ISSUE, so a
+     *        deleted design still reads correctly in the trail.
      *
      * @return array{route: array<string, mixed>, steps: list<array<string, mixed>>,
      *               edges: list<array<string, mixed>>, resolved: int, delivered: int}
      *
      * @throws RoutingRejectedException When the request is not acceptable (422).
      */
-    public function issue(int $tenantId, ?int $actorId, array $document, string $title, array $steps): array
-    {
+    public function issue(
+        int $tenantId,
+        ?int $actorId,
+        array $document,
+        string $title,
+        array $steps,
+        ?int $templateId = null,
+        ?string $templateName = null,
+    ): array {
         $documentId = (int) $document['id'];
         $declared = $this->validateSteps($tenantId, $steps);
 
@@ -171,7 +184,7 @@ final class DocumentRouter
         }
 
         try {
-            $routeId = $this->routes->create($tenantId, $documentId, $title, $actorId);
+            $routeId = $this->routes->create($tenantId, $documentId, $title, $actorId, $templateId, $templateName);
 
             $stepIds = [];
             foreach ($declared as $i => $step) {

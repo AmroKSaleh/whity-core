@@ -2404,6 +2404,12 @@ $documentRouter = new \Whity\Core\Document\Routing\DocumentRouter(
     $settingsService,
     $hookManager
 );
+// #1031. The route-TEMPLATE store, constructed here rather than beside the
+// templates handler below because BOTH need it: designing a flow and applying one
+// read the same three tables, and a second instance would be a second connection
+// to the same rows for no benefit. The templates handler further down reuses this
+// object.
+$routeTemplateRepository = new \Whity\Core\Document\RouteTemplate\RouteTemplateRepository($db->getPdo());
 $documentRoutingHandler = new \Whity\Api\DocumentRoutingApiHandler(
     $documentRepository,
     $routeRepository,
@@ -2414,10 +2420,18 @@ $documentRoutingHandler = new \Whity\Api\DocumentRoutingApiHandler(
     $documentRouter,
     $routingRuleRegistry,
     $documentVisibilityPolicy,
-    $roleChecker
+    $roleChecker,
+    $routeTemplateRepository
 );
 $router->register('GET',  '/api/routing-rules',                                        [$documentRoutingHandler, 'rules'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST', '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'create'],     null, null, CorePermissions::DOCUMENTS_ROUTE);
+// #1031. Applying a DESIGN. Registered before the `{routeId:\d+}` action route
+// below purely for readability - `from-template` is not a number and could never
+// match it - and gated on `documents:route` because issuing a circulation is the
+// act. The handler additionally requires `route_templates:read`, since the reply
+// contains every stage of somebody's design and the router carries one permission
+// per route; migration 120 grants that slug to this same audience.
+$router->register('POST', '/api/documents/{id:\d+}/routes/from-template',              [$documentRoutingHandler, 'createFromTemplate'], null, null, CorePermissions::DOCUMENTS_ROUTE);
 $router->register('GET',  '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'list'],       null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/trail',                             [$documentRoutingHandler, 'trail'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/recipients',                        [$documentRoutingHandler, 'recipients'], null, null, CorePermissions::DOCUMENTS_READ);
@@ -2507,7 +2521,8 @@ $router->register('DELETE', '/api/user-groups/{id:\d+}',           [$userGroupsH
 // clerk who may send a form onward should not thereby be able to rewrite where
 // every form goes. `/graph` is registered before `/{id}` for the same reason
 // `/preview` is above — the router matches in registration order.
-$routeTemplateRepository = new \Whity\Core\Document\RouteTemplate\RouteTemplateRepository($db->getPdo());
+// $routeTemplateRepository is constructed above, beside the routing handler that
+// also needs it (#1031).
 $routeTemplateGraph = new \Whity\Core\Document\RouteTemplate\RouteTemplateGraph($routingRuleRegistry);
 $routeTemplatesHandler = new \Whity\Api\DocumentRouteTemplatesApiHandler(
     $routeTemplateRepository,

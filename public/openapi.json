@@ -8589,6 +8589,122 @@
                 ]
             }
         },
+        "/api/v1/documents/{id}/routes/from-template": {
+            "post": {
+                "operationId": "post_api_v1_documents_id_routes_from_template",
+                "summary": "Apply a route template to a document: copy its stages and branches into a live route",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentRouteFromTemplateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The issued route with the copied steps and edges, its template provenance, and how many recipients the first step resolved to and delivered",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentRouteResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "The caller may route documents but may not read route templates (route_templates:read)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not visible to the caller, or no such template in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A design with no stages, a branch leaving a stage that produces no verdict, a rule kind nothing registers any more, or more stages than the tenant's documents.routing_max_steps allows right now",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/documents/{id}/routes/{routeId}/actions": {
             "post": {
                 "operationId": "post_api_v1_documents_id_routes_routeid_actions",
@@ -28419,6 +28535,14 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "template_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "template_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "created_at": {
                         "type": "string"
                     },
@@ -28593,6 +28717,21 @@
                     "from_step_id",
                     "to_step_id",
                     "verdict"
+                ]
+            },
+            "DocumentRouteFromTemplateRequest": {
+                "type": "object",
+                "properties": {
+                    "template_id": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "template_id"
                 ]
             },
             "DocumentRouteListResponse": {

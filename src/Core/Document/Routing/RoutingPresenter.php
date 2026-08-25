@@ -53,6 +53,14 @@ final class RoutingPresenter
      * likely person in the tenant to hold `settings:read`: asking them to fetch
      * it would 403 exactly the reader who needs it.
      *
+     * PROVENANCE (#1031) IS PUBLISHED AS BOTH HALVES, AND THE NAME IS NOT A
+     * CONVENIENCE COPY OF THE POINTER. `template_id` is null on a route composed
+     * by hand AND on one whose design has since been deleted; `template_name`
+     * survives the second case and not the first. A client that rendered "from a
+     * template" from the id alone would silently stop crediting every design its
+     * author ever tidied up, which is the same staleness the snapshot exists to
+     * prevent — so both go out and neither is derivable from the other.
+     *
      * @param array<string, mixed>       $route
      * @param list<array<string, mixed>> $steps
      * @param list<array<string, mixed>> $edges
@@ -67,6 +75,8 @@ final class RoutingPresenter
             'document_id' => (int) $route['document_id'],
             'title' => (string) $route['title'],
             'created_by' => $route['created_by'],
+            'template_id' => $route['template_id'] ?? null,
+            'template_name' => $route['template_name'] ?? null,
             'created_at' => (string) $route['created_at'],
             'steps' => array_map(self::step(...), $steps),
             'edges' => array_map(self::edge(...), $edges),
