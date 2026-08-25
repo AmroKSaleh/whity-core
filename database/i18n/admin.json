@@ -1145,6 +1145,8 @@
         "settings.meta.support_email.label": "Support email",
         "settings.meta.timezone.help": "Applied for tenants that have not chosen their own timezone.",
         "settings.meta.timezone.label": "Default timezone",
+        "settings.meta.ui.hide_dates.help": "Stop showing dates and times anywhere in the interface. Everything is still recorded — timestamps stay in the database, in the audit trail and in the API, and turning this off brings them all back. The public document-verification page is not affected; it has its own setting.",
+        "settings.meta.ui.hide_dates.label": "Hide dates and times",
         "settings.platform.description": "Instance-wide fallback values applied to every tenant that has not overridden them.",
         "settings.platform.loadFailed": "Failed to load global defaults",
         "settings.platform.save": "Save platform defaults",
