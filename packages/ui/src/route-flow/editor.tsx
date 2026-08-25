@@ -292,9 +292,15 @@ function verdictInset(
   direction: RouteFlowDirection,
   percentFromReadingStart: number
 ): React.CSSProperties {
-  return direction === 'rtl'
-    ? { right: `${percentFromReadingStart}%`, left: 'auto' }
-    : { left: `${percentFromReadingStart}%`, right: 'auto' };
+  // Mirrored by arithmetic and still written as `left`, NOT by switching to
+  // `right`. `@xyflow/react` centres a handle on its inset with a
+  // `translateX(-50%)` of its own; anchoring from the other edge leaves that
+  // translation pulling the wrong way and lands the handle half its own width
+  // off — measured 0.65 where 0.70 was meant. One physical property, one
+  // percentage, nothing left for a transform to disagree with.
+  const fromLeft = direction === 'rtl' ? 100 - percentFromReadingStart : percentFromReadingStart;
+
+  return { left: `${fromLeft}%` };
 }
 
 const FACE: Record<string, Position> = {
