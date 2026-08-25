@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
+use Whity\Auth\JwtParser;
 use Whity\Core\Branding\HostResolver;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -59,6 +60,7 @@ final class UiPreferencesApiHandler
     public function __construct(
         private readonly SettingsService $settings,
         private readonly HostResolver $hostResolver,
+        private readonly ?JwtParser $jwtParser = null,
     ) {
     }
 
@@ -70,16 +72,27 @@ final class UiPreferencesApiHandler
         try {
             $effective = $this->settings->effective($this->resolveDisplayTenant($request));
 
-            // A minute's cache, matching branding. Long enough that the shell
-            // is not re-asking on every navigation, short enough that an
-            // administrator who has just flipped the setting sees it take
-            // effect while they are still looking at the screen they changed it
-            // from.
+            // NOT CACHEABLE, and this is the one place branding's shape had to
+            // be departed from. Branding's answer varies by HOST; this one
+            // varies by WHO IS ASKING, because the tenant comes from the
+            // caller's own token when they have one. A `public, max-age=60`
+            // response — which this carried until a browser walk caught it —
+            // is reused by the browser across the sign-in boundary, so a reader
+            // who loaded the login screen (answered from the global layer) kept
+            // that answer for the first minute of their session and saw every
+            // date their tenant had asked to hide.
+            //
+            // A shared cache would be worse still: one tenant's preference
+            // served to another's reader. `no-store` costs one small request
+            // per page render, which is what branding already costs.
             return Response::json([
                 'data' => [
                     'hideDates' => ($effective[SettingsRegistry::UI_HIDE_DATES] ?? 'false') === 'true',
                 ],
-            ], 200)->withHeaders(['Cache-Control' => 'public, max-age=60']);
+            ], 200)->withHeaders([
+                'Cache-Control' => 'no-store',
+                'Vary' => 'Cookie, Authorization',
+            ]);
         } catch (\Throwable $e) {
             error_log('[UiPreferencesApiHandler] get failed: ' . $e->getMessage());
 
@@ -98,9 +111,26 @@ final class UiPreferencesApiHandler
     }
 
     /**
-     * The tenant whose presentation applies, on branding's exact ladder: the
-     * authenticated tenant, else the one the request host names, else the
-     * global layer.
+     * The tenant whose presentation applies: the authenticated tenant, else the
+     * one the request host names, else the global layer.
+     *
+     * IT READS THE TOKEN ITSELF, and that is not redundancy. A route on
+     * {@see \Whity\Http\Middleware\EnforceTenantIsolation}'s public list is
+     * returned to the pipeline BEFORE tenant resolution runs, so
+     * `TenantContext` is empty here even for a caller holding a perfectly good
+     * session. Reading the context first and stopping there is what a browser
+     * walk caught: with the setting on for tenant 1 and an administrator signed
+     * in, every screen still showed its dates, because the endpoint had fallen
+     * through to the global layer for a request that named its tenant in the
+     * cookie it carried.
+     *
+     * The context check stays first because a NON-public caller (a test, or
+     * this handler mounted behind the middleware later) has one, and it is
+     * cheaper and more authoritative than re-parsing.
+     *
+     * It does NOT lock the context. This route is public; a public request that
+     * silently pinned a request-scoped tenant would be a side effect nothing
+     * downstream expects. The claim is read and used, and that is all.
      */
     private function resolveDisplayTenant(Request $request): int
     {
@@ -109,8 +139,73 @@ final class UiPreferencesApiHandler
             return $ctx;
         }
 
+        $fromToken = $this->tenantFromToken($request);
+        if ($fromToken !== null) {
+            return $fromToken;
+        }
+
         $host = $request->getHeader('X-Forwarded-Host') ?? $request->getHeader('Host') ?? '';
 
         return $this->hostResolver->resolveTenantIdByHost($host) ?? 0;
+    }
+
+    /**
+     * The active tenant a valid session token names, or null.
+     *
+     * Fails SILENTLY on anything it does not like — no parser, no token, a
+     * token that will not parse, a claim that is not an integer. This endpoint
+     * has no authentication decision to make: the worst outcome of a token it
+     * cannot read is that a reader gets the global layer's answer, which is the
+     * behaviour that existed before the setting did.
+     */
+    private function tenantFromToken(Request $request): ?int
+    {
+        if ($this->jwtParser === null) {
+            return null;
+        }
+
+        $token = $this->bearerOrCookieToken($request);
+        if ($token === null) {
+            return null;
+        }
+
+        $payload = $this->jwtParser->parse($token);
+        if (!is_array($payload)) {
+            return null;
+        }
+
+        $claim = $payload['active_tenant_id'] ?? $payload['tenant_id'] ?? null;
+
+        return is_int($claim) || (is_string($claim) && ctype_digit($claim)) ? (int) $claim : null;
+    }
+
+    /**
+     * The access token, from the Authorization header or the session cookie.
+     *
+     * Mirrors {@see TenantContext}'s own extraction. Duplicated rather than
+     * exposed because that one is `private` and making it public would invite
+     * handlers to resolve tenants for themselves, which is precisely what the
+     * middleware exists to stop them doing.
+     */
+    private function bearerOrCookieToken(Request $request): ?string
+    {
+        $authHeader = $request->getHeader('Authorization');
+        if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $matches) === 1) {
+            return $matches[1];
+        }
+
+        $cookieHeader = $request->getHeader('Cookie');
+        if ($cookieHeader === null) {
+            return null;
+        }
+
+        foreach (explode(';', $cookieHeader) as $cookie) {
+            $parts = explode('=', trim($cookie), 2);
+            if (count($parts) === 2 && $parts[0] === 'access_token') {
+                return $parts[1];
+            }
+        }
+
+        return null;
     }
 }

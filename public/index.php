@@ -2905,7 +2905,7 @@ $router->register('PUT',    '/api/tenants/{id}/branding-host',      [$brandingHa
 // preference about how every screen renders has to reach every reader,
 // including the ones who will never open the settings console. The payload is
 // one boolean about presentation and carries no tenant data.
-$uiPreferencesHandler = new \Whity\Api\UiPreferencesApiHandler($settingsService, $hostResolver);
+$uiPreferencesHandler = new \Whity\Api\UiPreferencesApiHandler($settingsService, $hostResolver, $jwtParser);
 $router->register('GET', '/api/ui/preferences', [$uiPreferencesHandler, 'get'], null, null, null);
 
 // 12b. Theme Override API (WC-242) — public GET, unauthenticated by design

@@ -8,6 +8,7 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\UiPreferencesApiHandler;
+use Whity\Auth\JwtParser;
 use Whity\Core\Branding\HostResolver;
 use Whity\Core\Branding\TenantHostRepository;
 use Whity\Core\Request;
@@ -35,6 +36,7 @@ final class UiPreferencesApiRealEngineTest extends TestCase
 {
     private const TENANT_A = 1;
     private const TENANT_B = 2;
+    private const JWT_SECRET = 'ui-preferences-test-secret-0123456789';
 
     private PDO $pdo;
     private SettingsService $settings;
@@ -185,16 +187,91 @@ final class UiPreferencesApiRealEngineTest extends TestCase
     }
 
     /**
-     * A short public cache, matching branding: long enough that the shell is not
-     * re-asking on every navigation, short enough that an administrator who has
-     * just flipped the setting sees it take effect while still looking at the
-     * screen they changed it from.
+     * NOT cacheable, and the assertion is deliberate rather than incidental.
+     *
+     * This answer varies by WHO IS ASKING — the tenant comes from the caller's
+     * own token when they carry one. It shipped as `public, max-age=60`, copied
+     * from branding, whose answer varies only by host; a browser walk found the
+     * consequence, which is that a reader who loaded the login screen kept its
+     * (global-layer) answer for the first minute of their session and saw every
+     * date their tenant had asked to hide. A SHARED cache would be worse still:
+     * one tenant's preference served to another tenant's reader.
      */
-    public function testItIsBrieflyCacheable(): void
+    public function testItIsNotCacheableBecauseTheAnswerDependsOnWhoIsAsking(): void
     {
         $response = $this->handler->get(new Request('GET', '/api/ui/preferences', [], ''));
 
-        self::assertSame('public, max-age=60', $response->getHeaders()['cache-control'] ?? null);
+        self::assertSame('no-store', $response->getHeaders()['cache-control'] ?? null);
+        self::assertSame('Cookie, Authorization', $response->getHeaders()['vary'] ?? null);
+    }
+
+    /**
+     * A signed-in caller's own token names the tenant, and it must be read HERE.
+     *
+     * This route is on EnforceTenantIsolation's public list, which returns the
+     * request to the pipeline BEFORE tenant resolution runs — so `TenantContext`
+     * is empty even for a caller holding a perfectly good session. Reading the
+     * context and stopping there is exactly what shipped, and what a browser
+     * walk caught: with the setting on and an administrator signed in, every
+     * screen still showed its dates.
+     */
+    public function testASignedInCallersTokenNamesTheTenantEvenWithNoResolvedContext(): void
+    {
+        $this->settings->setTenant(self::TENANT_A, 'ui.hide_dates', 'true');
+
+        $request = new Request('GET', '/api/ui/preferences', [
+            'Authorization' => 'Bearer ' . $this->tokenFor(self::TENANT_A),
+        ], '');
+
+        self::assertSame(['hideDates' => true], $this->dataOf($this->tokenAware()->get($request)));
+    }
+
+    /** The cookie the browser actually sends, not only a Bearer header. */
+    public function testTheSessionCookieNamesTheTenantToo(): void
+    {
+        $this->settings->setTenant(self::TENANT_A, 'ui.hide_dates', 'true');
+
+        $request = new Request('GET', '/api/ui/preferences', [
+            'Cookie' => 'theme=dark; access_token=' . $this->tokenFor(self::TENANT_A),
+        ], '');
+
+        self::assertSame(['hideDates' => true], $this->dataOf($this->tokenAware()->get($request)));
+    }
+
+    /**
+     * One caller's token does not answer for another tenant. The same assertion
+     * as the context-based one above, made through the path a real browser
+     * request actually takes.
+     */
+    public function testAnotherTenantsTokenGetsThatTenantsAnswer(): void
+    {
+        $this->settings->setTenant(self::TENANT_A, 'ui.hide_dates', 'true');
+
+        $request = new Request('GET', '/api/ui/preferences', [
+            'Authorization' => 'Bearer ' . $this->tokenFor(self::TENANT_B),
+        ], '');
+
+        self::assertSame(['hideDates' => false], $this->dataOf($this->tokenAware()->get($request)));
+    }
+
+    /**
+     * A token it cannot read is not an authentication decision. This endpoint
+     * has none to make, so it falls through to the host and then the global
+     * layer rather than refusing — the behaviour that existed before the
+     * setting did.
+     */
+    public function testAnUnreadableTokenFallsThroughRatherThanRefusing(): void
+    {
+        $this->settings->setTenant(self::TENANT_A, 'ui.hide_dates', 'true');
+
+        $request = new Request('GET', '/api/ui/preferences', [
+            'Authorization' => 'Bearer not.a.token',
+        ], '');
+
+        $response = $this->tokenAware()->get($request);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame(['hideDates' => false], $this->dataOf($response));
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
@@ -208,6 +285,40 @@ final class UiPreferencesApiRealEngineTest extends TestCase
         $response = $this->handler->get(new Request('GET', '/api/ui/preferences', $headers, ''));
         self::assertSame(200, $response->getStatusCode());
 
+        $decoded = json_decode($response->getBody(), true);
+        self::assertIsArray($decoded);
+        self::assertIsArray($decoded['data']);
+
+        return $decoded['data'];
+    }
+
+    /**
+     * A handler that can read a token, i.e. the one production wires. The
+     * default `$this->handler` deliberately has no parser, so the tests above
+     * exercise the context and host paths in isolation.
+     */
+    private function tokenAware(): UiPreferencesApiHandler
+    {
+        return new UiPreferencesApiHandler(
+            $this->settings,
+            new HostResolver(new TenantHostRepository($this->pdo), 'example.test'),
+            new JwtParser(self::JWT_SECRET)
+        );
+    }
+
+    private function tokenFor(int $tenantId): string
+    {
+        return (new JwtParser(self::JWT_SECRET))->create([
+            'profile_id' => 1,
+            'active_tenant_id' => $tenantId,
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function dataOf(\Whity\Sdk\Http\Response $response): array
+    {
         $decoded = json_decode($response->getBody(), true);
         self::assertIsArray($decoded);
         self::assertIsArray($decoded['data']);
