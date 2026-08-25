@@ -203,15 +203,44 @@ Inserts catalogue keys that have no row yet, as English system defaults
 (`tenant_id IS NULL`).
 
 ```bash
-whity-cli i18n:sync                 # seed missing keys
+whity-cli i18n:sync                 # seed missing keys (English)
 whity-cli i18n:sync --dry-run       # report what it would insert, write nothing
+whity-cli i18n:sync --language=ar   # seed database/i18n/ar/ instead
+whity-cli i18n:sync --all           # English and every committed language
 ```
+
+`--language=` **does not machine-translate**, which is worth saying plainly
+because a language flag on a seeding command reads like it might. It seeds a
+file a person wrote and committed (`database/i18n/ar/documents.json`), for
+exactly the same reason English is seeded from a file: strings that exist only
+in a database cannot be reviewed in a diff, cannot ship in the image, and do not
+survive the database being rebuilt.
+
+Migration `119_seed_translation_catalogues` does the same thing at `migrate
+run`, so a fresh install arrives already seeded in every committed language.
+This command remains the way to seed a catalogue added *after* that migration
+ran, and the way to seed an already-deployed database.
 
 **It never overwrites an existing row, in any language.** An English string
 edited in the console stays edited (and is reported as divergent); a finished
 Arabic translation is untouchable. Running it twice changes nothing the second
 time. It also reports keys the database still has that no source references, and
 domains it does not manage — and deletes neither.
+
+### `i18n:coverage`
+
+Per-domain translated/missing counts for every committed language.
+
+```bash
+whity-cli i18n:coverage              # print the table
+whity-cli i18n:coverage --strict     # exit 1 if any orphan keys exist
+```
+
+Reads files and nothing else, so it runs in CI, inside a container with no
+database, and on a laptop with the stack down. An **orphan** — a key translated
+in a language that English no longer has — is listed separately, because it is
+the one thing that makes a coverage number lie: it is left behind by a rename,
+it makes the file longer, and it will never render.
 
 Only English is seeded. Every other language is filled in by a human at
 `/admin/translations`, which reports what is still missing per language and
