@@ -265,20 +265,30 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
         <span className="truncate text-xs text-muted-foreground">{ruleLabel}</span>
       </button>
 
-      {/* THE COUNT, NEVER A ROSTER. This is the line that makes a type-node
-          honest: one card, and the number of people behind it. */}
+      {/* THE COUNT, NEVER A ROSTER — the line that makes a type-node honest: one
+          card, and the number of people behind it.
+
+          The QUORUM is shown for every decision stage, INDEPENDENTLY of whether
+          the count resolved. It used to be rendered inside the count branch, so
+          a viewer who could not preview audiences (a 403 there is ordinary — the
+          draft preview needs `groups:write`, which designing a flow does not
+          imply) saw a gate with no indication of what would satisfy it. The two
+          facts have different sources and only one of them can fail; binding
+          them together made the reliable one vanish with the unreliable one.
+
+          One line rather than two because the card height is fixed: a third row
+          would push the terminal note out of the box. */}
       <span className="truncate text-xs text-muted-foreground">
-        {audience === undefined ? (
-          ' '
-        ) : audience.count !== null ? (
-          <>
-            {labels.reaches} <span className="font-medium text-foreground">{audience.count.toLocaleString()}</span>{' '}
-            {labels.people}
-            {step.decision && <> · {quorumText}</>}
-          </>
-        ) : (
-          <span className="italic">{audience.unavailableReason ?? labels.audienceUnavailable}</span>
-        )}
+        {[
+          audience === undefined
+            ? null
+            : audience.count !== null
+              ? `${labels.reaches} ${audience.count.toLocaleString()} ${labels.people}`
+              : (audience.unavailableReason ?? labels.audienceUnavailable),
+          step.decision ? quorumText : null,
+        ]
+          .filter((part): part is string => part !== null)
+          .join(' · ')}
       </span>
 
       {terminalNotes.length > 0 && (
