@@ -28713,6 +28713,13 @@
                                 "on_rejected": {
                                     "type": "integer",
                                     "nullable": true
+                                },
+                                "satisfied_by": {
+                                    "type": "string",
+                                    "enum": [
+                                        "act",
+                                        "delivery"
+                                    ]
                                 }
                             },
                             "required": [
@@ -28821,6 +28828,9 @@
                     "open": {
                         "type": "boolean"
                     },
+                    "closed_by_delivery": {
+                        "type": "boolean"
+                    },
                     "created_at": {
                         "type": "string"
                     }
@@ -28833,6 +28843,7 @@
                     "profile_id",
                     "created_by_event_id",
                     "open",
+                    "closed_by_delivery",
                     "created_at"
                 ]
             },
@@ -28900,6 +28911,13 @@
                             "majority"
                         ],
                         "nullable": true
+                    },
+                    "satisfied_by": {
+                        "type": "string",
+                        "enum": [
+                            "act",
+                            "delivery"
+                        ]
                     }
                 },
                 "required": [
@@ -28907,7 +28925,8 @@
                     "position",
                     "rule_kind",
                     "rule_config",
-                    "decision"
+                    "decision",
+                    "satisfied_by"
                 ]
             },
             "DocumentStarResponse": {
@@ -33638,6 +33657,13 @@
                     "decision_quorum": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "satisfied_by": {
+                        "type": "string",
+                        "enum": [
+                            "act",
+                            "delivery"
+                        ]
                     },
                     "canvas_x": {
                         "type": "integer"

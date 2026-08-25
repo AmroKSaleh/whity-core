@@ -273,6 +273,31 @@ final class SettingsRegistry
     // (`the dean signs off`) `all` and `any` are the same rule anyway, so the
     // default only differs from `any` exactly where `any` is dangerous.
     public const DOCUMENTS_ROUTING_APPROVAL_QUORUM = 'documents.routing_approval_quorum';
+
+    // HOW a routing event reaches the people it named (#1054) — a
+    // comma-separated list of notification channels, e.g. `in_app,email`.
+    //
+    // THIS IS THE OPERATOR'S HALF OF A DELIBERATE SPLIT, and the split is the
+    // whole reason the key exists rather than a `"delivery": "email"` field on a
+    // route step. A step declares INTENT — *these people are told, and are not
+    // asked to act* — which is a property of the route DESIGN and has to travel
+    // with the template. The CHANNEL is not: it is a fact about how this
+    // organisation reaches its people, and putting it on the step would mean
+    // re-authoring every route in the tenant to move from e-mail to in-app.
+    // Platform declares capability, operator decides presentation.
+    //
+    // TENANT-OVERRIDABLE, because it is exactly the kind of question two tenants
+    // on one instance answer differently: a faculty circulating notices to
+    // instructors who never open the app needs e-mail, and a workshop whose
+    // technicians live in the app does not want the mail volume.
+    //
+    // EMPTY IS A LEGITIMATE VALUE and means "notify nobody" — an operator turning
+    // routing notifications off entirely. That reading is safe in a way that an
+    // empty CEILING would not be (see `positiveSetting()`, where "0" must never
+    // silently mean "no limit"): the failure mode here is a missed notification,
+    // and the trail, the inbox and every folder are unaffected, because none of
+    // them is derived from a notification.
+    public const DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS = 'documents.routing_notification_channels';
     // The master switch for QR verification codes on documents (#1036), scope 1
     // of three — the tenant setting, the per-template flag inside
     // `document_templates.data`, and where the element sits on the page. They
@@ -680,6 +705,22 @@ final class SettingsRegistry
         // what most tenants want; it is the reading that fails loudly when it is
         // wrong, on a value whose other reading fails silently.
         self::DOCUMENTS_ROUTING_APPROVAL_QUORUM => 'all',
+        // `in_app` alone, and the omission of `email` is the considered half.
+        //
+        // Routing sent no notifications at all before #1054, so whatever goes
+        // here starts happening on every existing route on every deployment the
+        // day it upgrades. An in-app row is free, is read by the person when they
+        // next look, and is the only trace a DELIVERY step's recipient gets at
+        // all — their inbox item is closed the moment it exists. An e-mail is a
+        // send: it costs money, it reaches people outside the app, and switching
+        // it on for every routing act everywhere is not a decision this default
+        // gets to make for an operator who has not read the release note.
+        //
+        // A tenant that wants it — the motivating case for #1054 is precisely a
+        // faculty whose instructors never log in — writes `in_app,email` once,
+        // and every route in that tenant honours it without a single step being
+        // rewritten. Which is the point of the setting.
+        self::DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS => 'in_app',
         // Off. Turning it on publishes an unauthenticated verification surface
         // for this tenant's documents — see the constant.
         self::DOCUMENTS_QR_ENABLED => 'false',
@@ -987,6 +1028,7 @@ final class SettingsRegistry
             self::DOCUMENTS_ROUTING_MAX_STEPS => self::validateRoutingMaxSteps($value),
             self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => self::validateRoutingMaxRecipients($value),
             self::DOCUMENTS_ROUTING_APPROVAL_QUORUM => self::validateRoutingApprovalQuorum($value),
+            self::DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS => self::validateRoutingNotificationChannels($value),
             self::DOCUMENTS_QR_ENABLED => self::validateBoolean($value, self::DOCUMENTS_QR_ENABLED),
             self::DOCUMENTS_QR_PUBLIC_DETAIL => self::validateEnum($key, $value),
             self::GROUPS_PREVIEW_SAMPLE_SIZE => self::validateGroupsPreviewSampleSize($value),
@@ -1325,6 +1367,59 @@ final class SettingsRegistry
     {
         if (!RouteQuorum::isValid($value)) {
             return 'documents.routing_approval_quorum must be one of: ' . implode(', ', RouteQuorum::all()) . '.';
+        }
+
+        return null;
+    }
+
+    /**
+     * The channels a routing notification is offered on (#1054): a
+     * comma-separated list of channel slugs, or empty for none.
+     *
+     * VALIDATED FOR SHAPE, NOT FOR MEMBERSHIP, and that asymmetry with
+     * {@see validateRoutingApprovalQuorum()} above is deliberate rather than
+     * laziness. A quorum is a value the ENGINE implements, so the set is closed
+     * and drift between the setting and the engine is a real bug. A channel is
+     * whatever a TRANSPORT has registered for
+     * ({@see \Whity\Core\Notification\TransportRegistry}) — core ships `in_app`
+     * and `email`, and a plugin may register `sms` or `whatsapp` at boot. A
+     * closed list here would refuse the very extension the registry exists to
+     * allow, and it would refuse it in a settings validator, where the author of
+     * the plugin has no way to reach.
+     *
+     * A channel nothing serves is therefore accepted and then simply resolves to
+     * no transport, which the dispatcher already records per delivery — a
+     * visible, per-notification "nothing sent" rather than a settings write that
+     * fails for a channel the operator's own plugin provides.
+     *
+     * EMPTY IS VALID and means "notify nobody". See the constant for why that
+     * reading is safe here and is not safe for a numeric ceiling.
+     */
+    private static function validateRoutingNotificationChannels(string $value): ?string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $channels = array_map('trim', explode(',', $trimmed));
+        if (count($channels) > 8) {
+            return 'documents.routing_notification_channels must name 8 channels or fewer.';
+        }
+
+        foreach ($channels as $channel) {
+            if (preg_match('/^[a-z][a-z0-9_]{0,31}$/', $channel) !== 1) {
+                return "documents.routing_notification_channels: '{$channel}' is not a channel slug "
+                    . '(lower-case letters, digits and underscores, starting with a letter).';
+            }
+        }
+
+        if (count(array_unique($channels)) !== count($channels)) {
+            // Refused rather than de-duplicated. A repeated channel is a typo the
+            // operator can see and fix; silently collapsing it would leave them
+            // believing they had configured something they had not — and the
+            // dispatcher would record one delivery where the list says two.
+            return 'documents.routing_notification_channels names the same channel twice.';
         }
 
         return null;

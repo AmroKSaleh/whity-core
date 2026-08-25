@@ -93,6 +93,7 @@ final class DocumentRoutingInboxSource implements InboxSourceInterface
     {
         $arrivedBy = (string) ($row['arrived_by'] ?? RouteAction::ISSUED);
         $decision = ($row['step_decision'] ?? false) === true;
+        $delivery = RouteSatisfaction::isDelivery($row['step_satisfied_by'] ?? null);
 
         return new InboxItem(
             // A string, because the aggregate will eventually mix sources whose
@@ -106,7 +107,7 @@ final class DocumentRoutingInboxSource implements InboxSourceInterface
             // which one.
             subtitle: (string) $row['document_template_name'],
             timestamp: (string) $row['created_at'],
-            status: self::statusFor($arrivedBy, $row['closed_by_event_id'] !== null, $decision),
+            status: self::statusFor($arrivedBy, $row['closed_by_event_id'] !== null, $decision, $delivery),
             resourceType: ResourceTypeRegistry::TYPE_DOCUMENT,
             resourceId: (string) $row['document_id'],
             meta: [
@@ -129,6 +130,13 @@ final class DocumentRoutingInboxSource implements InboxSourceInterface
                 // difference from a 422 after clicking, which is the worst place
                 // to learn what kind of thing you are holding.
                 'decision' => $decision,
+                // #1054: whether this item was SENT TO THEM or is ASKED OF them.
+                // A client needs it before it renders anything, for a sharper
+                // version of the reason `decision` is here: on a delivery item
+                // every act is a 422, because the row was closed the instant it
+                // was created. Offering Forward / Acknowledge / Return on one is
+                // offering three buttons that cannot work.
+                'satisfied_by' => $delivery ? RouteSatisfaction::DELIVERY : RouteSatisfaction::ACT,
             ],
         );
     }
@@ -141,15 +149,42 @@ final class DocumentRoutingInboxSource implements InboxSourceInterface
      * chosen from the reader's side — the trail's verb is what HAPPENED, and this
      * is what happened TO THEM.
      *
-     * A DECISION ITEM SAYS SO (#1014), and says it in place of how it arrived
+     * WITH ONE EXCEPTION, AND IT IS THE REASON #1054's COLUMN EXISTS. A DELIVERY
+     * item is closed too, and "Done" would be a lie about it — the person did
+     * nothing, was asked for nothing, and closing it was the engine recording
+     * that they had been told. "Sent to you" is what actually happened, and it is
+     * the only line here that describes an item nobody has to do anything about.
+     *
+     * A DELIVERY ITEM IS NEVER IN THE OPEN INBOX AT ALL (#1054), and that is the
+ * whole point of the step. Its row is closed by the event that created it, so
+ * `openOnly` — which is what an inbox IS — excludes it, and a stage resolving to
+ * every instructor in a faculty leaves no item in hundreds of inboxes that no
+ * act could clear. It appears only in the HISTORY (`openOnly = false`), where it
+ * has to be told apart from work somebody did: see {@see statusFor()}.
+ *
+ * The telling itself is a NOTIFICATION, not an inbox item. The recipient row
+ * records who was reached; {@see RoutingNotifications} is what actually reaches
+ * them, over whichever channels the tenant configured.
+ *
+ * A DECISION ITEM SAYS SO (#1014), and says it in place of how it arrived
      * rather than beside it. "Forwarded to you" and "awaiting your approval"
      * compete for the same one line, and only the second changes what the person
      * has to do — an approval that reads identically to a circulation is one
      * people clear at the same speed as a circulation, which is the entire
      * failure a sign-off step exists to prevent.
      */
-    private static function statusFor(string $arrivedBy, bool $closed, bool $decision): string
+    private static function statusFor(string $arrivedBy, bool $closed, bool $decision, bool $delivery): string
     {
+        // #1054, AND THIS BRANCH COMES FIRST FOR A REASON. A delivery item is
+        // ALWAYS closed — its row is closed by the event that created it — so
+        // the `Done` branch below would swallow every one of them and tell each
+        // person they had finished something they were never asked to do. It is
+        // the one place in the inbox where a closed item is not an item somebody
+        // dealt with, and the word has to say so.
+        if ($delivery) {
+            return 'Sent to you';
+        }
+
         if ($closed) {
             return 'Done';
         }

@@ -3171,7 +3171,13 @@ final class CoreApiSchemas
                 // to the tenant's `documents.routing_approval_quorum` setting,
                 // which defaults to `all`.
                 'decision_quorum' => ['type' => 'string', 'enum' => ['all', 'any', 'majority'], 'nullable' => true],
-            ], ['id', 'position', 'rule_kind', 'rule_config', 'decision']),
+                // #1054. WHETHER ANYBODY HERE IS ASKED TO ACT. `delivery` means
+                // the people this step reaches are TOLD: their inbox item is
+                // closed by the event that created it and the document carries
+                // straight on. A client needs this before it renders anything —
+                // on such a step Forward, Acknowledge and Return are all 422s.
+                'satisfied_by' => ['type' => 'string', 'enum' => ['act', 'delivery']],
+            ], ['id', 'position', 'rule_kind', 'rule_config', 'decision', 'satisfied_by']),
             // Where a settled VERDICT sends the document (#1014, migration 119).
             // A flat list on the route rather than fields on a step, because an
             // edge is a relationship between two steps and belongs to neither -
@@ -3251,6 +3257,21 @@ final class CoreApiSchemas
                         // is not.
                         'on_approved' => self::int(true),
                         'on_rejected' => self::int(true),
+                        // #1054. Absent means `act`, which is what every route
+                        // authored before it means. `delivery` is refused
+                        // together with `decision`: a gate needs somebody
+                        // holding the item to answer it, and a delivery step
+                        // closes every item the moment it is sent.
+                        //
+                        // There is no CHANNEL here, deliberately. The step says
+                        // its people are told rather than asked; e-mail versus
+                        // in-app is `documents.routing_notification_channels`,
+                        // so a tenant can change transport without re-authoring
+                        // a single route.
+                        'satisfied_by' => [
+                            'type' => 'string',
+                            'enum' => ['act', 'delivery'],
+                        ],
                     ], ['rule_kind']),
                 ],
             ], ['steps']),
@@ -3316,8 +3337,17 @@ final class CoreApiSchemas
                 'created_by_event_id' => self::int(),
                 'closed_by_event_id' => self::int(true),
                 'open' => self::bool(),
+                // #1054. TRUE when this row was closed by the document reaching
+                // the person rather than by their acting — the rows a
+                // `satisfied_by: delivery` step opens. Without it a delivery
+                // step's three hundred closed rows read exactly like three
+                // hundred people who acted.
+                'closed_by_delivery' => self::bool(),
                 'created_at' => self::str(),
-            ], ['id', 'document_id', 'route_id', 'step_id', 'profile_id', 'created_by_event_id', 'open', 'created_at']),
+            ], [
+                'id', 'document_id', 'route_id', 'step_id', 'profile_id', 'created_by_event_id',
+                'open', 'closed_by_delivery', 'created_at',
+            ]),
             'DocumentRouteRecipientListResponse' => self::listEnvelope('DocumentRouteRecipient'),
 
             'DocumentRouteActionRequest' => self::object([
@@ -3559,8 +3589,23 @@ final class CoreApiSchemas
                 'label' => self::str(true),
                 'decision' => self::bool(),
                 'decision_quorum' => self::str(true),
+                // #1054, carried on the DESIGN as well as on the instance. A
+                // stage the converter could not carry is a stage the design
+                // silently loses: a delivery stage flattened into a circulation
+                // hands every instructor in a faculty an item nothing can close.
+                'satisfied_by' => ['type' => 'string', 'enum' => ['act', 'delivery']],
                 'canvas_x' => self::int(),
                 'canvas_y' => self::int(),
+                // NOT in the required list, unlike `DocumentRouteStep` above.
+                // This one component serves both the graph RESPONSE and the graph
+                // REQUEST, and a canvas drawn before #1054 does not send the
+                // field: the server reads its absence as `act`, which is what
+                // that design has always meant. Marking it required would make
+                // every existing editor's save read as non-conforming for a value
+                // it correctly has no opinion about.
+                //
+                // (`decision` IS in that list, and is the wart this declines to
+                // copy rather than the precedent it follows.)
             ], ['position', 'rule_kind', 'rule_config', 'decision']),
             // One transition, keyed by the verdict that takes it (#1014's
             // vocabulary, mirrored — `approved` or `rejected`).

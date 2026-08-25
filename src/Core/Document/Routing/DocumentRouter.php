@@ -104,6 +104,44 @@ use Whity\Sdk\Routing\RoutingRuleContext;
  *     there is still no counter, no `steps.completed_at` and no aggregate any
  *     chain could be held by. Two chains reaching one step decide separately.
  *
+ * A STEP CAN BE SATISFIED BY DELIVERY (#1054)
+ * -------------------------------------------
+ * Every verb in {@see RouteAction} is an ACTOR-DRIVEN transition, so until now
+ * there was no way to model the last stage of a circular: *put this in every
+ * instructor's mailbox; nobody downstream is being asked for anything*. Authored
+ * as an ordinary step it left every one of those people holding an open
+ * recipient row for ever — a permanent phantom item in "Awaiting me" and in the
+ * #881 inbox that no act could clear, because there was no act to make.
+ *
+ * A step now declares {@see RouteSatisfaction} (migration 125), and three things
+ * about the implementation are worth stating against the code:
+ *
+ *  a. THE CLOSE APPENDS NOTHING AND CLAIMS NOTHING. {@see openChain()} closes a
+ *     delivery step's rows by naming THE EVENT THAT CREATED THEM. No sixth verb
+ *     was added — widening the trail's inline CHECK is impossible on SQLite, and
+ *     spelling a system close as `noted` would make an append-only audit log
+ *     assert that a person did something they did not. The people told appear in
+ *     the trail as ACTORS nowhere, because they were not.
+ *
+ *  b. THE DOCUMENT DOES NOT STOP THERE. Nobody at a delivery step will forward
+ *     it, so {@see planChain()} walks on to the next ordinal in the same act,
+ *     resolved from the same actor. A version that closed the rows and stopped
+ *     would turn a mid-route delivery step into a silent dead end that every
+ *     screen renders as a document travelling normally.
+ *
+ *  c. IT CAN NEVER BE A GATE. A quorum counts the rows one act opened, and here
+ *     they are closed the instant they exist. {@see validateSteps()} refuses the
+ *     pair at authoring time rather than storing a step that looks like an
+ *     approval and can never be given one.
+ *
+ * WHAT THE STEP DOES NOT SAY IS THE CHANNEL. `satisfied_by` is the route
+ * DESIGN's business; e-mail versus in-app versus SMS is the operator's, and it
+ * resolves through `documents.routing_notification_channels` and each profile's
+ * own notification preferences. {@see \Whity\Core\Document\Routing\RoutingNotifications}
+ * is the subscriber that turns a routing broadcast into notifications, and it is
+ * a SUBSCRIBER rather than a call from this class on purpose: the engine's job
+ * ends when the trail and the rows are right.
+ *
  * CEILINGS ARE SETTINGS, AND EXCEEDING ONE IS A REFUSAL
  * ----------------------------------------------------
  * `documents.routing_max_steps` and `documents.routing_max_recipients_per_step`
@@ -142,11 +180,12 @@ final class DocumentRouter
      *
      * @param array<string, mixed>       $document A normalized `documents` row.
      * @param list<array<string, mixed>> $steps    Declared steps in order:
-     *        `rule_kind`, optional `rule_config`, optional `label`, and #1014's
+     *        `rule_kind`, optional `rule_config`, optional `label`, #1014's
      *        optional `decision` / `decision_quorum` / `on_approved` /
-     *        `on_rejected`. The last two name a target by its 1-BASED POSITION in
-     *        this list, because ids do not exist until the steps are written and
-     *        a position is the only handle an author has while composing.
+     *        `on_rejected`, and #1054's optional `satisfied_by`. The two edge
+     *        fields name a target by its 1-BASED POSITION in this list, because
+     *        ids do not exist until the steps are written and a position is the
+     *        only handle an author has while composing.
      * @param ?int    $templateId   #1031: the route TEMPLATE this step list was
      *        converted from, or null for a route composed by hand. Recorded, not
      *        consulted — nothing downstream reads back through it, which is what
@@ -197,6 +236,7 @@ final class DocumentRouter
                     $step['label'],
                     $step['decision'],
                     $step['decision_quorum'],
+                    $step['satisfied_by'],
                 );
             }
 
@@ -232,7 +272,17 @@ final class DocumentRouter
             // A ceiling breach therefore refuses before the trail is touched, so
             // a rejected issue writes literally nothing rather than relying on a
             // rollback to undo an event it should not have appended.
-            $plan = $this->planStep($tenantId, $documentId, $routeId, $stepIds[0], 1, $actorId, $actorOuId);
+            //
+            // #1054: a CHAIN rather than a single step, because a delivery step
+            // does not stop the document. If step 1 is one, its people are
+            // resolved, told and closed, and the plan carries straight on to
+            // step 2 — all still as a pure read, so the single event below can
+            // be appended already knowing every unit it reached.
+            $first = $this->steps->findById($stepIds[0], $tenantId);
+            if ($first === null) {
+                throw new \RuntimeException('The first step could not be read back for planning.');
+            }
+            $plan = $this->planChain($tenantId, $documentId, $routeId, $first, $actorId, $actorOuId);
 
             $eventId = $this->events->append($tenantId, $documentId, [
                 'route_id' => $routeId,
@@ -247,12 +297,11 @@ final class DocumentRouter
                 'verdict' => null,
             ]);
 
-            $outcome = $this->openInboxRows(
+            $outcome = $this->openChain(
                 $tenantId,
                 $documentId,
                 $routeId,
-                $stepIds[0],
-                $plan['members'],
+                $plan['stops'],
                 parentRecipientId: null,
                 eventId: $eventId,
             );
@@ -280,10 +329,21 @@ final class DocumentRouter
 
         $this->broadcast('document.routed', $tenantId, $documentId, [
             'route_id' => $routeId,
+            // The ROUTE's title, which defaults to the document's own. Carried so
+            // a subscriber can name the thing in a notification without a second
+            // query — and, more to the point, without one that could read a title
+            // the document has since been given.
+            'title' => $title,
             'action' => RouteAction::ISSUED,
             'actor_profile_id' => $actorId,
             'step_count' => count($written),
             'delivered' => $outcome['delivered'],
+            // WHO this act reached, and whether each of them is being ASKED for
+            // anything (#1054). A notifier cannot work it out for itself: the
+            // recipient rows of a delivery step are already closed by the time
+            // any listener runs, so re-reading the open set would find nobody
+            // and announce nothing to the very people the step existed to tell.
+            'recipients' => $outcome['recipients'],
         ]);
 
         return [
@@ -347,7 +407,7 @@ final class DocumentRouter
                 );
             }
 
-            return $this->appendNote($tenantId, $actorId, $routeId, $documentId, $note);
+            return $this->appendNote($tenantId, $actorId, $routeId, $documentId, (string) $route['title'], $note);
         }
 
         if (!in_array($action, RouteAction::recipientActions(), true)) {
@@ -423,13 +483,18 @@ final class DocumentRouter
         // resolution is a pure read, so the event can be appended already
         // carrying its destination, and a ceiling breach refuses without having
         // touched the trail.
+        //
+        // #1054: a CHAIN, not a single step. `planChain()` walks on past any
+        // DELIVERY step it lands on — nobody there will forward the document, so
+        // a delivery step that merely closed its own rows would silently strand
+        // this chain. Every stop it collects is resolved from the SAME actor and
+        // the SAME unit, because none of the people in between acted.
         $plan = $next !== null
-            ? $this->planStep(
+            ? $this->planChain(
                 $tenantId,
                 $documentId,
                 $routeId,
-                (int) $next['id'],
-                (int) $next['position'],
+                $next,
                 $actorId,
                 // Resolved relative to the ACTOR, from the unit they were reached
                 // through — not their primary membership. A person forwarding an
@@ -439,7 +504,7 @@ final class DocumentRouter
                 // one argument.
                 $recipient['ou_id'],
             )
-            : ['members' => [], 'destinationOuId' => null];
+            : ['stops' => [], 'destinationOuId' => null];
 
         $ownTransaction = !$this->db->inTransaction();
         if ($ownTransaction) {
@@ -486,15 +551,14 @@ final class DocumentRouter
                 );
             }
 
-            $outcome = ['resolved' => 0, 'delivered' => 0];
+            $outcome = ['resolved' => 0, 'delivered' => 0, 'recipients' => []];
 
-            if ($next !== null) {
-                $outcome = $this->openInboxRows(
+            if ($plan['stops'] !== []) {
+                $outcome = $this->openChain(
                     $tenantId,
                     $documentId,
                     $routeId,
-                    (int) $next['id'],
-                    $plan['members'],
+                    $plan['stops'],
                     parentRecipientId: (int) $recipient['id'],
                     eventId: $eventId,
                 );
@@ -515,7 +579,21 @@ final class DocumentRouter
                     'parent_recipient_id' => (int) $recipient['id'],
                     'created_by_event_id' => $eventId,
                 ]);
-                $outcome = ['resolved' => 1, 'delivered' => $reopened === null ? 0 : 1];
+                $outcome = [
+                    'resolved' => 1,
+                    'delivered' => $reopened === null ? 0 : 1,
+                    // The predecessor is getting an OPEN item back and is being
+                    // asked to do something about it, so they are announced like
+                    // any other person a step reached. Empty when the row was
+                    // de-duplicated away: they already hold it, and telling
+                    // somebody twice about one item is noise, not safety.
+                    'recipients' => $reopened === null ? [] : [[
+                        'recipient_id' => $reopened,
+                        'profile_id' => (int) $returnTo['profile_id'],
+                        'step_id' => (int) $returnTo['step_id'],
+                        'satisfied_by' => RouteSatisfaction::ACT,
+                    ]],
+                ];
             }
 
             $event = $this->events->findById($eventId, $tenantId);
@@ -536,6 +614,7 @@ final class DocumentRouter
 
         $this->broadcast('document.route_acted', $tenantId, $documentId, [
             'route_id' => $routeId,
+            'title' => (string) $route['title'],
             'action' => $action,
             'actor_profile_id' => $actorId,
             'step_id' => (int) $step['id'],
@@ -547,6 +626,9 @@ final class DocumentRouter
             // first of three required approvals.
             'verdict' => $verdict,
             'decided' => $decided,
+            // See issue(): who this act reached, and whether each of them is
+            // being asked for anything.
+            'recipients' => $outcome['recipients'],
         ]);
 
         return [
@@ -881,6 +963,7 @@ final class DocumentRouter
         int $actorId,
         int $routeId,
         int $documentId,
+        string $title,
         ?string $note,
     ): array {
         if ($note === null || trim($note) === '') {
@@ -915,13 +998,130 @@ final class DocumentRouter
 
         $this->broadcast('document.route_acted', $tenantId, $documentId, [
             'route_id' => $routeId,
+            'title' => $title,
             'action' => RouteAction::NOTED,
             'actor_profile_id' => $actorId,
             'step_id' => $open !== null ? (int) $open['step_id'] : null,
             'delivered' => 0,
+            // A note reaches nobody: it closes nothing and opens nothing. The
+            // key is present rather than absent so every routing broadcast has
+            // one shape and a subscriber needs no special case for the verb that
+            // happens to deliver to no one.
+            'recipients' => [],
         ]);
 
         return ['event' => $event, 'resolved' => 0, 'delivered' => 0, 'decided' => null];
+    }
+
+    /**
+     * Plan every step ONE ACT REACHES, walking on past each DELIVERY step
+     * (#1054). Writes nothing.
+     *
+     * WHY A CHAIN AND NOT A STEP
+     * --------------------------
+     * A delivery step is satisfied by reaching it, so nobody standing on it will
+     * ever forward the document. A version of this feature that closed a
+     * delivery step's rows and stopped would therefore leave a delivery step in
+     * the MIDDLE of a route as a silent dead end: every chain that reached it
+     * would end, the trail would show a document that had travelled normally,
+     * and no screen anywhere would report a problem. That is the exact failure
+     * class this subsystem is written against, so "non-blocking" is implemented
+     * as what it says — the document does not stop.
+     *
+     * Every stop is resolved from THE SAME actor and THE SAME unit, because
+     * nobody in between acted. The people at a delivery step do not become the
+     * origin of anything: substituting one of them would make the next step
+     * resolve relative to somebody who was copied in, which is not a position
+     * anybody authored.
+     *
+     * STILL A PURE READ, which is the property the whole engine is built on: one
+     * event is appended afterwards already carrying its destination, and a
+     * ceiling breach anywhere in the chain refuses before the trail is touched.
+     * {@see issue()} records the argument in full.
+     *
+     * THE DESTINATION IS THE UNION. `to_ou_id` is set when every person the act
+     * reached — across every stop — is in exactly ONE unit, and null otherwise.
+     * That is {@see planStep()}'s rule generalised rather than a new one, and it
+     * stays honest: an act that told a faculty and then opened a step in the
+     * registry has no single destination, and naming one would make #947 item
+     * 5's "passed through my unit" folder report a unit that was never involved.
+     * For an ordinary route (one stop) it is identical to what planStep answers,
+     * so nothing authored before this migration reads differently.
+     *
+     * @param array<string, mixed> $firstStep The step the act reaches first.
+     *
+     * @return array{stops: list<array{step: array<string, mixed>, members: list<ResolvedRecipient>}>,
+     *               destinationOuId: int|null}
+     */
+    private function planChain(
+        int $tenantId,
+        int $documentId,
+        int $routeId,
+        array $firstStep,
+        ?int $actorId,
+        ?int $actorOuId,
+    ): array {
+        $stops = [];
+        $units = [];
+        $seen = [];
+        $step = $firstStep;
+
+        while (true) {
+            $stepId = (int) $step['id'];
+
+            if (isset($seen[$stepId])) {
+                // Unreachable while {@see RouteStepRepository::findNext()}
+                // answers by strictly increasing ordinal, which is why this is a
+                // RuntimeException rather than a refusal a caller could act on.
+                // It is here because the day that method is rewritten to follow
+                // edges — which migration 112 explicitly leaves room for — a
+                // cycle of delivery steps becomes expressible, and the failure it
+                // would otherwise produce is an endless loop inside a request.
+                throw new \RuntimeException(
+                    'A chain of delivery steps revisited step ' . $stepId . '; route step succession must '
+                    . 'be acyclic.'
+                );
+            }
+            $seen[$stepId] = true;
+
+            $plan = $this->planStep(
+                $tenantId,
+                $documentId,
+                $routeId,
+                $stepId,
+                (int) $step['position'],
+                $actorId,
+                $actorOuId,
+            );
+
+            $stops[] = ['step' => $step, 'members' => $plan['members']];
+            foreach ($plan['members'] as $member) {
+                if ($member->ouId !== null) {
+                    $units[$member->ouId] = true;
+                }
+            }
+
+            if (!RouteSatisfaction::isDelivery($step['satisfied_by'] ?? null)) {
+                break;
+            }
+
+            // A delivery step never branches: it cannot be a decision step, so it
+            // has no edges, and its successor is the next authoring ordinal —
+            // the same answer a plain forward gets, from the same method.
+            $next = $this->steps->findNext($routeId, $tenantId, (int) $step['position']);
+            if ($next === null) {
+                // The ordinary shape of the motivating case: the last stage puts
+                // the document in front of everybody and the route is done.
+                break;
+            }
+
+            $step = $next;
+        }
+
+        return [
+            'stops' => $stops,
+            'destinationOuId' => count($units) === 1 ? (int) array_key_first($units) : null,
+        ];
     }
 
     /**
@@ -995,41 +1195,114 @@ final class DocumentRouter
     }
 
     /**
-     * Open one inbox row per planned recipient, all pointing at the event that
-     * created them.
+     * Open the inbox rows for every stop one act reached, and CLOSE the ones
+     * that were only ever going to be told (#1054).
      *
-     * @param list<ResolvedRecipient> $members
-     * @return array{resolved: int, delivered: int}
+     * THE WHOLE OF "SATISFIED BY DELIVERY" IS THE TWO LINES THAT CLOSE A ROW
+     * -----------------------------------------------------------------------
+     * A delivery stop's rows are closed by `close()` naming THE EVENT THAT
+     * CREATED THEM. That is deliberate, and it is what makes the close both
+     * honest and unmistakable:
+     *
+     *  - NO NEW EVENT IS APPENDED. There is no verb for "the system delivered
+     *    this", and inventing one out of the existing five would have the trail
+     *    assert that a person did something they did not. What the trail says is
+     *    exactly what happened: somebody issued or forwarded a document, and the
+     *    recipient rows record who that reached.
+     *
+     *  - `closed_by_event_id = created_by_event_id` IS A SHAPE NO HUMAN ACT CAN
+     *    PRODUCE. Acting closes a row with a LATER event than the one that
+     *    opened it — always, because the act has to happen after the arrival.
+     *    So a reader can tell the two apart from the row alone, without knowing
+     *    anything about steps.
+     *
+     *  - AND THEY DO NOT HAVE TO. The authoritative answer is the STEP's
+     *    `satisfied_by`, which is why the column is there: every row at a
+     *    delivery step is delivery-closed by construction, so the inbox reads it
+     *    off the join it already does rather than inferring it from a pointer
+     *    comparison somebody could later break without noticing.
+     *
+     * THE ROW IS STILL WRITTEN, and that is not a formality. `document_route_
+     * recipients` is the only place that records WHICH PEOPLE a rule actually
+     * resolved to and when — rules resolve against the organisation as it stood
+     * at that instant, and replaying one later answers a different question. Not
+     * writing the row would make "who was told?" unanswerable for exactly the
+     * distribution most likely to be asked about.
+     *
+     * @param list<array{step: array<string, mixed>, members: list<ResolvedRecipient>}> $stops
+     * @return array{resolved: int, delivered: int,
+     *               recipients: list<array{recipient_id: int, profile_id: int, step_id: int, satisfied_by: string}>}
      */
-    private function openInboxRows(
+    private function openChain(
         int $tenantId,
         int $documentId,
         int $routeId,
-        int $stepId,
-        array $members,
+        array $stops,
         ?int $parentRecipientId,
         int $eventId,
     ): array {
+        $resolved = 0;
         $delivered = 0;
-        foreach ($members as $recipient) {
-            $id = $this->recipients->create($tenantId, [
-                'document_id' => $documentId,
-                'route_id' => $routeId,
-                'step_id' => $stepId,
-                'profile_id' => $recipient->profileId,
-                'ou_id' => $recipient->ouId,
-                'parent_recipient_id' => $parentRecipientId,
-                'created_by_event_id' => $eventId,
-            ]);
-            if ($id !== null) {
+        $reached = [];
+
+        foreach ($stops as $stop) {
+            $step = $stop['step'];
+            $stepId = (int) $step['id'];
+            $satisfiedBy = RouteSatisfaction::isDelivery($step['satisfied_by'] ?? null)
+                ? RouteSatisfaction::DELIVERY
+                : RouteSatisfaction::ACT;
+
+            $resolved += count($stop['members']);
+
+            foreach ($stop['members'] as $member) {
+                $id = $this->recipients->create($tenantId, [
+                    'document_id' => $documentId,
+                    'route_id' => $routeId,
+                    'step_id' => $stepId,
+                    'profile_id' => $member->profileId,
+                    'ou_id' => $member->ouId,
+                    // The ACTOR's row for every stop in the chain, including the
+                    // ones after a delivery step. Nobody at a delivery step
+                    // acted, so none of them produced anything — and this is
+                    // what keeps `returned` meaningful: it goes back to the
+                    // person who actually sent the document, not to somebody who
+                    // was merely copied on the way past and has no open row to
+                    // receive it.
+                    'parent_recipient_id' => $parentRecipientId,
+                    'created_by_event_id' => $eventId,
+                ]);
+
+                if ($id === null) {
+                    // Another chain already put this item in front of them.
+                    // Counted as resolved-but-not-delivered, and NOT announced:
+                    // they hold it already, and telling somebody twice about one
+                    // item is noise rather than safety.
+                    continue;
+                }
+
                 $delivered++;
+
+                if ($satisfiedBy === RouteSatisfaction::DELIVERY) {
+                    // Closed by the event that opened it. See the docblock — the
+                    // single mutation in the routing tables, setting one column
+                    // to a real trail row id, so it cannot make a claim the
+                    // trail does not already make.
+                    $this->recipients->close($tenantId, $id, $eventId);
+                }
+
+                $reached[] = [
+                    'recipient_id' => $id,
+                    'profile_id' => $member->profileId,
+                    'step_id' => $stepId,
+                    'satisfied_by' => $satisfiedBy,
+                ];
             }
         }
 
-        // Both counts: `resolved` is what the rule answered, `delivered` how many
-        // rows that became after de-duplicating against chains that already
-        // reached those people.
-        return ['resolved' => count($members), 'delivered' => $delivered];
+        // Both counts: `resolved` is what the rules answered across every stop,
+        // `delivered` how many rows that became after de-duplicating against
+        // chains that already reached those people.
+        return ['resolved' => $resolved, 'delivered' => $delivered, 'recipients' => $reached];
     }
 
     /**
@@ -1117,7 +1390,8 @@ final class DocumentRouter
      *
      * @param list<array<string, mixed>> $steps
      * @return list<array{rule_kind: string, rule_config: array<string, mixed>, label: ?string,
-     *                    decision: bool, decision_quorum: ?string, edges: array<string, int>}>
+     *                    decision: bool, decision_quorum: ?string, satisfied_by: string,
+     *                    edges: array<string, int>}>
      */
     private function validateSteps(int $tenantId, array $steps): array
     {
@@ -1186,6 +1460,37 @@ final class DocumentRouter
                 throw RoutingRejectedException::because(
                     "Step {$position}: 'decision' must be true or false when present."
                 );
+            }
+
+            // #1054. WHAT SETTLES THIS STEP, defaulting to what every step has
+            // always meant.
+            $satisfiedBy = $step['satisfied_by'] ?? RouteSatisfaction::fallback();
+            if (!is_string($satisfiedBy) || !RouteSatisfaction::isValid($satisfiedBy)) {
+                throw RoutingRejectedException::because(sprintf(
+                    "Step %d: 'satisfied_by' must be one of: %s.",
+                    $position,
+                    implode(', ', RouteSatisfaction::all()),
+                ));
+            }
+
+            if ($satisfiedBy === RouteSatisfaction::DELIVERY && $decision) {
+                // THE ONE COMBINATION THAT CANNOT MEAN ANYTHING, and it is
+                // refused here rather than left to fail later, because later it
+                // would not fail at all — it would sit there looking like an
+                // approval nobody had got round to.
+                //
+                // A quorum is counted over the recipient rows one act opened
+                // (migration 119). A delivery step closes every one of those rows
+                // the instant it creates them, so there would be nobody holding
+                // an item, nobody able to answer, and no act that could ever
+                // settle the gate. The route would stop at a step whose whole
+                // point was not to stop it.
+                throw RoutingRejectedException::because(sprintf(
+                    'Step %d asks to be satisfied by delivery AND to be a decision step. It cannot be '
+                    . 'both: a decision needs somebody holding the item to answer it, and a delivery step '
+                    . 'closes every item the moment it is sent. Drop one of the two.',
+                    $position,
+                ));
             }
 
             $quorum = $step['decision_quorum'] ?? null;
@@ -1257,6 +1562,7 @@ final class DocumentRouter
                 'label' => is_string($label) && trim($label) !== '' ? trim($label) : null,
                 'decision' => $decision,
                 'decision_quorum' => is_string($quorum) ? $quorum : null,
+                'satisfied_by' => $satisfiedBy,
                 'edges' => $edges,
             ];
         }
@@ -1321,12 +1627,45 @@ final class DocumentRouter
             return;
         }
 
+        $full = $payload + [
+            'id' => $documentId,
+            'document_id' => $documentId,
+            'tenant_id' => $tenantId,
+        ];
+
+        // THE SYNCHRONOUS HALF, AND WHY IT IS NOT REDUNDANT (#1054).
+        //
+        // `dispatchAsync()` PERSISTS an event; it does not run listeners. Nothing
+        // in this codebase drains `event_outbox` yet, so a subscriber registered
+        // with `HookManager::listen()` against a routing event would never have
+        // been called at all — it would have looked wired up, logged nothing and
+        // done nothing. #1054 predicted "a subscriber is what is missing"; the
+        // accurate version is that a subscriber had nothing to subscribe TO.
+        //
+        // So routing now emits BOTH, which is the shape every other core writer
+        // already uses ({@see \Whity\Api\OusApiHandler}, {@see
+        // \Whity\Api\RolesApiHandler}): `x` synchronously for listeners, and
+        // `x.async` onto the durable spine for the relay. One trail, two
+        // broadcasts of it, and neither is ever read as authoritative.
+        //
+        // TWO try/catch BLOCKS, not one. A plugin listener that throws inside
+        // the first must not cost us the durable append in the second — the
+        // spine is the record that survives a bad listener, so it is exactly the
+        // thing that must not share a failure path with one.
         try {
-            $this->hooks->dispatchAsync($event . '.async', $payload + [
-                'id' => $documentId,
-                'document_id' => $documentId,
-                'tenant_id' => $tenantId,
-            ]);
+            $this->hooks->dispatch($event, $full);
+        } catch (Throwable $e) {
+            // AFTER THE COMMIT, and this is why the class docblock insists on
+            // that ordering: a listener runs synchronously right here, and one
+            // that threw inside our transaction would roll back a routing act
+            // that had already succeeded. A person told they had forwarded
+            // something, who had not, is a far worse outcome than a notification
+            // nobody sent.
+            error_log('[DocumentRouter] a listener on a routing event failed: ' . $e->getMessage());
+        }
+
+        try {
+            $this->hooks->dispatchAsync($event . '.async', $full);
         } catch (Throwable $e) {
             // The trail is already committed and is the system of record. A
             // broadcast that could not be recorded is a missed notification, not
