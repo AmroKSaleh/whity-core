@@ -42,7 +42,6 @@ import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Button } from '@amroksaleh/ui/button';
 import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
-import { useBranding } from '@/lib/branding-context';
 
 /** The wire shape of `GET /api/v1/document-verifications/{token}`. */
 type Verification = {
@@ -123,7 +122,6 @@ type Phase =
 export default function VerifyDocumentPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const t = useTranslation('documents');
-  const branding = useBranding();
 
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   // The signed-in follow-through. `null` means "no record reachable by this
@@ -194,8 +192,8 @@ export default function VerifyDocumentPage({ params }: { params: Promise<{ token
     <main className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle data-testid="verify-title">{headline(t, phase)}</CardTitle>
-          <CardDescription data-testid="verify-body">{body(t, phase)}</CardDescription>
+          <CardTitle data-testid="verify-title" dir="auto">{headline(t, phase)}</CardTitle>
+          <CardDescription data-testid="verify-body" dir="auto">{body(t, phase)}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {phase.kind === 'ready' && phase.data.verified && (
@@ -231,12 +229,8 @@ export default function VerifyDocumentPage({ params }: { params: Promise<{ token
             </Button>
           )}
 
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'verify.footer',
-              'This page confirms only that {org} issued a document. It shows no contents.',
-              { org: branding.siteName || t('verify.footerOrgFallback', 'this organisation') },
-            )}
+          <p className="text-xs text-muted-foreground" dir="auto">
+            {footer(t, phase)}
           </p>
         </CardContent>
       </Card>
@@ -265,10 +259,10 @@ function Fact({
 
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <dt className="text-muted-foreground text-start">{label}</dt>
+      <dt className="text-muted-foreground text-start" dir="auto">{label}</dt>
       <dd
         className={`font-medium text-end ${monospaceLtr ? 'font-mono' : ''}`}
-        dir={monospaceLtr ? 'ltr' : undefined}
+        dir={monospaceLtr ? 'ltr' : 'auto'}
       >
         {value}
       </dd>
@@ -285,6 +279,35 @@ function headline(t: TranslateFn, phase: Phase): string {
   const copy = REFUSAL_COPY[phase.data.reason ?? 'unrecognised'] ?? REFUSAL_COPY.unrecognised;
 
   return t(copy.titleKey, copy.title);
+}
+
+/**
+ * The small print, and the reason it is not one sentence.
+ *
+ * A browser pass caught this saying "This page confirms only that Whity issued
+ * a document" on a page that had just REFUSED a code — asserting a confirmation
+ * that had not happened, under the platform's own brand name rather than the
+ * issuing organisation's. Both halves were wrong and neither could fail a test:
+ * the string rendered perfectly, on top of an answer it contradicted.
+ *
+ * So the confirming sentence exists only where something was confirmed, and it
+ * names the ISSUER from the payload — the organisation this page is vouching
+ * for — never `branding.siteName`, which on an unauthenticated page is the
+ * platform's name and is not who issued anything.
+ */
+function footer(t: TranslateFn, phase: Phase): string {
+  if (phase.kind === 'ready' && phase.data.verified && phase.data.issuer) {
+    return t(
+      'verify.footerVerified',
+      'This page confirms only that {org} issued a document on the date shown. It does not show the document or its contents.',
+      { org: phase.data.issuer },
+    );
+  }
+
+  return t(
+    'verify.footerGeneric',
+    'This page checks codes printed on documents issued through this service. It never shows a document or its contents.',
+  );
 }
 
 function body(t: TranslateFn, phase: Phase): string {
