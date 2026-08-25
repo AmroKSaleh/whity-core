@@ -1,8 +1,10 @@
 import {
+  ROUTE_FLOW_MAX_NOTES,
   autoLayout,
   effectiveQuorum,
   handleFaces,
   needsAutoLayout,
+  notesFor,
   renumber,
   resolveTransitions,
   slotAt,
@@ -277,6 +279,119 @@ describe('resolveTransitions — loops', () => {
     );
 
     expect(cycles).toEqual([2, 3]);
+  });
+});
+
+/**
+ * The notes a card draws, and the bound the card's HEIGHT is budgeted against.
+ *
+ * This block exists because of a defect that a type check and 1750 unit tests
+ * could not see (#1042): a stage could carry three notes and the card clamped at
+ * two, so "Rejected: Ends here" was dropped from a node that had visible empty
+ * space beneath it. The canvas went quiet about rejection ending the chain, in
+ * the most ordinary approval shape there is.
+ *
+ * The height is now derived from ROUTE_FLOW_MAX_NOTES and so is the clamp, so
+ * they cannot drift apart again — but that only helps while the constant is
+ * TRUE. These assert it against the graphs that produce the most notes, so
+ * making a fourth reachable fails here rather than on a canvas nobody rendered.
+ */
+describe('notesFor', () => {
+  it('gives a merging, looping stage that ends on rejection all three of its notes', () => {
+    // The exact shape from the bug report: 3 is a merge target (1 approves into
+    // it AND 2 falls through into it), is reachable from itself (3 → 4 → 3), and
+    // is a decision with no reject edge, so a rejection ends there.
+    const graph = graphOf(
+      [
+        step(1, { decision: true }),
+        step(2),
+        step(3, { decision: true }),
+        step(4, { decision: true }),
+      ],
+      [
+        { from: 1, to: 3, verdict: 'approved' },
+        { from: 4, to: 3, verdict: 'rejected' },
+      ]
+    );
+
+    expect(notesFor(3, resolveTransitions(graph))).toEqual([
+      { kind: 'merge' },
+      { kind: 'cycle' },
+      { kind: 'terminal', on: 'rejected' },
+    ]);
+  });
+
+  it('gives a merging final decision both of its terminals, and no loop note', () => {
+    // The other three-note shape, and the reason three is the ceiling: a stage
+    // where BOTH verdicts end has no outgoing transition, so nothing can lead
+    // back to it and the loop note is unreachable by construction.
+    const graph = graphOf(
+      [step(1, { decision: true }), step(2), step(3, { decision: true })],
+      [{ from: 1, to: 3, verdict: 'approved' }]
+    );
+
+    expect(notesFor(3, resolveTransitions(graph))).toEqual([
+      { kind: 'merge' },
+      { kind: 'terminal', on: 'approved' },
+      { kind: 'terminal', on: 'rejected' },
+    ]);
+  });
+
+  it('never exceeds the number of note lines the card is built to hold', () => {
+    // Enumerated rather than argued: every three-stage graph this editor can
+    // produce, over every combination of decision flags and of the verdict
+    // edges those flags permit — the shape space where merge, loop and terminal
+    // can coincide. If some future note makes a fourth reachable, one of these
+    // finds it.
+    const positions = [1, 2, 3];
+    let checked = 0;
+    let worst = 0;
+    let worstCase = '';
+
+    for (let flags = 0; flags < 2 ** positions.length; flags++) {
+      const steps = positions.map((p) =>
+        step(p, { decision: Math.floor(flags / 2 ** (p - 1)) % 2 === 1 })
+      );
+      const decisions = steps.filter((s) => s.decision).map((s) => s.position);
+
+      // Every destination (including "no edge") for every verdict of every
+      // decision stage.
+      let choices: RouteFlowGraph['edges'][] = [[]];
+      for (const from of decisions) {
+        for (const verdict of ['approved', 'rejected'] as const) {
+          const grown: RouteFlowGraph['edges'][] = [];
+          for (const soFar of choices) {
+            grown.push(soFar);
+            for (const to of positions) {
+              if (to !== from) grown.push([...soFar, { from, to, verdict }]);
+            }
+          }
+          choices = grown;
+        }
+      }
+
+      for (const edges of choices) {
+        const resolution = resolveTransitions(graphOf(steps, edges));
+        for (const p of positions) {
+          const count = notesFor(p, resolution).length;
+          checked++;
+          if (count > worst) {
+            worst = count;
+            worstCase = `stage ${p} of ${JSON.stringify({ decisions, edges })}`;
+          }
+        }
+      }
+    }
+
+    // Asserted once, with the graph that produced the maximum, rather than once
+    // per stage: tens of thousands of assertions would be slow and would say
+    // less when one failed.
+    expect(`${worst} (${worstCase})`).toBe(`${ROUTE_FLOW_MAX_NOTES} (${worstCase})`);
+    // The bound must be TIGHT as well as true. A ceiling nothing reaches would
+    // buy height the card never uses and would pass while the real maximum had
+    // moved underneath it.
+    expect(worst).toBe(ROUTE_FLOW_MAX_NOTES);
+    expect(checked).toBeGreaterThan(1000);
   });
 });
 

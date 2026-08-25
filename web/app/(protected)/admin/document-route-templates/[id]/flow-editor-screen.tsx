@@ -104,6 +104,34 @@ interface GroupOption {
 const ROLE_KINDS = new Set(['role', 'role_below_actor']);
 const GROUP_KIND = 'group';
 
+/**
+ * What a NEW stage names, in order of preference.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * WHY THIS IS A LIST HERE AND NOT `rules[0]`
+ * ─────────────────────────────────────────────────────────────────────────
+ * It was `rules[0]`. `GET /api/v1/routing-rules` returns its catalogue sorted by
+ * kind, so `rules[0]` is `explicit` — and every stage anybody added therefore
+ * arrived as "Specific people, chosen by name", which is:
+ *
+ *  - unconfigurable HERE, because {@link StageInspector} has editors for role
+ *    kinds and for groups and says so plainly for anything else, so the first
+ *    thing an author did could not be finished; and
+ *  - the enumerate-individuals shape this whole feature exists to replace. A
+ *    node is a TYPE of person. Defaulting to the one kind that is a list of
+ *    names taught the opposite in the first five seconds.
+ *
+ * The fix is NOT to reorder the server's response. A client that depends on the
+ * order of a catalogue is the defect; the ordering is just what exposed it. So
+ * the preference is stated here, and it is stated as the kinds this screen can
+ * actually EDIT — which is the property that matters, and which changes when
+ * this file changes rather than when a server sorts differently.
+ *
+ * Falls back to whatever the server does offer if none of these are installed,
+ * because a stage has to name something.
+ */
+const NEW_STAGE_KIND_PREFERENCE = ['role', 'group', 'role_below_actor'];
+
 const QUORUMS: RouteFlowQuorum[] = ['all', 'any', 'majority'];
 
 export function RouteFlowEditorScreen({
@@ -311,11 +339,15 @@ function RouteFlowBody({
   }, []);
 
   const addStage = useCallback(() => {
-    const first = rules[0]?.kind ?? 'role';
+    const offered = new Set(rules.map((r) => r.kind));
+    const kind =
+      NEW_STAGE_KIND_PREFERENCE.find((k) => offered.has(k)) ??
+      rules[0]?.kind ??
+      NEW_STAGE_KIND_PREFERENCE[0];
 
     const next = appendStep(
       graph,
-      { ruleKind: first, ruleConfig: {}, label: null, decision: false, decisionQuorum: null },
+      { ruleKind: kind, ruleConfig: {}, label: null, decision: false, decisionQuorum: null },
       orientation,
       dir
     );
@@ -437,7 +469,8 @@ function RouteFlowBody({
             empty: t('routeTemplates.canvas.empty', 'No stages yet. Add the first one to start the flow.'),
             decision: t('routeTemplates.canvas.decision', 'Decision'),
             reaches: t('routeTemplates.canvas.reaches', 'Reaches'),
-            people: t('routeTemplates.canvas.people', 'people'),
+            people: t('routeTemplates.canvas.people.other', 'people'),
+            person: t('routeTemplates.canvas.people.one', 'person'),
             audienceUnavailable: t('routeTemplates.canvas.audienceUnavailable', 'Audience size unavailable'),
             approved: t('routeTemplates.canvas.approved', 'Approved'),
             rejected: t('routeTemplates.canvas.rejected', 'Rejected'),
@@ -486,6 +519,29 @@ function RouteFlowBody({
       </div>
     </div>
   );
+}
+
+/**
+ * "Reaches N people right now", in the form the count calls for.
+ *
+ * One function because the sentence is rendered in two places — under the group
+ * picker and under the stage heading — and a count of one used to read "Reaches
+ * 1 people right now" in both (#1042). Singular and plural are separate KEYS,
+ * following `tenants.delete.userCount.one` / `.other`: a suffix rule applied to
+ * a translated string is an English rule, and the two forms differ by more than
+ * an "s" in most languages.
+ *
+ * This is a one/other split and Arabic has six categories, so "reaches 2" still
+ * takes the plural where the dual would be right. That is a limitation of the
+ * translator, not of these call sites; a plural-aware `t()` would change this
+ * function and nothing else.
+ */
+function reachesRightNow(t: ReturnType<typeof useTranslation>, count: number): string {
+  return count === 1
+    ? t('routeTemplates.inspector.reaches.one', 'Reaches 1 person right now')
+    : t('routeTemplates.inspector.reaches.other', 'Reaches {count} people right now', {
+        count: count.toLocaleString(),
+      });
 }
 
 /**
@@ -646,11 +702,7 @@ function StageInspector({
             }
             previewError={audience?.count === null ? (audience.unavailableReason ?? null) : null}
             placeholder={t('routeTemplates.inspector.pickGroup', 'Choose a group')}
-            previewCountLabel={(total) =>
-              t('routeTemplates.inspector.reaches', 'Reaches {count} people right now', {
-                count: total.toLocaleString(),
-              })
-            }
+            previewCountLabel={(total) => reachesRightNow(t, total)}
             previewDynamicNote={t(
               'routeTemplates.inspector.groupDynamic',
               'This is who the group means right now. It is re-resolved every time the stage is reached, so a document routed next month reaches whoever matches then.'
@@ -672,12 +724,17 @@ function StageInspector({
 
       {/* THE COUNT, BESIDE THE QUORUM. This pairing is the point: an author
           setting "all must approve" on a node that reaches 1,043 people reads
-          both facts in one glance, at the moment the decision is made. */}
-      {audience !== undefined && audience.count !== null && (
+          both facts in one glance, at the moment the decision is made.
+
+          NOT for a group stage. `AudienceGroupPicker` already draws this exact
+          sentence, from this exact number, a few rows above — so a group stage
+          said "Reaches 2 people right now" twice, once under the picker and once
+          under this heading (#1042). The picker's copy is the one to keep: it
+          sits beside the sample and the "re-resolved every time" caveat, which
+          is what makes the number mean something. */}
+      {!isGroupKind && audience !== undefined && audience.count !== null && (
         <p className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
-          {t('routeTemplates.inspector.reaches', 'Reaches {count} people right now', {
-            count: audience.count.toLocaleString(),
-          })}
+          {reachesRightNow(t, audience.count)}
         </p>
       )}
 
