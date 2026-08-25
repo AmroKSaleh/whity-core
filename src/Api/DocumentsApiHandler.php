@@ -1064,9 +1064,53 @@ final class DocumentsApiHandler
         'trail' => 'This document has not been put into circulation, so there is no trail to add to.',
         'recipients' => 'This document is not awaiting you. You are reading it as a record '
             . 'rather than as something to act on.',
+        // The SWITCH branch only. `documentCarriesQr()` says no for three
+        // different reasons and this sentence is true of one of them, so it is
+        // chosen between by {@see self::qrRecordDeniedReason()} rather than read
+        // straight out of this table. Blaming the tenant setting on an instance
+        // with no APP_URL sends an administrator to a settings page where the
+        // switch is already on, with nothing to tell them they are in the wrong
+        // place.
         'qr' => 'This document does not carry a verification code, and cannot be given one '
             . 'while QR verification is switched off for this template or this organisation.',
     ];
+
+    /**
+     * Why the `qr` region has nothing to change, told apart by CAUSE.
+     *
+     * The three causes are genuinely different problems with genuinely different
+     * fixes, and only one of them is a setting anybody can reach:
+     *
+     *   - this installation wires no QR service at all — an embedder's build,
+     *     and no grant and no setting anywhere would make a code appear;
+     *   - the instance has no public address, so a code would encode a link that
+     *     leads nowhere — an operator fixes it with APP_URL;
+     *   - the switch is off for this template or this organisation.
+     *
+     * Only consulted when the predicate already said no, so it does not need to
+     * re-derive the switch: reaching the last line IS the switch being off.
+     *
+     * The web client overrides all three with one cause-NEUTRAL sentence and
+     * lets its panel name the cause in the reader's own language, because the
+     * panel holds `configured` and `enabled` and this method's output is prose.
+     * That is not a duplicate: this is what a client without that panel — the
+     * desktop shell, an integrator's own UI — is told, and it was previously
+     * told something false in two cases out of three.
+     */
+    private function qrRecordDeniedReason(): string
+    {
+        if ($this->qr === null) {
+            return 'This installation does not issue verification codes, so no document here '
+                . 'can carry one.';
+        }
+        if (!$this->qr->isConfigured()) {
+            return 'This installation has not been told its own public address, so a verification '
+                . 'code issued here would encode a link that leads nowhere. Nothing about your '
+                . 'account or this document is in the way.';
+        }
+
+        return self::RECORD_DENIED_REASONS['qr'];
+    }
 
     /**
      * The per-region verdicts for this caller and this document, or null when
@@ -1123,6 +1167,11 @@ final class DocumentsApiHandler
             'qr' => $this->documentCarriesQr($tenantId, $document),
         ];
 
+        // One region's record sentence is chosen rather than looked up — see
+        // qrRecordDeniedReason(). The other three have exactly one cause each.
+        $reasons = self::RECORD_DENIED_REASONS;
+        $reasons['qr'] = $this->qrRecordDeniedReason();
+
         $verdicts = [];
         foreach (self::recordSections() as $requirement) {
             $verdicts += $this->sectionResolver->resolve(
@@ -1130,7 +1179,7 @@ final class DocumentsApiHandler
                 $callerId,
                 $tenantId,
                 $predicates[$requirement->key] ?? false,
-                self::RECORD_DENIED_REASONS[$requirement->key] ?? null,
+                $reasons[$requirement->key] ?? null,
                 $includeDetail
             );
         }

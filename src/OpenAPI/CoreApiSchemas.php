@@ -7205,6 +7205,11 @@ final class CoreApiSchemas
                     'The record page panel. `enabled` composes the tenant setting with the template '
                     . 'flag; `configured` is separate because "this instance has no public address" and '
                     . '"this tenant switched it off" are different problems with different fixes. '
+                    . '`token` is null in TWO different states — never minted, and withdrawn — so '
+                    . '`retired` is what separates them: it lists the codes this document has carried '
+                    . 'and stopped honouring, newest first, each with the reason (`withdrawn` or '
+                    . '`superseded`). A retired entry carries the human reference, never the token and '
+                    . 'never a verification URL. '
                     . 'Anonymous scans appear with `scanner_profile_id: null` and carry nothing else '
                     . 'about the scanner — no address, no device — because nothing else is stored.',
                 'tags' => ['documents'],
@@ -7225,6 +7230,34 @@ final class CoreApiSchemas
                                             'verification_url' => ['type' => 'string'],
                                             'issued_at' => ['type' => 'string', 'nullable' => true],
                                             'issued_by' => ['type' => 'integer', 'nullable' => true],
+                                        ],
+                                    ],
+                                    'retired' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'total' => ['type' => 'integer'],
+                                            'recent' => [
+                                                'type' => 'array',
+                                                'items' => [
+                                                    'type' => 'object',
+                                                    'properties' => [
+                                                        'reference' => ['type' => 'string'],
+                                                        'issued_at' => [
+                                                            'type' => 'string',
+                                                            'nullable' => true,
+                                                        ],
+                                                        'revoked_at' => ['type' => 'string'],
+                                                        'revoked_by' => [
+                                                            'type' => 'integer',
+                                                            'nullable' => true,
+                                                        ],
+                                                        'reason' => [
+                                                            'type' => 'string',
+                                                            'enum' => ['withdrawn', 'superseded'],
+                                                        ],
+                                                    ],
+                                                ],
+                                            ],
                                         ],
                                     ],
                                     'scans' => [
