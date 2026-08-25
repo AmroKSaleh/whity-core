@@ -162,6 +162,7 @@ import {
   TabsTrigger,
 } from '@amroksaleh/ui/tabs';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 
 /**
  * WC-227: the web renderer for `screen: 'blocks'` plugin features.
@@ -2126,6 +2127,7 @@ function ChartRenderer({ block }: { block: ChartBlock }) {
 function TimelineRenderer({ block }: { block: TimelineBlock }) {
   type Rows = Record<string, unknown>[];
   const t = useTranslation('plugin');
+  const dates = useDateDisplay();
   const source = useEffectiveSource(block.source, block.params);
   const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
@@ -2186,7 +2188,17 @@ function TimelineRenderer({ block }: { block: TimelineBlock }) {
   const events = state.data.map((row) => ({
     actor: String(row[block.actorField] ?? ''),
     action: String(row[block.actionField] ?? ''),
-    timestamp: String(row[block.timestampField] ?? ''),
+    // #1068. `timestampField` is DECLARED by the block as a timestamp, so
+    // there is no guessing to do here: it goes through the one date path,
+    // which formats it in the reader's language and returns null when this
+    // tenant hides dates. It used to be `String(…)` — the raw wire string,
+    // unlocalised, straight onto the screen.
+    //
+    // Empty means "render nothing", which the event row below now checks. A
+    // value that will not parse also lands here, and that is the right answer
+    // for a field a plugin declared as a timestamp and then filled with
+    // something else.
+    timestamp: dates.dateTime(String(row[block.timestampField] ?? '')) ?? '',
     note: block.noteField !== undefined ? String(row[block.noteField] ?? '') : '',
     from: block.fromField !== undefined ? String(row[block.fromField] ?? '') : '',
     to: block.toField !== undefined ? String(row[block.toField] ?? '') : '',
@@ -2224,7 +2236,9 @@ function TimelineRenderer({ block }: { block: TimelineBlock }) {
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-sm font-medium text-foreground">{event.actor}</span>
               <span className="text-sm text-foreground">{event.action}</span>
-              <span className="text-xs text-muted-foreground">{event.timestamp}</span>
+              {event.timestamp !== '' && (
+                <span className="text-xs text-muted-foreground">{event.timestamp}</span>
+              )}
             </div>
             {(event.from !== '' || event.to !== '') && (
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -2364,6 +2378,7 @@ function InboxActionButton({
 function InboxRenderer({ block }: { block: InboxBlock }) {
   type Rows = Record<string, unknown>[];
   const t = useTranslation('plugin');
+  const dates = useDateDisplay();
   const source = useEffectiveSource(block.source, block.params);
   const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
@@ -2379,8 +2394,13 @@ function InboxRenderer({ block }: { block: InboxBlock }) {
         id: String(row[block.idField] ?? ''),
         title: String(row[block.titleField] ?? ''),
         subtitle: block.subtitleField !== undefined ? String(row[block.subtitleField] ?? '') : '',
+        // #1068, exactly as the timeline block above: a declared timestamp
+        // field goes through the one date path, and an empty result means the
+        // third line of the item is simply not rendered.
         timestamp:
-          block.timestampField !== undefined ? String(row[block.timestampField] ?? '') : '',
+          block.timestampField !== undefined
+            ? (dates.dateTime(String(row[block.timestampField] ?? '')) ?? '')
+            : '',
         status: block.statusField !== undefined ? String(row[block.statusField] ?? '') : '',
         raw: row,
       })),
@@ -2391,6 +2411,7 @@ function InboxRenderer({ block }: { block: InboxBlock }) {
       block.subtitleField,
       block.timestampField,
       block.statusField,
+      dates,
     ]
   );
 

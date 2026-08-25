@@ -199,6 +199,26 @@ export default function VerifyDocumentPage({ params }: { params: Promise<{ token
           {phase.kind === 'ready' && phase.data.verified && (
             <dl className="space-y-3 text-sm">
               <Fact label={t('verify.field.issuer', 'Issued by')} value={phase.data.issuer} />
+              {/*
+                @date-display-ignore: this page is NOT governed by
+                `ui.hide_dates`, and #1068 says so in as many words. That
+                setting is about what a tenant's own STAFF see on their screens;
+                the audience here is a stranger holding a printed sheet, for
+                whom "issued on" is doing real verification work that no staff
+                timestamp is doing. A verification page with no date is a
+                substantially weaker one.
+
+                Whether to show it stays this page's own decision, on its own
+                key: `documents.qr_public_detail`, whose `undated` level (added
+                by #1068 for exactly this) withholds `issued_on` server-side.
+                The value is ABSENT from the payload then, so `Fact` renders
+                nothing, and no client-side gate is involved at all.
+
+                It is rendered verbatim because the SERVER already reduced it to
+                a date (`VerificationPresenter::dateOnly`) and deliberately did
+                not send a time. Re-parsing and re-localising it here would
+                reintroduce a time-of-day this endpoint exists not to disclose.
+              */}
               <Fact label={t('verify.field.issuedOn', 'Issued on')} value={phase.data.issued_on} />
               <Fact
                 label={t('verify.field.reference', 'Reference')}
@@ -215,6 +235,10 @@ export default function VerifyDocumentPage({ params }: { params: Promise<{ token
             </dl>
           )}
 
+          {/* @date-display-ignore: same as `issued_on` directly above — this is
+              the public verification surface, governed by
+              `documents.qr_public_detail` and not by `ui.hide_dates`, and the
+              server has already reduced the value to a date. */}
           {phase.kind === 'ready' && !phase.data.verified && phase.data.revoked_on && (
             <dl className="space-y-3 text-sm">
               <Fact label={t('verify.field.withdrawnOn', 'Withdrawn on')} value={phase.data.revoked_on} />

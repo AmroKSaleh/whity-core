@@ -32,7 +32,25 @@ export type InstalledPluginState = "active" | "inactive" | "disabled" | "update-
 
 export interface PluginVersion {
   version: string
-  releasedAt: string
+  /**
+   * When this version was released, ALREADY as display text — or omitted to
+   * show nothing beside the version number.
+   *
+   * A LABEL and not a timestamp, which is what it has always actually been:
+   * the callers that exist pass "Current (Installed)" and "2 weeks ago", not
+   * an ISO string, and this component printed whatever it was given verbatim.
+   * The name said otherwise, and a name that says "timestamp" over a field that
+   * is really display text is how an unformatted `2026-08-25 14:02:11` ends up
+   * on a screen.
+   *
+   * It stays a label because this package cannot do better. `@amroksaleh/ui` is
+   * a design system: it has no access to the reader's resolved language and none
+   * to the tenant's `ui.hide_dates` preference (#1068), both of which live in
+   * `@amroksaleh/features`, which depends on THIS package and not the other way
+   * round. So the caller formats — through `useDateDisplay()`, the one
+   * sanctioned path — and omits this when that path returns null.
+   */
+  releasedLabel?: string
   changelog?: string
   isCurrent?: boolean
 }
@@ -388,7 +406,9 @@ export function InstalledPluginCard({
                         <IconArrowBackUp className="size-3.5 text-muted-foreground" />
                         <span className="font-semibold">v{ver.version}</span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground">{ver.releasedAt}</span>
+                      {ver.releasedLabel !== undefined && (
+                        <span className="text-[10px] text-muted-foreground">{ver.releasedLabel}</span>
+                      )}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
@@ -624,7 +644,9 @@ function PluginDetailsModal({
                 <div key={ver.version} className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-xs text-foreground">Version {ver.version}</span>
-                    <span className="text-[10px] text-muted-foreground">{ver.releasedAt}</span>
+                    {ver.releasedLabel !== undefined && (
+                      <span className="text-[10px] text-muted-foreground">{ver.releasedLabel}</span>
+                    )}
                   </div>
                   {ver.changelog && (
                     <p className="text-xs text-muted-foreground leading-relaxed">{ver.changelog}</p>

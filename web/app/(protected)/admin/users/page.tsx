@@ -21,6 +21,7 @@ import {
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { CreateUserModal } from './create-modal';
 import { EditUserModal } from './edit-modal';
 import { DeleteUserModal } from './delete-modal';
@@ -47,6 +48,7 @@ export default function UsersPage() {
   const router = useRouter();
   const { hasPermission } = useCapabilities();
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
   const canCreate = hasPermission(USERS_WRITE);
   const canEdit = hasPermission(USERS_WRITE);
   const canDelete = hasPermission(USERS_DELETE);
@@ -183,11 +185,19 @@ export default function UsersPage() {
         </Badge>
       ),
     },
-    {
-      accessorKey: 'createdAt',
-      header: t('users.table.createdAt', 'Created At'),
-      enableSorting: true,
-    },
+    // #1068. Two things changed here. The column is now GATED on the tenant
+    // preference, and it is now FORMATTED at all: an `accessorKey` with no
+    // `cell` renders `String(value)`, so this column has been printing the raw
+    // wire string — `2026-08-25 14:02:11`, unlocalised, in the middle of an
+    // otherwise Arabic table — since it was written.
+    ...dates.dateColumns<User>([
+      {
+        id: 'createdAt',
+        header: t('users.table.createdAt', 'Created At'),
+        value: (user) => user.createdAt,
+        enableSorting: true,
+      },
+    ]),
   ];
 
   // The dropdown is always rendered: "which tenants is this person in?" is a
