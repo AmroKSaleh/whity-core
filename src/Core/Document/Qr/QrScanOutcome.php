@@ -18,7 +18,7 @@ namespace Whity\Core\Document\Qr;
  *
  * NOTE WHAT IS ABSENT: there is no `unknown`. A scan of a code that resolves to
  * nothing has no token row to hang off and no tenant to belong to, so it is not
- * recorded at all — see migration 120 for why recording it would also hand an
+ * recorded at all — see migration 122 for why recording it would also hand an
  * anonymous caller an unbounded write.
  */
 final class QrScanOutcome

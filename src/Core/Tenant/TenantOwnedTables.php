@@ -325,7 +325,7 @@ final class TenantOwnedTables
         'document_collection_items' => '114_create_document_collections.php',
 
         // #1036 — the QR code printed on a document, and the append-only record
-        // of it being scanned (migration 120). Tenant-owned like everything else
+        // of it being scanned (migration 122). Tenant-owned like everything else
         // that hangs off `documents`, with ONE statement in the subsystem that
         // arrives without a tenant to bind: the PUBLIC verification lookup, which
         // is entered by an anonymous stranger holding a piece of paper and whose
@@ -333,8 +333,8 @@ final class TenantOwnedTables
         // annotation, exactly as `invitations` does above and for the same
         // reason — and every read the handler makes AFTER it binds the tenant_id
         // that lookup returned.
-        'document_qr_tokens' => '120_create_document_qr_tracking.php',
-        'document_qr_scans' => '120_create_document_qr_tracking.php',
+        'document_qr_tokens' => '122_create_document_qr_tracking.php',
+        'document_qr_scans' => '122_create_document_qr_tracking.php',
     ];
 
     /**

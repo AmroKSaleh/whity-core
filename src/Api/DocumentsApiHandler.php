@@ -1029,7 +1029,7 @@ final class DocumentsApiHandler
             // second, subtly different visibility rule over the same record —
             // the shape this subsystem argues against everywhere else — for no
             // gain. Anonymous scans name nobody at all, because nothing about
-            // them is stored (migration 120).
+            // them is stored (migration 122).
             //
             // WRITE is `documents:render`: rotating or withdrawing a code
             // changes what every printed copy in the world asserts, which is the

@@ -41,7 +41,7 @@ final class DocumentQrScanRepository
     /**
      * Append one scan and return its id. The only write this class has.
      *
-     * The outcome is CHECK-constrained by the schema (migration 120), so a verb
+     * The outcome is CHECK-constrained by the schema (migration 122), so a verb
      * outside {@see QrScanOutcome::all()} is refused by the database rather than
      * stored as a row nothing renders.
      *

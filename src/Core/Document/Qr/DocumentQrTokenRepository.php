@@ -15,7 +15,7 @@ use PDO;
  * that already exists in the world, so the row is written once and thereafter
  * only LATCHED — {@see revoke()} sets `revoked_at`/`revoked_by`/`revoked_reason`
  * and refuses to touch a row that already carries them. Rows leave only by
- * cascade from `documents` or `tenants` (migration 120); there is no path from
+ * cascade from `documents` or `tenants` (migration 122); there is no path from
  * here, for the same reason
  * {@see \Whity\Core\Document\Routing\RouteEventRepository} offers none.
  *
@@ -67,7 +67,7 @@ final class DocumentQrTokenRepository
      * The code currently in force for a document, or null when it has none.
      *
      * "In force" is `revoked_at IS NULL`, read off the row rather than derived
-     * from anywhere — see migration 120 on why this latch is not the status
+     * from anywhere — see migration 122 on why this latch is not the status
      * column migration 108 refuses.
      *
      * Newest first, because a document may legitimately have several rows: every

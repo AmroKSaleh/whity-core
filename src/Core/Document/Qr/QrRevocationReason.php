@@ -8,7 +8,7 @@ namespace Whity\Core\Document\Qr;
  * Why a printed QR code stopped being honoured (#1036).
  *
  * A CLOSED vocabulary, matching `document_qr_tokens`' CHECK constraint
- * (migration 120), for the reason {@see \Whity\Core\Document\Routing\RouteAction}
+ * (migration 122), for the reason {@see \Whity\Core\Document\Routing\RouteAction}
  * is closed one subsystem over: a column that accepts any string is a column
  * whose readers must handle any string, and the first typo becomes a permanent
  * row nothing renders and nothing can correct.
