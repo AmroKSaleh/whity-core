@@ -3191,7 +3191,15 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
                 'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteStep')],
                 'edges' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteEdge')],
-            ], ['id', 'document_id', 'title', 'created_at', 'steps', 'edges']),
+                // What a step whose `decision_quorum` is NULL actually does in
+                // this tenant, already resolved through the settings chain
+                // (#1041). Published with the route because the answer lives
+                // behind `settings:read` and the person standing on a decision
+                // step is the least likely person in the tenant to hold it - so
+                // without this a client could not tell an approver whether their
+                // single approval carries the gate or is one of four hundred.
+                'default_quorum' => ['type' => 'string', 'enum' => ['all', 'any', 'majority']],
+            ], ['id', 'document_id', 'title', 'created_at', 'steps', 'edges', 'default_quorum']),
             'DocumentRouteListResponse' => self::listEnvelope('DocumentRoute'),
             // `resolved` and `delivered` are on the envelope rather than on the
             // route, because they describe what THIS request did rather than a

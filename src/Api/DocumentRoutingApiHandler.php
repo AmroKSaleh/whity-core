@@ -74,6 +74,12 @@ use Whity\Http\PaginationParams;
  * verdict is available to you is decided by the route that reached you, not by a
  * tenant-wide grant — see above.
  *
+ * For the same reason the route READ publishes `default_quorum` (#1041): a step
+ * whose `decision_quorum` is null defers to the tenant's setting, and the person
+ * being asked to approve is the least likely person in the tenant to be able to
+ * read that setting. Sending it with the route is what lets a screen say "all
+ * three of you must approve" instead of naming a rule it had to guess.
+ *
  * NO 403s ON A MISS
  * -----------------
  * A document the caller may not see is reported as missing. A 403 confirms the
@@ -181,7 +187,12 @@ final class DocumentRoutingApiHandler
         }
 
         return Response::json([
-            'data' => RoutingPresenter::route($issued['route'], $issued['steps'], $issued['edges']),
+            'data' => RoutingPresenter::route(
+                $issued['route'],
+                $issued['steps'],
+                $issued['edges'],
+                $this->router->defaultQuorum($tenantId),
+            ),
             'resolved' => $issued['resolved'],
             'delivered' => $issued['delivered'],
         ], 201);
@@ -201,11 +212,16 @@ final class DocumentRoutingApiHandler
         [$tenantId, , $document] = $resolved;
 
         $documentId = (int) $document['id'];
+        // Resolved ONCE for the whole page rather than per route: it is a fact
+        // about the tenant, and asking the settings chain once per route would
+        // make a document with forty circulations forty reads of the same row.
+        $defaultQuorum = $this->router->defaultQuorum($tenantId);
         $data = array_map(
             fn (array $route): array => RoutingPresenter::route(
                 $route,
                 $this->steps->listForRoute((int) $route['id'], $tenantId),
-                $this->edges->listForRoute((int) $route['id'], $tenantId)
+                $this->edges->listForRoute((int) $route['id'], $tenantId),
+                $defaultQuorum,
             ),
             $this->routes->listForDocument($documentId, $tenantId)
         );

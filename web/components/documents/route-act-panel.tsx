@@ -1,76 +1,132 @@
 'use client';
 
 /**
- * Acting on a routed document — forward, acknowledge, return, or note
- * (#978, over #989's engine).
+ * Acting on a routed document — forward, acknowledge, return, note, and (on a
+ * decision step) approve or reject (#978 over #989's engine, #1041 over #1030's).
  *
  * THE VOCABULARY IS THE ENGINE'S, NOT THIS SCREEN'S
  * -------------------------------------------------
- * Four buttons, and every one of them is a verb from the CHECK constraint in
- * migration 112. `RouteAction::recipientActions()` is `forwarded`,
- * `acknowledged`, `returned`; `noted` is open to anyone who may see the
- * document. That is the whole set a person can produce.
+ * Every control here is a verb from the CHECK constraint in migration 112.
+ * `RouteAction::recipientActions()` is `forwarded`, `acknowledged`, `returned`;
+ * `noted` is open to anyone who may see the document. That is the whole set a
+ * person can produce.
  *
- * There is NO "Approve". It is the first word anybody reaches for and the engine
- * does not have it: the terminal act is `acknowledged` — "this goes no further
- * along my chain" — and approval as a DECISION is something #989 deliberately
- * does not model (its "configured effects" seam records the distinction:
- * routing says who must act and when a step is satisfied; a judgement about the
- * content is not routing). Labelling this button "Approve" would put a word in
- * front of the user that the append-only trail does not contain, and the trail
- * is the thing anybody auditing this will read.
+ * WHY THERE IS AN "APPROVE" BUTTON NOW, AND WHAT IT POSTS
+ * ------------------------------------------------------
+ * This file used to say, at length, that there is no Approve — that the terminal
+ * act is `acknowledged` and approval as a DECISION is something the engine
+ * deliberately does not model. That was accurate until #1030 and false the
+ * moment migration 119 landed. It is corrected rather than deleted because the
+ * SHAPE of the answer is still load-bearing:
+ *
+ * Approval is a VERDICT on the act, not a sixth verb. A step may be marked
+ * `decision`, and answering one posts `acknowledged` carrying
+ * `verdict: 'approved' | 'rejected'`. The act still says the actor chose no
+ * destination — which is exactly what a gate means — and where the document goes
+ * is DERIVED by the engine from the verdict, the step's edges and the quorum.
+ * `forwarded` is refused on a gate for the same reason: it means the ACTOR chose
+ * the destination, which is the one thing the step exists to take away from them.
+ *
+ * So the word in front of the user and the word in the trail agree, which is
+ * what the old paragraph was protecting.
+ *
+ * THE ONE THING THIS PANEL MUST NOT GET WRONG
+ * -------------------------------------------
+ * The action response carries `decided` — what the STEP concluded — and it is
+ * NULL while a quorum is still short. Under the default quorum of `all`, two of
+ * three approvals conclude nothing.
+ *
+ * This panel renders `decided`, never the verdict the caller just submitted. The
+ * difference is invisible in the single-approver case that is most of them, and
+ * in the fan-out case that the whole feature exists for it is the difference
+ * between "your approval is recorded, the others have not answered" and telling
+ * two people that a document was authorised before it was — confidently, in the
+ * one place they would go to check. {@link readDecided} is shaped so that the
+ * substitution cannot be written: it never receives the caller's verdict.
+ *
+ * A NULL VERDICT IS NOT A REJECTION, AND NOT A PENDING DECISION
+ * ------------------------------------------------------------
+ * Every act on a circulation step, every note, and every event written before
+ * migration 119 has `verdict = null`. This panel therefore renders nothing at
+ * all about approval unless the step the viewer is standing on is a decision —
+ * no "not approved", no "awaiting a verdict", no greyed-out approve button on a
+ * step that will never take one.
  *
  * WHY A DENIED ACTION IS DISABLED WITH ITS REASON (#951)
  * -----------------------------------------------------
- * Three of these four can be unavailable, and each has a DIFFERENT cause that a
- * hidden button would render identically:
+ * An act can be unavailable for causes a hidden button would render identically:
  *
  *  - you have no open item on this route (you already acted, or it never
  *    reached you);
  *  - you are standing on the last step, so there is nothing to forward to;
  *  - your item came from the first step, so there is no predecessor to return
- *    it to.
+ *    it to;
+ *  - you are standing on a DECISION step, where forwarding is refused outright.
  *
- * All three are states the person can do something about — acknowledge instead,
- * add a note instead — and the reason is what tells them which. #951 landed
- * because a hidden control made unrelated causes look the same.
+ * All four are states the person can do something about — approve instead,
+ * acknowledge instead, add a note instead — and the reason is what tells them
+ * which. #951 landed because a hidden control made unrelated causes look alike.
  *
  * WHY THE PREDICATES ARE EVALUATED HERE AT ALL
  * --------------------------------------------
- * They duplicate three checks `DocumentRouter::act()` makes. That is a real cost
- * and the alternative is worse: enabling all four and letting people discover
- * the refusal by clicking turns an explainable state into a failed request, and
- * the person still has to be told the same sentence afterwards.
+ * They duplicate checks `DocumentRouter::act()` makes. That is a real cost and
+ * the alternative is worse: enabling everything and letting people discover the
+ * refusal by clicking turns an explainable state into a failed request, and the
+ * person still has to be told the same sentence afterwards.
  *
  * What makes the duplication safe is that it is not a second SOURCE of truth:
  *
  *  - every input is a field the server published for this purpose — `open` (its
- *    own derivation of `closed_by_event_id IS NULL`), `parent_recipient_id`, and
- *    the steps' `position` values;
+ *    own derivation of `closed_by_event_id IS NULL`), `parent_recipient_id`,
+ *    `decision`, `decision_quorum`, `default_quorum`, and the steps' `position`
+ *    values;
  *  - the reason SENTENCES are the engine's own, quoted from `DocumentRouter`, so
  *    the two cannot say different things about the same state;
  *  - the server re-checks on submit regardless, and its 422 body is surfaced
  *    VERBATIM rather than re-keyed. If this component's reading is ever wrong,
  *    the engine's answer is the one the user sees.
  *
+ * The one thing deliberately NOT duplicated is the quorum arithmetic. This panel
+ * names the RULE and the size of the audience the step was put to, and never a
+ * tally: the recipients endpoint publishes no closing verdict, and the engine
+ * also drops from its denominator anybody who is no longer an active member. A
+ * client-side count would be wrong in both directions and wrong invisibly.
+ *
  * Deliberately NOT gated on a permission. Acting is self-service: being a
  * recipient IS the authorization, which is why `POST .../actions` is registered
  * unpermissioned. Migration 113 records why — a route that resolved to somebody
  * who then needs a grant to answer it leaves the item open forever with no way
- * for them to find out why.
+ * for them to find out why. A verdict is no different: whether one is available
+ * to you is decided by the route that reached you, not by a tenant-wide grant.
+ *
+ * WHAT THIS PANEL CANNOT TELL YOU, AND SAYS NOTHING ABOUT (#1037)
+ * --------------------------------------------------------------
+ * How many times this document has already been round this loop. Nothing counts
+ * laps, so a document on its ninth rejection is indistinguishable here from one
+ * on its first — and this panel is exactly where that would show if it existed.
+ * It is not invented: a number nobody derived is worse than an absent one,
+ * because it would be believed. The rejection copy names the route's SHAPE
+ * ("back to an earlier step for correction") without claiming how often it has
+ * been walked.
  */
 
 import { useMemo, useState } from 'react';
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { Badge } from '@amroksaleh/ui/badge';
+import { IconCheck, IconX } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
-import type {
-  ActOnRouteResponse,
-  DocumentRoute,
-  RecipientActionName,
-  RouteRecipient,
+import {
+  effectiveQuorum,
+  readDecided,
+  stepCohort,
+  type DocumentRoute,
+  type RecipientActionName,
+  type RouteQuorumName,
+  type RouteRecipient,
+  type RouteVerdictName,
 } from './routing-wire';
 
 /**
@@ -88,6 +144,21 @@ interface ActionAvailability {
   allowed: boolean;
   /** The engine's own sentence. Null only when allowed. */
   reason: string | null;
+}
+
+/**
+ * What came back from answering a decision step.
+ *
+ * `submitted` and `decided` are held as two fields because they are two facts,
+ * and the panel's whole job here is not to conflate them. `submitted` is only
+ * ever used to name the reader's OWN act ("your approval is recorded");
+ * `decided` is the only thing allowed to describe the step.
+ */
+interface DecisionOutcome {
+  submitted: RouteVerdictName;
+  decided: RouteVerdictName | null;
+  resolved: number;
+  delivered: number;
 }
 
 export interface RouteActPanelProps {
@@ -120,6 +191,14 @@ export function RouteActPanel({
    * to do instead, and a toast that has already faded is not available then.
    */
   const [refusal, setRefusal] = useState<string | null>(null);
+  /**
+   * The step's conclusion, held for the same reason and more urgently.
+   *
+   * "Your approval is recorded and the step is still waiting on two other
+   * people" is the sentence that stops somebody assuming the document has moved.
+   * A toast says it for four seconds; this says it until they navigate away.
+   */
+  const [outcome, setOutcome] = useState<DecisionOutcome | null>(null);
 
   /** The viewer's own OPEN item on this route, if they have one. */
   const myOpenItem = useMemo<RouteRecipient | null>(() => {
@@ -134,6 +213,31 @@ export function RouteActPanel({
   const myStep = useMemo(
     () => (myOpenItem === null ? null : route.steps.find((s) => s.id === myOpenItem.step_id) ?? null),
     [myOpenItem, route.steps]
+  );
+
+  /**
+   * Whether the viewer is being asked for a VERDICT.
+   *
+   * Read from the step's own `decision` flag, never inferred from the edges: a
+   * gate at the end of a route has no outgoing edge and still demands a verdict,
+   * so inferring it would render the final sign-off as an ordinary circulation.
+   */
+  const isDecision = myStep?.decision === true;
+
+  /**
+   * How many people this step was put to, in the viewer's own chain.
+   *
+   * The cohort is one act's rows — see {@link stepCohort}. Not a tally, and the
+   * copy that renders it never calls it one.
+   */
+  const cohortSize = useMemo(
+    () => (myOpenItem === null ? 0 : stepCohort(recipients, myOpenItem).length),
+    [recipients, myOpenItem]
+  );
+
+  const quorum = useMemo<RouteQuorumName>(
+    () => (myStep === null ? 'all' : effectiveQuorum(myStep, route)),
+    [myStep, route]
   );
 
   /**
@@ -153,24 +257,41 @@ export function RouteActPanel({
   );
 
   const availability = useMemo<Record<RecipientActionName, ActionAvailability>>(() => {
-    if (myOpenItem === null) {
+    if (myOpenItem === null || myStep === null) {
       const denied: ActionAvailability = { allowed: false, reason: noOpenItemReason };
       return { forwarded: denied, acknowledged: denied, returned: denied };
     }
 
     return {
-      forwarded: hasNextStep
-        ? { allowed: true, reason: null }
-        : {
+      // A gate refuses a forward outright, and the reason is the engine's own
+      // sentence: choosing the destination is precisely what the step exists to
+      // take away from the person answering it. Checked BEFORE the last-step
+      // rule, because on a decision step "there is nothing to forward to" would
+      // be a true sentence about the wrong thing.
+      forwarded: myStep.decision
+        ? {
             allowed: false,
             reason: t(
-              'routing.act.denied.lastStep',
-              'This is the last step of the route, so there is nothing to forward to. Acknowledge it instead.'
+              'routing.act.denied.decisionStep',
+              'Step {position} is a decision step: it is answered with a verdict, and where the document goes next follows from that verdict. Forwarding would let you choose the destination the step exists to decide.',
+              { position: myStep.position }
             ),
-          },
+          }
+        : hasNextStep
+          ? { allowed: true, reason: null }
+          : {
+              allowed: false,
+              reason: t(
+                'routing.act.denied.lastStep',
+                'This is the last step of the route, so there is nothing to forward to. Acknowledge it instead.'
+              ),
+            },
       // Legal at ANY step, not only the last: a person who is the intended end
       // of their own branch says so here, and the other chains are unaffected
-      // because no aggregate could be waiting on them.
+      // because no aggregate could be waiting on them. On a decision step it is
+      // still the act — it is what Approve and Reject post — but it is never
+      // offered on its own there, because the engine refuses it without a
+      // verdict.
       acknowledged: { allowed: true, reason: null },
       returned:
         myOpenItem.parent_recipient_id !== null
@@ -183,11 +304,62 @@ export function RouteActPanel({
               ),
             },
     };
-  }, [myOpenItem, hasNextStep, noOpenItemReason, t]);
+  }, [myOpenItem, myStep, hasNextStep, noOpenItemReason, t]);
 
-  const submit = async (action: RecipientActionName | 'noted'): Promise<void> => {
-    setBusy(action);
+  /**
+   * What to say about a decision that has been recorded.
+   *
+   * One function, used for BOTH the toast and the panel, so the two can never
+   * disagree about whether a document was approved. Every branch is keyed on
+   * `decided`; `submitted` names only the reader's own act.
+   */
+  const decisionMessage = (o: DecisionOutcome): string => {
+    if (o.decided === null) {
+      // THE CASE THAT MATTERS. The step concluded nothing, so nothing here may
+      // say it did — not "approved", not "rejected", not "complete".
+      return o.submitted === 'approved'
+        ? t(
+            'routing.act.decision.pending.approved',
+            'Your approval is recorded. This step is not approved yet — it is still waiting on the other people it was put to.'
+          )
+        : t(
+            'routing.act.decision.pending.rejected',
+            'Your rejection is recorded. This step is not settled yet — under its approval rule the people who have not answered can still carry it.'
+          );
+    }
+
+    if (o.decided === 'approved') {
+      return o.delivered > 0
+        ? t(
+            'routing.act.decision.approved.moved',
+            'Approved. This step is approved and the document has moved on: the next step resolved to {resolved} people and reached {delivered}.',
+            { resolved: o.resolved, delivered: o.delivered }
+          )
+        : t(
+            'routing.act.decision.approved.ends',
+            'Approved. This step is approved, and the route names nowhere for it to go next — so the document goes no further along this chain.'
+          );
+    }
+
+    return o.delivered > 0
+      ? t(
+          'routing.act.decision.rejected.moved',
+          'Rejected. This step can no longer be approved, and the document has gone where the route sends a rejection: that step resolved to {resolved} people and reached {delivered}.',
+          { resolved: o.resolved, delivered: o.delivered }
+        )
+      : t(
+          'routing.act.decision.rejected.ends',
+          'Rejected. This step can no longer be approved, and the route draws no path for a rejection — so the document ends here. A rejection never falls through to where an approval would have sent it.'
+        );
+  };
+
+  const submit = async (
+    action: RecipientActionName | 'noted',
+    verdict?: RouteVerdictName
+  ): Promise<void> => {
+    setBusy(verdict ?? action);
     setRefusal(null);
+    setOutcome(null);
     try {
       const trimmed = note.trim();
       const response = await apiClient(
@@ -201,27 +373,52 @@ export function RouteActPanel({
             // zero-length note is a row in an append-only table that says
             // nothing.
             ...(trimmed === '' ? {} : { note: trimmed }),
+            // Likewise omitted on a circulation step, where the engine refuses a
+            // verdict outright rather than storing one nothing routes on.
+            ...(verdict === undefined ? {} : { verdict }),
           }),
         }
       );
 
-      const body = (await response.json().catch(() => null)) as
-        | (ActOnRouteResponse & { error?: string })
-        | null;
+      const body: unknown = await response.json().catch(() => null);
 
       if (!response.ok) {
         // The server's own sentence, verbatim. Never re-keyed: the engine's
         // refusals are written for the person who hit them and name the thing to
         // do instead.
+        const error =
+          typeof body === 'object' && body !== null
+            ? (body as { error?: unknown }).error
+            : undefined;
         const message =
-          body?.error ?? t('routing.act.error', 'The action could not be recorded.');
+          typeof error === 'string' && error !== ''
+            ? error
+            : t('routing.act.error', 'The action could not be recorded.');
         setRefusal(message);
         addToast(message, 'error');
         return;
       }
 
+      const counts = (body ?? {}) as { resolved?: number; delivered?: number };
+
       setNote('');
-      if (action === 'noted') {
+      if (verdict !== undefined) {
+        const settled: DecisionOutcome = {
+          submitted: verdict,
+          // NOT `verdict`. See the file docblock, and note that `readDecided`
+          // is not given the caller's verdict at all, so the fallback that would
+          // be wrong here is not expressible.
+          decided: readDecided(body),
+          resolved: counts.resolved ?? 0,
+          delivered: counts.delivered ?? 0,
+        };
+        setOutcome(settled);
+        // 'success' ONLY for an approval the step actually concluded. A recorded
+        // verdict that settled nothing is not a success and must not be tinted
+        // like one — the tint is read faster than the sentence, and a green
+        // toast saying "not approved yet" is the same lie in a different medium.
+        addToast(decisionMessage(settled), settled.decided === 'approved' ? 'success' : 'info');
+      } else if (action === 'noted') {
         addToast(t('routing.act.noted.ok', 'Note added to the trail.'), 'success');
       } else {
         // BOTH counts, because they answer different questions and the engine
@@ -230,7 +427,7 @@ export function RouteActPanel({
           t(
             'routing.act.forwarded.ok',
             'Recorded. The next step resolved to {resolved} people and reached {delivered}.',
-            { resolved: body?.resolved ?? 0, delivered: body?.delivered ?? 0 }
+            { resolved: counts.resolved ?? 0, delivered: counts.delivered ?? 0 }
           ),
           'success'
         );
@@ -248,10 +445,17 @@ export function RouteActPanel({
   const overLimit = note.length > MAX_NOTE_LENGTH;
 
   return (
-    <div className="space-y-3" data-slot="route-act-panel">
+    <div className="space-y-3" data-slot="route-act-panel" data-decision={isDecision ? 'true' : 'false'}>
       <div>
-        <h4 className="text-sm font-semibold text-foreground">
-          {t('routing.act.heading', 'Your action on this route')}
+        <h4 className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+          {isDecision
+            ? t('routing.act.decision.heading', 'Your decision on this route')
+            : t('routing.act.heading', 'Your action on this route')}
+          {isDecision && (
+            <Badge variant="warning-solid" data-slot="route-act-decision-badge">
+              {t('routing.act.decision.badge', 'Decision')}
+            </Badge>
+          )}
         </h4>
         <p className="mt-1 text-xs text-muted-foreground">
           {myOpenItem === null
@@ -261,15 +465,74 @@ export function RouteActPanel({
               )
             : myStep === null
               ? t('routing.act.itemUnknownStep', 'You have an open item on this route.')
-              : t('routing.act.item', 'You have an open item at step {position}.', {
-                  position: myStep.position,
-                })}
+              : isDecision
+                ? t(
+                    'routing.act.decision.item',
+                    'Step {position} is a decision step, and it is asking you to approve or reject. Where the document goes next follows from your verdict rather than from a destination you choose.',
+                    { position: myStep.position }
+                  )
+                : t('routing.act.item', 'You have an open item at step {position}.', {
+                    position: myStep.position,
+                  })}
         </p>
       </div>
 
+      {/*
+        THE QUORUM, AND ONLY WHERE IT MEANS ANYTHING.
+
+        `all`, `any` and `majority` are the same rule for a cohort of one, which
+        is the overwhelmingly common approval step. They differ exactly where a
+        rule fans out to hundreds — the "one node for a thousand instructors"
+        case the feature exists for — and that is where somebody genuinely cannot
+        tell whether their own approval carries the step. Rendering it for a
+        cohort of one would be chrome that explains nothing, every time.
+      */}
+      {isDecision && cohortSize > 1 && (
+        <div
+          className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground"
+          data-slot="route-act-quorum"
+          data-quorum={quorum}
+        >
+          <p className="font-medium text-foreground">
+            {t('routing.act.quorum.cohort', 'This step was put to {count} people at once.', {
+              count: cohortSize,
+            })}
+          </p>
+          <p className="mt-1">
+            {quorum === 'any'
+              ? t(
+                  'routing.act.quorum.any',
+                  'One approval from any of them carries it, so yours may settle it on its own. A rejection decides nothing while anybody is still able to approve.'
+                )
+              : quorum === 'majority'
+                ? t(
+                    'routing.act.quorum.majority',
+                    'It is approved when more than half of them approve, and refused as soon as a majority in favour has become impossible.'
+                  )
+                : t(
+                    'routing.act.quorum.all',
+                    'Every one of them must approve. One rejection settles it, because unanimity is impossible after that.'
+                  )}
+          </p>
+          <p className="mt-1">
+            {myStep !== null && myStep.decision_quorum !== null
+              ? t('routing.act.quorum.onStep', 'This step names that rule itself.')
+              : t(
+                  'routing.act.quorum.inherited',
+                  'That is this tenant’s rule for approval steps; this step does not override it.'
+                )}
+          </p>
+        </div>
+      )}
+
       <div>
         <label htmlFor={`route-note-${route.id}`} className="text-xs font-medium text-foreground">
-          {t('routing.act.note.label', 'Note (optional, appended to the trail)')}
+          {isDecision
+            ? t(
+                'routing.act.note.decisionLabel',
+                'Reason (optional, appended to the trail beside your verdict)'
+              )
+            : t('routing.act.note.label', 'Note (optional, appended to the trail)')}
         </label>
         <textarea
           id={`route-note-${route.id}`}
@@ -291,7 +554,40 @@ export function RouteActPanel({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(['forwarded', 'acknowledged', 'returned'] as const).map((action) => (
+        {isDecision && (
+          <>
+            <VerdictButton
+              verdict="approved"
+              label={t('routing.act.approve', 'Approve')}
+              availability={availability.acknowledged}
+              busy={busy === 'approved'}
+              disabledByNote={overLimit}
+              onClick={() => void submit('acknowledged', 'approved')}
+            />
+            <VerdictButton
+              verdict="rejected"
+              label={t('routing.act.reject', 'Reject')}
+              availability={availability.acknowledged}
+              busy={busy === 'rejected'}
+              disabledByNote={overLimit}
+              onClick={() => void submit('acknowledged', 'rejected')}
+            />
+          </>
+        )}
+        {/*
+          On a decision step `acknowledged` is not offered on its own: it is what
+          Approve and Reject post, and the engine refuses it there without a
+          verdict. Offering it anyway would be a third button that looks like a
+          way to answer without deciding and is in fact a 422.
+
+          `forwarded` IS still offered, disabled and carrying the engine's
+          reason, because it is the control a person will look for on a step that
+          used to have one — #951's whole point.
+        */}
+        {(isDecision
+          ? (['forwarded', 'returned'] as const)
+          : (['forwarded', 'acknowledged', 'returned'] as const)
+        ).map((action) => (
           <ActButton
             key={action}
             action={action}
@@ -307,7 +603,8 @@ export function RouteActPanel({
           has no refusal case of its own — it is the one act available to anyone
           who may see the document. It is the CORRECTION mechanism: the trail has
           no update and no delete path, so a mistaken note or a wrong unit is
-          answered by appending beside it.
+          answered by appending beside it. It carries no verdict, and the engine
+          refuses one on it: a remark decides nothing and moves nothing.
         */}
         <Button
           variant="outline"
@@ -322,6 +619,25 @@ export function RouteActPanel({
           {t('routing.act.noted', 'Add note')}
         </Button>
       </div>
+
+      {outcome !== null && (
+        <Alert
+          variant={
+            outcome.decided === 'approved'
+              ? 'success'
+              : outcome.decided === 'rejected'
+                ? 'destructive'
+                : 'warning'
+          }
+          data-slot="route-act-outcome"
+          // The machine-readable half of the same claim, so a test can pin
+          // "the step concluded nothing" without pinning a sentence.
+          data-decided={outcome.decided ?? 'pending'}
+          data-submitted={outcome.submitted}
+        >
+          <AlertDescription>{decisionMessage(outcome)}</AlertDescription>
+        </Alert>
+      )}
 
       {refusal !== null && (
         <Alert variant="destructive" data-slot="route-act-refusal">
@@ -357,7 +673,10 @@ interface ActButtonProps {
 function ActButton({ action, availability, busy, disabledByNote, onClick, t }: ActButtonProps) {
   const labels: Record<RecipientActionName, string> = {
     forwarded: t('routing.act.forward', 'Forward'),
-    // Not "Approve" — see the file docblock.
+    // Still not "Approve": on a circulation step this act says "this goes no
+    // further along my chain" and decides nothing about the content. Approving
+    // is a verdict carried BY this act on a decision step, and has its own
+    // control there.
     acknowledged: t('routing.act.acknowledge', 'Acknowledge'),
     returned: t('routing.act.return', 'Return to sender'),
   };
@@ -376,6 +695,68 @@ function ActButton({ action, availability, busy, disabledByNote, onClick, t }: A
           data-slot={`route-act-${action}`}
         >
           {labels[action]}
+        </Button>
+        {reason !== null && (
+          <span className="sr-only" role="note">
+            {reason}
+          </span>
+        )}
+      </span>
+      {reason !== null && (
+        <p className="mt-1 max-w-xs text-xs text-muted-foreground">{reason}</p>
+      )}
+    </div>
+  );
+}
+
+interface VerdictButtonProps {
+  verdict: RouteVerdictName;
+  label: string;
+  availability: ActionAvailability;
+  busy: boolean;
+  disabledByNote: boolean;
+  onClick: () => void;
+}
+
+/**
+ * Approve or Reject — the same disabled-with-its-reason shape as {@link ActButton}.
+ *
+ * Both post `acknowledged`; the verdict is what differs, and the `data-slot`
+ * names the VERDICT rather than the action so a reader of the DOM (or of a test)
+ * sees the distinction the trail records.
+ *
+ * The two are visually unlike each other on purpose. A reject that looks like an
+ * approve is a mis-click that cannot be undone: the trail has no delete path, so
+ * the only remedy is a note appended beside a refusal that is already recorded
+ * and has already sent the document somewhere else.
+ */
+function VerdictButton({
+  verdict,
+  label,
+  availability,
+  busy,
+  disabledByNote,
+  onClick,
+}: VerdictButtonProps) {
+  const disabled = !availability.allowed || busy || disabledByNote;
+  const reason = availability.allowed ? null : availability.reason;
+
+  return (
+    <div className="flex flex-col">
+      <span className="inline-flex" title={reason ?? undefined}>
+        <Button
+          variant={verdict === 'approved' ? 'success-solid' : 'destructive'}
+          disabled={disabled}
+          aria-disabled={disabled}
+          onClick={disabled ? undefined : onClick}
+          data-slot={`route-act-verdict-${verdict}`}
+        >
+          {verdict === 'approved' ? (
+            <IconCheck className="size-4 me-1" />
+          ) : (
+            <IconX className="size-4 me-1" />
+          )}
+          {label}
         </Button>
         {reason !== null && (
           <span className="sr-only" role="note">

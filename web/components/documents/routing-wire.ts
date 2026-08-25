@@ -22,16 +22,59 @@
  * The closed action vocabulary, from `RouteAction` and CHECK-constrained in
  * migration 112. Five verbs and the database refuses a sixth.
  *
- * There is deliberately no `approved` here, and it is worth saying so out loud
- * because "approve" is the word everybody reaches for: the engine's terminal act
- * is `acknowledged` ("this goes no further along my chain"), and approval as a
- * DECISION is not something routing models at all. Spelling an "Approve" button
- * over `acknowledged` would put a word in the trail that the trail does not
- * contain.
+ * There is still no `approved` here, and the REASON changed in #1030 — which is
+ * worth spelling out, because the paragraph that stood in this place said
+ * routing does not model approval at all, and that has been false since
+ * migration 119. It was true when it was written. Left alone it would have gone
+ * on telling the next reader not to look, which is the one thing a confident
+ * comment is reliably good at.
+ *
+ * What is true now: approval is a VERDICT on the act, not a sixth verb.
+ * `document_route_events` carries a nullable `verdict` column beside `action`,
+ * because under a quorum the same verdict has different routing effects — the
+ * first approval of three closes one inbox row and opens nothing, the third
+ * opens the next step — and this vocabulary's defining property is that the verb
+ * DETERMINES the effect. See {@link ROUTE_VERDICTS}.
+ *
+ * So an "Approve" button is legitimate now, and it posts `acknowledged` carrying
+ * `verdict: 'approved'`. The trail keeps the two facts apart: what the person
+ * did, and what they decided.
  */
 export const ROUTE_ACTIONS = ['issued', 'forwarded', 'acknowledged', 'returned', 'noted'] as const;
 
 export type RouteActionName = (typeof ROUTE_ACTIONS)[number];
+
+/**
+ * The closed VERDICT vocabulary, from `RouteVerdict` and CHECK-constrained in
+ * migration 119. Two values, and NULL is not a third.
+ *
+ * `verdict === null` means "this act said nothing about approval". That is every
+ * act on a circulation step, every `noted`, and every event written before
+ * migration 119. It NEVER means "not approved" — a reader that treated absence
+ * as refusal would invent a rejection for every document ever circulated.
+ */
+export const ROUTE_VERDICTS = ['approved', 'rejected'] as const;
+
+export type RouteVerdictName = (typeof ROUTE_VERDICTS)[number];
+
+/**
+ * What "this step approved" MEANS when its rule resolves to more than one
+ * person, from `RouteQuorum` and CHECK-constrained on
+ * `document_route_steps.decision_quorum`.
+ *
+ * All three are the SAME RULE for a cohort of one, which is the overwhelmingly
+ * common approval step ("the dean signs off"). They differ exactly where a rule
+ * fans out to hundreds — which is why this client shows the quorum only there,
+ * and why `all` is the engine's default: identical in the safe case,
+ * conservative in the risky one.
+ *
+ * There is deliberately no rejection quorum to render. Rejection is DERIVED —
+ * the reject edge fires when the approval quorum has become arithmetically
+ * unreachable — so a second control here would offer a rule that does not exist.
+ */
+export const ROUTE_QUORUMS = ['all', 'any', 'majority'] as const;
+
+export type RouteQuorumName = (typeof ROUTE_QUORUMS)[number];
 
 /**
  * What a RECIPIENT may do to their own open item, plus `noted`.
@@ -40,6 +83,12 @@ export type RouteActionName = (typeof ROUTE_ACTIONS)[number];
  * accepting it from a recipient would mint a second beginning for a circulation
  * already under way. This list is the same one
  * `DocumentRoutingApiHandler::act()` validates against, in the same order.
+ *
+ * On a DECISION step the engine narrows it (#1030): `forwarded` is refused,
+ * because choosing the destination is the one thing a gate exists to take away
+ * from the person answering. `acknowledged` is the act a verdict is carried by,
+ * and it is REFUSED there without one. `returned` stays available and carries no
+ * verdict. See {@link RouteStep.decision}.
  */
 export const RECIPIENT_ACTIONS = ['forwarded', 'acknowledged', 'returned'] as const;
 
@@ -77,6 +126,44 @@ export interface RouteStep {
   rule_kind: string;
   rule_config: Record<string, unknown>;
   label: string | null;
+  /**
+   * Whether this step is a GATE — answered with a verdict rather than a forward
+   * (#1030).
+   *
+   * Published by the server rather than inferred from the edges, and this client
+   * must not infer it either: a gate at the END of a route has no outgoing edge
+   * and still demands a verdict, so reading the edges would render the last
+   * sign-off in a route as an ordinary circulation.
+   */
+  decision: boolean;
+  /**
+   * This step's OWN override of what "this step approved" means.
+   *
+   * `null` is not "no quorum". It means "follow the tenant's setting", which is
+   * what {@link DocumentRoute.default_quorum} carries — resolve the pair with
+   * {@link effectiveQuorum} rather than reading either alone.
+   */
+  decision_quorum: RouteQuorumName | null;
+}
+
+/**
+ * One verdict edge: where a SETTLED verdict sends this step's document.
+ *
+ * A flat list on the route rather than fields on a step, mirroring the server:
+ * an edge is a relationship between two steps and belongs to neither.
+ *
+ * The two verdicts are deliberately not symmetric when no edge was drawn. An
+ * approval with no `approved` edge continues to the next authoring ordinal; a
+ * rejection with no `rejected` edge goes NOWHERE and the chain ends. No code
+ * path lets a rejection inherit the approval's destination, so no client may
+ * describe one as though it had.
+ */
+export interface RouteEdge {
+  id: number;
+  route_id: number;
+  from_step_id: number;
+  to_step_id: number;
+  verdict: RouteVerdictName;
 }
 
 /** A route: one circulation of one document. */
@@ -88,6 +175,23 @@ export interface DocumentRoute {
   created_by: number | null;
   created_at: string;
   steps: RouteStep[];
+  edges: RouteEdge[];
+  /**
+   * What a step whose `decision_quorum` is null actually does in this tenant,
+   * already resolved through the settings chain by the server (#1041).
+   *
+   * It rides along with the route because the answer lives behind
+   * `settings:read`, and the person standing on a decision step is the least
+   * likely person in the tenant to hold it. Without it this client could not
+   * tell an approver whether their single approval carries the gate or is one of
+   * four hundred required — and guessing is the one thing it must not do.
+   *
+   * Typed as required because the spec requires it. It is still read through
+   * {@link effectiveQuorum}, which validates at RUNTIME: an install serving a
+   * build older than #1041 sends nothing here, and the safe reading of a missing
+   * approval rule is the strictest one, never the most permissive.
+   */
+  default_quorum: RouteQuorumName;
 }
 
 export interface RoutesResponse {
@@ -157,8 +261,112 @@ export interface ActOnRouteResponse extends RoutingOutcome {
     from_ou_id: number | null;
     to_ou_id: number | null;
     note: string | null;
+    /**
+     * What THIS PERSON decided — the verdict on their own event, echoed back.
+     *
+     * Not the outcome. See {@link ActOnRouteResponse.decided}, and do not render
+     * this field as one.
+     */
+    verdict: RouteVerdictName | null;
     occurred_at: string;
   };
+  /**
+   * What the STEP concluded, which is not what the caller said.
+   *
+   * This is the single most important field on this wire and the only one it is
+   * possible to get wrong while everything typechecks. Under the default quorum
+   * of `all`, two of three approvals conclude NOTHING and this stays null; the
+   * third settles the step and this becomes `approved`.
+   *
+   * A client that rendered `data.verdict` here would tell the first two of three
+   * approvers that the document was approved — confidently, in the exact place a
+   * person goes to find out, and to the two people least able to check. Read it
+   * through {@link readDecided}, which cannot fall back to the caller's own
+   * verdict because it never sees it.
+   */
+  decided: RouteVerdictName | null;
+}
+
+/**
+ * The step's conclusion from an action response, or null if there is not one.
+ *
+ * Deliberately takes the WHOLE body and nothing else: the caller's own verdict
+ * is not a parameter, so no amount of editing inside this function can make it
+ * substitute one for the other. That is the entire design — the mistake this
+ * guards against is not a typo, it is the perfectly reasonable-looking
+ * `decided ?? verdict`, and a signature that cannot express it is a stronger
+ * guarantee than a comment asking nobody to write it.
+ *
+ * `undefined` and `null` are both "the step did not conclude". A server older
+ * than #1030 sends no field at all, and the safe reading of a missing conclusion
+ * is that nothing was concluded — never that the caller's wish was granted.
+ */
+export function readDecided(body: unknown): RouteVerdictName | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const decided = (body as Record<string, unknown>)['decided'];
+  if (typeof decided !== 'string') return null;
+  return (ROUTE_VERDICTS as readonly string[]).includes(decided)
+    ? (decided as RouteVerdictName)
+    : null;
+}
+
+/**
+ * The quorum actually in force for a step: its own override, else the tenant's.
+ *
+ * Mirrors the top two layers of `DocumentRouter::approvalQuorum()`. The lower
+ * two (global, then the registry default) are already resolved into
+ * {@link DocumentRoute.default_quorum} by the server, so this client resolves a
+ * pair rather than a ladder.
+ *
+ * An unrecognised value on either side falls back to `all`, exactly as the
+ * engine does and for the engine's reason: the value has been through a CHECK
+ * constraint and a settings validator to get this far, so a foreign string means
+ * something upstream is broken — and the safe reading of a broken approval rule
+ * is the strictest one, never the most permissive. Naming a laxer rule than the
+ * engine will apply is how a screen tells somebody their approval is enough when
+ * it is not.
+ */
+export function effectiveQuorum(step: RouteStep, route: DocumentRoute): RouteQuorumName {
+  const onStep = step.decision_quorum;
+  if (typeof onStep === 'string' && (ROUTE_QUORUMS as readonly string[]).includes(onStep)) {
+    return onStep;
+  }
+
+  const onTenant: unknown = route.default_quorum;
+  if (typeof onTenant === 'string' && (ROUTE_QUORUMS as readonly string[]).includes(onTenant)) {
+    return onTenant as RouteQuorumName;
+  }
+
+  return 'all';
+}
+
+/**
+ * The COHORT one open item belongs to: the rows a single act opened at a step.
+ *
+ * `created_by_event_id` is the whole definition, and it is the server's own —
+ * `RouteRecipientRepository::listCohort()` groups by exactly this. It is what
+ * keeps chains independent: two chains that reach the same decision step each
+ * decide for themselves, so "how many people is this step waiting on" is a
+ * question about one act's rows, never about the step.
+ *
+ * WHAT THIS COUNT IS, AND WHAT IT IS NOT. It is how many people the step was PUT
+ * TO. It is not a live tally of who has answered and it deliberately does not
+ * try to be: the recipients endpoint publishes no closing verdict, and the
+ * engine also drops from its own denominator anybody who is no longer an active
+ * member. A client arithmetic that looked like a tally would be wrong in both
+ * directions and wrong invisibly. So this number is only ever rendered as the
+ * size of the audience a rule resolved to — which is a fact the rows do carry.
+ */
+export function stepCohort(
+  recipients: RouteRecipient[],
+  item: RouteRecipient
+): RouteRecipient[] {
+  return recipients.filter(
+    (r) =>
+      r.route_id === item.route_id &&
+      r.step_id === item.step_id &&
+      r.created_by_event_id === item.created_by_event_id
+  );
 }
 
 /** A step as the composer holds it, before the server has ever seen it. */
@@ -243,6 +451,16 @@ export interface RoutingItemMeta {
   document_id: number;
   open: boolean;
   arrived_by: RouteActionName;
+  /**
+   * Whether this item is a DECISION (#1030).
+   *
+   * Published so a client knows before it renders anything, because the acts
+   * available differ — a gate takes a verdict and refuses a forward. Without it
+   * the inbox offers the wrong affordances and the person discovers the
+   * difference from a 422 after clicking, which is the worst possible place to
+   * learn what kind of thing you are holding.
+   */
+  decision: boolean;
 }
 
 /**
@@ -281,6 +499,14 @@ export function routingMeta(item: InboxItem): RoutingItemMeta | null {
     document_id: documentId,
     open,
     arrived_by: arrivedBy as RouteActionName,
+    // The ONE field here that does not join the guard above, and on purpose. A
+    // server older than #1030 sends no `decision` key, and requiring it would
+    // make every routing item on such an install fail the whole check — which
+    // this screen renders as "an item from a source I have no link for", so the
+    // document would silently lose its link rather than lose a chip. Absent is
+    // read as false, which is also what it MEANT before decision steps existed:
+    // absence of a verdict has never meant a verdict.
+    decision: meta['decision'] === true,
   };
 }
 

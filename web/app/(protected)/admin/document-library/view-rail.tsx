@@ -72,6 +72,15 @@ export function viewLabel(t: ReturnType<typeof useTranslation>, view: DocumentVi
       return t('organizer.view.awaitingMe', 'Awaiting me');
     case 'acted-on-by-me':
       return t('organizer.view.actedOnByMe', 'Acted on by me');
+    // #1030's two verdict folders, which arrived from the server a release after
+    // this file was written and rendered in English through the `default` branch
+    // below — the exact half-shipped state the docblock above describes. They are
+    // siblings of "Acted on by me" rather than replacements for it: that folder
+    // is unchanged and still means EVERY act.
+    case 'approved-by-me':
+      return t('organizer.view.approvedByMe', 'Approved by me');
+    case 'rejected-by-me':
+      return t('organizer.view.rejectedByMe', 'Rejected by me');
     case 'passed-through-my-unit':
       return t('organizer.view.passedThroughMyUnit', 'Passed through my unit');
     case 'starred':
@@ -124,6 +133,10 @@ export function viewDescription(
         'organizer.viewDesc.actedOnByMe',
         'Documents whose routing trail records you as the actor — including ones you have passed on.'
       );
+    case 'approved-by-me':
+      return t('organizer.viewDesc.approvedByMe', 'Documents you authorised at an approval step.');
+    case 'rejected-by-me':
+      return t('organizer.viewDesc.rejectedByMe', 'Documents you refused at an approval step.');
     case 'passed-through-my-unit':
       return t(
         'organizer.viewDesc.passedThroughMyUnit',

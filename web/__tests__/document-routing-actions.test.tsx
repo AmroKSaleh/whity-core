@@ -40,6 +40,12 @@ function jsonResponse(status: number, body: unknown) {
   });
 }
 
+/**
+ * Three CIRCULATION steps — `decision: false` throughout, which is what keeps
+ * the "no Approve" assertion below meaningful after #1030 made an Approve button
+ * legitimate elsewhere. The gate's own behaviour lives in
+ * `document-routing-decision.test.tsx`.
+ */
 const ROUTE: DocumentRoute = {
   id: 5,
   document_id: 318,
@@ -47,10 +53,21 @@ const ROUTE: DocumentRoute = {
   created_by: 1,
   created_at: '2026-08-20T09:00:00Z',
   steps: [
-    { id: 11, position: 1, rule_kind: 'role', rule_config: { role_id: 3 }, label: null },
-    { id: 12, position: 2, rule_kind: 'role_below_actor', rule_config: { role_id: 4 }, label: null },
-    { id: 13, position: 3, rule_kind: 'role', rule_config: { role_id: 9 }, label: 'Final sign-off' },
+    {
+      id: 11, position: 1, rule_kind: 'role', rule_config: { role_id: 3 }, label: null,
+      decision: false, decision_quorum: null,
+    },
+    {
+      id: 12, position: 2, rule_kind: 'role_below_actor', rule_config: { role_id: 4 }, label: null,
+      decision: false, decision_quorum: null,
+    },
+    {
+      id: 13, position: 3, rule_kind: 'role', rule_config: { role_id: 9 }, label: 'Final sign-off',
+      decision: false, decision_quorum: null,
+    },
   ],
+  edges: [],
+  default_quorum: 'all',
 };
 
 function recipient(overrides: Partial<RouteRecipient> & { id: number }): RouteRecipient {
@@ -248,8 +265,14 @@ describe('RouteActPanel', () => {
     expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Return to sender' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add note' })).toBeInTheDocument();
-    // `approved` is not in the CHECK constraint, so it is not a button.
+    // Still no Approve, and the reason CHANGED with #1030 rather than going
+    // away: approval is a verdict on a DECISION step, and this step is a
+    // circulation one. Every act here has `verdict = null`, which has never
+    // meant "not approved" — so there is nothing to approve, nothing to grey
+    // out, and nothing to say about approval at all.
     expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="route-act-quorum"]')).toBeNull();
   });
 
   it('disables Forward WITH its reason on the last step', () => {

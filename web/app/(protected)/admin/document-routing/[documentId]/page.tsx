@@ -480,10 +480,21 @@ export default function DocumentRoutingPage() {
                   `routes` and `recipients` are two requests and the routes
                   resolve first, which is exactly why the gap is visible rather
                   than theoretical.
+
+                  The gate is the FIRST load only — `loading` with nothing held
+                  yet. `useFetch` raises `loading` again on every refetch, and an
+                  act triggers one, so gating on `loading` alone UNMOUNTED the
+                  act panel the instant somebody acted. That threw away the one
+                  sentence the panel exists to show them ("your approval is
+                  recorded; this step is still waiting on the others") before it
+                  could be read (#1041). Holding the previous rows for the length
+                  of a refetch does not reintroduce the #1039 defect: the claim
+                  that was false was "this route reached nobody", and rows we
+                  already have are not nobody.
                 */}
                 {recipients.error !== null ? (
                   <p className="text-sm text-muted-foreground">{recipients.error}</p>
-                ) : recipients.loading ? (
+                ) : recipients.loading && recipients.data === null ? (
                   <p className="text-sm text-muted-foreground" data-slot="routing-recipients-loading">
                     {t('routing.recipients.loading', 'Working out who this reached…')}
                   </p>
