@@ -21,6 +21,7 @@ use Whity\Core\Document\Routing\RouteAction;
 use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
+use Whity\Core\Document\Routing\RouteQuorum;
 use Whity\Core\Document\Routing\RouteRepository;
 use Whity\Core\Document\Routing\RouteStepRepository;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
@@ -37,6 +38,7 @@ use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
 use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Request;
 use Whity\Core\Settings\GlobalSettingsRepository;
+use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\TenantSettingsRepository;
 use Whity\Core\Tenant\TenantContext;
@@ -86,6 +88,7 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
     private RouteRecipientRepository $recipients;
     private RouteTemplateRepository $templates;
     private RouteTemplateGraph $templateGraph;
+    private SettingsService $settings;
     private InboxSourceRegistry $inboxSources;
     private int $documentId;
 
@@ -117,7 +120,7 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
             ))
         );
 
-        $settings = new SettingsService(
+        $settings = $this->settings = new SettingsService(
             new GlobalSettingsRepository($this->pdo),
             new TenantSettingsRepository($this->pdo)
         );
@@ -569,6 +572,54 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
         self::assertCount(2, $steps);
         self::assertTrue($steps[1]['decision'], 'the gate must arrive as a gate');
         self::assertSame([self::HEAD_A, self::HEAD_B], $this->reachedProfiles());
+    }
+
+    public function testTheAppliedRouteReportsTheTENANTSQuorumAndNotTheHardcodedDefault(): void
+    {
+        // #1041 publishes `default_quorum` on a route so a recipient standing on
+        // a gate with no quorum of its own can be told what their approval
+        // actually does — the settings chain that holds the answer is behind
+        // `settings:read`, which that person will not hold.
+        //
+        // An APPLIED design is the route most likely to need it: the canvas
+        // leaves `decision_quorum` NULL by default, so nearly every gate a
+        // template produces defers to the tenant. Omitting the argument on this
+        // one call site is invisible on a stock install — the presenter's own
+        // fallback is `all`, which is also the registry default — and wrong on
+        // the first tenant that changed the setting, in the direction that tells
+        // an approver their single approval carries a gate it does not.
+        //
+        // So the tenant is moved OFF the default before anything is asserted;
+        // against `all` this test could not fail.
+        $this->settings->setTenant(
+            self::TENANT,
+            SettingsRegistry::DOCUMENTS_ROUTING_APPROVAL_QUORUM,
+            RouteQuorum::ANY
+        );
+        $templateId = $this->seedTemplate('Quorum check');
+
+        $applied = $this->post(
+            "/api/documents/{$this->documentId}/routes/from-template",
+            self::DEAN,
+            ['template_id' => $templateId],
+            ['id' => (string) $this->documentId]
+        );
+
+        self::assertSame(201, $applied->getStatusCode());
+        self::assertSame(
+            RouteQuorum::ANY,
+            $this->json($applied)['data']['default_quorum'],
+            "the reply must carry the ENGINE resolved answer, not the presenter fallback"
+        );
+
+        // And the read agrees with the write, which is the property that makes
+        // the field worth publishing at all.
+        $read = $this->get(
+            "/api/documents/{$this->documentId}/routes",
+            self::DEAN,
+            ['id' => (string) $this->documentId]
+        );
+        self::assertSame(RouteQuorum::ANY, $this->json($read)['data'][0]['default_quorum']);
     }
 
     public function testAHandComposedRouteStillReportsNoTemplate(): void
