@@ -212,10 +212,10 @@ export interface RouteFlowEditorProps {
    * {@link handleFaces} warns about: the reject arrow left the far side of its
    * own card and crossed back underneath it.
    *
-   * They are placed with physical `left`/`right` now, chosen from this prop, so
-   * the mirroring does not depend on a container's inherited direction. The card
-   * carries its own `dir` for the same reason — `text-start` inside the canvas
-   * would otherwise resolve to "left" and left-align Arabic.
+   * They are placed with a physical `left`, mirrored arithmetically from this
+   * prop, so the mirroring does not depend on a container's inherited direction.
+   * The card carries its own `dir` for the same reason — `text-start` inside the
+   * canvas would otherwise resolve to "left" and left-align Arabic.
    */
   direction?: RouteFlowDirection;
   /**
