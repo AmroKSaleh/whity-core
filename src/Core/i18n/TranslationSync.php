@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\i18n;
 
 use PDO;
+use PDOStatement;
 use RuntimeException;
 use Whity\Core\Db\DbBool;
 
@@ -214,7 +215,10 @@ final class TranslationSync
                     // Divergent because the SOURCE moved. Nobody has touched
                     // this row since the sync wrote it, so the correction is
                     // simply late.
-                    if (!$dryRun && $refresh !== null) {
+                    // `instanceof` rather than `!== null`: prepare() also
+                    // returns false, and a refresh that silently skipped on a
+                    // failed prepare would look exactly like the #1057 defect.
+                    if (!$dryRun && $refresh instanceof PDOStatement) {
                         $refresh->execute([
                             ':translation' => $text,
                             ':language_id' => $languageId,
