@@ -613,6 +613,7 @@ export function RouteActPanel({
               label={t('routing.act.approve', 'Approve')}
               availability={availability.acknowledged}
               busy={busy === 'approved'}
+              anyBusy={busy !== null}
               disabledByNote={overLimit}
               onClick={() => void submit('acknowledged', 'approved')}
             />
@@ -621,6 +622,7 @@ export function RouteActPanel({
               label={t('routing.act.reject', 'Reject')}
               availability={availability.acknowledged}
               busy={busy === 'rejected'}
+              anyBusy={busy !== null}
               disabledByNote={overLimit}
               onClick={() => void submit('acknowledged', 'rejected')}
             />
@@ -645,6 +647,7 @@ export function RouteActPanel({
             action={action}
             availability={availability[action]}
             busy={busy === action}
+            anyBusy={busy !== null}
             disabledByNote={overLimit}
             /*
               ONE VISIBLE COPY PER SENTENCE.
@@ -704,7 +707,21 @@ export function RouteActPanel({
 interface ActButtonProps {
   action: RecipientActionName;
   availability: ActionAvailability;
+  /** This control's own request is in flight. */
   busy: boolean;
+  /**
+   * SOME control's request is in flight — including another one's.
+   *
+   * Every act here is irreversible: the trail has no update path and no delete
+   * path. Disabling only the control that was clicked left every OTHER one live
+   * while its request was in the air, so a second click during the round trip
+   * posted a second act. On a decision step that is Approve and Reject, side by
+   * side, and the loser is a 422 — but only because the first act had already
+   * closed the row. The ordering is the engine's to enforce and this is not a
+   * second opinion about it; it is not offering a person a click whose meaning
+   * depends on which request wins.
+   */
+  anyBusy: boolean;
   disabledByNote: boolean;
   /**
    * Whether to print the reason under THIS control.
@@ -736,6 +753,7 @@ function ActButton({
   action,
   availability,
   busy,
+  anyBusy,
   disabledByNote,
   showReasonText,
   onClick,
@@ -751,7 +769,7 @@ function ActButton({
     returned: t('routing.act.return', 'Return to sender'),
   };
 
-  const disabled = !availability.allowed || busy || disabledByNote;
+  const disabled = !availability.allowed || busy || anyBusy || disabledByNote;
   const reason = availability.allowed ? null : availability.reason;
 
   return (
@@ -791,6 +809,8 @@ interface VerdictButtonProps {
   label: string;
   availability: ActionAvailability;
   busy: boolean;
+  /** See {@link ActButtonProps.anyBusy} — it matters most on these two. */
+  anyBusy: boolean;
   disabledByNote: boolean;
   onClick: () => void;
 }
@@ -812,10 +832,11 @@ function VerdictButton({
   label,
   availability,
   busy,
+  anyBusy,
   disabledByNote,
   onClick,
 }: VerdictButtonProps) {
-  const disabled = !availability.allowed || busy || disabledByNote;
+  const disabled = !availability.allowed || busy || anyBusy || disabledByNote;
   const reason = availability.allowed ? null : availability.reason;
 
   return (

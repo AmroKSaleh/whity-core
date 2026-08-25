@@ -197,6 +197,35 @@ describe('a decision step offers a verdict', () => {
     });
   });
 
+  it('shuts every control while an answer is in flight', async () => {
+    // The trail has no update path and no delete path, so a second act posted
+    // during the first one's round trip cannot be taken back. Approve and Reject
+    // sit side by side and mean opposite things; disabling only the one that was
+    // clicked left the other live for the length of the request.
+    let release: ((v: unknown) => void) | undefined;
+    mockApiClient.mockImplementation(
+      () => new Promise((r) => { release = r; })
+    );
+
+    renderPanel(decisionRoute(), SOLE_APPROVER);
+    fireEvent.click(screen.getByRole('button', { name: /approve/i }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /reject/i })).toBeDisabled());
+    expect(screen.getByRole('button', { name: /approve/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Return to sender' })).toBeDisabled();
+    // Exactly one request went out, and clicking the others adds none.
+    fireEvent.click(screen.getByRole('button', { name: /reject/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Return to sender' }));
+    expect(mockApiClient).toHaveBeenCalledTimes(1);
+
+    release?.({
+      ok: true,
+      status: 201,
+      json: () => Promise.resolve({ data: {}, resolved: 0, delivered: 0, decided: 'approved' }),
+    });
+    await waitFor(() => expect(outcome()).not.toBeNull());
+  });
+
   it('refuses Forward WITH the engine’s own reason, rather than hiding it', () => {
     renderPanel(decisionRoute(), SOLE_APPROVER);
 
