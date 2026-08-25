@@ -109,7 +109,11 @@ final class SettingsApiRealEngineTest extends TestCase
         // how many of the people already asked have to say yes, and one tenant
         // routing three-person sign-offs wants a different answer from one
         // circulating faculty-wide notices.
-        self::assertCount(16, $data['registry']);
+        // 18 since #1036 added documents.qr_enabled (whether this
+        // organisation publishes verifiable documents) and
+        // documents.qr_public_detail (what a stranger holding one is
+        // told). Both per-tenant, both defaulting closed.
+        self::assertCount(18, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

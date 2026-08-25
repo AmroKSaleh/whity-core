@@ -93,6 +93,12 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.routing_max_steps',
             'documents.routing_max_recipients_per_step',
             'documents.routing_approval_quorum',
+            // #1036: QR verification on documents. Two keys, both
+            // per-tenant, both defaulting closed — the switch is off and
+            // the public page discloses the minimum. This pin firing on
+            // them was the pin working; they are added here deliberately.
+            'documents.qr_enabled',
+            'documents.qr_public_detail',
             // #999 — how many people a USER GROUP preview SHOWS. Not a ceiling
             // on resolution: the count a preview reports is exact and unbounded,
             // this is the size of the sample beside it.
@@ -217,6 +223,12 @@ final class SettingsRegistryCorePinTest extends TestCase
             // changes who can authorise a document, so it should be a
             // deliberate edit rather than a number that drifted.
             'documents.routing_approval_quorum' => 'all',
+            // #1036. OFF, because turning it on publishes an
+            // unauthenticated verification surface for this tenant's
+            // documents; MINIMAL, because that is the level that cannot
+            // leak where a document sits internally.
+            'documents.qr_enabled' => 'false',
+            'documents.qr_public_detail' => 'minimal',
             // Ten faces: enough to recognise a group at a glance, small enough
             // that nobody mistakes the sample for the list.
             'groups.preview_sample_size' => '10',
@@ -269,6 +281,14 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['support_email', 'not-an-email', false],
             ['mcp.enabled', 'true', true],
             ['mcp.enabled', '1', false],
+            // #1036. The boolean arm and the enum arm, each with a value the
+            // registry must refuse — a key with no validate() arm falls through
+            // to "Unknown setting key" and 422s on a key the registry knows,
+            // which is the exact bug the error_tracking.* keys shipped with.
+            ['documents.qr_enabled', 'true', true],
+            ['documents.qr_enabled', 'yes', false],
+            ['documents.qr_public_detail', 'stage', true],
+            ['documents.qr_public_detail', 'everything', false],
             ['auth.self_registration_enabled', 'false', true],
             ['auth.self_registration_enabled', 'yes', false],
             ['auth.desktop_login_max_hours', '2160', true],

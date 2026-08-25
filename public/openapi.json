@@ -6931,6 +6931,142 @@
                 ]
             }
         },
+        "/api/v1/document-verifications/{token}": {
+            "get": {
+                "operationId": "get_api_v1_document_verifications_token",
+                "summary": "Verify a document from the QR code printed on it (public, rate-limited)",
+                "tags": [
+                    "documents"
+                ],
+                "description": "PUBLIC and unauthenticated by design: the caller is somebody holding a printed sheet, and the paper is the whole of their relationship with this system. Always 200. An unknown token, a malformed one, a withdrawn one and a superseded one produce the SAME body at the default disclosure level, so this endpoint cannot be asked whether a document exists. A tenant may raise `documents.qr_public_detail` to `stage`, which adds the current routing verb and distinguishes a revoked code from an unrecognised one. It never returns a document id, a title, any content, any recipient, or any name of a person or unit \u2014 a signed-in reader who wants the record calls GET /api/documents/by-verification/{token}, where RBAC decides unchanged.",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Whether the code verifies, and the minimum that makes that meaningful",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "verified": {
+                                                    "type": "boolean"
+                                                },
+                                                "reason": {
+                                                    "type": "string",
+                                                    "description": "Present only when verified is false. `unrecognised` covers unknown, malformed, withdrawn and superseded at the default disclosure level.",
+                                                    "enum": [
+                                                        "unrecognised",
+                                                        "withdrawn",
+                                                        "superseded"
+                                                    ]
+                                                },
+                                                "revoked_on": {
+                                                    "type": "string",
+                                                    "nullable": true,
+                                                    "description": "Date only, and only at the `stage` level"
+                                                },
+                                                "reference": {
+                                                    "type": "string",
+                                                    "description": "The short reference printed beneath the code"
+                                                },
+                                                "issuer": {
+                                                    "type": "string",
+                                                    "description": "The issuing ORGANISATION, never a person or a unit"
+                                                },
+                                                "issued_on": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                },
+                                                "stage": {
+                                                    "type": "string",
+                                                    "description": "Only at the `stage` disclosure level",
+                                                    "enum": [
+                                                        "issued",
+                                                        "forwarded",
+                                                        "acknowledged",
+                                                        "returned",
+                                                        "noted"
+                                                    ]
+                                                },
+                                                "stage_on": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "required": [
+                                                "verified"
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many verification attempts from this address",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Verification is temporarily unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/documents": {
             "get": {
                 "operationId": "get_api_v1_documents",
@@ -7183,6 +7319,110 @@
                     },
                     "503": {
                         "description": "render:true was requested and rendering or persistence is disabled on this instance",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/by-verification/{token}": {
+            "get": {
+                "operationId": "get_api_v1_documents_by_verification_token",
+                "summary": "Resolve a scanned QR code to the record it names, under the existing RBAC",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The scan-through. The token selects a ROW; DocumentVisibilityPolicy then decides, unchanged and with no knowledge that a token was involved. A caller without reach gets 404 with the same message GET /api/documents/{id} gives them \u2014 holding the paper confers nothing. A code minted in another tenant collapses into the same 404. `code_honoured` says whether the printing that got the caller here is still the current one.",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The document this code names",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer"
+                                                },
+                                                "code_honoured": {
+                                                    "type": "boolean"
+                                                }
+                                            },
+                                            "required": [
+                                                "id",
+                                                "code_honoured"
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such code, or the document it names is not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -7548,6 +7788,369 @@
                     },
                     "503": {
                         "description": "The stored artifact could not be read from storage",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/documents/{id}/qr": {
+            "delete": {
+                "operationId": "delete_api_v1_documents_id_qr",
+                "summary": "Stop honouring the verification code on a document",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The answer to \"paper cannot be recalled\". The symbol stays legible on every copy in the world and stops confirming anything; the row survives with its timestamps. 204 whether or not a code was live, so a second click is not an error and the route does not report whether a document has one.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "The code is no longer honoured"
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such document, or it is not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "get": {
+                "operationId": "get_api_v1_documents_id_qr",
+                "summary": "The verification code on a document, and the record of it being scanned",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The record page panel. `enabled` composes the tenant setting with the template flag; `configured` is separate because \"this instance has no public address\" and \"this tenant switched it off\" are different problems with different fixes. Anonymous scans appear with `scanner_profile_id: null` and carry nothing else about the scanner \u2014 no address, no device \u2014 because nothing else is stored.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The live code, if any, and the scan trail",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "enabled": {
+                                                    "type": "boolean"
+                                                },
+                                                "configured": {
+                                                    "type": "boolean"
+                                                },
+                                                "token": {
+                                                    "type": "object",
+                                                    "nullable": true,
+                                                    "properties": {
+                                                        "reference": {
+                                                            "type": "string"
+                                                        },
+                                                        "verification_url": {
+                                                            "type": "string"
+                                                        },
+                                                        "issued_at": {
+                                                            "type": "string",
+                                                            "nullable": true
+                                                        },
+                                                        "issued_by": {
+                                                            "type": "integer",
+                                                            "nullable": true
+                                                        }
+                                                    }
+                                                },
+                                                "scans": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "total": {
+                                                            "type": "integer"
+                                                        },
+                                                        "recent": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "id": {
+                                                                        "type": "integer"
+                                                                    },
+                                                                    "document_id": {
+                                                                        "type": "integer"
+                                                                    },
+                                                                    "qr_token_id": {
+                                                                        "type": "integer"
+                                                                    },
+                                                                    "scanner_profile_id": {
+                                                                        "type": "integer",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "outcome": {
+                                                                        "type": "string",
+                                                                        "enum": [
+                                                                            "verified",
+                                                                            "refused"
+                                                                        ]
+                                                                    },
+                                                                    "scanned_at": {
+                                                                        "type": "string"
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such document, or it is not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_documents_id_qr",
+                "summary": "Issue a new verification code, retiring the current one",
+                "tags": [
+                    "documents"
+                ],
+                "description": "ALWAYS ROTATES. The previous code is retired as `superseded` in the same transaction, so anybody holding an older printing stops being able to confirm it \u2014 which is the reason to call this, and why re-rendering a document deliberately does NOT do it.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "The new code",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "reference": {
+                                                    "type": "string"
+                                                },
+                                                "verification_url": {
+                                                    "type": "string"
+                                                },
+                                                "issued_at": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                },
+                                                "issued_by": {
+                                                    "type": "integer",
+                                                    "nullable": true
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such document, or it is not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "QR verification is switched off for this template or tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "This instance has no public address configured",
                         "content": {
                             "application/json": {
                                 "schema": {
