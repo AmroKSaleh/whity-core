@@ -751,6 +751,8 @@
         "topBar.unsaved": "لم يُحفَظ بعد",
         "topBar.zoomIn": "تكبير",
         "topBar.zoomOut": "تصغير",
-        "topBar.zoomReset": "تكبير إلى ١٠٠٪"
+        "topBar.zoomReset": "تكبير إلى ١٠٠٪",
+        "verify.footerVerifiedUndated": "تؤكّد هذه الصفحة فقط أن {org} أصدرت هذا المستند. وهي لا تعرض المستند ولا محتواه.",
+        "verify.genuineBodyUndated": "أصدرته الجهة المذكورة أدناه."
     }
 }

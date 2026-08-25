@@ -321,6 +321,19 @@ function headline(t: TranslateFn, phase: Phase): string {
  */
 function footer(t: TranslateFn, phase: Phase): string {
   if (phase.kind === 'ready' && phase.data.verified && phase.data.issuer) {
+    // #1068: "on the date shown" has to go when there is no date shown. A
+    // tenant on the `undated` disclosure level gets no `issued_on` at all, and
+    // a page whose own sentence points at a row that is not there reads as
+    // broken — on the one surface in the product that has to look trustworthy
+    // to somebody who has never seen it before.
+    if (phase.data.issued_on === undefined || phase.data.issued_on === null) {
+      return t(
+        'verify.footerVerifiedUndated',
+        'This page confirms only that {org} issued this document. It does not show the document or its contents.',
+        { org: phase.data.issuer },
+      );
+    }
+
     return t(
       'verify.footerVerified',
       'This page confirms only that {org} issued a document on the date shown. It does not show the document or its contents.',
@@ -343,6 +356,15 @@ function body(t: TranslateFn, phase: Phase): string {
     return t('verify.errorBody', 'We could not check this code just now. Please try again shortly.');
   }
   if (phase.data.verified) {
+    // #1068, same reason as the footer: at the `undated` level there is no date
+    // row to point at.
+    if (phase.data.issued_on === undefined || phase.data.issued_on === null) {
+      return t(
+        'verify.genuineBodyUndated',
+        'It was issued by the organisation named below.',
+      );
+    }
+
     return t('verify.genuineBody', 'It was issued by the organisation named below, on the date shown.');
   }
 
