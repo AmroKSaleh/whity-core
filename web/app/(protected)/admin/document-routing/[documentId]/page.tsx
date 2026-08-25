@@ -462,27 +462,51 @@ export default function DocumentRoutingPage() {
                 </p>
               </CardHeader>
               <CardContent className="space-y-6">
+                {/*
+                  BOTH panels below read the recipient rows, and BOTH turn an
+                  empty list into a definite statement: "this route reached
+                  nobody", "nothing on this route is awaiting you". So neither
+                  may be rendered until the rows have actually arrived.
+
+                  Until this branch existed they were, and the result was a
+                  route that had just reached two people announcing that it had
+                  reached nobody — for as long as the second request took. The
+                  claim was not merely premature, it was the OPPOSITE of the
+                  truth, and it is the reading `RouteFanout`'s own comment says
+                  the sentence exists to prevent: an empty list must never be
+                  shown where "still loading" is what is true.
+
+                  `routes` and `recipients` are two requests and the routes
+                  resolve first, which is exactly why the gap is visible rather
+                  than theoretical.
+                */}
                 {recipients.error !== null ? (
                   <p className="text-sm text-muted-foreground">{recipients.error}</p>
+                ) : recipients.loading ? (
+                  <p className="text-sm text-muted-foreground" data-slot="routing-recipients-loading">
+                    {t('routing.recipients.loading', 'Working out who this reached…')}
+                  </p>
                 ) : (
-                  <RouteFanout
-                    route={route}
-                    recipients={recipientRows}
-                    profileNames={peopleResult.data?.names ?? new Map()}
-                    roleNames={roleNames}
-                    viewerProfileId={viewerProfileId}
-                  />
-                )}
+                  <>
+                    <RouteFanout
+                      route={route}
+                      recipients={recipientRows}
+                      profileNames={peopleResult.data?.names ?? new Map()}
+                      roleNames={roleNames}
+                      viewerProfileId={viewerProfileId}
+                    />
 
-                <div className="border-t border-border pt-4">
-                  <RouteActPanel
-                    documentId={documentId}
-                    route={route}
-                    recipients={recipientRows}
-                    viewerProfileId={viewerProfileId}
-                    onActed={() => setVersion((v) => v + 1)}
-                  />
-                </div>
+                    <div className="border-t border-border pt-4">
+                      <RouteActPanel
+                        documentId={documentId}
+                        route={route}
+                        recipients={recipientRows}
+                        viewerProfileId={viewerProfileId}
+                        onActed={() => setVersion((v) => v + 1)}
+                      />
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           ))}
