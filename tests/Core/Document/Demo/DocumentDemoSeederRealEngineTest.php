@@ -1476,6 +1476,60 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         self::assertSame($before, $this->countQrTokens(), 'and still exactly those two after two more runs');
     }
 
+    /**
+     * Somebody in the demo can actually OPEN the designs — and not everybody can
+     * rewrite them.
+     *
+     * The gap this pins is one the fixture walked into and nothing would have
+     * caught, because with no designs seeded an empty list and a 403 render
+     * identically. Migration 120 backfills `route_templates:read` onto every role
+     * holding `documents:route`, and a backfill reaches only the roles that exist
+     * when it runs; every demo role is created afterwards, by the seeder. So the
+     * demo dean — who holds `documents:route` — did not have it, and every
+     * persona opened the flow editor on "This route template could not be
+     * loaded".
+     *
+     * THREE ASSERTIONS, NOT ONE, because "the dean can read" alone would pass on
+     * a fixture that granted everything to everybody, which is the other way to
+     * make a permission demo worthless:
+     *
+     *   - the dean can READ and WRITE (she draws the flows);
+     *   - a head can READ but NOT write (a clerk who may route a document must
+     *     not thereby be able to rewrite where every document goes);
+     *   - the technician holds neither, so the page is not even in her nav.
+     */
+    public function testThePeopleWhoRouteDocumentsCanOpenTheSeededDesignsAndOnlyOneCanRedrawThem(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $dean = $this->permissionsOfRole($this->roleOf(DemoOrganisationSeeder::DEAN));
+        $head = $this->permissionsOfRole($this->roleOf(DemoOrganisationSeeder::CIVIL_HEAD));
+        $technician = $this->permissionsOfRole($this->roleOf(DemoOrganisationSeeder::CIVIL_TECHNICIAN));
+
+        self::assertContains(
+            CorePermissions::ROUTE_TEMPLATES_READ,
+            $dean,
+            'the dean cannot open the designs she authored, so the flow editor 403s for the one '
+            . 'persona the fixture seeds them for'
+        );
+        self::assertContains(CorePermissions::ROUTE_TEMPLATES_WRITE, $dean);
+
+        self::assertContains(
+            CorePermissions::ROUTE_TEMPLATES_READ,
+            $head,
+            'a head routes documents, so migration 120 would have backfilled read onto this role on '
+            . 'any tenant whose roles predate it'
+        );
+        self::assertNotContains(
+            CorePermissions::ROUTE_TEMPLATES_WRITE,
+            $head,
+            'and must NOT be able to redraw every route in the tenant'
+        );
+
+        self::assertNotContains(CorePermissions::ROUTE_TEMPLATES_READ, $technician);
+        self::assertNotContains(CorePermissions::ROUTE_TEMPLATES_WRITE, $technician);
+    }
+
     // ── helpers for the outcomes tranche ───────────────────────────────
 
     private function documentIdByTitle(string $title): int
