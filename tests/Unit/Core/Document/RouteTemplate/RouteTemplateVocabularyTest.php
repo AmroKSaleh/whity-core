@@ -25,24 +25,35 @@ use Whity\Core\Document\RouteTemplate\RouteTemplateContract;
  *
  * WHY IT READS MIGRATION SOURCE RATHER THAN CLASSES
  * -------------------------------------------------
- * The comparison has to work in three states of the world, and only one of them
- * has both class trees present:
+ * Because a constant that agrees with another constant while the DATABASE
+ * refuses the value is not agreement. The CHECK constraints are what the engine
+ * will actually enforce, so they are what the two sides are compared on.
  *
- *   - #1027 alone (this branch today): `RouteVerdict`/`RouteQuorum` do not exist.
- *   - #1014 alone: this test does not exist.
- *   - both merged: the real state this is written for.
+ * IT CANNOT SKIP, AND THAT IS DELIBERATE
+ * --------------------------------------
+ * An earlier version of this test SKIPPED when it could not find the engine
+ * migration — correct at the time, because #1014 was unmerged and there was
+ * genuinely nothing to compare against. It is merged now, so that branch has
+ * been replaced by an outright failure.
  *
- * Reading the CHECK constraints out of the migration files works in all three,
- * and it also checks the thing that actually matters — a constant that agrees
- * with another constant while the DATABASE refuses the value is not agreement.
+ * The reason is worth stating because the skip looked like the careful choice: a
+ * test that skips is INDISTINGUISHABLE FROM ONE THAT PASSES in every summary
+ * either a human or CI will look at. Had it stayed, a rename that moved the
+ * engine migration out of reach of {@see engineMigrationSource()} would have
+ * silently retired the only check comparing the two vocabularies, and the branch
+ * would have gone on reporting green. That is precisely the failure this test
+ * exists to prevent, reached one layer up — in the test rather than in the code.
  *
- * WHY IT SKIPS RATHER THAN PASSES WHEN #1014 IS ABSENT
- * ----------------------------------------------------
- * A test that quietly returns green when it could not find the thing it compares
- * against is the exact false-green this repo has been bitten by. Skipping says
- * "not checked" out loud, and the day #1014's migration lands on the same branch
- * the comparison starts running by itself — with no follow-up ticket and nobody
- * needing to remember.
+ * So: both halves run unconditionally, and anything that stops them finding what
+ * they compare is a red build.
+ *
+ * PROVEN TO COMPARE, NOT MERELY TO RUN. Mutating one member of the mirrored
+ * vocabulary on BOTH template sides at once — the constant and this feature's own
+ * migration CHECK together, so they still agree with each other — leaves
+ * {@see testTemplateMigrationMatchesTheContractConstants()} passing and fails
+ * {@see testTemplateVocabularyMirrorsTheEngineVocabulary()} alone. That is the
+ * isolation worth having: the second test is reading the ENGINE, not a copy of
+ * this feature's own input.
  */
 final class RouteTemplateVocabularyTest extends TestCase
 {
@@ -76,15 +87,23 @@ final class RouteTemplateVocabularyTest extends TestCase
     /**
      * The template vocabulary must equal the ENGINE's, once both are present.
      *
-     * @see the class docblock for why this skips rather than passes.
+     * A MISSING ENGINE MIGRATION IS A FAILURE, NOT A SKIP. It used to skip, while
+     * #1014 was unmerged and there was genuinely nothing to compare against. That
+     * is no longer true, and leaving the skip in would be the more dangerous of
+     * the two options: a test that skips is indistinguishable from one that
+     * passes in every summary anybody reads, so a rename that moved the engine
+     * migration out of reach of the finder would silently retire the only check
+     * comparing the two vocabularies — while CI stayed green.
      */
     public function testTemplateVocabularyMirrorsTheEngineVocabulary(): void
     {
         $engine = $this->engineMigrationSource();
         if ($engine === null) {
-            self::markTestSkipped(
-                "#1014's migration is not on this branch, so the template vocabulary has nothing to be "
-                . 'compared against. This test starts checking automatically once both are merged.'
+            self::fail(
+                'No migration creates `document_route_edges`, so the template vocabulary has nothing to be '
+                . 'compared against. That is a FAILURE rather than a skip: the engine side is on develop, so '
+                . 'its absence means the finder no longer locates it — and a check that quietly stops '
+                . 'comparing is the exact failure this test exists to prevent, one layer up.'
             );
         }
 
@@ -116,7 +135,10 @@ final class RouteTemplateVocabularyTest extends TestCase
     {
         $quorum = dirname(__DIR__, 5) . '/src/Core/Document/Routing/RouteQuorum.php';
         if (!is_file($quorum)) {
-            self::markTestSkipped("#1014's RouteQuorum is not on this branch.");
+            self::fail(
+                'RouteQuorum is missing. It is on develop, so its absence means it moved — and the settings '
+                . 'key mirrored from it can no longer be checked against anything.'
+            );
         }
 
         self::assertStringContainsString(
