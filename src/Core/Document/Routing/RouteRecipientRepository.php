@@ -387,7 +387,7 @@ final class RouteRecipientRepository
                         r.parent_recipient_id, r.created_by_event_id, r.closed_by_event_id, r.created_at,
                         d.title AS document_title, d.template_name AS document_template_name,
                         e.action AS arrived_by, e.actor_profile_id AS arrived_from,
-                        s.decision AS step_decision
+                        s.decision AS step_decision, s.satisfied_by AS step_satisfied_by
                    FROM document_route_recipients r
                    JOIN documents d
                      ON d.id = r.document_id AND d.tenant_id = :tenant_id
@@ -407,7 +407,7 @@ final class RouteRecipientRepository
                         r.parent_recipient_id, r.created_by_event_id, r.closed_by_event_id, r.created_at,
                         d.title AS document_title, d.template_name AS document_template_name,
                         e.action AS arrived_by, e.actor_profile_id AS arrived_from,
-                        s.decision AS step_decision
+                        s.decision AS step_decision, s.satisfied_by AS step_satisfied_by
                    FROM document_route_recipients r
                    JOIN documents d
                      ON d.id = r.document_id AND d.tenant_id = :tenant_id
@@ -569,6 +569,21 @@ final class RouteRecipientRepository
             // apart from a circulation offers the wrong buttons, and the person
             // then discovers the difference from a 422 after clicking.
             'step_decision' => DbBool::of($row['step_decision'] ?? false),
+            // #1054: WHAT SETTLED THIS ITEM. Joined from the step for the same
+            // reason `arrived_by` is read through the creating event — the row
+            // holds no state of its own — and it is the field that stops a
+            // delivery item reading as work somebody finished.
+            //
+            // Every row at a delivery step is closed by the event that created
+            // it, so without this the inbox would render hundreds of items as
+            // "Done" and credit each person with an act they never made. The
+            // authoritative answer is the STEP, not a comparison of the two
+            // event pointers on the row: the pointers happen to agree today, and
+            // a fact this legible should not depend on a reader noticing that.
+            'step_satisfied_by' => isset($row['step_satisfied_by'])
+                && RouteSatisfaction::isValid((string) $row['step_satisfied_by'])
+                    ? (string) $row['step_satisfied_by']
+                    : RouteSatisfaction::fallback(),
         ];
     }
 }

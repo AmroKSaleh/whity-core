@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Document\RouteTemplate;
 
 use Whity\Core\Db\DbBool;
+use Whity\Core\Document\Routing\RouteSatisfaction;
 use Whity\Core\Document\Routing\RouteVerdict;
 
 /**
@@ -46,6 +47,25 @@ use Whity\Core\Document\Routing\RouteVerdict;
  * one ({@see RouteTemplateGraph::validateEdges()}, for the identical reason the
  * engine does — such an edge could never fire), so a design that SAVED cleanly
  * already satisfies both invariants.
+ *
+ * `satisfied_by` IS CARRIED TOO, AND FOR THE SAME REASON (#1054)
+ * ---------------------------------------------------------------
+ * A stage may be satisfied by DELIVERY: its people are told and are not asked to
+ * act, its recipient rows are closed by the event that created them, and the
+ * document carries straight on to the next stage.
+ *
+ * Nothing about that is derivable from any other column. A converter that
+ * dropped it would produce the failure this whole issue exists to remove,
+ * reached through the template door: the stage would become an ordinary
+ * circulation, every instructor in a faculty would be handed an item that no act
+ * of theirs was ever going to close, and each of them would carry the document
+ * in "Awaiting me" for ever. Nothing anywhere would report an error — the route
+ * would look exactly like a route waiting on some slow people.
+ *
+ * The mirror-image mistake is just as available and would be caught by nothing:
+ * INFERRING delivery from "this stage has no outgoing edge and is not a
+ * decision" describes almost every ordinary circulation step ever authored, and
+ * would silently close everybody's item on all of them.
  *
  * WHY A DRIFTED ROW IS REFUSED RATHER THAN CORRECTED
  * ---------------------------------------------------
@@ -164,6 +184,32 @@ final class RouteTemplateInstantiation
             // TRUE and would turn every circulation stage in the design into a
             // gate.
             $decision = DbBool::of($step['decision']);
+            // CARRIED, exactly like `decision` above and never inferred — see the
+            // class docblock for what inferring it in either direction costs.
+            // Read through the vocabulary rather than cast, because this method
+            // takes an ARRAY rather than a repository and a value it cannot read
+            // must become an ordinary stage rather than a delivery one.
+            $satisfiedBy = is_string($step['satisfied_by'] ?? null)
+                && RouteSatisfaction::isValid((string) $step['satisfied_by'])
+                    ? (string) $step['satisfied_by']
+                    : RouteSatisfaction::fallback();
+
+            if ($satisfiedBy === RouteSatisfaction::DELIVERY && $decision) {
+                // REFUSED, not coerced, and the choice matters as much here as it
+                // does for the edge case below. Silently clearing `decision` would
+                // turn a stage the canvas draws as an approval into one that
+                // approves nothing and lets the document straight through;
+                // silently clearing `satisfied_by` would hand an unanswerable
+                // approval to everybody the stage reaches. Both do MORE than the
+                // design says, in opposite directions, which is why the answer is
+                // to do neither and name the stage.
+                throw RouteTemplateRejectedException::because(
+                    "Stage {$position} of this template is marked both as a decision and as satisfied by "
+                    . 'delivery. It cannot be both — a decision needs somebody holding the item to answer '
+                    . 'it, and a delivery stage closes every item the moment it is sent. Fix the design '
+                    . 'before applying it.'
+                );
+            }
 
             if ($quorum !== null && !$decision) {
                 // Refused rather than dropped: the engine refuses the same pair
@@ -184,6 +230,7 @@ final class RouteTemplateInstantiation
                 'label' => is_string($label) && trim($label) !== '' ? trim($label) : null,
                 'decision' => $decision,
                 'decision_quorum' => is_string($quorum) ? $quorum : null,
+                'satisfied_by' => $satisfiedBy,
             ];
 
             foreach (RouteVerdict::all() as $verdict) {
