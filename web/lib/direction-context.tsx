@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect } from 'react';
+import { Direction as RadixDirection } from 'radix-ui';
 import { useLanguageDirection } from '@amroksaleh/features/i18n';
 
 /**
@@ -121,7 +122,30 @@ export function DirectionProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  return <DirectionContext.Provider value={{ dir }}>{children}</DirectionContext.Provider>;
+  // RADIX HAS ITS OWN DIRECTION CHANNEL, AND IT DEFAULTS TO LTR.
+  //
+  // Every Radix primitive resolves direction from `DirectionProvider` context
+  // and falls back to 'ltr' when there is none — it does not read <html dir>.
+  // `Tabs` acts on that immediately by stamping `dir="ltr"` onto its own root,
+  // and CSS direction inherits, so everything inside a tab panel flipped back
+  // to left-to-right INSIDE an otherwise correct right-to-left page.
+  //
+  // The visible damage was worst where it was least obvious. On
+  // /admin/document-templates the whole table re-laid out left-to-right — Name
+  // in the leftmost column instead of the rightmost — and, because the page
+  // around it was still RTL, the table's own width then overflowed the wrong
+  // edge and clipped its last two columns off-screen entirely. It reads as a
+  // width bug, and no amount of logical-property work would have fixed it.
+  //
+  // One provider fixes every Radix component at once (Tabs, DropdownMenu,
+  // Select, Slider, Toast, ContextMenu…), which is the reason to do it here
+  // rather than pass `dir` at each call site: the next component someone adds
+  // is correct without anyone remembering.
+  return (
+    <DirectionContext.Provider value={{ dir }}>
+      <RadixDirection.Provider dir={dir}>{children}</RadixDirection.Provider>
+    </DirectionContext.Provider>
+  );
 }
 
 export function useDirection(): DirectionContextValue {
