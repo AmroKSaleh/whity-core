@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 /**
@@ -644,7 +644,44 @@ describe('scan history', () => {
     // Never a blank and never a guess: the id, plus the sentence naming the
     // permission, so a reader can tell a policy boundary from a data bug.
     expect(await screen.findByTestId('document-record-qr-scan-2')).toHaveTextContent('Account #10');
-    expect(screen.getAllByTestId('document-record-directory-people').length).toBeGreaterThan(0);
+    expect(
+      within(screen.getByTestId('document-record-section-qr')).getByTestId(
+        'document-record-directory-people'
+      )
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * ...AND WITHHOLDS THAT SENTENCE WHEN IT NUMBERS NOBODY.
+   *
+   * A document with no code and no signed-in scanner shows no person at all.
+   * "People are shown by account number" above a panel showing no account
+   * numbers is a true sentence about nothing in front of the reader, which is
+   * the same class of defect as a false one: it sends somebody looking for a
+   * permission that would change nothing they can see.
+   */
+  it('says nothing about the directory when it names nobody', async () => {
+    serve({
+      qrPanels: [
+        {
+          enabled: true,
+          configured: true,
+          token: null,
+          retired: { total: 0, recent: [] },
+          scans: { total: 0, recent: [] },
+        },
+      ],
+      directoryStatus: 403,
+    });
+
+    render(<DocumentRecordPage />);
+
+    await screen.findByTestId('document-record-qr-none');
+    expect(
+      within(screen.getByTestId('document-record-section-qr')).queryByTestId(
+        'document-record-directory-people'
+      )
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -84,6 +84,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
@@ -147,6 +148,19 @@ export interface DocumentQrPanelProps {
    * holding an opinion about authorization (#910).
    */
   canWrite: boolean;
+  /**
+   * The screen's "ids are showing because you may not read the directory"
+   * notice, rendered ONLY when this panel actually numbers somebody.
+   *
+   * Passed as a node rather than rebuilt here so there is one copy of that
+   * explanation on the page — two copies is two chances for them to explain it
+   * differently, which is the reason the screen owns it. But the SCREEN cannot
+   * know whether this panel has a person to number: the panel fetches for
+   * itself, and a document with no code and no signed-in scanner shows nobody.
+   * Rendering the notice there anyway would put a true sentence on screen that
+   * applies to nothing in front of the reader.
+   */
+  directoryNotice?: ReactNode;
   apiClient: ApiClient;
 }
 
@@ -156,6 +170,7 @@ export function DocumentQrPanel({
   versionCount,
   directory,
   canWrite,
+  directoryNotice,
   apiClient,
 }: DocumentQrPanelProps) {
   const t = useTranslation('documents');
@@ -289,8 +304,17 @@ export function DocumentQrPanel({
   // the time a refusal arrives the operator has already decided.
   const mintBlocked = !data.configured || !data.enabled;
 
+  // Whether anybody at all is named on this panel. Only these three render a
+  // profile id: the retired list shows references and dates, never actors.
+  const namesSomebody =
+    live_?.issued_by != null ||
+    withdrawn?.revoked_by != null ||
+    data.scans.recent.some((scan) => scan.scanner_profile_id !== null);
+
   return (
     <div className="space-y-4" data-testid="document-record-qr">
+      {namesSomebody && directoryNotice}
+
       {!data.configured && (
         <Alert variant="warning" data-testid="document-record-qr-unconfigured">
           <AlertTitle>

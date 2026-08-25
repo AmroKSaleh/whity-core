@@ -649,20 +649,26 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
    * the panel's own docblock for the other half of that decision.
    */
   const qrBody = (
-    <div className="space-y-3">
-      {!resolvedDirectory.peopleAvailable && <DirectoryNotice kind="people" t={t} />}
-      <DocumentQrPanel
-        documentId={record.id}
-        documentTitle={record.title}
-        // Counted from the artifacts the server sent, like the stat strip above:
-        // position IS issue order in this subsystem, and there is no revision
-        // column to disagree with.
-        versionCount={record.artifacts.length}
-        directory={resolvedDirectory}
-        canWrite={qrAccess.state === 'editable'}
-        apiClient={apiClient}
-      />
-    </div>
+    <DocumentQrPanel
+      documentId={record.id}
+      documentTitle={record.title}
+      // Counted from the artifacts the server sent, like the stat strip above:
+      // position IS issue order in this subsystem, and there is no revision
+      // column to disagree with.
+      versionCount={record.artifacts.length}
+      directory={resolvedDirectory}
+      canWrite={qrAccess.state === 'editable'}
+      // Handed DOWN rather than rendered here, unlike the two regions above.
+      // Those always list people; this one often lists none — a document with no
+      // code and no signed-in scanner numbers nobody — and a notice explaining
+      // why ids are showing, above a panel showing no ids, is a true sentence
+      // about nothing on screen. The panel renders it when it has somebody to
+      // number, and the copy still lives in one place.
+      directoryNotice={
+        resolvedDirectory.peopleAvailable ? undefined : <DirectoryNotice kind="people" t={t} />
+      }
+      apiClient={apiClient}
+    />
   );
 
   const qrSection: RecordSectionSpec = {
