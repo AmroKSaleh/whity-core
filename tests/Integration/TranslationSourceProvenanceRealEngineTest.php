@@ -185,20 +185,65 @@ final class TranslationSourceProvenanceRealEngineTest extends TestCase
     public function testDownDropsTheColumnAndKeepsEveryString(): void
     {
         $this->plantRow('en', 'probe', 'greeting.hello', 'Hello', null);
-        $before = (int) $this->pdo->query('SELECT COUNT(*) FROM translations')->fetchColumn();
+        $before = $this->scalar('SELECT COUNT(*) FROM translations');
 
         AddTranslationSourceProvenance::down($this->database());
 
         self::assertSame(
             $before,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM translations')->fetchColumn(),
+            $this->scalar('SELECT COUNT(*) FROM translations'),
             'A rollback of a provenance column must not delete a single translation.'
         );
         self::assertSame(
             'Hello',
-            (string) $this->pdo->query(
+            $this->scalar("SELECT translation FROM translations WHERE domain = 'probe' AND key = 'greeting.hello'")
+        );
+    }
+
+    /**
+     * Regression: the sync must RUN, and run safely, against a table that has
+     * no provenance column at all.
+     *
+     * This is not a hypothetical robustness test — it is a fresh-install
+     * blocker that a SQLite-only suite hides completely. Migration 121 seeds the
+     * catalogues and runs BEFORE 124 adds the column, so on every new install
+     * the sync executes at least once against a pre-124 table. Referencing
+     * `source_managed` there raises `42703`, and on PostgreSQL that aborts the
+     * whole seeding transaction: migration 121 fails, `migrate run` stops, and
+     * the install never completes. SQLite hides it because migration 121
+     * swallows the exception and the transaction survives, so the seed simply
+     * does nothing and 124 quietly cleans up afterwards.
+     *
+     * The required behaviour without the column is exactly the pre-#1057
+     * behaviour: insert what is missing, rewrite nothing, and report every
+     * difference as divergent — because with no provenance there is no way to
+     * know whose text a row holds.
+     */
+    public function testTheSyncFallsBackToInsertOnlyWhenTheColumnIsNotThereYet(): void
+    {
+        $this->plantRow('en', 'probe', 'greeting.hello', 'Seeded earlier', null);
+
+        // Return the table to its migration-121 shape.
+        AddTranslationSourceProvenance::down($this->database());
+        self::assertFalse($this->hasSourceManagedColumn(), 'precondition: the column is gone');
+
+        $report = (new TranslationSync($this->pdo))->sync([
+            'probe' => ['greeting.hello' => 'Corrected wording', 'greeting.bye' => 'Goodbye'],
+        ]);
+
+        self::assertSame(
+            [['domain' => 'probe', 'key' => 'greeting.bye', 'text' => 'Goodbye']],
+            $report['inserted'],
+            'A missing key is still seeded — this is the path every fresh install takes.'
+        );
+        self::assertSame([], $report['updated'], 'With no provenance, nothing may be rewritten.');
+        self::assertCount(1, $report['divergent'], 'The difference is reported instead.');
+        self::assertSame(
+            'Seeded earlier',
+            $this->scalar(
                 "SELECT translation FROM translations WHERE domain = 'probe' AND key = 'greeting.hello'"
-            )->fetchColumn()
+            ),
+            'An existing row is left exactly as it was.'
         );
     }
 
@@ -350,6 +395,20 @@ final class TranslationSourceProvenanceRealEngineTest extends TestCase
         self::assertNotNull($translation, "No translation row with id {$id}.");
 
         return $translation->sourceManaged;
+    }
+
+    /**
+     * One scalar, as a string. Via prepare() rather than query() so the result
+     * is a statement and not `PDOStatement|false` — the engines return the
+     * counts and the text with different PHP types, and comparing them as
+     * strings is the one form that means the same thing on both.
+     */
+    private function scalar(string $sql): string
+    {
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute();
+
+        return (string) $statement->fetchColumn();
     }
 
     private function languageId(string $code): int

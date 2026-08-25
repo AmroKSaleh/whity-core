@@ -72,6 +72,13 @@ use Whity\Core\Db\DbBool;
  */
 final class TranslationSync
 {
+    /**
+     * Whether `translations.source_managed` exists, resolved once per instance.
+     * Null until asked. See {@see self::hasProvenanceColumn()} for why this is
+     * not simply assumed true.
+     */
+    private ?bool $hasProvenanceColumn = null;
+
     public function __construct(
         private readonly PDO $pdo,
     ) {
@@ -100,7 +107,25 @@ final class TranslationSync
         bool $dryRun = false,
     ): array {
         $languageId = $this->languageId($languageCode);
-        $existing = $this->systemDefaults($languageId);
+
+        // Whether this database can tell a seeded row from a human's yet.
+        //
+        // IT CANNOT DURING MIGRATION 121, and that is not a hypothetical: 121
+        // seeds the catalogues and runs BEFORE 124 adds the column, so on every
+        // fresh install this class executes at least once against a table that
+        // has no provenance on it. Referencing the column there is not a
+        // degraded result but a hard failure — PostgreSQL aborts the entire
+        // transaction on the first unknown column and every later statement in
+        // the migration dies with it, so `migrate run` cannot complete and the
+        // install never finishes.
+        //
+        // Without the column there is no way to know whose text a row holds, so
+        // the only safe behaviour is the pre-#1057 one: insert what is missing,
+        // touch nothing that exists, report every difference as divergent. That
+        // is what falls out of this flag, because a row read without provenance
+        // is read as `managed: false`.
+        $provenance = $this->hasProvenanceColumn();
+        $existing = $this->systemDefaults($languageId, $provenance);
 
         $inserted = [];
         $updated = [];
@@ -118,8 +143,18 @@ final class TranslationSync
             // codebase: this statement is the only thing that may claim a row
             // for the catalogue. The column defaults to FALSE precisely so that
             // a row written by any other path stays out of reach.
-            'INSERT INTO translations (language_id, domain, key, translation, tenant_id, source_managed, created_at, updated_at)
+            $provenance
+                ? 'INSERT INTO translations (language_id, domain, key, translation, tenant_id, source_managed, created_at, updated_at)
              SELECT :language_id, :domain, :key, :translation, NULL, TRUE, NOW(), NOW()
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM translations
+                 WHERE language_id = :existing_language_id
+                   AND domain = :existing_domain
+                   AND key = :existing_key
+                   AND tenant_id IS NULL
+             )'
+                : 'INSERT INTO translations (language_id, domain, key, translation, tenant_id, created_at, updated_at)
+             SELECT :language_id, :domain, :key, :translation, NULL, NOW(), NOW()
              WHERE NOT EXISTS (
                  SELECT 1 FROM translations
                  WHERE language_id = :existing_language_id
@@ -138,7 +173,12 @@ final class TranslationSync
         // {@see TranslationRepository::update()} use: a bug in the PHP that
         // chooses which keys to pass here cannot turn into a lost translation,
         // because the statement itself will match no row.
-        $refresh = $this->pdo->prepare(
+        //
+        // Prepared ONLY when the column exists. PostgreSQL validates a
+        // statement at PREPARE time, so preparing this against a pre-124 table
+        // would fail — and abort the migration's transaction — before a single
+        // row was considered.
+        $refresh = $provenance ? $this->pdo->prepare(
             'UPDATE translations
                 SET translation = :translation, updated_at = NOW()
               WHERE language_id = :language_id
@@ -146,7 +186,7 @@ final class TranslationSync
                 AND key = :key
                 AND tenant_id IS NULL
                 AND source_managed = TRUE'
-        );
+        ) : null;
 
         foreach ($catalog as $domain => $keys) {
             foreach ($keys as $key => $text) {
@@ -174,7 +214,7 @@ final class TranslationSync
                     // Divergent because the SOURCE moved. Nobody has touched
                     // this row since the sync wrote it, so the correction is
                     // simply late.
-                    if (!$dryRun) {
+                    if (!$dryRun && $refresh !== null) {
                         $refresh->execute([
                             ':translation' => $text,
                             ':language_id' => $languageId,
@@ -349,13 +389,19 @@ final class TranslationSync
      * after migration 124, but is what a partially-migrated database looks like
      * — reads as FALSE, the hands-off direction.
      *
+     * @param bool $provenance Whether `source_managed` exists on this database.
+     *                         When it does not, every row reads as unmanaged,
+     *                         which is what makes a pre-124 run insert-only.
      * @return array<string, array<string, array{text: string, managed: bool}>>
      */
-    private function systemDefaults(int $languageId): array
+    private function systemDefaults(int $languageId, bool $provenance): array
     {
         $statement = $this->pdo->prepare(
-            'SELECT domain, key, translation, source_managed FROM translations
-             WHERE language_id = :language_id AND tenant_id IS NULL'
+            $provenance
+                ? 'SELECT domain, key, translation, source_managed FROM translations
+                   WHERE language_id = :language_id AND tenant_id IS NULL'
+                : 'SELECT domain, key, translation FROM translations
+                   WHERE language_id = :language_id AND tenant_id IS NULL'
         );
         $statement->execute([':language_id' => $languageId]);
 
@@ -368,6 +414,56 @@ final class TranslationSync
         }
 
         return $rows;
+    }
+
+    /**
+     * Whether `translations.source_managed` exists on this database.
+     *
+     * ASKED OF THE CATALOGUE, NEVER BY TRYING A QUERY AND CATCHING THE FAILURE.
+     * On PostgreSQL a failed statement aborts the whole transaction, so a
+     * probe-by-exception inside migration 121's single seeding transaction
+     * would not be a probe at all — it would be the thing that kills the
+     * install. Both branches below are ordinary reads that succeed either way.
+     *
+     * The PostgreSQL branch binds `table_schema = current_schema()`, which
+     * matters more than it looks: `information_schema.columns` spans EVERY
+     * schema in the database, and a test harness that builds throwaway schemas
+     * (or any deployment with more than one) will otherwise answer for somebody
+     * else's table. Migration 094 carries the unqualified version of this same
+     * lookup and mis-answers exactly that way.
+     */
+    private function hasProvenanceColumn(): bool
+    {
+        if ($this->hasProvenanceColumn !== null) {
+            return $this->hasProvenanceColumn;
+        }
+
+        $driver = (string) $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+
+        if ($driver === 'pgsql') {
+            $statement = $this->pdo->query(
+                "SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = current_schema()
+                    AND table_name = 'translations'
+                    AND column_name = 'source_managed'"
+            );
+
+            return $this->hasProvenanceColumn = $statement !== false && $statement->fetchColumn() !== false;
+        }
+
+        $statement = $this->pdo->query('PRAGMA table_info(translations)');
+        if ($statement === false) {
+            return $this->hasProvenanceColumn = false;
+        }
+
+        /** @var array<string, mixed> $column */
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $column) {
+            if (($column['name'] ?? '') === 'source_managed') {
+                return $this->hasProvenanceColumn = true;
+            }
+        }
+
+        return $this->hasProvenanceColumn = false;
     }
 
     private function languageId(string $code): int
