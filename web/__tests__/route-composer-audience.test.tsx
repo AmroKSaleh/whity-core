@@ -91,6 +91,8 @@ function renderComposer(props: Partial<React.ComponentProps<typeof RouteComposer
       groupsUnavailableReason={null}
       people={PEOPLE}
       peopleUnavailableReason={null}
+      templates={[]}
+      templatesUnavailableReason={null}
       onIssued={onIssued}
       onCancel={jest.fn()}
       {...props}
@@ -338,6 +340,8 @@ describe('RouteComposer — mounted before the rule catalogue has arrived', () =
         groupsUnavailableReason={null}
         people={PEOPLE}
         peopleUnavailableReason={null}
+        templates={[]}
+        templatesUnavailableReason={null}
         onIssued={onIssued}
         onCancel={jest.fn()}
       />

@@ -65,6 +65,9 @@ import type {
   RoutesResponse,
   RoutingRulesResponse,
 } from '@/components/documents/routing-wire';
+import type {
+  RouteTemplateSummary,
+} from '@/components/documents/route-template-wire';
 
 interface DocumentSummary {
   id: number;
@@ -258,6 +261,65 @@ export default function DocumentRoutingPage() {
   }, [apiClient]);
 
   /**
+   * Route templates, for #1031's "start from a template".
+   *
+   * A 403 here is EXPECTED for the same reason it is on roles and groups:
+   * migration 120 grants `route_templates:read` to `documents:route` holders
+   * because they are one of its two audiences, but a deployment can revoke it —
+   * and the endpoint that APPLIES a design requires it, so a caller without it
+   * would be refused after choosing rather than before. Captured as a reason the
+   * composer renders instead of the picker, never thrown: a page must not fall
+   * over because one of three ways to name recipients is closed.
+   */
+  const templatesResult = useFetch<PickerCatalogue<RouteTemplateSummary>>(async () => {
+    const probe = await apiClient('/api/v1/document-route-templates?page=1');
+    if (!probe.ok) {
+      const body = (await probe.json().catch(() => null)) as
+        | { error?: string; required?: string }
+        | null;
+      const required = body?.required;
+      return {
+        items: [],
+        incomplete: null,
+        unavailable:
+          probe.status === 403
+            ? required !== undefined && required !== ''
+              ? t(
+                  'routing.compose.templates.forbiddenNamed',
+                  'You cannot read this tenant’s route templates, so a design cannot be applied here. An administrator would need to grant you {slug}.',
+                  { slug: required }
+                )
+              : t(
+                  'routing.compose.templates.forbidden',
+                  'You cannot read this tenant’s route templates, so a design cannot be applied here. An administrator would need to grant you permission to read route templates.'
+                )
+            : (body?.error ??
+              t('routing.compose.templates.error', 'Route templates could not be loaded.')),
+      };
+    }
+
+    const all = await fetchAllPages<RouteTemplateSummary>(
+      apiClient,
+      '/api/v1/document-route-templates'
+    );
+    return {
+      items: all.items.map((template) => ({
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        step_count: template.step_count,
+      })),
+      unavailable: null,
+      incomplete: all.complete
+        ? null
+        : t(
+            'routing.compose.templates.partial',
+            'Only some route templates could be loaded, so this list may be incomplete.'
+          ),
+    };
+  }, [apiClient]);
+
+  /**
    * People — two jobs, ONE request.
    *
    * The display names this page has always needed (see the file docblock), and
@@ -424,6 +486,9 @@ export default function DocumentRoutingPage() {
               people={peopleResult.data?.items ?? []}
               peopleUnavailableReason={peopleResult.data?.unavailable ?? null}
               peopleIncompleteReason={peopleResult.data?.incomplete ?? null}
+              templates={templatesResult.data?.items ?? []}
+              templatesUnavailableReason={templatesResult.data?.unavailable ?? null}
+              templatesIncompleteReason={templatesResult.data?.incomplete ?? null}
               onIssued={onIssued}
               onCancel={() => setComposing(false)}
             />

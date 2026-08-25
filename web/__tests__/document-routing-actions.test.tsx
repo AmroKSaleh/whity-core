@@ -428,6 +428,8 @@ describe('RouteComposer', () => {
         groupsUnavailableReason={null}
         people={[]}
         peopleUnavailableReason={null}
+        templates={[]}
+        templatesUnavailableReason={null}
         onIssued={jest.fn()}
         onCancel={jest.fn()}
         {...props}

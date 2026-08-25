@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\Document\RouteTemplate;
 
+use Whity\Core\Db\DbBool;
 use Whity\Core\Document\Routing\RouteVerdict;
 
 /**
@@ -140,7 +141,7 @@ final class RouteTemplateInstantiation
         foreach ($ordered as $index => $step) {
             $position = (int) $step['position'];
             $ordinalByPosition[$position] = $index + 1;
-            $decisionByPosition[$position] = (bool) $step['decision'];
+            $decisionByPosition[$position] = DbBool::of($step['decision']);
         }
 
         $branches = self::branches($edges, $ordinalByPosition, $decisionByPosition);
@@ -154,7 +155,15 @@ final class RouteTemplateInstantiation
             // that derived this from `isset($branches[$position])` would convert
             // a terminal gate into an ordinary circulation step, and every test
             // downstream of it would still pass.
-            $decision = (bool) $step['decision'];
+            //
+            // Through {@see DbBool} rather than a bare cast. The repository has
+            // already normalised this row, so the cast would be right today —
+            // but this method takes an ARRAY, not a repository, and the one
+            // representation that defeats `(bool)` is reachable: a boolean
+            // projected as text comes back as the string 'false', which casts to
+            // TRUE and would turn every circulation stage in the design into a
+            // gate.
+            $decision = DbBool::of($step['decision']);
 
             if ($quorum !== null && !$decision) {
                 // Refused rather than dropped: the engine refuses the same pair
