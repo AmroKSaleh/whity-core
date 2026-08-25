@@ -21,14 +21,24 @@ use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentStarterSeeder;
 use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\Qr\DocumentQrScanRepository;
+use Whity\Core\Document\Qr\DocumentQrService;
+use Whity\Core\Document\Qr\DocumentQrTokenRepository;
+use Whity\Core\Document\Qr\QrRevocationReason;
+use Whity\Core\Document\RouteTemplate\RouteTemplateGraph;
+use Whity\Core\Document\RouteTemplate\RouteTemplateRepository;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
 use Whity\Core\Document\Routing\RoleRuleResolver;
+use Whity\Core\Document\Routing\RouteAction;
 use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
+use Whity\Core\Document\Routing\RouteQuorum;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
+use Whity\Core\Document\Routing\RouteSatisfaction;
 use Whity\Core\Document\Routing\RouteStepRepository;
+use Whity\Core\Document\Routing\RouteVerdict;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
 use Whity\Core\Group\GroupResolver;
 use Whity\Core\Group\GroupRuleResolver;
@@ -40,6 +50,7 @@ use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
 use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Settings\GlobalSettingsRepository;
+use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\TenantSettingsRepository;
 use Whity\Database\Database;
@@ -93,6 +104,14 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
     /** Deterministic, >= 32 characters (project secret policy). */
     private const DEMO_PASSWORD = 'demo-seeder-fixture-password-0123456789';
 
+    /**
+     * A non-empty public origin, so {@see DocumentQrService::isConfigured()} is
+     * true. With an empty one the service refuses to mint, every verification
+     * assertion below would be asserting nothing, and the suite would go green
+     * over a fixture that had not been seeded.
+     */
+    private const PUBLIC_URL = 'https://demo.example.test';
+
     private PDO $pdo;
     private Database $db;
     private string $storageRoot;
@@ -100,6 +119,9 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
     private DocumentTemplateRepository $templates;
     private DocumentBlockRepository $blocks;
     private DocumentRepository $documents;
+    private RouteTemplateRepository $routeTemplates;
+    private DocumentQrTokenRepository $qrTokens;
+    private DocumentRouter $router;
 
     protected function setUp(): void
     {
@@ -127,6 +149,8 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         $this->templates = new DocumentTemplateRepository($this->pdo);
         $this->blocks = new DocumentBlockRepository($this->pdo);
         $this->documents = new DocumentRepository($this->pdo);
+        $this->routeTemplates = new RouteTemplateRepository($this->pdo);
+        $this->qrTokens = new DocumentQrTokenRepository($this->pdo);
 
         $settings = new SettingsService(
             new GlobalSettingsRepository($this->pdo),
@@ -175,7 +199,31 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
                 $settings,
                 null
             ),
-            new DocumentCollectionRepository($this->pdo)
+            new DocumentCollectionRepository($this->pdo),
+            $this->routeTemplates,
+            new RouteTemplateGraph($rules),
+            $settings,
+            // A REAL public base URL, so `isConfigured()` is true and the
+            // verification fixture is actually seeded. Empty here would make
+            // every QR assertion below pass vacuously against a seeder that
+            // minted nothing — the shape of test the coordinator's note on
+            // positive controls warns about.
+            new DocumentQrService($this->pdo, $this->qrTokens, new DocumentQrScanRepository($this->pdo), self::PUBLIC_URL),
+            $this->qrTokens
+        );
+
+        // Held for the tests below, which read what the seeder wrote through the
+        // same repositories the product reads it through.
+        $this->router = new DocumentRouter(
+            $this->pdo,
+            new RouteRepository($this->pdo),
+            new RouteStepRepository($this->pdo),
+            new RouteEventRepository($this->pdo),
+            new RouteRecipientRepository($this->pdo),
+            new RouteEdgeRepository($this->pdo),
+            $rules,
+            $settings,
+            null
         );
     }
 
@@ -596,6 +644,21 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
      * A closed row names the event that closed it, that event is on the same
      * route, and its actor is the person whose row it is. A hand-written fixture
      * could satisfy the schema and fail every one of these.
+     *
+     * NARROWED TO `act` STAGES BY #1054, AND THE NARROWING IS THE POINT.
+     * ------------------------------------------------------------------
+     * This assertion predates delivery stages, and it encoded an assumption they
+     * invalidate: that the only way a recipient row closes is that ITS OWN HOLDER
+     * acted. At a stage {@see RouteSatisfaction::DELIVERY} the row is closed by
+     * the very event that opened it — somebody ELSE's forward, one step up —
+     * because those people were TOLD rather than asked, and one act performs both
+     * closes. {@see RouteSatisfaction} says so in as many words.
+     *
+     * So the invariant is not weakened, it is SPLIT: `act` rows are still closed
+     * only by their own holder's act, and `delivery` rows are checked below by
+     * the rule that actually governs them. Dropping the `act` half instead would
+     * have retired the check that makes a hand-written recipient row detectable,
+     * which is the one this fixture most needs.
      */
     public function testEveryClosedRecipientRowWasClosedByThatPersonsOwnActOnThatRoute(): void
     {
@@ -604,14 +667,53 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         $stmt = $this->pdo->prepare(
             'SELECT count(*) FROM document_route_recipients r
                JOIN document_route_events e ON e.id = r.closed_by_event_id
+               JOIN document_route_steps s ON s.id = r.step_id
               WHERE r.tenant_id = :tenant_id
+                AND s.satisfied_by = :act
                 AND (e.route_id <> r.route_id
                      OR e.actor_profile_id <> r.profile_id
                      OR e.tenant_id <> r.tenant_id)'
         );
-        $stmt->execute([':tenant_id' => self::TENANT]);
+        $stmt->execute([':tenant_id' => self::TENANT, ':act' => RouteSatisfaction::ACT]);
 
         self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
+    /**
+     * The other half of the invariant above: a row at a DELIVERY stage is closed
+     * by the event that created it, and by no other (#1054).
+     *
+     * Asserted over the whole tenant rather than over one document, so a future
+     * delivery stage added anywhere in this fixture is covered by construction.
+     * The POSITIVE CONTROL is the count: the fixture must actually contain
+     * delivery rows, or an all-clear here means only that there were none.
+     */
+    public function testEveryDeliveryRowWasClosedByTheEventThatOpenedIt(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $stmt = $this->pdo->prepare(
+            'SELECT count(*) AS total,
+                    sum(CASE WHEN r.closed_by_event_id = r.created_by_event_id THEN 1 ELSE 0 END) AS matched
+               FROM document_route_recipients r
+               JOIN document_route_steps s ON s.id = r.step_id
+              WHERE r.tenant_id = :tenant_id AND s.satisfied_by = :delivery'
+        );
+        $stmt->execute([':tenant_id' => self::TENANT, ':delivery' => RouteSatisfaction::DELIVERY]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        self::assertIsArray($row);
+        self::assertGreaterThan(
+            0,
+            (int) $row['total'],
+            'the fixture contains no delivery rows at all, so this test would pass over nothing'
+        );
+        self::assertSame(
+            (int) $row['total'],
+            (int) $row['matched'],
+            'every row at a delivery stage is closed by the event that opened it — nothing there is '
+            . 'ever awaited, and nobody there ever acted'
+        );
     }
 
     /**
@@ -856,6 +958,687 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
      * the row carries it again (#1013), which is what let the seeder point a
      * template at a block in the first place.
      */
+    // ── 8. the OUTCOMES tranche: what was decided, not only where it is ─────
+
+    /**
+     * A quorum stopped PART WAY — two of three approvals in, the step undecided.
+     *
+     * The state the whole tranche is for. #1041's answer carries `decided`, which
+     * is what the STEP concluded and not the verdict the caller gave, and it is
+     * null while a quorum is short. Reaching that state used to require three
+     * people acting in order, which is precisely why nobody had looked at it.
+     *
+     * ASSERTED FROM BOTH SIDES, because "the step has not settled" is a claim an
+     * empty result satisfies for many reasons — a route that never issued, a rule
+     * that resolved to nobody, a quorum that is not what the fixture thinks. So:
+     *
+     *  BEFORE  the tallies are read off the rows and put through
+     *          {@see RouteQuorum::approvalCarried()} — the ENGINE's own
+     *          predicate, not a re-implementation of it — which must say the
+     *          step has not carried;
+     *  AFTER   the third approver is driven through the real {@see DocumentRouter}
+     *          and `decided` must come back `approved`.
+     *
+     * The second half is the positive control: it can only pass if the route
+     * issued, the rule resolved to three real people, one of them was genuinely
+     * left holding an open item, and the quorum arithmetic is the one the fixture
+     * declares.
+     */
+    public function testAQuorumIsSeededPartWayThroughAndOneMoreApprovalSettlesIt(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $documentId = $this->documentIdByTitle('Demo research grant sign-off');
+        $step = $this->onlyStepOf($documentId);
+
+        self::assertTrue((bool) $step['decision'], 'the grant step must be a decision step');
+        self::assertSame(
+            RouteQuorum::ALL,
+            $step['decision_quorum'],
+            'the quorum is named ON THE STEP so this fixture behaves the same in a tenant whose '
+            . 'default is `any`'
+        );
+
+        $rows = $this->recipientsAtStep($documentId, (int) $step['id']);
+        $approvals = count(array_filter(
+            $rows,
+            static fn (array $r): bool => $r['closing_verdict'] === RouteVerdict::APPROVED
+        ));
+        $open = array_values(array_filter(
+            $rows,
+            static fn (array $r): bool => $r['closed_by_event_id'] === null
+        ));
+
+        self::assertCount(3, $rows, 'three approvers, so the intermediate state is two acts from each end');
+        self::assertSame(2, $approvals, 'two approvals are already recorded');
+        self::assertCount(1, $open, 'and exactly one person is still holding it');
+
+        self::assertFalse(
+            RouteQuorum::approvalCarried(RouteQuorum::ALL, $approvals, count($open), count($rows)),
+            'the ENGINE\'s own predicate must say this step has not carried — which is what makes '
+            . '`decided` null, and what the two people who have already approved were told'
+        );
+
+        // The positive control. Only a fixture that really issued, really
+        // resolved and really left somebody holding an open item can be settled
+        // by one more act through the real engine.
+        $route = $this->routeOf($documentId);
+        $settled = $this->router->act(
+            self::TENANT,
+            (int) $open[0]['profile_id'],
+            $route,
+            RouteAction::ACKNOWLEDGED,
+            null,
+            RouteVerdict::APPROVED,
+        );
+
+        self::assertSame(
+            RouteVerdict::APPROVED,
+            $settled['decided'],
+            'the THIRD approval settles the step, and only then. Before it, the same call would have '
+            . 'answered null — that difference is the whole of what this document exists to show'
+        );
+    }
+
+    /**
+     * One design, two documents, two destinations (#1030).
+     *
+     * The claim is not "a rejection is recorded"; it is that a rejection goes
+     * SOMEWHERE ELSE and never inherits the approval's destination. That cannot
+     * be seen from one document, so the fixture applies ONE design twice and
+     * answers it differently — which makes the answer the only variable.
+     *
+     * Each half carries its own positive control: the stage a document did NOT
+     * reach must have ZERO rows, and the stage it did reach must have an OPEN
+     * one. A route that never issued would fail the second.
+     */
+    public function testTheApproveEdgeAndTheRejectEdgeOfOneDesignLeadToDifferentPlaces(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $approved = $this->documentIdByTitle('Demo stationery purchase order');
+        $rejected = $this->documentIdByTitle('Demo overtime claim');
+
+        self::assertSame(
+            $this->routeTemplateIdOf($approved),
+            $this->routeTemplateIdOf($rejected),
+            'both documents must be applied from the SAME design, or the difference below could be '
+            . 'the design rather than the verdict'
+        );
+
+        // The approval took the drawn edge and SKIPPED the next ordinal.
+        self::assertSame(0, $this->rowsAtPosition($approved, 2), 'an approval never reaches the referral stage');
+        self::assertSame(1, $this->openRowsAtPosition($approved, 3), 'it is sitting at the filing stage');
+
+        // The rejection went to the stage an approval never reaches, and stopped
+        // there — it did NOT fall through to where an approval would have gone.
+        self::assertSame(1, $this->openRowsAtPosition($rejected, 2), 'the refusal is with the registry officer');
+        self::assertSame(
+            0,
+            $this->rowsAtPosition($rejected, 3),
+            'and it never reached filing, which is the destination approval has. A rejection that '
+            . 'inherited the approve edge would be indistinguishable on every screen'
+        );
+    }
+
+    /**
+     * A rejection at a gate with NO reject edge ends the chain.
+     *
+     * What this produces is an ABSENCE, so it is asserted beside two presences on
+     * the same document: the gate HAS a recipient row and it WAS closed by a
+     * `rejected` verdict. Without those, "step 2 has no rows" is equally
+     * satisfied by a route that was never issued at all.
+     */
+    public function testARejectionWithNoRejectEdgeEndsTheChain(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $documentId = $this->documentIdByTitle('Demo conference travel request');
+        $steps = $this->stepsOf($documentId);
+        self::assertCount(2, $steps, 'the route must HAVE a second step, or there is nothing to not reach');
+
+        $gate = $steps[0];
+        self::assertTrue((bool) $gate['decision']);
+        self::assertSame(
+            0,
+            $this->outgoingEdges((int) $gate['id']),
+            'the gate must have NO edges at all: the absent reject edge is the configuration'
+        );
+
+        $gateRows = $this->recipientsAtStep($documentId, (int) $gate['id']);
+        self::assertCount(1, $gateRows, 'the gate was reached');
+        self::assertSame(
+            RouteVerdict::REJECTED,
+            $gateRows[0]['closing_verdict'],
+            'and it was answered with a refusal'
+        );
+
+        self::assertSame(
+            0,
+            $this->rowsAtPosition($documentId, 2),
+            'step 2 was never opened. A rejection falling through to the ordinal successor is the '
+            . 'failure #1014 is written against, and it is invisible on every screen'
+        );
+        self::assertSame(0, $this->countRecipients($documentId, open: true), 'nothing anywhere is awaited');
+    }
+
+    /**
+     * The rework loop has been round more than once (#1037).
+     *
+     * Three rows at the drafting stage is the assertion, and it is only
+     * meaningful because they belong to ONE person: three DIFFERENT people would
+     * be an ordinary fan-out. Two of the three are closed and one is open, which
+     * is what "on its third lap" means.
+     */
+    public function testTheReworkLoopHasBeenRoundMoreThanOnce(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $documentId = $this->documentIdByTitle('Demo laboratory refurbishment plan');
+        $steps = $this->stepsOf($documentId);
+        $drafting = $this->recipientsAtStep($documentId, (int) $steps[0]['id']);
+
+        self::assertCount(3, $drafting, 'three arrivals at the drafting stage: lap one, lap two, lap three');
+        self::assertCount(
+            1,
+            array_unique(array_map(static fn (array $r): int => (int) $r['profile_id'], $drafting)),
+            'all three are the SAME person — otherwise this is a fan-out, not a loop'
+        );
+
+        $open = array_filter($drafting, static fn (array $r): bool => $r['closed_by_event_id'] === null);
+        self::assertCount(1, $open, 'exactly one open item on the current lap');
+
+        $rejections = $this->countEvents($documentId, RouteVerdict::REJECTED);
+        self::assertSame(
+            2,
+            $rejections,
+            'two refusals behind it. One lap is indistinguishable from a document that simply has an '
+            . 'open item; two is the cheapest fixture that shows a loop is a loop'
+        );
+
+        // #1037, made portable: the three arrivals are INDISTINGUISHABLE from
+        // each other in every column that carries meaning. Same person, same
+        // stage, same unit — nothing anywhere says which lap a row belongs to,
+        // so a document on its ninth rejection renders exactly like one on its
+        // first. Asserted over the rows rather than by probing the schema for a
+        // column named `lap`, which only PostgreSQL can answer and which would
+        // therefore not run on the engine CI's unit job uses.
+        $shape = array_map(
+            static fn (array $r): string => $r['profile_id'] . '|' . $r['step_id'] . '|' . ($r['ou_id'] ?? '-'),
+            $drafting
+        );
+        self::assertCount(
+            1,
+            array_unique($shape),
+            'the three laps are indistinguishable except by row id, which is #1037 exactly'
+        );
+    }
+
+    /**
+     * #1058 REPRODUCED IN THE FIXTURE: a merge whose rule is actor-relative
+     * settles once per ARRIVING CHAIN, not once.
+     *
+     * The flow editor draws "Paths merge here — settles once" on this stage. Two
+     * chains reach it, resolve to two DIFFERENT people, nothing de-duplicates,
+     * and the stage ends up holding two independent cohorts.
+     *
+     * This test asserts the WRONG behaviour on purpose, exactly as
+     * {@see \Tests\Core\Document\RouteTemplate\RouteTemplateInstantiationRealEngineTest}
+     * does: it is filed against the LABEL, not the engine, and a fixture that
+     * quietly avoided the shape would remove the only place anybody looking at
+     * the demo could meet it.
+     */
+    public function testTheActorRelativeMergeHoldsTwoCohortsAtOneStage(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $documentId = $this->documentIdByTitle('Demo cross-department equipment review');
+        $steps = $this->stepsOf($documentId);
+        self::assertCount(4, $steps);
+
+        $merge = $steps[3];
+        self::assertSame(
+            RoutingRuleRegistry::KIND_ROLE_BELOW_ACTOR,
+            (string) $merge['rule_kind'],
+            'the merge stage must be ACTOR-RELATIVE — that is the whole difference between the case '
+            . 'the canvas label describes and the case it does not'
+        );
+
+        $rows = $this->recipientsAtStep($documentId, (int) $merge['id']);
+        self::assertCount(2, $rows, 'two inbox items at a stage the canvas marked "settles once"');
+        self::assertCount(
+            2,
+            array_unique(array_map(static fn (array $r): int => (int) $r['created_by_event_id'], $rows)),
+            'in two SEPARATE cohorts. The cohort a quorum is counted over is the rows one act opened, '
+            . 'so two cohorts at one stage settle independently and each opens its own continuation'
+        );
+        self::assertCount(
+            2,
+            array_unique(array_map(static fn (array $r): int => (int) $r['profile_id'], $rows)),
+            'and they are two different people, which is why nothing de-duplicated'
+        );
+        self::assertSame(2, $this->openRowsAtPosition($documentId, 4), 'both are still open to be walked up to');
+    }
+
+    /**
+     * A delivery stage (#1054): every row closed by the event that opened it.
+     *
+     * THE POSITIVE CONTROL IS ON THE SAME DOCUMENT and is the point of the test.
+     * "The technicians are awaiting nothing" is satisfied by a route that never
+     * issued, a rule that reached nobody, or a broken predicate. The mechanical
+     * head's still-open step-1 item rules all three out: it can only exist if the
+     * route issued and its rules really resolved.
+     */
+    public function testADeliveryStageClosesItsRowsWithTheEventThatOpenedThem(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $documentId = $this->documentIdByTitle('Demo workshop reopening notice');
+        $steps = $this->stepsOf($documentId);
+
+        self::assertSame(RouteSatisfaction::ACT, (string) $steps[0]['satisfied_by']);
+        self::assertSame(RouteSatisfaction::DELIVERY, (string) $steps[1]['satisfied_by']);
+
+        $told = $this->recipientsAtStep($documentId, (int) $steps[1]['id']);
+        self::assertCount(2, $told, 'the delivery rule really reached two people');
+        foreach ($told as $row) {
+            self::assertNotNull($row['closed_by_event_id'], 'nobody at a delivery stage is ever awaited');
+            self::assertSame(
+                (int) $row['created_by_event_id'],
+                (int) $row['closed_by_event_id'],
+                'and the row is closed by the very event that opened it — one act, both effects, which '
+                . 'is why the flag is on the STEP and not on the event'
+            );
+        }
+
+        // THE POSITIVE CONTROL.
+        $waiting = array_filter(
+            $this->recipientsAtStep($documentId, (int) $steps[0]['id']),
+            static fn (array $r): bool => $r['closed_by_event_id'] === null
+        );
+        self::assertCount(
+            1,
+            $waiting,
+            'somebody on THIS document must still be waiting, or "the technicians are awaiting nothing" '
+            . 'is equally true of a document that was never routed'
+        );
+
+        // Nobody who was merely told appears among the people who acted.
+        $actors = $this->actorProfileIds($documentId);
+        foreach ($told as $row) {
+            self::assertNotContains(
+                (int) $row['profile_id'],
+                $actors,
+                'a person who was TOLD must not appear in "acted on by me" — they did not act'
+            );
+        }
+    }
+
+    /**
+     * Routes applied from a design carry `template_id` and a `template_name`
+     * snapshot (#1056), and routes composed by hand do not.
+     *
+     * The second half is the control: a column that were set on EVERY route would
+     * discriminate nothing, and the demo could not show the difference between a
+     * route somebody composed and one they applied.
+     */
+    public function testRoutesAppliedFromADesignCarryTheirProvenanceAndOthersDoNot(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $stmt = $this->pdo->prepare(
+            'SELECT id, title, template_id, template_name FROM document_routes WHERE tenant_id = :t'
+        );
+        $stmt->execute([':t' => self::TENANT]);
+        $routes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $applied = array_values(array_filter($routes, static fn (array $r): bool => $r['template_id'] !== null));
+        $composed = array_values(array_filter($routes, static fn (array $r): bool => $r['template_id'] === null));
+
+        self::assertNotSame([], $applied, 'no route carries design provenance, so #1056 cannot be seen');
+        self::assertNotSame([], $composed, 'every route carries it, so the column discriminates nothing');
+
+        foreach ($applied as $route) {
+            $design = $this->routeTemplates->findById((int) $route['template_id'], self::TENANT);
+            self::assertNotNull($design, 'a route names a design that does not exist');
+            self::assertSame(
+                (string) $design['name'],
+                (string) $route['template_name'],
+                'the snapshot must match the design it was taken from at seed time'
+            );
+        }
+    }
+
+    /**
+     * Every seeded design is one the editor itself would have accepted.
+     *
+     * Re-validated through {@see RouteTemplateGraph}, which is what `PUT /graph`
+     * runs. A demo whose purpose is that somebody opens the canvas on these must
+     * not contain a canvas the canvas cannot save — and a fixture written
+     * straight into the repository could.
+     */
+    public function testEverySeededRouteDesignIsOneTheEditorCouldHaveSaved(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $designs = $this->routeTemplates->listForTenant(self::TENANT, 50, 0);
+        self::assertNotSame([], $designs, 'no route designs were seeded, so the flow editor still opens empty');
+
+        $graph = new RouteTemplateGraph($this->rulesForTest());
+
+        foreach ($designs as $design) {
+            $id = (int) $design['id'];
+            $steps = $this->routeTemplates->stepsFor($id, self::TENANT);
+            $edges = $this->routeTemplates->edgesFor($id, self::TENANT);
+
+            self::assertNotSame([], $steps, "design '{$design['name']}' has no stages to open on");
+
+            $wire = [];
+            foreach ($steps as $step) {
+                $wire[] = [
+                    'position' => (int) $step['position'],
+                    'rule_kind' => (string) $step['rule_kind'],
+                    'rule_config' => $step['rule_config'] ?? [],
+                    'label' => $step['label'],
+                    'decision' => (bool) $step['decision'],
+                    'decision_quorum' => $step['decision_quorum'],
+                    'satisfied_by' => (string) ($step['satisfied_by'] ?? RouteSatisfaction::ACT),
+                    'canvas_x' => (int) $step['canvas_x'],
+                    'canvas_y' => (int) $step['canvas_y'],
+                ];
+            }
+
+            // Throws if the design could not be saved through the editor.
+            $graph->validate($wire, $edges, 50);
+        }
+    }
+
+    /**
+     * The designs are laid out on the canvas, not stacked at the origin.
+     *
+     * Not decoration: three designs whose every node sits at (0, 0) open as one
+     * illegible pile, which is a worse first-run experience than the empty canvas
+     * this fixture exists to replace.
+     */
+    public function testTheSeededDesignsHaveDistinctCanvasPositions(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        foreach ($this->routeTemplates->listForTenant(self::TENANT, 50, 0) as $design) {
+            $steps = $this->routeTemplates->stepsFor((int) $design['id'], self::TENANT);
+            $points = array_map(
+                static fn (array $s): string => $s['canvas_x'] . ',' . $s['canvas_y'],
+                $steps
+            );
+
+            self::assertSame(
+                count($steps),
+                count(array_unique($points)),
+                "design '{$design['name']}' has two stages at the same canvas point, so the editor "
+                . 'would open with nodes on top of each other'
+            );
+        }
+    }
+
+    /**
+     * A LIVE verification code and a REVOKED one, on two different documents.
+     *
+     * One of them alone proves nothing: the public page answers a revoked code
+     * and an unknown token the same way by default, so a lone revoked code
+     * renders exactly like a typo in the URL. The live one is what the refusal
+     * has to be different from.
+     */
+    public function testOneDocumentCarriesALiveVerificationCodeAndAnotherARevokedOne(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $stmt = $this->pdo->prepare(
+            'SELECT document_id, revoked_at, revoked_reason FROM document_qr_tokens WHERE tenant_id = :t'
+        );
+        $stmt->execute([':t' => self::TENANT]);
+        $tokens = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $live = array_values(array_filter($tokens, static fn (array $t): bool => $t['revoked_at'] === null));
+        $revoked = array_values(array_filter($tokens, static fn (array $t): bool => $t['revoked_at'] !== null));
+
+        self::assertCount(1, $live, 'exactly one code is in force');
+        self::assertCount(1, $revoked, 'and exactly one has been retired');
+        self::assertSame(
+            QrRevocationReason::WITHDRAWN,
+            (string) $revoked[0]['revoked_reason'],
+            'withdrawn, not superseded: the fixture is "this paper is not to be trusted", which is a '
+            . 'decision somebody made, rather than the side effect of a reprint'
+        );
+        self::assertNotSame(
+            (int) $live[0]['document_id'],
+            (int) $revoked[0]['document_id'],
+            'on two different documents, so the two states can be opened side by side'
+        );
+
+        // The tenant switch, without which neither would render anywhere.
+        $settings = new SettingsService(
+            new GlobalSettingsRepository($this->pdo),
+            new TenantSettingsRepository($this->pdo)
+        );
+        self::assertSame(
+            'true',
+            $settings->effective(self::TENANT)[SettingsRegistry::DOCUMENTS_QR_ENABLED] ?? null,
+            'documents.qr_enabled defaults to FALSE, so a fixture that did not turn it on would seed '
+            . 'two codes that no screen would ever show'
+        );
+    }
+
+    /**
+     * The demo never turns the verification switch back on over an operator's own
+     * answer.
+     *
+     * The whole file's discipline is "insert when absent, never update", and this
+     * is that discipline applied to the one thing here that is a SETTING rather
+     * than a row — which is exactly where it would be easiest to get wrong,
+     * because `setTenant()` is an upsert and would silently win.
+     */
+    public function testASecondRunDoesNotOverrideAnOperatorsOwnVerificationSetting(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $settings = new SettingsService(
+            new GlobalSettingsRepository($this->pdo),
+            new TenantSettingsRepository($this->pdo)
+        );
+        $settings->setTenant(self::TENANT, SettingsRegistry::DOCUMENTS_QR_ENABLED, 'false');
+
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        self::assertSame(
+            'false',
+            $settings->effective(self::TENANT)[SettingsRegistry::DOCUMENTS_QR_ENABLED] ?? null,
+            'an operator who looked at the demo and switched the feature off must keep their answer'
+        );
+    }
+
+    /**
+     * Re-running never mints a second verification code.
+     *
+     * The trap this pins is specific and would have been invisible: a revoked
+     * code leaves the document with NO code in force, so a guard written on
+     * "does it have a live one" sees nothing, mints again, revokes again, and
+     * adds two rows every run — drift that no count of the DOCUMENTS would catch.
+     */
+    public function testASecondRunMintsNoFurtherVerificationCodes(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+        $before = $this->countQrTokens();
+
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        self::assertSame(2, $before, 'one live and one revoked');
+        self::assertSame($before, $this->countQrTokens(), 'and still exactly those two after two more runs');
+    }
+
+    // ── helpers for the outcomes tranche ───────────────────────────────
+
+    private function documentIdByTitle(string $title): int
+    {
+        foreach ($this->documentTitles() as $id => $seeded) {
+            if ($seeded === $title) {
+                return $id;
+            }
+        }
+
+        self::fail("The demo document '{$title}' was not seeded.");
+    }
+
+    /** @return array<string, mixed> */
+    private function routeOf(int $documentId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM document_routes WHERE tenant_id = :t AND document_id = :d ORDER BY id LIMIT 1'
+        );
+        $stmt->execute([':t' => self::TENANT, ':d' => $documentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row, 'the document has no route');
+
+        return $row;
+    }
+
+    private function routeTemplateIdOf(int $documentId): ?int
+    {
+        $id = $this->routeOf($documentId)['template_id'] ?? null;
+
+        return $id === null ? null : (int) $id;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function stepsOf(int $documentId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT s.* FROM document_route_steps s
+               JOIN document_routes r ON r.id = s.route_id
+              WHERE s.tenant_id = :t AND r.document_id = :d
+              ORDER BY s.position'
+        );
+        $stmt->execute([':t' => self::TENANT, ':d' => $documentId]);
+
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return $rows;
+    }
+
+    /** @return array<string, mixed> */
+    private function onlyStepOf(int $documentId): array
+    {
+        $steps = $this->stepsOf($documentId);
+        self::assertCount(1, $steps, 'this fixture expects a single-step route');
+
+        return $steps[0];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function recipientsAtStep(int $documentId, int $stepId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT rc.*, e.verdict AS closing_verdict
+               FROM document_route_recipients rc
+               LEFT JOIN document_route_events e ON e.id = rc.closed_by_event_id
+              WHERE rc.tenant_id = :t AND rc.document_id = :d AND rc.step_id = :s
+              ORDER BY rc.id'
+        );
+        $stmt->execute([':t' => self::TENANT, ':d' => $documentId, ':s' => $stepId]);
+
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return $rows;
+    }
+
+    private function rowsAtPosition(int $documentId, int $position): int
+    {
+        $steps = $this->stepsOf($documentId);
+        if (!isset($steps[$position - 1])) {
+            self::fail("The route has no step at position {$position}.");
+        }
+
+        return count($this->recipientsAtStep($documentId, (int) $steps[$position - 1]['id']));
+    }
+
+    private function openRowsAtPosition(int $documentId, int $position): int
+    {
+        $steps = $this->stepsOf($documentId);
+        if (!isset($steps[$position - 1])) {
+            self::fail("The route has no step at position {$position}.");
+        }
+
+        return count(array_filter(
+            $this->recipientsAtStep($documentId, (int) $steps[$position - 1]['id']),
+            static fn (array $r): bool => $r['closed_by_event_id'] === null
+        ));
+    }
+
+    private function outgoingEdges(int $stepId): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT count(*) FROM document_route_edges WHERE tenant_id = :t AND from_step_id = :s'
+        );
+        $stmt->execute([':t' => self::TENANT, ':s' => $stepId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function countEvents(int $documentId, string $verdict): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT count(*) FROM document_route_events
+              WHERE tenant_id = :t AND document_id = :d AND verdict = :v'
+        );
+        $stmt->execute([':t' => self::TENANT, ':d' => $documentId, ':v' => $verdict]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** @return list<int> */
+    private function actorProfileIds(int $documentId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT DISTINCT actor_profile_id FROM document_route_events
+              WHERE tenant_id = :t AND document_id = :d AND actor_profile_id IS NOT NULL'
+        );
+        $stmt->execute([':t' => self::TENANT, ':d' => $documentId]);
+
+        return array_map(intval(...), $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    private function countQrTokens(): int
+    {
+        $stmt = $this->pdo->prepare('SELECT count(*) FROM document_qr_tokens WHERE tenant_id = :t');
+        $stmt->execute([':t' => self::TENANT]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * The same four core rule kinds SeedCommand registers, for the tests that
+     * need a registry of their own.
+     */
+    private function rulesForTest(): RoutingRuleRegistry
+    {
+        $rules = new RoutingRuleRegistry();
+        $groupResolver = new GroupResolver(
+            $this->pdo,
+            new UserGroupRepository($this->pdo),
+            static fn (): RoutingRuleRegistry => $rules
+        );
+        $rules->registerCoreRoutingRules(
+            new RoleRuleResolver($this->pdo),
+            new RoleBelowActorRuleResolver($this->pdo),
+            new ExplicitRuleResolver(),
+            new GroupRuleResolver($groupResolver)
+        );
+
+        return $rules;
+    }
+
     private function blockId(string $starterKey): int
     {
         foreach ($this->blocks->listForTenant(self::TENANT) as $row) {

@@ -14,6 +14,11 @@ use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentStarterSeeder;
 use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\Qr\DocumentQrScanRepository;
+use Whity\Core\Document\Qr\DocumentQrService;
+use Whity\Core\Document\Qr\DocumentQrTokenRepository;
+use Whity\Core\Document\RouteTemplate\RouteTemplateGraph;
+use Whity\Core\Document\RouteTemplate\RouteTemplateRepository;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
 use Whity\Core\Document\Routing\RoleRuleResolver;
@@ -51,8 +56,9 @@ use Whity\Storage\StorageDriverFactory;
  *
  * THE DOCUMENT DEMO HAS A GATE OF ITS OWN: --with-document-demo
  * ------------------------------------------------------------
- * {@see DocumentDemoSeeder} seeds an invented faculty, eight demo logins and six
- * routed documents so the document system's screens can be looked at instead of
+ * {@see DocumentDemoSeeder} seeds an invented faculty, eight demo logins, a set
+ * of route designs and a folder of routed documents — one per state the screens
+ * distinguish between — so the document system can be looked at instead of
  * guessed at. It is OFF by default in EVERY environment, development included;
  * only `--with-document-demo` turns it on.
  *
@@ -160,7 +166,8 @@ class SeedCommand
                 }
             } else {
                 echo "  - Document demo data SKIPPED: pass " . self::DOCUMENT_DEMO_FLAG . " for an\n";
-                echo "    invented faculty, its people and six routed documents. Off by default in\n";
+                echo "    invented faculty, its people, three route designs and a routed document\n";
+                echo "    per state the screens distinguish between. Off by default in\n";
                 echo "    EVERY environment, development included — nothing depends on it, so it is\n";
                 echo "    seeded only because somebody wants something to click through.\n";
             }
@@ -252,6 +259,12 @@ class SeedCommand
             new GroupRuleResolver($groupResolver)
         );
 
+        // ONE token repository, handed to both the service that writes through it
+        // and the seeder that makes one read the service does not expose. Two
+        // instances would work identically and would be two things to keep in
+        // step for no reason.
+        $qrTokens = new DocumentQrTokenRepository($pdo);
+
         $seeder = new DocumentDemoSeeder(
             $pdo,
             // The identity seam, not an INSERT of our own: see
@@ -287,7 +300,31 @@ class SeedCommand
                 // is the system of record and is written either way.
                 null
             ),
-            new DocumentCollectionRepository($pdo)
+            new DocumentCollectionRepository($pdo),
+            // #1056: route DESIGNS, and the validator the editor itself runs.
+            // The graph goes in through `RouteTemplateGraph` rather than
+            // straight into the repository so a seeded design is by construction
+            // one `PUT /graph` would have accepted — a demo whose whole point is
+            // that somebody opens the canvas on it must not contain a canvas the
+            // canvas cannot save.
+            new RouteTemplateRepository($pdo),
+            new RouteTemplateGraph($rules),
+            // Already built above for the router's quorum ladder; passed on
+            // rather than rebuilt, so the seeder cannot read a different
+            // settings chain from the engine it is driving.
+            $settings,
+            // #1036: the verification code. The public base URL is APP_URL, the
+            // same value `public/index.php` hands this service — read the same
+            // way, and EMPTY is a real state that the service answers by
+            // refusing to mint rather than by encoding a relative URL into a
+            // code nothing can follow.
+            new DocumentQrService(
+                $pdo,
+                $qrTokens,
+                new DocumentQrScanRepository($pdo),
+                rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/')
+            ),
+            $qrTokens
         );
 
         return $seeder->seedForTenant((int) $tenant['id'], (string) $tenant['name']);

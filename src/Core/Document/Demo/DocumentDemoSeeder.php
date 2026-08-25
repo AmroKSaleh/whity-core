@@ -14,10 +14,21 @@ use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentStarterSeeder;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\Organizer\DocumentCriteria;
+use Whity\Core\Document\Qr\DocumentQrService;
+use Whity\Core\Document\Qr\DocumentQrTokenRepository;
+use Whity\Core\Document\Qr\VerificationPresenter;
+use Whity\Core\Document\RouteTemplate\RouteTemplateGraph;
+use Whity\Core\Document\RouteTemplate\RouteTemplateInstantiation;
+use Whity\Core\Document\RouteTemplate\RouteTemplateRepository;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RouteAction;
+use Whity\Core\Document\Routing\RouteQuorum;
+use Whity\Core\Document\Routing\RouteSatisfaction;
+use Whity\Core\Document\Routing\RouteVerdict;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
 use Whity\Core\RBAC\CorePermissions;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
 
 /**
  * A demo dataset for the document system: the states its screens distinguish
@@ -67,6 +78,53 @@ use Whity\Core\RBAC\CorePermissions;
  *   |                                            | my unit" are different queries, and the  |
  *   |                                            | `unanchored` answer for a person with no |
  *   |                                            | unit (#951)                              |
+ *
+ * THE SECOND TRANCHE: OUTCOMES, NOT ONLY CIRCULATION
+ * --------------------------------------------------
+ * Everything above is about WHERE A DOCUMENT IS. v0.2.8 shipped five things that
+ * are about WHAT WAS DECIDED — and none of them could be looked at, because the
+ * only way to reach any of them was for several people to sign in and act.
+ * Measured rather than assumed: against the release, `template_id` appeared zero
+ * times in this fixture and `qr` zero times, and while `decision` and `quorum`
+ * appeared, no OUTCOME of either did.
+ *
+ *   | Seeded                                     | What it makes visible                    |
+ *   |--------------------------------------------|------------------------------------------|
+ *   | A quorum stopped PART WAY: two of three    | the answer `decided: null` — the STEP's  |
+ *   | approvals in, the step still undecided     | conclusion, not the caller's verdict      |
+ *   |                                            | (#1041). Reachable before only by three  |
+ *   |                                            | people acting by hand, in order          |
+ *   | One document APPROVED at a gate and one    | #1030: an approve edge and a reject edge |
+ *   | REJECTED at the SAME gate of the SAME      | send the same document to two different  |
+ *   | design                                     | places. Two documents, one design, so    |
+ *   |                                            | the destination is the only variable     |
+ *   | One document rejected at a gate that has   | that a rejection with no edge ENDS the   |
+ *   | NO reject edge                             | chain — it never inherits the approval's |
+ *   |                                            | destination, and the step it would have  |
+ *   |                                            | opened never opens                       |
+ *   | One document round a REWORK LOOP twice     | a backwards reject edge, and #1037: the  |
+ *   |                                            | third lap is indistinguishable from the  |
+ *   |                                            | first, because nothing counts laps       |
+ *   | Three ROUTE TEMPLATES, and four documents  | #1056's `template_id` / `template_name`  |
+ *   | whose routes were applied from them        | provenance, and a flow editor that opens |
+ *   |                                            | on a real design instead of blank canvas |
+ *   | A merge stage whose rule is ACTOR-RELATIVE | #1058: "Paths merge here — settles once" |
+ *   |                                            | is FALSE here. Two arrivals resolve to   |
+ *   |                                            | two different people, nothing            |
+ *   |                                            | de-duplicates, and the stage carries two |
+ *   |                                            | independent cohorts                      |
+ *   | A stage SATISFIED BY DELIVERY (#1054)      | recipients who were TOLD and are not     |
+ *   |                                            | asked to act: rows closed the instant    |
+ *   |                                            | they were opened, an empty "Awaiting me" |
+ *   |                                            | beside a populated recipient list        |
+ *   | A LIVE verification code and a REVOKED one | #1036/#1051: a revoked code answers, by  |
+ *   |                                            | default, exactly what an unknown token   |
+ *   |                                            | answers, so ONE of them proves nothing   |
+ *
+ * The QR pair also needs the tenant switch — `documents.qr_enabled` defaults to
+ * FALSE, deliberately, because turning it on publishes an unauthenticated
+ * verification surface. See {@see seedQrCodes()} for why the seed writes it only
+ * when the tenant has no opinion of its own.
  *
  * DRIVEN THROUGH THE REAL SERVICES — WHICH IS THE POINT, NOT A PREFERENCE
  * ----------------------------------------------------------------------
@@ -145,8 +203,8 @@ use Whity\Core\RBAC\CorePermissions;
  * --------------------------------
  * Called from {@see \Whity\Cli\Commands\SeedCommand} only under
  * `--with-document-demo`, which is off by default in EVERY environment,
- * `APP_ENV=development` included. Eight logins, an invented faculty and six fake
- * documents have no business appearing in a tenant by accident.
+ * `APP_ENV=development` included. Eight logins, an invented faculty and a folder
+ * of fake documents have no business appearing in a tenant by accident.
  *
  * It briefly rode `--with-fixtures` — the demo-ACCOUNTS flag — and that is worth
  * recording because of how it failed rather than that it did. The E2E suite
@@ -178,6 +236,33 @@ final class DocumentDemoSeeder
     /** The one custom collection, beside the well-known `starred` one. */
     private const COLLECTION_BUDGET_FILE = 'Demo budget file 2026';
 
+    /**
+     * ROUTE-template identities — the DESIGNS, not the page templates above.
+     *
+     * Keyed by NAME rather than by a `starter_key`, because
+     * `document_route_templates` has no such column: {@see RouteTemplateRepository::findByName()}
+     * is the duplicate check the API itself uses, so it is the identity available
+     * here. The same compromise the DOCUMENTS make, and acceptable for the same
+     * reason — a demo row an operator renames stops being found and is left
+     * alone, which is the safe direction for a fixture that never updates.
+     */
+    private const ROUTE_TPL_PURCHASE_APPROVAL = 'Demo purchase approval (approve files it, reject refers it)';
+    private const ROUTE_TPL_DRAFTING_LOOP = 'Demo drafting loop (rejection goes back to the drafter)';
+    private const ROUTE_TPL_TWO_DEPARTMENT_REVIEW = 'Demo two-department review (the paths merge)';
+
+    /**
+     * The two documents that carry a verification code (#1036/#1051).
+     *
+     * Named as constants because {@see seedQrCodes()} resolves them out of the
+     * title => id map {@see seedDocuments()} returns, and a typo there would be a
+     * silently missing demo rather than an error. Both are documents that already
+     * exist for another reason: a QR code is an ATTRIBUTE of a document, not a
+     * routing state, so inventing two more documents to carry one would break the
+     * rule the rest of this file follows.
+     */
+    private const QR_LIVE_DOCUMENT = 'Demo tenant-wide registry notice';
+    private const QR_REVOKED_DOCUMENT = 'Demo safety inspection report';
+
     public function __construct(
         private readonly PDO $db,
         private readonly DemoOrganisationSeeder $organisation,
@@ -188,6 +273,17 @@ final class DocumentDemoSeeder
         private readonly DocumentIssuer $issuer,
         private readonly DocumentRouter $router,
         private readonly DocumentCollectionRepository $collections,
+        private readonly RouteTemplateRepository $routeTemplates,
+        private readonly RouteTemplateGraph $routeGraph,
+        private readonly SettingsService $settings,
+        private readonly DocumentQrService $qr,
+        // Beside the service, not instead of it. Every WRITE goes through
+        // {@see DocumentQrService}; this is here for one READ the service does
+        // not expose — "has this document EVER had a code" — which is what makes
+        // the revoked-code fixture idempotent. `active()` answers only about the
+        // live one, and a document whose only code has been revoked has none, so
+        // a guard built on it would mint and revoke a fresh token on every run.
+        private readonly DocumentQrTokenRepository $qrTokens,
     ) {
     }
 
@@ -222,8 +318,14 @@ final class DocumentDemoSeeder
         // at them (#1024) and a pointer needs the id it points at.
         $blockIds = $this->seedBlocks($org);
         $templateIds = $this->seedTemplates($org, $blockIds);
-        $documentIds = $this->seedDocuments($org, $templateIds);
+        // ROUTE templates before documents, for the same reason blocks come
+        // before page templates: four of the documents below have their routes
+        // APPLIED from one of these designs (#1056), and applying a design needs
+        // the id it is being applied from.
+        $routeTemplateIds = $this->seedRouteTemplates($org);
+        $documentIds = $this->seedDocuments($org, $templateIds, $routeTemplateIds);
         $collectionLines = $this->seedCollections($org, $documentIds);
+        $qrLines = $this->seedQrCodes($org, $documentIds);
 
         return array_merge(
             [
@@ -257,8 +359,20 @@ final class DocumentDemoSeeder
                     )),
                 ),
                 sprintf('Documents: %d, each with a route the engine issued and resolved.', count($documentIds)),
+                sprintf(
+                    'Route designs: %d, drawn through the editor\'s own validator; %d of the documents '
+                    . 'above carry `template_id` provenance from one of them (#1056).',
+                    count($routeTemplateIds),
+                    // Counted from the declaration, never typed — same argument
+                    // as the tagged-template count above.
+                    count(array_filter(
+                        self::documentDeclarations($org),
+                        static fn (array $spec): bool => ($spec['route_template'] ?? null) !== null,
+                    )),
+                ),
             ],
             $collectionLines,
+            $qrLines,
         );
     }
 
@@ -582,37 +696,293 @@ final class DocumentDemoSeeder
         return $out;
     }
 
+    // ── route designs (#1027 / #1031 / #1056) ─────────────────────────
+
+    /**
+     * Three route templates — the DESIGNS a route can be applied from.
+     *
+     * TWO THINGS THIS FIXES AT ONCE.
+     *
+     * The first is the FIRST-RUN EXPERIENCE. The flow editor (#1027) is a canvas
+     * for drawing these, and on an unseeded install there is nothing to open it
+     * on: the list is empty, so the only way to see what a design looks like is to
+     * draw one, which is the position somebody evaluating the product is least
+     * able to be in. Three real designs make the editor openable on something,
+     * and between them they use every graph shape it can draw — a branch, a
+     * skip, a merge and a backwards edge.
+     *
+     * The second is PROVENANCE. A route issued from a design carries `template_id`
+     * and a `template_name` snapshot (#1056), and until now no route in this
+     * fixture carried either, so the record page's routing panel had no way to
+     * show the difference between a route somebody composed by hand and one they
+     * applied. Four of the documents below are applied from these.
+     *
+     * WHY THE DESIGNS ARE THE ONES THEY ARE — one graph shape each, and nothing
+     * that repeats:
+     *
+     *   PURCHASE APPROVAL   a gate with BOTH edges drawn, whose approve edge
+     *                       SKIPS the next ordinal. Two documents are applied from
+     *                       it and answer it differently, which is the only way to
+     *                       see that the two verdicts lead to two places (#1030).
+     *   DRAFTING LOOP       a gate whose reject edge points BACKWARDS. A cycle,
+     *                       and the commonest real approval design there is.
+     *   TWO-DEPARTMENT      a stage with two arriving transitions whose rule is
+     *   REVIEW              ACTOR-RELATIVE — the case the canvas labels wrongly
+     *                       (#1058).
+     *
+     * SAVED THROUGH THE EDITOR'S OWN VALIDATOR, never straight into the
+     * repository. {@see RouteTemplateGraph::validate()} is what `PUT /graph`
+     * runs, so a design this seeder draws is by construction one the editor could
+     * have saved — the same argument that puts every routing state through
+     * {@see DocumentRouter}. A fixture that bypassed it could contain a canvas
+     * nobody can edit, in the demo whose purpose is to show the canvas.
+     *
+     * IDEMPOTENT BY NAME, and the graph is written ONCE. A design that already
+     * exists is reused and NOT redrawn, exactly as an existing template is not
+     * rewritten: `replaceGraph()` would silently discard whatever an operator had
+     * moved, renamed or rewired while looking at the demo, which is the one thing
+     * a demo dataset must never do to somebody's work.
+     *
+     * @return array<string, int> design name => template id
+     */
+    private function seedRouteTemplates(DemoOrganisation $org): array
+    {
+        $tenantId = $org->tenantId;
+        $maxSteps = $this->routingMaxSteps($tenantId);
+
+        $ids = [];
+        foreach (self::routeTemplateDeclarations($org) as $name => $design) {
+            $existing = $this->routeTemplates->findByName($name, $tenantId);
+            if ($existing !== null) {
+                $ids[$name] = (int) $existing['id'];
+                continue;
+            }
+
+            $id = $this->routeTemplates->create(
+                $tenantId,
+                $name,
+                $design['description'],
+                $org->person($design['author']),
+            );
+
+            $validated = $this->routeGraph->validate($design['stages'], $design['edges'], $maxSteps);
+            $this->routeTemplates->replaceGraph($id, $tenantId, $validated['steps'], $validated['edges']);
+
+            $ids[$name] = $id;
+        }
+
+        return $ids;
+    }
+
+    /**
+     * The three designs as data, in the wire shape `PUT /graph` accepts.
+     *
+     * `canvas_x` / `canvas_y` are real coordinates rather than zeroes, and that is
+     * not decoration: the editor lays out from them, and three designs stacked at
+     * the origin would open as one illegible pile of nodes on top of each other —
+     * which is a worse first-run experience than the empty canvas this exists to
+     * replace. Laid out left to right at a node's width apart, with branches
+     * separated vertically, so the SHAPE of each design reads before any label
+     * does.
+     *
+     * @return array<string, array{description: string, author: string,
+     *         stages: list<array<string, mixed>>, edges: list<array{from: int, to: int, verdict: string}>}>
+     */
+    private static function routeTemplateDeclarations(DemoOrganisation $org): array
+    {
+        $head = $org->role(DemoOrganisationSeeder::ROLE_HEAD);
+        $dean = $org->role(DemoOrganisationSeeder::ROLE_DEAN);
+        $technician = $org->role(DemoOrganisationSeeder::ROLE_TECHNICIAN);
+
+        return [
+            self::ROUTE_TPL_PURCHASE_APPROVAL => [
+                'description' => 'Demo fixture: one gate, two destinations. Approval skips straight to '
+                    . 'filing; refusal goes to the registry instead, which approval never reaches.',
+                'author' => DemoOrganisationSeeder::DEAN,
+                'stages' => [
+                    self::stage(1, RoutingRuleRegistry::KIND_ROLE, ['role_id' => $dean], 'The dean decides', 0, 0, decision: true),
+                    self::stage(2, RoutingRuleRegistry::KIND_EXPLICIT, [
+                        'profile_ids' => [$org->person(DemoOrganisationSeeder::REGISTRY_OFFICER)],
+                    ], 'Referred to the registry officer', 300, 180),
+                    self::stage(3, RoutingRuleRegistry::KIND_EXPLICIT, [
+                        'profile_ids' => [$org->person(DemoOrganisationSeeder::FACULTY_SECRETARY)],
+                    ], 'Filed by the faculty secretary', 300, -180),
+                ],
+                // The approve edge JUMPS stage 2. Without it an approval would
+                // fall through to the next ordinal and land on the referral
+                // stage, which is the destination a refusal is supposed to have
+                // — so the two verdicts would be indistinguishable on this
+                // design and the pair of documents applied from it would prove
+                // nothing.
+                'edges' => [
+                    ['from' => 1, 'to' => 3, 'verdict' => RouteVerdict::APPROVED],
+                    ['from' => 1, 'to' => 2, 'verdict' => RouteVerdict::REJECTED],
+                ],
+            ],
+
+            self::ROUTE_TPL_DRAFTING_LOOP => [
+                'description' => 'Demo fixture: the rework loop. A refusal at the gate sends the document '
+                    . 'BACK to the drafting stage, and the rule there is resolved again on arrival.',
+                'author' => DemoOrganisationSeeder::CIVIL_HEAD,
+                'stages' => [
+                    // A NAMED person rather than a role, so that every lap
+                    // returns to the same desk and the laps are comparable. An
+                    // actor-relative rule here would resolve differently on lap
+                    // two (relative to the dean, who rejected it, rather than to
+                    // the head who raised it), which is interesting and is
+                    // exactly what the two-department design already shows.
+                    self::stage(1, RoutingRuleRegistry::KIND_EXPLICIT, [
+                        'profile_ids' => [$org->person(DemoOrganisationSeeder::CIVIL_TECHNICIAN)],
+                    ], 'The drafter', 0, 0),
+                    self::stage(2, RoutingRuleRegistry::KIND_ROLE, ['role_id' => $dean], 'The dean decides', 300, 0, decision: true),
+                ],
+                'edges' => [
+                    ['from' => 2, 'to' => 1, 'verdict' => RouteVerdict::REJECTED],
+                ],
+            ],
+
+            self::ROUTE_TPL_TWO_DEPARTMENT_REVIEW => [
+                'description' => 'Demo fixture: two departments review in parallel and both paths reach '
+                    . 'the final stage. Its rule is actor-relative, so the two arrivals reach two '
+                    . 'different people — see #1058.',
+                'author' => DemoOrganisationSeeder::DEAN,
+                'stages' => [
+                    self::stage(1, RoutingRuleRegistry::KIND_ROLE, ['role_id' => $head], 'Both department heads', 0, 0),
+                    self::stage(2, RoutingRuleRegistry::KIND_ROLE_BELOW_ACTOR, [
+                        'role_id' => $technician,
+                    ], 'A technician in the receiving department decides', 300, 0, decision: true),
+                    self::stage(3, RoutingRuleRegistry::KIND_ROLE_BELOW_ACTOR, [
+                        'role_id' => $head,
+                    ], 'Back to the head to rework', 600, 180),
+                    // THE MERGE. Two transitions arrive: stage 2's drawn approve
+                    // edge and stage 3's positional fallthrough — which is what
+                    // the editor counts when it decides to draw "Paths merge
+                    // here — settles once" on a node. The rule is
+                    // actor-relative, so that label is false here.
+                    self::stage(4, RoutingRuleRegistry::KIND_ROLE_BELOW_ACTOR, [
+                        'role_id' => $head,
+                    ], 'Signed off by the head above whoever sent it', 900, 0, decision: true),
+                ],
+                'edges' => [
+                    ['from' => 2, 'to' => 4, 'verdict' => RouteVerdict::APPROVED],
+                    ['from' => 2, 'to' => 3, 'verdict' => RouteVerdict::REJECTED],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * One stage in the wire shape `PUT /graph` accepts.
+     *
+     * Every key is written out, including the nulls. The validator defaults the
+     * absent ones, but a demo fixture is also a worked example of the payload, and
+     * a reader who has to know which keys are optional to understand the shape is
+     * reading a worse example.
+     *
+     * @param array<string, mixed> $config
+     * @return array<string, mixed>
+     */
+    private static function stage(
+        int $position,
+        string $kind,
+        array $config,
+        string $label,
+        int $x,
+        int $y,
+        bool $decision = false,
+        ?string $quorum = null,
+        string $satisfiedBy = RouteSatisfaction::ACT,
+    ): array {
+        return [
+            'position' => $position,
+            'rule_kind' => $kind,
+            'rule_config' => $config,
+            'label' => $label,
+            'decision' => $decision,
+            'decision_quorum' => $quorum,
+            'satisfied_by' => $satisfiedBy,
+            'canvas_x' => $x,
+            'canvas_y' => $y,
+        ];
+    }
+
+    /**
+     * The tenant's effective `documents.routing_max_steps`, which is the ceiling
+     * {@see RouteTemplateGraph} applies.
+     *
+     * Read through the settings chain rather than passed a literal, because the
+     * ceiling is per-tenant ?? global ?? registry default and a second copy of it
+     * here would be free to disagree with the one the engine applies when a
+     * document is finally issued from the design.
+     */
+    private function routingMaxSteps(int $tenantId): int
+    {
+        $effective = $this->settings->effective($tenantId);
+        $configured = (int) ($effective[SettingsRegistry::DOCUMENTS_ROUTING_MAX_STEPS] ?? 0);
+
+        return $configured > 0 ? $configured : 1;
+    }
+
     // ── documents, and the routing states that distinguish them ──────────────
 
     /**
-     * Six documents, one per routing state that looks different from the others.
-     *
-     * Read as a table of states rather than as a story: D2 is the pristine
-     * inbox item, D3 is the finished one, D1 and D5 are the mixed fan-outs
-     * (which no linear document can be — D1 at step 1 through the scoped rule,
-     * D5 at step 1 through the unscoped one), D4 is the one that leaves the unit
-     * it was raised in AND is mixed at step 2, and D6 belongs to no unit at all.
-     * Nothing here is a second example of something already seeded.
+     * Issue every declared document, in order.
      *
      * @param array<string, int> $templateIds
+     * @param array<string, int> $routeTemplateIds
      * @return array<string, int> title => document id
      */
-    private function seedDocuments(DemoOrganisation $org, array $templateIds): array
+    private function seedDocuments(DemoOrganisation $org, array $templateIds, array $routeTemplateIds): array
+    {
+        $ids = [];
+        foreach (self::documentDeclarations($org) as $spec) {
+            $ids[$spec['title']] = $this->seedOneDocument($org, $templateIds, $routeTemplateIds, $spec);
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Every demo document as data — one entry per routing state that looks
+     * different from all the others.
+     *
+     * Read as a table of states rather than as a story. D2 is the pristine inbox
+     * item, D3 is the finished one, D1 and D5 are the mixed fan-outs (which no
+     * linear document can be — D1 at step 1 through the scoped rule, D5 at step 1
+     * through the unscoped one), D4 is the one that leaves the unit it was raised
+     * in AND is mixed at step 2, D6 belongs to no unit at all, and D7 is the
+     * fan-out gate nobody has answered. D8 onwards are the OUTCOMES — see the
+     * class docblock's second table. Nothing here is a second example of
+     * something already seeded.
+     *
+     * SPLIT OUT OF {@see seedDocuments()} for the same reason
+     * {@see templateDeclarations()} is split out of {@see seedTemplates()}: the
+     * summary line names how many of these carry route-design provenance, and the
+     * only way for that number to stay true without anybody maintaining it is for
+     * it to be counted from the array the rows are written from.
+     *
+     * Takes the {@see DemoOrganisation} rather than being pure, because a routing
+     * rule's config names ROLE and PROFILE IDS and those do not exist until the
+     * organisation is seeded. It still writes nothing and reads no database.
+     *
+     * @return list<array{
+     *     title: string, template: string, raiser: string, route: ?string,
+     *     route_template?: string,
+     *     steps: list<array{rule_kind: string, rule_config: array<string, mixed>, label: string,
+     *                       decision?: bool, decision_quorum?: string, satisfied_by?: string,
+     *                       on_approved?: int, on_rejected?: int}>,
+     *     acts: list<array{actor: string, action: string, note: ?string, verdict?: string}>,
+     *     corrections: int, captions: list<string>
+     * }>
+     */
+    private static function documentDeclarations(DemoOrganisation $org): array
     {
         $head = $org->role(DemoOrganisationSeeder::ROLE_HEAD);
         $dean = $org->role(DemoOrganisationSeeder::ROLE_DEAN);
         $technician = $org->role(DemoOrganisationSeeder::ROLE_TECHNICIAN);
         $secretary = $org->role(DemoOrganisationSeeder::ROLE_SECRETARY);
 
-        /**
-         * @var list<array{
-         *     title: string, template: string, raiser: string, route: string,
-         *     steps: list<array{rule_kind: string, rule_config: array<string, mixed>, label: string, decision?: bool}>,
-         *     acts: list<array{actor: string, action: string, note: ?string}>,
-         *     corrections: int, captions: list<string>
-         * }> $declared
-         */
-        $declared = [
+        return [
             // D1. The MIXED FAN-OUT, and the reason #1000 renders per-step counts
             // instead of one progress bar. `role_below_actor` resolves relative
             // to whoever reaches it, so step 1 fans out to both department heads
@@ -876,14 +1246,385 @@ final class DocumentDemoSeeder
                     'Demo fixture.',
                 ],
             ],
+            // D8. A QUORUM STOPPED PART WAY — the state #1041's answer is about,
+            // and the one that could not be looked at.
+            //
+            // D7 leaves a fan-out gate with NOTHING recorded, so somebody can
+            // walk up and answer it. That shows the FIRST act and the LAST. It
+            // cannot show the state between them, and reaching that state took
+            // three people signing in and answering in order — which is exactly
+            // the cost this whole fixture exists to remove.
+            //
+            // Three approvers, quorum `all`, and TWO approvals already recorded.
+            // The step's conclusion is still null. `act()` returns `decided` —
+            // what the STEP concluded — rather than the verdict the caller just
+            // gave, so both people who have answered were told "your approval is
+            // recorded, this step is not approved yet", and the document has not
+            // moved anywhere.
+            //
+            // WHY THREE AND NOT TWO. In a cohort of two with one approval in, the
+            // one remaining approver is also the LAST approver: the intermediate
+            // state and the settled state are one act apart, and a reader cannot
+            // tell "not yet" from "not yet, and I am the only reason". Three
+            // separates them — two people answered and were both told the step
+            // is still open, which is the sentence that surprises people.
+            //
+            // NAMED PEOPLE (`explicit`), the only such rule in this fixture, and
+            // not because a committee is better modelled that way. No demo role
+            // has three holders, and adding a third technician or a third
+            // secretary would silently change what D4, D5 and D7 fan out to —
+            // the same argument {@see DemoOrganisationSeeder::ROLE_REGISTRY_OFFICER}
+            // makes for giving the unaffiliated person a role of her own. It has
+            // the side benefit of putting the third core rule kind in the demo.
+            [
+                'title' => 'Demo research grant sign-off',
+                'template' => self::TPL_MECHANICAL_REPORT,
+                'raiser' => DemoOrganisationSeeder::MECHANICAL_HEAD,
+                'route' => 'Grant committee: all three must approve',
+                'steps' => [
+                    [
+                        'rule_kind' => RoutingRuleRegistry::KIND_EXPLICIT,
+                        'rule_config' => [
+                            'profile_ids' => [
+                                $org->person(DemoOrganisationSeeder::DEAN),
+                                $org->person(DemoOrganisationSeeder::CIVIL_HEAD),
+                                $org->person(DemoOrganisationSeeder::FACULTY_SECRETARY),
+                            ],
+                        ],
+                        'label' => 'The grant committee (three named members)',
+                        'decision' => true,
+                        // Named ON THE STEP rather than left to the settings
+                        // chain, so the fixture shows the same thing in a tenant
+                        // whose default is `any` — under which this route would
+                        // have concluded on the dean's approval and the state
+                        // this document exists for would not exist.
+                        'decision_quorum' => RouteQuorum::ALL,
+                    ],
+                ],
+                'acts' => [
+                    [
+                        'actor' => DemoOrganisationSeeder::DEAN,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::APPROVED,
+                        'note' => 'Approved against the faculty research line.',
+                    ],
+                    [
+                        'actor' => DemoOrganisationSeeder::CIVIL_HEAD,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::APPROVED,
+                        'note' => 'Civil Engineering has no objection.',
+                    ],
+                    // The faculty secretary has NOT answered, and that is the
+                    // fixture. Sign in as her and one act settles the step.
+                ],
+                'corrections' => 0,
+                'captions' => [
+                    'Two of three approvals recorded; the step is not approved yet.',
+                    'Demo fixture.',
+                ],
+            ],
+
+            // D9 and D10. THE SAME GATE, THE SAME DESIGN, TWO DESTINATIONS.
+            //
+            // #1030's claim is that an approval and a rejection send a document
+            // to DIFFERENT places, and that a rejection never inherits the
+            // approval's destination. A single document can only take one branch,
+            // so the claim is not checkable from one — and two documents on two
+            // different designs would leave a reader wondering which of the
+            // differences did the work.
+            //
+            // So: ONE design, two documents, one answer each, and the answer is
+            // the only variable. The approve edge jumps over stage 2 entirely and
+            // lands on filing; the reject edge lands on stage 2, with the registry
+            // officer, which an approval never reaches. Open the two record pages
+            // side by side and the whole of #1030 is one comparison.
+            [
+                'title' => 'Demo stationery purchase order',
+                'template' => self::TPL_CIVIL_WORKS_ORDER,
+                'raiser' => DemoOrganisationSeeder::CIVIL_HEAD,
+                'route_template' => self::ROUTE_TPL_PURCHASE_APPROVAL,
+                // Null because the design supplies both the steps and the route's
+                // title — see {@see seedOneDocument()} for why the title is taken
+                // off the template row rather than typed a second time here.
+                'route' => null,
+                'steps' => [],
+                'acts' => [
+                    [
+                        'actor' => DemoOrganisationSeeder::DEAN,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::APPROVED,
+                        'note' => 'Approved. Send it straight to filing.',
+                    ],
+                ],
+                'corrections' => 0,
+                'captions' => ['Approved at the gate; it skipped the referral stage.', 'Demo fixture.'],
+            ],
+
+            [
+                'title' => 'Demo overtime claim',
+                'template' => self::TPL_CIVIL_WORKS_ORDER,
+                'raiser' => DemoOrganisationSeeder::CIVIL_HEAD,
+                'route_template' => self::ROUTE_TPL_PURCHASE_APPROVAL,
+                'route' => null,
+                'steps' => [],
+                'acts' => [
+                    [
+                        'actor' => DemoOrganisationSeeder::DEAN,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::REJECTED,
+                        'note' => 'Not approved at faculty level; refer it to the registry.',
+                    ],
+                ],
+                'corrections' => 0,
+                'captions' => ['Rejected at the gate; it went to the registry, not to filing.', 'Demo fixture.'],
+            ],
+
+            // D11. A REJECTION AT A GATE WITH NO REJECT EDGE — the chain ENDS.
+            //
+            // The other half of #1030, and the half that is invisible without a
+            // seeded example, because what it produces is an ABSENCE: a route
+            // whose second step never opened, no open recipient row anywhere, and
+            // a document that has simply stopped. Every other settled document in
+            // this fixture (D3, D5, D6) got there by being acknowledged at its
+            // LAST step, so "nothing open" already had a reading — "it finished".
+            // This is the other reading, and the two are told apart only by the
+            // verdict on the trail and by the step sitting there with nobody at
+            // it.
+            //
+            // Hand-composed rather than applied from a design, deliberately: an
+            // ABSENT edge is the one piece of configuration a canvas cannot show,
+            // and burying it in a list of three designs would hide the very thing
+            // the document is for.
+            [
+                'title' => 'Demo conference travel request',
+                'template' => self::TPL_CIVIL_WORKS_ORDER,
+                'raiser' => DemoOrganisationSeeder::CIVIL_HEAD,
+                'route' => 'Dean approves, then the secretariat files it',
+                'steps' => [
+                    [
+                        'rule_kind' => RoutingRuleRegistry::KIND_ROLE,
+                        'rule_config' => ['role_id' => $dean],
+                        'label' => 'The dean',
+                        'decision' => true,
+                        // No `on_rejected`. An approval would have fallen through
+                        // to step 2 — that fallthrough is what makes a gate usable
+                        // in a plain linear route — and a rejection gets no
+                        // fallback at all.
+                    ],
+                    [
+                        'rule_kind' => RoutingRuleRegistry::KIND_EXPLICIT,
+                        'rule_config' => [
+                            'profile_ids' => [$org->person(DemoOrganisationSeeder::FACULTY_SECRETARY)],
+                        ],
+                        'label' => 'The faculty secretary files it',
+                    ],
+                ],
+                'acts' => [
+                    [
+                        'actor' => DemoOrganisationSeeder::DEAN,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::REJECTED,
+                        'note' => 'Not approved. There is no budget this quarter.',
+                    ],
+                ],
+                'corrections' => 0,
+                'captions' => ['Refused at the gate. Step 2 was never opened.', 'Demo fixture.'],
+            ],
+
+            // D12. ROUND THE REWORK LOOP TWICE — and the reason #1037 is filed.
+            //
+            // A reject edge pointing BACKWARDS is the commonest real approval
+            // design ("send it back to be fixed"), it is a cycle, and the rule at
+            // the stage it returns to is re-resolved fresh on every arrival. All
+            // of that was true, tested, and absent from the demo.
+            //
+            // Seeded on its THIRD arrival at the drafting stage, with two
+            // rejections behind it — because ONE lap is indistinguishable from a
+            // document that merely has an open item, and because two laps is the
+            // cheapest way to turn #1037's finding into something a person can
+            // look at rather than read. Open this record page: the third lap is
+            // rendered exactly like the first. One open row, no lap number,
+            // nothing that says "returned twice". The only place the laps exist at
+            // all is as repetition in the trail, which IS the report.
+            [
+                'title' => 'Demo laboratory refurbishment plan',
+                'template' => self::TPL_CIVIL_WORKS_ORDER,
+                'raiser' => DemoOrganisationSeeder::CIVIL_HEAD,
+                'route_template' => self::ROUTE_TPL_DRAFTING_LOOP,
+                'route' => null,
+                'steps' => [],
+                'acts' => [
+                    // Lap one.
+                    [
+                        'actor' => DemoOrganisationSeeder::CIVIL_TECHNICIAN,
+                        'action' => RouteAction::FORWARDED,
+                        'note' => 'First draft, submitted for approval.',
+                    ],
+                    [
+                        'actor' => DemoOrganisationSeeder::DEAN,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::REJECTED,
+                        'note' => 'The costings are missing. Back to the drafter.',
+                    ],
+                    // Lap two — a NEW recipient row for the same person, because
+                    // un-closing the first would erase the fact that she acted on
+                    // lap one.
+                    [
+                        'actor' => DemoOrganisationSeeder::CIVIL_TECHNICIAN,
+                        'action' => RouteAction::FORWARDED,
+                        'note' => 'Costings added; resubmitted.',
+                    ],
+                    [
+                        'actor' => DemoOrganisationSeeder::DEAN,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::REJECTED,
+                        'note' => 'Still no ventilation figures. Back again.',
+                    ],
+                    // …and it is now sitting on lap three, open at the drafting
+                    // stage, looking exactly like lap one.
+                ],
+                'corrections' => 0,
+                'captions' => ['Rejected twice; back with the drafter for a third time.', 'Demo fixture.'],
+            ],
+
+            // D13. THE MERGE THE CANVAS DESCRIBES WRONGLY (#1058).
+            //
+            // `packages/ui`'s flow editor draws "Paths merge here — settles once"
+            // on any stage with more than one arriving transition. The claim is
+            // TRUE when the arrivals resolve to the same people — the second
+            // arrival de-duplicates against an item they already hold — and FALSE
+            // when the stage's rule is ACTOR-RELATIVE, which is the rule kind a
+            // merge is most likely to carry, because an actor-relative rule
+            // upstream is what put the two chains there in the first place.
+            //
+            // Both cases are pinned by
+            // {@see \Tests\Core\Document\RouteTemplate\RouteTemplateInstantiationRealEngineTest}
+            // and NEITHER was seeded, so a wrong label on a canvas was visible
+            // only to somebody reading a test. This document is the second case:
+            // two chains reach stage 4, resolve to two DIFFERENT heads, nothing
+            // de-duplicates, and the stage ends up holding two independent
+            // cohorts — two open items at a node the editor has just said settles
+            // once.
+            //
+            // Left with BOTH stage-4 items open. Answering them settles the stage
+            // TWICE, which is the finding; seeding that instead would spend the
+            // walk-up and leave a finished document, and two open rows at a merge
+            // are already the contradiction. Reported, not worked around —
+            // nothing here is bent to hide it.
+            [
+                'title' => 'Demo cross-department equipment review',
+                'template' => self::TPL_FACULTY_CIRCULAR,
+                'raiser' => DemoOrganisationSeeder::DEAN,
+                'route_template' => self::ROUTE_TPL_TWO_DEPARTMENT_REVIEW,
+                'route' => null,
+                'steps' => [],
+                'acts' => [
+                    // Both departments take it up, so the two chains are real.
+                    [
+                        'actor' => DemoOrganisationSeeder::CIVIL_HEAD,
+                        'action' => RouteAction::FORWARDED,
+                        'note' => 'Passing to Civil for a technical opinion.',
+                    ],
+                    [
+                        'actor' => DemoOrganisationSeeder::MECHANICAL_HEAD,
+                        'action' => RouteAction::FORWARDED,
+                        'note' => 'Passing to Mechanical for a technical opinion.',
+                    ],
+                    // Chain A approves and takes the drawn edge straight to the
+                    // merge, where the rule resolves below HER unit — so it
+                    // reaches the civil head.
+                    [
+                        'actor' => DemoOrganisationSeeder::CIVIL_TECHNICIAN,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::APPROVED,
+                        'note' => 'Civil is satisfied with the specification.',
+                    ],
+                    // Chain B rejects and goes to the rework stage…
+                    [
+                        'actor' => DemoOrganisationSeeder::MECHANICAL_TECHNICIAN,
+                        'action' => RouteAction::ACKNOWLEDGED,
+                        'verdict' => RouteVerdict::REJECTED,
+                        'note' => 'Mechanical wants the load figures reworked.',
+                    ],
+                    // …and arrives at the SAME merge stage by the other path,
+                    // where the same rule resolves below HIS unit and reaches
+                    // somebody else entirely. Nothing de-duplicates.
+                    [
+                        'actor' => DemoOrganisationSeeder::MECHANICAL_HEAD,
+                        'action' => RouteAction::FORWARDED,
+                        'note' => 'Reworked; sending it on to the review stage.',
+                    ],
+                ],
+                'corrections' => 0,
+                'captions' => [
+                    'Two chains arrived at one review stage and did not merge.',
+                    'Demo fixture.',
+                ],
+            ],
+
+            // D14. A STAGE SATISFIED BY DELIVERY (#1054) — people who are TOLD.
+            //
+            // The motivating shape, and the one that makes the feature
+            // comprehensible at a glance: circulate to the heads, one of them
+            // passes it on, and the last stage tells every technician. Their
+            // recipient rows are opened so that WHO WAS TOLD is recorded as
+            // durably as who acted, and closed by the very event that opened them
+            // — so they appear in the document's recipient list and in nobody's
+            // "Awaiting me", and in nobody's "Acted on by me" either, because they
+            // did not act.
+            //
+            // THE STEP IS THE ONLY VARIABLE, DELIBERATELY. Its rule is the same
+            // unscoped `role` fan-out D5 uses, spanning the same two units and
+            // reaching the same two people. D5 ASKS them and one of its rows is
+            // still open; this one TELLS them and neither row ever was. Put the
+            // two record pages side by side and the difference is `satisfied_by`
+            // and nothing else.
+            //
+            // NO ACT IS DECLARED AT THE DELIVERY STEP, and none could be: nobody
+            // there holds an open item, so `act()` refuses. That refusal is this
+            // seeder's safety property working exactly as intended — see the
+            // class docblock on why every act goes through the engine — and not
+            // an obstacle to route around.
+            //
+            // THE POSITIVE CONTROL is the mechanical head, whose step-1 item is
+            // still open. "The technicians are awaiting nothing" is a claim an
+            // empty folder satisfies for many reasons — a route that never
+            // issued, a rule that resolved to nobody, a broken folder predicate —
+            // and only somebody on the SAME document who IS still waiting rules
+            // all of them out.
+            [
+                'title' => 'Demo workshop reopening notice',
+                'template' => self::TPL_FACULTY_CIRCULAR,
+                'raiser' => DemoOrganisationSeeder::DEAN,
+                'route' => 'To the departments, then tell every technician',
+                'steps' => [
+                    [
+                        'rule_kind' => RoutingRuleRegistry::KIND_ROLE,
+                        'rule_config' => ['role_id' => $head],
+                        'label' => 'Both department heads',
+                    ],
+                    [
+                        'rule_kind' => RoutingRuleRegistry::KIND_ROLE,
+                        'rule_config' => ['role_id' => $technician],
+                        'label' => 'Every technician in the tenant — for information',
+                        'satisfied_by' => RouteSatisfaction::DELIVERY,
+                    ],
+                ],
+                'acts' => [
+                    [
+                        'actor' => DemoOrganisationSeeder::CIVIL_HEAD,
+                        'action' => RouteAction::FORWARDED,
+                        'note' => 'Noted; passing it on to the workshops.',
+                    ],
+                    // The mechanical head has NOT acted: the positive control.
+                ],
+                'corrections' => 0,
+                'captions' => [
+                    'The technicians were told. Nobody is waiting on them.',
+                    'Demo fixture.',
+                ],
+            ],
         ];
-
-        $ids = [];
-        foreach ($declared as $spec) {
-            $ids[$spec['title']] = $this->seedOneDocument($org, $templateIds, $spec);
-        }
-
-        return $ids;
     }
 
     /**
@@ -891,15 +1632,23 @@ final class DocumentDemoSeeder
      * transaction, so the title check that guards it is a complete answer.
      *
      * @param array<string, int> $templateIds
+     * @param array<string, int> $routeTemplateIds
      * @param array{
-     *     title: string, template: string, raiser: string, route: string,
-     *     steps: list<array{rule_kind: string, rule_config: array<string, mixed>, label: string, decision?: bool}>,
-     *     acts: list<array{actor: string, action: string, note: ?string}>,
+     *     title: string, template: string, raiser: string, route: ?string,
+     *     route_template?: string,
+     *     steps: list<array{rule_kind: string, rule_config: array<string, mixed>, label: string,
+     *                       decision?: bool, decision_quorum?: string, satisfied_by?: string,
+     *                       on_approved?: int, on_rejected?: int}>,
+     *     acts: list<array{actor: string, action: string, note: ?string, verdict?: string}>,
      *     corrections: int, captions: list<string>
      * } $spec
      */
-    private function seedOneDocument(DemoOrganisation $org, array $templateIds, array $spec): int
-    {
+    private function seedOneDocument(
+        DemoOrganisation $org,
+        array $templateIds,
+        array $routeTemplateIds,
+        array $spec,
+    ): int {
         $tenantId = $org->tenantId;
 
         $existing = $this->findDocumentByTitle($tenantId, $spec['title']);
@@ -950,20 +1699,28 @@ final class DocumentDemoSeeder
                 );
             }
 
-            $route = $this->router->issue($tenantId, $raiser, $document, $spec['route'], $spec['steps']);
+            $route = $this->issueRoute($org, $routeTemplateIds, $document, $spec);
 
             foreach ($spec['acts'] as $act) {
                 // Every act goes through the engine, which means an act this
                 // fixture got wrong is a refusal rather than a row. That is the
                 // check that makes the dataset trustworthy: `act()` will not
                 // forward from the last step, will not return from the first,
-                // and will not accept an actor holding no open item.
+                // will not forward from a DECISION step (#1014), will not accept
+                // a verdict on a circulation step, and will not accept an actor
+                // holding no open item — which is why no act is declared at a
+                // delivery stage (#1054), where every row is closed the instant
+                // it exists.
                 $this->router->act(
                     $tenantId,
                     $org->person($act['actor']),
                     $route['route'],
                     $act['action'],
                     $act['note'],
+                    // Null on every circulation act, which is what `verdict IS
+                    // NULL` means: "this act said nothing about approval". It is
+                    // never a third verdict and never a refusal.
+                    $act['verdict'] ?? null,
                 );
             }
 
@@ -978,6 +1735,95 @@ final class DocumentDemoSeeder
         }
 
         return (int) $document['id'];
+    }
+
+    /**
+     * Issue the route for one document — either from a stored DESIGN (#1056) or
+     * from steps the declaration composed itself.
+     *
+     * WHY BOTH PATHS EXIST IN A FIXTURE. Applying a design is not a shorthand for
+     * composing the same steps: it writes `template_id` and a `template_name`
+     * SNAPSHOT onto the route, and those two columns are the whole of #1056's
+     * provenance. A demo with no route carrying them cannot show the difference
+     * between a route somebody composed and a route somebody APPLIED, which is
+     * the question the record page's routing panel answers.
+     *
+     * THE TITLE COMES OFF THE TEMPLATE ROW, not out of the declaration, because
+     * that is what {@see \Whity\Api\DocumentRoutingApiHandler::createFromTemplate()}
+     * does. A fixture that typed the title separately could disagree with the
+     * design it names — rename the design and the demo would quietly keep
+     * claiming the old name in one place and the new one in the other, which is
+     * exactly the drift the snapshot column exists to make legible rather than to
+     * create.
+     *
+     * THE CONVERSION IS THE REAL ONE. {@see RouteTemplateInstantiation::toRouteSteps()}
+     * is called here, not a private copy of it, so a design this seeder draws that
+     * the converter would refuse fails LOUDLY at seed time instead of becoming a
+     * demo route the product could not have produced.
+     *
+     * @param array<string, int>   $routeTemplateIds
+     * @param array<string, mixed> $document
+     * @param array<string, mixed> $spec
+     * @return array{route: array<string, mixed>, steps: list<array<string, mixed>>,
+     *               edges: list<array<string, mixed>>, resolved: int, delivered: int}
+     */
+    private function issueRoute(
+        DemoOrganisation $org,
+        array $routeTemplateIds,
+        array $document,
+        array $spec,
+    ): array {
+        $tenantId = $org->tenantId;
+        $raiser = $org->person($spec['raiser']);
+        $designName = $spec['route_template'] ?? null;
+
+        if ($designName === null) {
+            $title = $spec['route'] ?? null;
+            if (!is_string($title) || trim($title) === '') {
+                throw new RuntimeException(
+                    "Demo document '{$spec['title']}' names no route design and no route title."
+                );
+            }
+
+            /** @var list<array<string, mixed>> $steps */
+            $steps = $spec['steps'];
+
+            return $this->router->issue($tenantId, $raiser, $document, $title, $steps);
+        }
+
+        if ($spec['steps'] !== []) {
+            // Refused rather than ignored. A declaration carrying both would have
+            // one of them silently discarded, and the reader of this file would
+            // have no way to know which — the same argument the engine makes for
+            // refusing a quorum on a non-decision step.
+            throw new RuntimeException(
+                "Demo document '{$spec['title']}' declares both a route design and its own steps. "
+                . 'It can have one or the other.'
+            );
+        }
+
+        if (!isset($routeTemplateIds[$designName])) {
+            throw new RuntimeException("Demo document '{$spec['title']}' names an unseeded route design.");
+        }
+
+        $designId = $routeTemplateIds[$designName];
+        $design = $this->routeTemplates->findById($designId, $tenantId);
+        if ($design === null) {
+            throw new RuntimeException("Demo route design '{$designName}' could not be read back.");
+        }
+
+        return $this->router->issue(
+            $tenantId,
+            $raiser,
+            $document,
+            (string) $design['name'],
+            RouteTemplateInstantiation::toRouteSteps(
+                $this->routeTemplates->stepsFor($designId, $tenantId),
+                $this->routeTemplates->edgesFor($designId, $tenantId),
+            ),
+            $designId,
+            (string) $design['name'],
+        );
     }
 
     // ── collections, and why `starred` is one of them ─────────────────────────
@@ -1061,6 +1907,219 @@ final class DocumentDemoSeeder
         }
 
         return $this->collections->create($tenantId, $profileId, $name);
+    }
+
+    // ── verification codes (#1036 / #1051) ─────────────────────────────
+
+    /**
+     * One LIVE verification code, and one that has been REVOKED.
+     *
+     * WHY BOTH, AND WHY ONE OF THEM PROVES NOTHING ALONE. The public verification
+     * page answers a revoked code and an unknown one with the SAME body by
+     * default — deliberately, so that a stranger probing tokens cannot learn
+     * which strings name a real document ({@see VerificationPresenter::refusal()}
+     * calls that the oracle question and decides it there). A fixture with only a
+     * revoked code therefore renders exactly like a fixture with no code at all
+     * and a typo in the URL. The LIVE one is what gives the refusal something to
+     * be different from.
+     *
+     * THEY GO ON DOCUMENTS THAT ALREADY EXIST. A code is an ATTRIBUTE of a
+     * document, not a routing state, so inventing two more documents to carry one
+     * would break the rule the rest of this file follows — nothing is seeded that
+     * would look like something already seeded.
+     *
+     *   LIVE      the registry notice: issued centrally, acknowledged, finished.
+     *             The shape of thing that gets printed and handed over, which is
+     *             the only reason a verification code exists.
+     *   REVOKED   the safety inspection report, which is also the one document
+     *             carrying TWO artifact versions. "The printing that went out
+     *             with version 1 has been withdrawn" is the story its own
+     *             correction already tells, so the two fixtures explain each
+     *             other instead of each needing their own explanation.
+     *
+     * THE REVOKED DOCUMENT IS LEFT WITH NO LIVE CODE, which is the state
+     * {@see DocumentQrService::revoke()} produces and documents: withdrawing a
+     * code and issuing a new one are different decisions, and folding them
+     * together would mean an operator who withdrew a forgery's code immediately
+     * published one that verifies.
+     *
+     * BOTH URLS ARE REPORTED, and that is not a convenience. The record panel
+     * publishes the LIVE code's URL only ({@see \Whity\Api\DocumentQrApiHandler::show()}
+     * returns `token: null` when none is in force), so there is no screen in the
+     * product from which a revoked code can be scanned. Printing it here is
+     * currently the only way the revoked half of this fixture can be reached at
+     * all. See the seeding report for the finding.
+     *
+     * @param array<string, int> $documentIds
+     * @return list<string>
+     */
+    private function seedQrCodes(DemoOrganisation $org, array $documentIds): array
+    {
+        $tenantId = $org->tenantId;
+
+        if (!$this->qr->isConfigured()) {
+            // An INSTANCE fault, not a tenant preference, and reported as one:
+            // sending somebody to the tenant's settings page for a missing
+            // APP_URL is the exact confusion `isConfigured()` exists to prevent.
+            return [
+                'Verification codes SKIPPED: this instance has never been told its own public address '
+                . '(APP_URL), so a minted code would encode a URL nothing can follow. Set APP_URL and '
+                . 're-run to seed a live code and a revoked one.',
+            ];
+        }
+
+        $lines = $this->enableQrForTenant($tenantId);
+
+        $live = $this->ensureQrCode(
+            $tenantId,
+            $this->documentId($documentIds, self::QR_LIVE_DOCUMENT),
+            $org->person(DemoOrganisationSeeder::REGISTRY_OFFICER),
+            revoke: false,
+        );
+        $revoked = $this->ensureQrCode(
+            $tenantId,
+            $this->documentId($documentIds, self::QR_REVOKED_DOCUMENT),
+            $org->person(DemoOrganisationSeeder::CIVIL_TECHNICIAN),
+            revoke: true,
+        );
+
+        $lines[] = sprintf(
+            'Verification: "%s" carries a LIVE code — %s',
+            self::QR_LIVE_DOCUMENT,
+            $live === null ? '(could not be read back)' : $this->qr->verificationUrl($live),
+        );
+        $lines[] = sprintf(
+            'Verification: "%s" carries a WITHDRAWN one, and no live code — %s. Scan both: the second '
+            . 'is what a retired printing answers, which by default is what an unknown token answers '
+            . 'too (documents.qr_public_detail).',
+            self::QR_REVOKED_DOCUMENT,
+            $revoked === null ? '(could not be read back)' : $this->qr->verificationUrl($revoked),
+        );
+
+        return $lines;
+    }
+
+    /**
+     * Turn the tenant switch on — ONCE, and never over an operator's own answer.
+     *
+     * `documents.qr_enabled` defaults to FALSE, and the default is not an
+     * oversight: switching it on publishes an unauthenticated verification
+     * surface for that tenant's documents, which
+     * {@see \Whity\Core\Document\Qr\DocumentQrPolicy} says is a decision
+     * somebody should make rather than inherit. The demo makes that decision on
+     * the demo tenant's behalf, because a QR fixture in a tenant with the feature
+     * off is a fixture that renders nothing.
+     *
+     * WRITTEN ONLY WHEN THE TENANT HAS NO OPINION. `overriddenKeys()` is asked
+     * whether a per-tenant row exists at all, not what it says — so an operator
+     * who looked at the demo and deliberately switched the feature back OFF keeps
+     * their answer on the next run. That is the same "insert when absent, never
+     * update" discipline the templates, blocks and documents follow, applied to
+     * the one thing here that is a setting rather than a row.
+     *
+     * `qr_public_detail` IS SET TOO, AND THAT IS A JUDGEMENT WORTH SEEING. Left
+     * at its default (`minimal`) a revoked code and an unknown token produce
+     * BYTE-IDENTICAL answers, so the revoked half of this fixture would be
+     * unreachable by inspection — it would seed correctly and demonstrate
+     * nothing, which is the one failure mode a demo dataset must not have. At
+     * `stage` a revoked code says it has been retired. The privacy trade is real
+     * and is exactly the one the setting exists to let an operator make; the demo
+     * tenant is where "tell holders where their paper stands" is the intended
+     * posture, and one `settings` write puts it back.
+     *
+     * @return list<string>
+     */
+    private function enableQrForTenant(int $tenantId): array
+    {
+        $overridden = $this->settings->overriddenKeys($tenantId);
+        $lines = [];
+
+        if (!in_array(SettingsRegistry::DOCUMENTS_QR_ENABLED, $overridden, true)) {
+            $this->settings->setTenant($tenantId, SettingsRegistry::DOCUMENTS_QR_ENABLED, 'true');
+            $lines[] = sprintf(
+                'Settings: %s turned ON for this tenant (it defaults to false — it publishes an '
+                . 'unauthenticated verification page). Left alone on later runs.',
+                SettingsRegistry::DOCUMENTS_QR_ENABLED,
+            );
+        }
+
+        if (!in_array(SettingsRegistry::DOCUMENTS_QR_PUBLIC_DETAIL, $overridden, true)) {
+            $this->settings->setTenant(
+                $tenantId,
+                SettingsRegistry::DOCUMENTS_QR_PUBLIC_DETAIL,
+                VerificationPresenter::DETAIL_STAGE,
+            );
+            $lines[] = sprintf(
+                'Settings: %s set to "%s", so a revoked code says it was retired instead of answering '
+                . 'exactly what an unknown token answers. Set it back to "%s" to see the private default.',
+                SettingsRegistry::DOCUMENTS_QR_PUBLIC_DETAIL,
+                VerificationPresenter::DETAIL_STAGE,
+                VerificationPresenter::DETAIL_MINIMAL,
+            );
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Give one document a code, and optionally withdraw it — at most once, ever.
+     *
+     * THE GUARD IS "HAS THIS DOCUMENT EVER HAD A CODE", not "does it have a live
+     * one", and the difference is the whole of the idempotency. A withdrawn code
+     * leaves the document with NO code in force, so a guard built on
+     * {@see DocumentQrService::active()} would see nothing, mint again, withdraw
+     * again, and add two rows to `document_qr_tokens` on every single run —
+     * drift that no table-count test of the DOCUMENTS would ever notice.
+     *
+     * @return string|null The raw token, or null if it could not be read back.
+     */
+    private function ensureQrCode(int $tenantId, int $documentId, int $actorId, bool $revoke): ?string
+    {
+        $existing = $this->qrTokens->listForDocument($tenantId, $documentId);
+        if ($existing !== []) {
+            // Already seeded. The first row is the newest (`ORDER BY id DESC`),
+            // which for both fixtures is the one this method minted.
+            return isset($existing[0]['token']) ? (string) $existing[0]['token'] : null;
+        }
+
+        $minted = $this->qr->mint($tenantId, $documentId, $actorId);
+        if ($minted === null) {
+            return null;
+        }
+
+        $token = (string) $minted['token'];
+
+        if ($revoke) {
+            // Through the service, which latches `revoked_at` and stamps
+            // `withdrawn` as the reason. Writing the column here instead would
+            // let this fixture express a revocation the product cannot perform,
+            // which is the same mistake as a hand-written recipient row.
+            $this->qr->revoke($tenantId, $documentId, $actorId);
+        }
+
+        return $token;
+    }
+
+    /**
+     * One seeded document's id, by title.
+     *
+     * THROWS on a title this fixture does not contain, deliberately, and for the
+     * reason {@see DemoOrganisation}'s accessors throw: a demo that quietly stops
+     * discriminating is the one failure mode a demo dataset must not have. A
+     * silent null here would mean a renamed document takes its verification code
+     * with it and nobody is told.
+     *
+     * @param array<string, int> $documentIds
+     */
+    private function documentId(array $documentIds, string $title): int
+    {
+        if (!isset($documentIds[$title])) {
+            throw new RuntimeException(
+                "The demo document '{$title}' was not seeded, so nothing can be attached to it."
+            );
+        }
+
+        return $documentIds[$title];
     }
 
     // ── lookups used for idempotency ─────────────────────────────────────────
