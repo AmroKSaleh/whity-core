@@ -16,6 +16,9 @@ use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Organizer\CoreDocumentViews;
+use Whity\Core\Document\Qr\DocumentQrPolicy;
+use Whity\Core\Document\Qr\DocumentQrService;
+use Whity\Core\Document\Qr\DocumentQrStamp;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentViewContext;
 use Whity\Core\Document\Organizer\DocumentViewPresenter;
@@ -203,6 +206,17 @@ final class DocumentsApiHandler
         // the host cannot tell.
         private readonly ?RouteEventRepository $routeEvents = null,
         private readonly ?RouteRecipientRepository $routeRecipients = null,
+        // ── #1036: the document's QR verification code ───────────────────────
+        //
+        // OPTIONAL, following the three above and for the same reason: a host
+        // that does not wire it has no QR at all — no code minted, no code
+        // placed, no `qr` region on the record page and no QR routes registered
+        // — which is a TOTAL and therefore visible absence rather than a partial
+        // and silent one. The failure #1036 forbids is the switch being ON and
+        // the document quietly carrying nothing; that cannot happen here,
+        // because a host without this collaborator has no switch to turn on in
+        // its documents UI either.
+        private readonly ?DocumentQrService $qr = null,
     ) {
     }
 
@@ -345,6 +359,20 @@ final class DocumentsApiHandler
             return Response::error('The document could not be created', 503);
         }
 
+        // MINTED BEFORE THE RENDER, which is the whole reason this route can
+        // carry a code at all: `raise()` commits the record first, so the
+        // document has an id to bind a token to while there is still a render to
+        // put it on. (The older persisted-preview path,
+        // `POST /api/document-templates/{id}/render`, renders BEFORE the record
+        // exists, so it cannot — see this handler's `qrStamp()`.)
+        //
+        // A mint failure must not lose the document: the record is already
+        // committed and is the deliverable. So it degrades to "no code on this
+        // artifact", which the record page reports and an operator can fix in
+        // one click, rather than to a 503 that discards a document somebody
+        // just filled in.
+        $stamp = $this->qrStamp($tenantId, $callerId, (int) $document['id'], $templateData, $effective);
+
         $render = $this->attemptRender(
             $tenantId,
             $callerId,
@@ -355,6 +383,7 @@ final class DocumentsApiHandler
             $requested,
             $renderable,
             $persistable,
+            $stamp,
         );
 
         return Response::json([
@@ -395,6 +424,7 @@ final class DocumentsApiHandler
         mixed $requested,
         bool $renderable,
         bool $persistable,
+        ?DocumentQrStamp $qr = null,
     ): array {
         if ($requested === false) {
             return ['attempted' => false, 'stored' => false, 'reason' => 'declined'];
@@ -407,7 +437,7 @@ final class DocumentsApiHandler
         }
 
         try {
-            $pdf = $this->renderer->render($tenantId, $templateData, $rows, $sheet);
+            $pdf = $this->renderer->render($tenantId, $templateData, $rows, $sheet, $qr);
         } catch (DocumentRenderRejectedException $e) {
             // Reachable only through `sheet`: `dataRows` was normalised and the
             // ceilings were not, so an oversized batch or template lands here.
@@ -429,6 +459,61 @@ final class DocumentsApiHandler
         }
 
         return ['attempted' => true, 'stored' => true, 'reason' => null];
+    }
+
+    /**
+     * The verification code this document should be rendered with, or null.
+     *
+     * THE THREE SCOPES OF #1036 MEET HERE, and this is the only place they do:
+     *
+     *   1. the tenant switch + 2. the template flag →
+     *      {@see DocumentQrPolicy::enabled()}
+     *   3. where it sits on the page → the renderer, via
+     *      {@see \Whity\Core\Document\Qr\QrTemplateComposer}, which supplies a
+     *      default placement when nobody authored one
+     *
+     * Returning null is not "skip the code". It is the instruction the renderer
+     * needs to REMOVE an authored one, so a tenant who switched the feature off
+     * does not get an empty dashed box in the corner of every document issued
+     * from a template that still has the element on it.
+     *
+     * A HOST WITH NO QR SERVICE returns null too, and that is a total absence
+     * rather than a silent partial one — see the constructor.
+     *
+     * MINT FAILURES DEGRADE, THEY DO NOT THROW. Both callers have already
+     * committed the document (create) or are correcting one that exists
+     * (re-render), and neither should lose that work because a token insert
+     * lost a race or the instance has no public URL configured. The document is
+     * simply rendered without a code, the record page says so, and the operator
+     * can mint one deliberately.
+     *
+     * @param array<string, mixed>  $templateData
+     * @param array<string, string> $effective
+     */
+    private function qrStamp(
+        int $tenantId,
+        int $callerId,
+        int $documentId,
+        array $templateData,
+        array $effective,
+    ): ?DocumentQrStamp {
+        if ($this->qr === null || !DocumentQrPolicy::enabled($effective, $templateData)) {
+            return null;
+        }
+
+        try {
+            $token = $this->qr->ensure($tenantId, $documentId, $callerId);
+        } catch (\Throwable $e) {
+            error_log('[DocumentsApiHandler] minting the verification code failed: ' . $e->getMessage());
+
+            return null;
+        }
+
+        if ($token === null) {
+            return null;
+        }
+
+        return DocumentQrStamp::forToken($this->qr, (string) $token['token']);
     }
 
     /**
@@ -815,8 +900,16 @@ final class DocumentsApiHandler
             $dataRows = $document['variable_data'] ?? null;
         }
 
+        // A CORRECTION CARRIES THE SAME CODE AS THE ORIGINAL. `ensure()` is
+        // idempotent and never rotates, so re-rendering a document does not
+        // retire the paper already in circulation — which it would if the code
+        // were re-minted per artifact, silently voiding every copy the moment
+        // somebody fixed a typo. Rotation is a decision an operator takes
+        // explicitly, through `POST /api/documents/{id}/qr`.
+        $stamp = $this->qrStamp($tenantId, $callerId, (int) $document['id'], $templateData, $effective);
+
         try {
-            $pdf = $this->renderer->render($tenantId, $templateData, $dataRows, $body['sheet'] ?? null);
+            $pdf = $this->renderer->render($tenantId, $templateData, $dataRows, $body['sheet'] ?? null, $stamp);
         } catch (DocumentRenderRejectedException $e) {
             // ->clientMessage, never ->getMessage(): see the exception's docblock.
             return Response::error($e->clientMessage, 422);
@@ -922,6 +1015,34 @@ final class DocumentsApiHandler
                 writePermission: null,
                 recordScoped: true,
             ),
+            // #1036. READ is null for the reason the three above are: the
+            // region's dedicated route (`GET /api/documents/{id}/qr`) is
+            // registered on `documents:read` plus DocumentVisibilityPolicy, and
+            // declaring a tighter read here would be a gate with a bypass one
+            // path segment away.
+            //
+            // That also settles who sees the SCAN HISTORY, which is a real
+            // question rather than a fallout: the audience is exactly the
+            // audience for the routing trail, which already names the people who
+            // acted on this document. A scan is a strictly smaller disclosure
+            // than an act, so giving it a narrower audience would create a
+            // second, subtly different visibility rule over the same record —
+            // the shape this subsystem argues against everywhere else — for no
+            // gain. Anonymous scans name nobody at all, because nothing about
+            // them is stored (migration 120).
+            //
+            // WRITE is `documents:render`: rotating or withdrawing a code
+            // changes what every printed copy in the world asserts, which is the
+            // same kind of authority as issuing a corrected version, and it is
+            // held by exactly the people who can already do that.
+            new RecordSectionRequirement(
+                key: 'qr',
+                readPermission: null,
+                writePermission: CorePermissions::DOCUMENTS_RENDER,
+                recordScoped: true,
+                deniedReason: 'You can see this document\'s verification code. Issuing a new one, '
+                    . 'or withdrawing it, is not something your account can do.',
+            ),
         ];
     }
 
@@ -943,6 +1064,8 @@ final class DocumentsApiHandler
         'trail' => 'This document has not been put into circulation, so there is no trail to add to.',
         'recipients' => 'This document is not awaiting you. You are reading it as a record '
             . 'rather than as something to act on.',
+        'qr' => 'This document does not carry a verification code, and cannot be given one '
+            . 'while QR verification is switched off for this template or this organisation.',
     ];
 
     /**
@@ -997,6 +1120,7 @@ final class DocumentsApiHandler
             'document' => $this->documentIsReissuable($tenantId, $callerId, $document),
             'trail' => $this->documentHasTrail($tenantId, $document),
             'recipients' => $this->documentIsAwaiting($tenantId, $callerId, $document),
+            'qr' => $this->documentCarriesQr($tenantId, $document),
         ];
 
         $verdicts = [];
@@ -1111,6 +1235,43 @@ final class DocumentsApiHandler
         }
 
         return false;
+    }
+
+    /**
+     * Whether the `qr` region has anything to show for this document (#1036).
+     *
+     * TRUE in two cases, and the second is the one worth stating: the document
+     * ALREADY has a code, or it is currently eligible for one. The first matters
+     * because a code that was minted while the feature was on must stay visible
+     * — and revocable — after somebody switches it off, which is exactly when an
+     * operator most wants to reach it. Hiding the region on the switch alone
+     * would take the withdraw button away at the moment it is needed.
+     *
+     * Eligibility re-reads the template, because scope 2 lives in the template's
+     * own JSON and a document whose template was deleted
+     * (`document_template_id → SET NULL`) inherits only scope 1.
+     *
+     * @param array<string, mixed> $document
+     */
+    private function documentCarriesQr(int $tenantId, array $document): bool
+    {
+        if ($this->qr === null) {
+            return false;
+        }
+
+        if ($this->qr->active($tenantId, (int) $document['id']) !== null) {
+            return true;
+        }
+
+        if (!$this->qr->isConfigured()) {
+            return false;
+        }
+
+        $templateId = $document['document_template_id'];
+        $template = is_int($templateId) ? $this->templates->findById($templateId, $tenantId) : null;
+        $templateData = is_array($template['data'] ?? null) ? $template['data'] : [];
+
+        return DocumentQrPolicy::enabled($this->settings->effective($tenantId), $templateData);
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
