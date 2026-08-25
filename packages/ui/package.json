@@ -14,6 +14,8 @@
     "./alert-dialog": "./src/alert-dialog.tsx",
     "./alert": "./src/alert.tsx",
     "./app-sidebar": "./src/app-sidebar.tsx",
+    "./audience-group-picker": "./src/audience-group-picker.tsx",
+    "./audience-people-picker": "./src/audience-people-picker.tsx",
     "./badge": "./src/badge.tsx",
     "./beta-warning": "./src/beta-warning.tsx",
     "./bilingual-input": "./src/bilingual-input.tsx",

@@ -285,6 +285,26 @@ export function routingMeta(item: InboxItem): RoutingItemMeta | null {
 }
 
 /**
+ * One positive whole number out of a rule config, or null.
+ *
+ * Both spellings of the same number are accepted, because the SERVER accepts
+ * both and for the reason it records: a JSON body decodes `7` as a number and
+ * `"7"` as a string, and a config round-tripped through JSONB comes back either
+ * way depending on the driver. A client that insisted on one would render a step
+ * the engine can resolve perfectly well as unconfigured — and would do it on
+ * PostgreSQL or on the offline SQLite engine but not both, which is the worst
+ * place for a dialect difference to surface.
+ *
+ * Shared by every config reader here so the four kinds cannot drift into four
+ * ideas of what a number is.
+ */
+function positiveInteger(raw: unknown): number | null {
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return raw;
+  if (typeof raw === 'string' && /^\d+$/.test(raw) && Number(raw) > 0) return Number(raw);
+  return null;
+}
+
+/**
  * The role id a core routing rule is configured with, or null.
  *
  * Both core kinds (`role`, `role_below_actor`) take `{ role_id }`, and the
@@ -295,10 +315,7 @@ export function routingMeta(item: InboxItem): RoutingItemMeta | null {
  * never one this screen renders as unconfigured.
  */
 export function configuredRoleId(config: Record<string, unknown>): number | null {
-  const raw = config['role_id'];
-  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return raw;
-  if (typeof raw === 'string' && /^\d+$/.test(raw) && Number(raw) > 0) return Number(raw);
-  return null;
+  return positiveInteger(config['role_id']);
 }
 
 /** Core's two rule kinds, both of which are configured by naming a role. */
@@ -307,4 +324,83 @@ export const ROLE_CONFIGURED_KINDS = ['role', 'role_below_actor'] as const;
 /** Whether this kind is one whose config this client knows how to author. */
 export function isRoleConfiguredKind(kind: string): boolean {
   return (ROLE_CONFIGURED_KINDS as readonly string[]).includes(kind);
+}
+
+/**
+ * The kind that names a stored USER GROUP: `{ group_id }` (#999).
+ *
+ * A step's whole point — one row that keeps meaning what the institution
+ * currently means by "instructors" — so this is the kind #1015 exists to make
+ * authorable.
+ */
+export const GROUP_KIND = 'group';
+
+/** The kind that names PEOPLE, one by one: `{ profile_ids: [...] }` (#999). */
+export const EXPLICIT_KIND = 'explicit';
+
+/**
+ * The group id a `group` step names, or null.
+ *
+ * Mirrors `GroupRuleResolver::requireGroupId()` — the ID, never the name:
+ * renaming a group is an ordinary administrative act and must not silently
+ * re-point, or un-point, every step that named it.
+ */
+export function configuredGroupId(config: Record<string, unknown>): number | null {
+  return positiveInteger(config['group_id']);
+}
+
+/**
+ * The profile ids an `explicit` step names, in order, de-duplicated.
+ *
+ * Mirrors `ExplicitRuleResolver::requireProfileIds()`, including its
+ * de-duplication: an author who listed somebody twice must not read a count of
+ * three for two people. A malformed entry is DROPPED rather than failing the
+ * whole read — the server is the authority on whether the config is acceptable,
+ * and its refusal names what is wrong; a client that rendered nothing at all
+ * would hide the two ids that were fine and leave the author with no way to see
+ * what they had written.
+ */
+export function configuredProfileIds(config: Record<string, unknown>): number[] {
+  const raw = config['profile_ids'];
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set<number>();
+  const ids: number[] = [];
+  for (const entry of raw) {
+    const id = positiveInteger(entry);
+    if (id === null || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * Whether this client knows how to author the kind's config.
+ *
+ * Four kinds, all core's. A PLUGIN's kind is deliberately not here and is
+ * deliberately still offered: refusing to show it would hide a rule the install
+ * genuinely has, and the plugin's own validator — not a guess made here — is what
+ * says whether an empty config is enough.
+ */
+export function isCoreConfiguredKind(kind: string): boolean {
+  return isRoleConfiguredKind(kind) || kind === GROUP_KIND || kind === EXPLICIT_KIND;
+}
+
+/**
+ * Whether a step of this kind carries the config its rule requires.
+ *
+ * ONLY core's four kinds are judged here. Everything else — the tenant's step
+ * ceiling, the per-step recipient ceiling, a plugin rule's own required config —
+ * stays the engine's to judge, because guessing at it here would block routes the
+ * engine would have accepted. What changed with #1015 is only which kinds this
+ * client can speak for: `group` and `explicit` are core's, their configs are
+ * authored by controls on this screen, and letting them through empty produced a
+ * 422 the author could have been spared.
+ */
+export function isStepConfigured(kind: string, config: Record<string, unknown>): boolean {
+  if (isRoleConfiguredKind(kind)) return configuredRoleId(config) !== null;
+  if (kind === GROUP_KIND) return configuredGroupId(config) !== null;
+  if (kind === EXPLICIT_KIND) return configuredProfileIds(config).length > 0;
+  return true;
 }
