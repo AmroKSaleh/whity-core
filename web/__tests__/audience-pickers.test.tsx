@@ -198,6 +198,23 @@ describe('AudienceGroupPicker', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  it('says so when the step names a group that is not in the list', () => {
+    // A saved step pointing at a deleted group, or one past the pages the
+    // caller loaded. Radix draws the placeholder for a value it has no item
+    // for, so silence here reads as "nothing chosen" and invites the author to
+    // overwrite a `group_id` that was perfectly good.
+    render(<AudienceGroupPicker groups={GROUPS} value={404} onChange={jest.fn()} />);
+
+    expect(screen.getByText(/names user group #404/i)).toBeInTheDocument();
+    expect(screen.getByText(/would replace it/i)).toBeInTheDocument();
+  });
+
+  it('says nothing of the sort when the chosen group IS in the list', () => {
+    render(<AudienceGroupPicker groups={GROUPS} value={1} onChange={jest.fn()} />);
+
+    expect(screen.queryByText(/is not in the list you can see/i)).not.toBeInTheDocument();
+  });
+
   it('uses logical directional properties only, so it mirrors under RTL', () => {
     const { container } = render(
       <div dir="rtl">

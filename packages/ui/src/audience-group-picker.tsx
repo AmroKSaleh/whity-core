@@ -151,6 +151,13 @@ export interface AudienceGroupPickerProps {
   /** For a sample row whose name the reader may not see. */
   unnamedMemberLabel?: (profileId: number) => string
   previewRetryLabel?: string
+  /**
+   * For a `value` that names a group the caller's list does not contain.
+   *
+   * A function, because the id sits inside the sentence and languages put it in
+   * different places.
+   */
+  unknownGroupLabel?: (groupId: number) => string
 }
 
 /**
@@ -187,6 +194,8 @@ export function AudienceGroupPicker({
   previewDynamicNote = "A group is a rule, not a saved list of people. Who it reaches is worked out again every time the document moves, so this is what it means right now — not a set that has been fixed in place.",
   unnamedMemberLabel = (profileId: number) => `Profile #${profileId}`,
   previewRetryLabel = "Try again",
+  unknownGroupLabel = (groupId: number) =>
+    `This step names user group #${groupId}, which is not in the list you can see — it may have been deleted, or you may not be able to read it. Choosing another group here would replace it.`,
 }: AudienceGroupPickerProps) {
   // An explanation instead of an empty dropdown (#756). The caller's sentence is
   // rendered verbatim: it is the only party that knows WHY, and the server's own
@@ -214,6 +223,17 @@ export function AudienceGroupPicker({
   }
 
   const selected = groups.find((group) => group.id === value) ?? null
+
+  // A configured step whose group is NOT in the list. Radix renders the
+  // placeholder for a value it has no item for, so without this the step would
+  // read as "nothing chosen" — and an author would overwrite a perfectly good
+  // `group_id` believing they were filling in a blank.
+  //
+  // Unreachable from a composer that only ever starts steps empty, and squarely
+  // reachable from an editor that loads a SAVED step (a deleted group, or one
+  // past the pages the caller managed to load). #756: an empty state, never
+  // invented content — and never a silent one.
+  const namesMissingGroup = value !== null && selected === null
 
   return (
     <div
@@ -246,6 +266,15 @@ export function AudienceGroupPicker({
           className="text-xs text-muted-foreground"
         >
           {incompleteReason}
+        </p>
+      )}
+
+      {namesMissingGroup && (
+        <p
+          data-slot="audience-group-picker-unknown"
+          className="text-xs text-destructive"
+        >
+          {unknownGroupLabel(value)}
         </p>
       )}
 

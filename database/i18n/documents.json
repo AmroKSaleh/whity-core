@@ -480,6 +480,7 @@
         "routing.compose.step.groupPreviewLoading": "Working out who this group reaches…",
         "routing.compose.step.groupPreviewSample": "Showing {shown} of the {total} — a sample, not the whole set:",
         "routing.compose.step.groupRetry": "Try again",
+        "routing.compose.step.groupUnknown": "This step names user group #{id}, which is not in the list you can see — it may have been deleted, or you may not be able to read it. Choosing another group here would replace it.",
         "routing.compose.step.groupUnnamed": "Profile #{id}",
         "routing.compose.step.label": "Label shown on the step (optional)",
         "routing.compose.step.noGroups": "No user groups have been defined here yet. An administrator can define one under User Groups, and a step can then name it.",

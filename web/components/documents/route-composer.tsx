@@ -725,6 +725,13 @@ export function RouteComposer({
                         t('routing.compose.step.groupUnnamed', 'Profile #{id}', { id: profileId })
                       }
                       previewRetryLabel={t('routing.compose.step.groupRetry', 'Try again')}
+                      unknownGroupLabel={(groupId) =>
+                        t(
+                          'routing.compose.step.groupUnknown',
+                          'This step names user group #{id}, which is not in the list you can see — it may have been deleted, or you may not be able to read it. Choosing another group here would replace it.',
+                          { id: groupId }
+                        )
+                      }
                     />
                   </div>
                 </div>

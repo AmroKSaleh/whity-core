@@ -177,6 +177,16 @@ export const NoGroupsDefined: Story = {
   render: (args) => <ControlledPicker {...args} />,
 }
 
+/**
+ * A saved step naming a group the reader's list does not contain — deleted, or
+ * past the pages they could load. Said out loud, because Radix would otherwise
+ * draw the placeholder and the step would read as unconfigured.
+ */
+export const NamesAGroupNotInTheList: Story = {
+  args: { value: 404 },
+  render: (args) => <ControlledPicker {...args} />,
+}
+
 /** Right-to-left: the kit ships into Arabic UIs, so every story must survive it. */
 export const RightToLeft: Story = {
   args: { value: 1, preview: LARGE_PREVIEW, previewStatus: "ready" },
