@@ -147,6 +147,78 @@ describe('resolveTransitions', () => {
   });
 });
 
+describe('resolveTransitions — convergence', () => {
+  /**
+   * When two chains reach the same person at the same stage the engine
+   * DE-DUPLICATES them into one inbox item (migration 112's partial unique index
+   * over open recipient rows). The stage settles ONCE per cohort, not once per
+   * arriving chain — so two arrows entering a box do NOT both carry on through
+   * it, which is the opposite of what a graph naturally reads as.
+   *
+   * A linear composer could never draw two paths meeting, so this never
+   * mattered before. A canvas can, so the editor has to name it.
+   */
+
+  it('reports a stage that two DRAWN paths reach', () => {
+    // approve -> 3 and reject -> 2, and 2 continues -> 3. Stage 3 is reached
+    // both by the approval and by the reject path rejoining.
+    const { merges } = resolveTransitions(
+      graphOf(
+        [step(1, { decision: true }), step(2), step(3)],
+        [
+          { from: 1, to: 3, verdict: 'approved' },
+          { from: 1, to: 2, verdict: 'rejected' },
+        ]
+      )
+    );
+
+    expect(merges).toEqual([3]);
+  });
+
+  it('reports convergence the author never drew, created by the ordinal fallthrough', () => {
+    // The case that makes this a label rather than a validation. Only ONE edge
+    // is drawn — 1 rejected -> 3 — but stage 2 also continues into 3 by position,
+    // so 3 has two arrivals. An implementation that scanned the STORED edges
+    // would see one edge and report no convergence.
+    const { merges, transitions } = resolveTransitions(
+      graphOf(
+        [step(1, { decision: true }), step(2), step(3)],
+        [{ from: 1, to: 3, verdict: 'rejected' }]
+      )
+    );
+
+    expect(transitions.filter((t) => t.to === 3)).toHaveLength(2);
+    expect(merges).toEqual([3]);
+  });
+
+  it('reports nothing for a plain linear flow', () => {
+    expect(resolveTransitions(graphOf([step(1), step(2), step(3)])).merges).toEqual([]);
+  });
+
+  it('does not count a stage reached once as a merge', () => {
+    const { merges } = resolveTransitions(
+      graphOf([step(1), step(2, { decision: true })], [{ from: 2, to: 1, verdict: 'rejected' }])
+    );
+
+    // Stage 1 is reached only by the reject edge; stage 2 only by the continue.
+    expect(merges).toEqual([]);
+  });
+
+  it('lists several converging stages in position order', () => {
+    const { merges } = resolveTransitions(
+      graphOf(
+        [step(1, { decision: true }), step(2, { decision: true }), step(3), step(4)],
+        [
+          { from: 1, to: 3, verdict: 'rejected' },
+          { from: 2, to: 4, verdict: 'rejected' },
+        ]
+      )
+    );
+
+    expect(merges).toEqual([3, 4]);
+  });
+});
+
 describe('effectiveQuorum', () => {
   it('falls back to the tenant default when the step does not say', () => {
     const graph: RouteFlowGraph = { ...graphOf([step(1, { decision: true })]), defaultQuorum: 'majority' };

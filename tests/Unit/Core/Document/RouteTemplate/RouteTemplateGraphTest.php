@@ -45,7 +45,12 @@ final class RouteTemplateGraphTest extends TestCase
         $this->graph = new RouteTemplateGraph($registry);
     }
 
-    /** A minimal valid stage naming the fake kind. */
+    /**
+     * A minimal valid stage naming the fake kind.
+     *
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
     private function stage(int $position, array $overrides = []): array
     {
         return array_merge([

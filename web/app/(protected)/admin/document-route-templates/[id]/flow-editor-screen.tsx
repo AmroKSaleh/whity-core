@@ -436,6 +436,10 @@ function RouteFlowBody({
             continues: t('routeTemplates.canvas.continues', 'Continues'),
             implicit: t('routeTemplates.canvas.implicit', 'implicit'),
             ends: t('routeTemplates.canvas.ends', 'Ends here'),
+            arrivalsMerge: t(
+              'routeTemplates.canvas.arrivalsMerge',
+              'Paths merge here — settles once'
+            ),
             deleteStep: t('routeTemplates.canvas.deleteStep', 'Delete stage'),
             quorumAll: t('routeTemplates.quorum.all', 'all must approve'),
             quorumAny: t('routeTemplates.quorum.any', 'any one may approve'),

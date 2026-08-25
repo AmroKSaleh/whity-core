@@ -155,6 +155,39 @@ export interface RouteFlowTerminal {
 export interface RouteFlowResolution {
   transitions: RouteFlowTransition[];
   terminals: RouteFlowTerminal[];
+  /**
+   * Positions that MORE THAN ONE transition arrives at.
+   *
+   * WHY THIS IS A FACT THE EDITOR HAS TO STATE OUT LOUD
+   * ---------------------------------------------------
+   * When two chains reach the same person at the same step, the engine
+   * DE-DUPLICATES them into one inbox item — migration 112's partial unique
+   * index over the open recipient rows. The second arrival opens no cohort and
+   * gets no continuation of its own: the stage settles ONCE per cohort, not once
+   * per chain that reached it.
+   *
+   * That is pre-existing fan-out behaviour, not something verdicts introduced.
+   * It never mattered before because a LINEAR composer cannot draw two paths
+   * meeting. A canvas can, and will, the first time anybody uses one — and the
+   * natural reading of two arrows entering a box is that both carry on through
+   * it. They do not. One continuation happens, and which chain "owns" it is not
+   * something the author chose or can choose.
+   *
+   * REFUSING CONVERGENCE WAS NOT AVAILABLE, WHICH IS WHY THIS IS A LABEL RATHER
+   * THAN A VALIDATION. Convergence is not something this editor PERMITS — the
+   * engine does it regardless. The positional fallthrough alone produces
+   * arrivals nobody drew: step N-1 continuing into step N IS an arrival, so any
+   * explicit edge that also targets N converges with it. Refusing convergence
+   * would mean refusing the ordinal fallthrough, which is the engine's own
+   * documented behaviour and the thing that lets a plain linear route work with
+   * no graph authored at all. The drawing cannot prevent the merge; it can only
+   * avoid lying about it.
+   *
+   * Converging designs are also perfectly ordinary and worth keeping: "approve →
+   * archive" and "reject → fix → archive" both ending at one archive stage is a
+   * flow somebody obviously means to author.
+   */
+  merges: number[];
 }
 
 /**
@@ -229,7 +262,20 @@ export function resolveTransitions(graph: RouteFlowGraph): RouteFlowResolution {
     }
   });
 
-  return { transitions, terminals };
+  // Computed from the SAME transition list the canvas draws, so a node marked as
+  // merging is one the picture actually shows two arrows entering. Deriving it
+  // from the STORED edges instead would miss every convergence that involves the
+  // positional fallthrough — which is most of them.
+  const arrivals = new Map<number, number>();
+  for (const transition of transitions) {
+    arrivals.set(transition.to, (arrivals.get(transition.to) ?? 0) + 1);
+  }
+  const merges = [...arrivals.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([position]) => position)
+    .sort((a, b) => a - b);
+
+  return { transitions, terminals, merges };
 }
 
 /**
@@ -254,7 +300,13 @@ export type RouteFlowDirection = 'ltr' | 'rtl';
  * numbers instead of each carrying its own copy.
  */
 export const ROUTE_FLOW_NODE_WIDTH = 224;
-export const ROUTE_FLOW_NODE_HEIGHT = 108;
+/**
+ * Tall enough for the two note lines a stage can carry at once — "Paths merge
+ * here" and "Rejected: Ends here" are both facts about the same node, and a
+ * card that clipped one would hide exactly the semantics the notes exist to
+ * state. The layout strides are derived from this constant, so spacing follows.
+ */
+export const ROUTE_FLOW_NODE_HEIGHT = 124;
 const GAP_ALONG = 72;
 const GAP_ACROSS = 40;
 

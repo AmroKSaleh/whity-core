@@ -116,6 +116,15 @@ export interface RouteFlowEditorLabels {
   implicit: string;
   /** Marker where a chain stops. */
   ends: string;
+  /**
+   * Marker on a stage that more than one path reaches.
+   *
+   * Says that arrivals MERGE — the engine de-duplicates two chains reaching the
+   * same person at the same stage into one item, so the stage settles once
+   * rather than once per arriving path. Without it, two arrows entering a box
+   * read as two things carrying on through it, which is not what happens.
+   */
+  arrivalsMerge: string;
   /** Prefix for the effective quorum, e.g. "all must approve". */
   quorumAll: string;
   quorumAny: string;
@@ -137,6 +146,7 @@ const DEFAULT_LABELS: RouteFlowEditorLabels = {
   continues: 'Continues',
   implicit: 'implicit',
   ends: 'Ends here',
+  arrivalsMerge: 'Paths merge here — settles once',
   quorumAll: 'all must approve',
   quorumAny: 'any one may approve',
   quorumMajority: 'a majority must approve',
@@ -292,7 +302,7 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
       </span>
 
       {terminalNotes.length > 0 && (
-        <span className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="line-clamp-2 text-[10px] uppercase leading-tight tracking-wide text-muted-foreground">
           {terminalNotes.join(' · ')}
         </span>
       )}
@@ -369,7 +379,7 @@ export function RouteFlowEditor({
   const cut = ordered.length > maxNodes;
   const drawn = cut ? ordered.slice(0, maxNodes) : ordered;
 
-  const { transitions, terminals } = React.useMemo(() => resolveTransitions(graph), [graph]);
+  const { transitions, terminals, merges } = React.useMemo(() => resolveTransitions(graph), [graph]);
 
   const quorumLabel = React.useCallback(
     (step: RouteFlowStep): string => {
@@ -424,6 +434,11 @@ export function RouteFlowEditor({
     setNodes(
       placed.map((step) => {
         const notes: string[] = [];
+        // The merge note comes FIRST: it is the more surprising of the two, and
+        // the one a reader is most likely to have assumed the opposite of.
+        if (merges.includes(step.position)) {
+          notes.push(labels.arrivalsMerge);
+        }
         for (const terminal of terminals) {
           if (terminal.from !== step.position) continue;
           const on =
@@ -469,6 +484,7 @@ export function RouteFlowEditor({
     quorumLabel,
     readOnly,
     ruleLabelFor,
+    merges,
     selectedPosition,
     setNodes,
     sourceFace,
