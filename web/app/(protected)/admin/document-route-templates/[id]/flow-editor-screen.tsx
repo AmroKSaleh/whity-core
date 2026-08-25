@@ -80,8 +80,10 @@ import {
 } from '@amroksaleh/ui/route-flow/model';
 import { IconDeviceFloppy, IconPlus } from '@tabler/icons-react';
 import type { RoutingRule } from '@/components/documents/routing-wire';
+import { AudienceGroupPicker, type AudienceGroupPreview } from '@amroksaleh/ui/audience-group-picker';
 import {
   audiencePreviewRequest,
+  toAudienceGroupPreview,
   toFlowGraph,
   toGraphRequest,
   type AudiencePreviewWire,
@@ -213,7 +215,12 @@ function RouteFlowBody({
   // Keyed by the rule ITSELF (kind + config), not by the step's position. Two
   // stages naming the same rule are one question, and a position-keyed cache
   // would re-ask it on every renumber — which happens on every delete.
+  // The count feeds the CANVAS (one number per node, never a roster) and the full
+  // preview feeds the INSPECTOR's group picker, which draws the snapshot itself.
+  // One request answers both, so they are cached together under one key rather
+  // than fetched twice.
   const [audiences, setAudiences] = useState<Record<string, RouteFlowAudience>>({});
+  const [previews, setPreviews] = useState<Record<string, AudienceGroupPreview>>({});
   const inFlight = useRef<Set<string>>(new Set());
 
   const audienceKey = useCallback(
@@ -260,6 +267,7 @@ function RouteFlowBody({
           // `total`, not `count` — the field #1003's presenter actually emits.
           const body = (await response.json()) as AudiencePreviewWire;
           setAudiences((prev) => ({ ...prev, [key]: { count: body.data.total } }));
+          setPreviews((prev) => ({ ...prev, [key]: toAudienceGroupPreview(body) }));
         } finally {
           inFlight.current.delete(key);
         }
@@ -440,6 +448,7 @@ function RouteFlowBody({
               'routeTemplates.canvas.arrivalsMerge',
               'Paths merge here — settles once'
             ),
+            inCycle: t('routeTemplates.canvas.inCycle', 'Can come back round — loops'),
             deleteStep: t('routeTemplates.canvas.deleteStep', 'Delete stage'),
             quorumAll: t('routeTemplates.quorum.all', 'all must approve'),
             quorumAny: t('routeTemplates.quorum.any', 'any one may approve'),
@@ -467,6 +476,7 @@ function RouteFlowBody({
               roles={roles}
               groups={groups}
               audience={audienceFor(selectedStep)}
+              preview={previews[audienceKey(selectedStep)] ?? null}
               readOnly={!canWrite}
               onChange={updateSelected}
               t={t}
@@ -493,6 +503,7 @@ function StageInspector({
   roles,
   groups,
   audience,
+  preview,
   readOnly,
   onChange,
   t,
@@ -503,6 +514,7 @@ function StageInspector({
   roles: RoleOption[];
   groups: GroupOption[];
   audience: RouteFlowAudience | undefined;
+  preview: AudienceGroupPreview | null;
   readOnly: boolean;
   onChange: (patch: Partial<RouteFlowStep>) => void;
   t: ReturnType<typeof useTranslation>;
@@ -584,46 +596,67 @@ function StageInspector({
         </label>
       )}
 
-      {/* COMPOSE, DO NOT DUPLICATE. #1015 is adding `AudienceGroupPicker` to the
-          kit — a presentational control taking `groups`, `value`, `onChange` and
-          a `preview`, which is exactly the shape this screen already has to hand.
-          When that lands, this bare <Select> and its two empty-state branches
-          should be replaced by `@amroksaleh/ui/audience-group-picker`; it also
-          draws the membership snapshot beside the choice, which is the thing a
-          group node most needs and this inline control does not do.
+      {/* #1015's kit primitive, composed rather than duplicated.
 
-          It is left as a plain select rather than built out here PRECISELY so it
-          is not a second group picker competing with theirs — fifteen lines that
-          are obviously provisional, not a rival component. */}
+          It is the same control the linear route composer uses, which is the
+          whole reason it is a kit primitive: a route step saying "everyone in
+          Instructors" is authored in two places and a second copy is where the
+          two drift.
+
+          It also does the thing the provisional <Select> here could not — it
+          draws the membership SNAPSHOT beside the choice, in the present tense
+          ("reaches N people right now"), labels a sample as a sample from the
+          server's own `truncated` flag, and states outright that the rule is
+          re-resolved every time it is reached. A group node is exactly where
+          that caveat has to be visible: the whole point of naming a group rather
+          than people is that the answer changes after you author it. */}
       {isGroupKind && (
-        <label className="block space-y-1">
-          <span className="text-sm font-medium">{t('routeTemplates.inspector.group', 'User group')}</span>
-          {groups.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {t(
-                'routeTemplates.inspector.noGroups',
-                'No user groups are available to name. You may not have permission to list them.'
-              )}
-            </p>
-          ) : (
-            <Select
-              value={typeof step.ruleConfig.group_id === 'number' ? String(step.ruleConfig.group_id) : ''}
-              disabled={readOnly}
-              onValueChange={(v) => onChange({ ruleConfig: { group_id: Number(v) } })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t('routeTemplates.inspector.pickGroup', 'Choose a group')} />
-              </SelectTrigger>
-              <SelectContent>
-                {groups.map((group) => (
-                  <SelectItem key={group.id} value={String(group.id)}>
-                    {group.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </label>
+        <div className="space-y-1">
+          <label className="text-sm font-medium" htmlFor="route-flow-group">
+            {t('routeTemplates.inspector.group', 'User group')}
+          </label>
+          <AudienceGroupPicker
+            id="route-flow-group"
+            groups={groups}
+            value={typeof step.ruleConfig.group_id === 'number' ? step.ruleConfig.group_id : null}
+            onChange={(groupId) =>
+              onChange({ ruleConfig: groupId === null ? {} : { group_id: groupId } })
+            }
+            disabled={readOnly}
+            unavailableReason={
+              groups.length === 0
+                ? t(
+                    'routeTemplates.inspector.noGroups',
+                    'No user groups are available to name. You may not have permission to list them.'
+                  )
+                : null
+            }
+            preview={preview}
+            // `audience` is the SAME request's answer, so the two cannot disagree:
+            // a resolved count means the preview arrived, a null count with a
+            // reason means it did not.
+            previewStatus={
+              step.ruleConfig.group_id === undefined
+                ? 'idle'
+                : preview !== null
+                  ? 'ready'
+                  : audience?.count === null
+                    ? 'error'
+                    : 'loading'
+            }
+            previewError={audience?.count === null ? (audience.unavailableReason ?? null) : null}
+            placeholder={t('routeTemplates.inspector.pickGroup', 'Choose a group')}
+            previewCountLabel={(total) =>
+              t('routeTemplates.inspector.reaches', 'Reaches {count} people right now', {
+                count: total.toLocaleString(),
+              })
+            }
+            previewDynamicNote={t(
+              'routeTemplates.inspector.groupDynamic',
+              'This is who the group means right now. It is re-resolved every time the stage is reached, so a document routed next month reaches whoever matches then.'
+            )}
+          />
+        </div>
       )}
 
       {!isRoleKind && !isGroupKind && (

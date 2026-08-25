@@ -188,6 +188,27 @@ export interface RouteFlowResolution {
    * flow somebody obviously means to author.
    */
   merges: number[];
+  /**
+   * Positions that can be reached again from themselves.
+   *
+   * A rejection that sends a document BACK — "to the author, to fix" — is the
+   * most common real approval design, is fully supported by the engine
+   * (`nextForVerdict()` resolves by id with no position comparison anywhere, so
+   * backwards and forwards are literally the same code path), and produces a
+   * cycle. It is authored deliberately and must not be refused.
+   *
+   * What the engine does NOT do is count laps (#1037). One traversal per act, so
+   * no request can spin — the loop is human-driven, exactly as `returned` has
+   * been since #989. The cost is INVISIBILITY rather than runaway: a document on
+   * its ninth rejection looks identical to one on its first, because there is one
+   * inbox item and a trail nobody reads to the end.
+   *
+   * This editor is the first surface where somebody DRAWS that loop, so it is the
+   * first place that can say a loop exists at the moment it is created. That is
+   * all this does — it marks the design, not any document's laps, which the
+   * canvas cannot see and should not pretend to.
+   */
+  cycles: number[];
 }
 
 /**
@@ -275,7 +296,39 @@ export function resolveTransitions(graph: RouteFlowGraph): RouteFlowResolution {
     .map(([position]) => position)
     .sort((a, b) => a - b);
 
-  return { transitions, terminals, merges };
+  // A position is on a cycle when it can reach ITSELF by following transitions.
+  // Walked over the derived list for the same reason `merges` is: a loop closed
+  // through the positional fallthrough (reject back to 1, then 1..N forward
+  // again) involves edges nobody drew, and a scan of stored edges would not see
+  // it — which is the ordinary shape of a rework loop, not an exotic one.
+  const outgoing = new Map<number, number[]>();
+  for (const transition of transitions) {
+    outgoing.set(transition.from, [...(outgoing.get(transition.from) ?? []), transition.to]);
+  }
+
+  const reachesItself = (origin: number): boolean => {
+    const seen = new Set<number>();
+    const stack = [...(outgoing.get(origin) ?? [])];
+    while (stack.length > 0) {
+      const at = stack.pop() as number;
+      if (at === origin) {
+        return true;
+      }
+      if (seen.has(at)) {
+        continue;
+      }
+      seen.add(at);
+      stack.push(...(outgoing.get(at) ?? []));
+    }
+
+    return false;
+  };
+
+  const cycles = ordered
+    .map((s) => s.position)
+    .filter(reachesItself);
+
+  return { transitions, terminals, merges, cycles };
 }
 
 /**

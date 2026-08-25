@@ -125,6 +125,15 @@ export interface RouteFlowEditorLabels {
    * read as two things carrying on through it, which is not what happens.
    */
   arrivalsMerge: string;
+  /**
+   * Marker on a stage a document can come back round to.
+   *
+   * Says a LOOP exists in the design — not that any document has gone round it,
+   * which the canvas cannot know. Worth stating because a rework loop is
+   * authored deliberately and is invisible afterwards: nothing counts laps
+   * (#1037), so a document on its ninth rejection looks like one on its first.
+   */
+  inCycle: string;
   /** Prefix for the effective quorum, e.g. "all must approve". */
   quorumAll: string;
   quorumAny: string;
@@ -147,6 +156,7 @@ const DEFAULT_LABELS: RouteFlowEditorLabels = {
   implicit: 'implicit',
   ends: 'Ends here',
   arrivalsMerge: 'Paths merge here — settles once',
+  inCycle: 'Can come back round — loops',
   quorumAll: 'all must approve',
   quorumAny: 'any one may approve',
   quorumMajority: 'a majority must approve',
@@ -379,7 +389,10 @@ export function RouteFlowEditor({
   const cut = ordered.length > maxNodes;
   const drawn = cut ? ordered.slice(0, maxNodes) : ordered;
 
-  const { transitions, terminals, merges } = React.useMemo(() => resolveTransitions(graph), [graph]);
+  const { transitions, terminals, merges, cycles } = React.useMemo(
+    () => resolveTransitions(graph),
+    [graph]
+  );
 
   const quorumLabel = React.useCallback(
     (step: RouteFlowStep): string => {
@@ -439,6 +452,9 @@ export function RouteFlowEditor({
         if (merges.includes(step.position)) {
           notes.push(labels.arrivalsMerge);
         }
+        if (cycles.includes(step.position)) {
+          notes.push(labels.inCycle);
+        }
         for (const terminal of terminals) {
           if (terminal.from !== step.position) continue;
           const on =
@@ -484,6 +500,7 @@ export function RouteFlowEditor({
     quorumLabel,
     readOnly,
     ruleLabelFor,
+    cycles,
     merges,
     selectedPosition,
     setNodes,

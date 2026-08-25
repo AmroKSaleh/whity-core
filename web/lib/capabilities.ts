@@ -162,30 +162,6 @@ export const ROUTE_TEMPLATES_READ = 'route_templates:read';
 export const ROUTE_TEMPLATES_WRITE = 'route_templates:write';
 
 /**
- * Previewing an UNSAVED rule — what the flow editor asks per node to show "this
- * reaches 1,043 people".
- *
- * `groups:write` and not `groups:read`, because `POST /api/v1/user-groups/preview`
- * resolves an ARBITRARY rule the caller composed rather than a stored one, and
- * #999 gates it as the tighter of the two on purpose: a reader who may only see
- * existing definitions should not be able to probe "how many people hold role 4"
- * by inventing rules.
- *
- * On an ordinary install the same people hold this and `route_templates:write`
- * (migrations 116 and 120 grant both to `roles:write` holders). Where they do
- * not, the editor draws the node WITHOUT a count and says why — never a zero,
- * which would read as "this reaches nobody".
- *
- * IT IS NOT WHAT A GROUP NODE NEEDS. A stage naming a user group is previewed
- * through `GET /api/v1/user-groups/{id}/preview`, which is gated on the LOOSER
- * `groups:read` — the draft endpoint refuses `rule_kind: "group"` outright,
- * because a group cannot be defined as another group (#999). So the most
- * important node type in the flow editor is also the one most likely to be able
- * to show its size. See `audiencePreviewRequest` for the routing.
- */
-export const GROUPS_WRITE = 'groups:write';
-
-/**
  * User groups — the named rules that say which people a set contains (#999).
  *
  * Two slugs because the server draws the line in two places, and for a reason

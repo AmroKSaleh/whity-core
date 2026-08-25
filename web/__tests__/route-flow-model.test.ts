@@ -219,6 +219,67 @@ describe('resolveTransitions — convergence', () => {
   });
 });
 
+describe('resolveTransitions — loops', () => {
+  /**
+   * A reject edge pointing BACK ("to the author, to fix") is the most common real
+   * approval design and the engine supports it fully — `nextForVerdict()` resolves
+   * by id with no position comparison, so backwards and forwards are the same code
+   * path. It must never be refused.
+   *
+   * What the engine does not do is count laps (#1037), so a document on its ninth
+   * rejection looks identical to one on its first. This editor is the first
+   * surface where somebody DRAWS the loop, so it is the first that can say one
+   * exists at the moment it is created.
+   */
+
+  it('marks every stage on a rework loop, including the ones the fallthrough closes', () => {
+    // Reject from 3 back to 1. The loop closes through the POSITIONAL
+    // fallthrough: 1 -> 2 -> 3 are derived continues nobody drew. A scan of
+    // stored edges would see one edge and no cycle at all.
+    const { cycles } = resolveTransitions(
+      graphOf(
+        [step(1), step(2), step(3, { decision: true })],
+        [{ from: 3, to: 1, verdict: 'rejected' }]
+      )
+    );
+
+    expect(cycles).toEqual([1, 2, 3]);
+  });
+
+  it('reports no loop for a plain linear flow', () => {
+    expect(resolveTransitions(graphOf([step(1), step(2), step(3)])).cycles).toEqual([]);
+  });
+
+  it('reports no loop for a forward-only reject path', () => {
+    // 1 approves onward to 3, rejects to 2, and 2 continues to 3. Every arrow
+    // points forward, so nothing comes back round.
+    const { cycles } = resolveTransitions(
+      graphOf(
+        [step(1, { decision: true }), step(2), step(3)],
+        [
+          { from: 1, to: 3, verdict: 'approved' },
+          { from: 1, to: 2, verdict: 'rejected' },
+        ]
+      )
+    );
+
+    expect(cycles).toEqual([]);
+  });
+
+  it('marks only the stages actually inside the loop', () => {
+    // 1 -> 2 -> 3, 3 rejects back to 2. Stage 1 leads into the loop but nothing
+    // returns to it, so it is not on it.
+    const { cycles } = resolveTransitions(
+      graphOf(
+        [step(1), step(2), step(3, { decision: true })],
+        [{ from: 3, to: 2, verdict: 'rejected' }]
+      )
+    );
+
+    expect(cycles).toEqual([2, 3]);
+  });
+});
+
 describe('effectiveQuorum', () => {
   it('falls back to the tenant default when the step does not say', () => {
     const graph: RouteFlowGraph = { ...graphOf([step(1, { decision: true })]), defaultQuorum: 'majority' };

@@ -1,3 +1,4 @@
+import type { AudienceGroupPreview } from '@amroksaleh/ui/audience-group-picker';
 import type {
   RouteFlowGraph,
   RouteFlowQuorum,
@@ -129,6 +130,35 @@ export function toGraphRequest(graph: RouteFlowGraph): {
 export interface AudiencePreviewWire {
   data: {
     total: number;
+    /**
+     * The SERVER's own flag, never re-derived from `total > sample.length`.
+     * #1015's picker is emphatic about this and it is right: a client that got
+     * it wrong would present ten people as the whole group, which is the single
+     * misreading the whole design exists to prevent.
+     */
+    truncated: boolean;
+    sample_size: number;
+    sample: Array<{ profile_id: number; display_name?: string | null }>;
+  };
+}
+
+/**
+ * The wire preview in the shape `@amroksaleh/ui/audience-group-picker` reads.
+ *
+ * A mapper rather than matching field names on the wire: the API speaks
+ * snake_case like the rest of this backend, and the kit speaks camelCase like a
+ * TypeScript component library. One conversion here means neither side has to
+ * know about the other's spelling.
+ */
+export function toAudienceGroupPreview(wire: AudiencePreviewWire): AudienceGroupPreview {
+  return {
+    total: wire.data.total,
+    truncated: wire.data.truncated,
+    sampleSize: wire.data.sample_size,
+    members: wire.data.sample.map((m) => ({
+      profileId: m.profile_id,
+      displayName: m.display_name ?? null,
+    })),
   };
 }
 
