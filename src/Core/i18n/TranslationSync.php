@@ -88,6 +88,7 @@ final class TranslationSync
      *     updated: list<array{domain: string, key: string, from: string, to: string}>,
      *     present: int,
      *     divergent: list<array{domain: string, key: string, database: string, source: string}>,
+     *     overridden: array{rows: int, tenants: int},
      *     dead: list<array{domain: string, key: string, text: string}>,
      *     unmanaged: array<string, int>,
      *     dryRun: bool
@@ -213,10 +214,68 @@ final class TranslationSync
             'updated' => $updated,
             'present' => $present,
             'divergent' => $divergent,
+            'overridden' => $this->tenantOverrides($languageId, $catalog),
             'dead' => self::deadKeys($catalog, $existing),
             'unmanaged' => self::unmanagedDomains($catalog, $existing),
             'dryRun' => $dryRun,
         ];
+    }
+
+    /**
+     * How much tenant wording this run stepped around: override rows, for keys
+     * this catalogue covers, in this language.
+     *
+     * WHY A SYNC COUNTS SOMETHING IT NEVER TOUCHES
+     * ---------------------------------------------
+     * Because "never touches" is the claim, and an operator running this against
+     * a customised production install has no other way to check it. Every other
+     * number here is about rows that changed; this one is about rows that did
+     * not, and it is the only one that can be compared against what the
+     * customer knows they customised. Zero on an install with tenant overrides
+     * is a bug report; the same number before and after a deploy is the
+     * evidence that a refresh left tenant wording alone.
+     *
+     * It is a COUNT and not a list on purpose: the strings belong to tenants,
+     * and a platform-wide seeding command printing their private wording to an
+     * operator's terminal would be a disclosure dressed up as a progress report.
+     *
+     * These rows are unreachable from here by construction — every statement in
+     * this class carries `tenant_id IS NULL`, and
+     * {@see \Whity\Api\TranslationsApiHandler::writeAccessFor()} will not let a
+     * tenant write a system-default row either — so this is a measurement, not a
+     * guard. The guard is in the WHERE clauses.
+     *
+     * @param array<string, array<string, string>> $catalog
+     * @return array{rows: int, tenants: int}
+     */
+    private function tenantOverrides(int $languageId, array $catalog): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT domain, key, tenant_id FROM translations
+             WHERE language_id = :language_id AND tenant_id IS NOT NULL'
+        );
+        $statement->execute([':language_id' => $languageId]);
+
+        $rows = 0;
+        $tenants = [];
+
+        while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $domain = (string) $row['domain'];
+            $key = (string) $row['key'];
+
+            // Only overrides of keys THIS run considered. A tenant's own
+            // invented key, or one from a domain the catalogue does not cover,
+            // was never in the path of anything here and counting it would
+            // inflate the reassurance.
+            if (!isset($catalog[$domain][$key])) {
+                continue;
+            }
+
+            $rows++;
+            $tenants[(string) $row['tenant_id']] = true;
+        }
+
+        return ['rows' => $rows, 'tenants' => count($tenants)];
     }
 
     /**
