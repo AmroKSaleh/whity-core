@@ -28,6 +28,7 @@ use Whity\Core\Document\Organizer\PdoSchemaPresence;
 use Whity\Core\Document\Qr\DocumentQrScanRepository;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Qr\DocumentQrTokenRepository;
+use Whity\Core\Document\Qr\QrTemplateComposer;
 use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
@@ -110,6 +111,7 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
     private DocumentVerificationApiHandler $publicHandler;
     private DocumentQrService $qr;
     private DocumentTemplateRepository $templates;
+    private FakeRenderServiceClient $renderService;
     private string $storageRoot;
 
     protected function setUp(): void
@@ -129,10 +131,11 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
         );
 
         $store = new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot));
+        $this->renderService = new FakeRenderServiceClient();
         $renderer = new DocumentRenderer(
             new DocumentBlockRepository($this->pdo),
             $this->settings,
-            new FakeRenderServiceClient()
+            $this->renderService
         );
         $issuer = new DocumentIssuer($this->pdo, $documentRepo, $artifactRepo, $store);
         $roleChecker = new RoleChecker($db, new PermissionRegistry());
@@ -366,9 +369,68 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
         self::assertStringContainsString('Document not found', $response->getBody());
     }
 
+    // ── the loop from mint to printed page ───────────────────────────────────
+
+    /**
+     * The code that gets MINTED is the code that reaches the RENDERER, carrying
+     * the URL a phone will actually open.
+     *
+     * The three halves of this feature are individually covered — the policy
+     * composes the scopes, the composer places an element, the service mints a
+     * token — and that is exactly the shape of coverage that lets a feature be
+     * wrong anyway: each piece correct, the wiring between them not. This is the
+     * only test that follows one document from `POST /api/documents` to the
+     * payload the render service is handed.
+     *
+     * The URL is rebuilt here from the token READ OUT OF THE DATABASE rather
+     * than from the service that produced it, so a bug in
+     * {@see DocumentQrService::verificationUrl()} cannot agree with itself.
+     */
+    public function testTheMintedCodeReachesTheRendererAsAScannableUrl(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_PERSIST_ENABLED, 'true');
+
+        $documentId = $this->raise(self::OWNER, 'Minutes', render: true);
+        $token = $this->tokenFor($documentId);
+
+        self::assertNotSame([], $this->renderService->calls, 'fixture: the render must have been attempted');
+        $payload = $this->renderService->calls[0];
+
+        // 1. The element is on the page, bound to the reserved key — placed by
+        //    default, because this template has no QR element authored on it.
+        $bindings = [];
+        foreach ($payload['template']['pages'] as $page) {
+            foreach ($page['elements'] as $element) {
+                if (isset($element['binding'])) {
+                    $bindings[] = $element['binding'];
+                }
+            }
+        }
+        self::assertContains(QrTemplateComposer::VERIFICATION_BINDING, $bindings);
+
+        // 2. The value it resolves against is the real, absolute, scannable URL
+        //    for the token that was actually minted for THIS document.
+        $row = $payload['dataRows'][0];
+        $resolved = is_array($row) ? $row : (array) $row;
+        self::assertSame(
+            'https://docs.example.test/verify/' . $token,
+            $resolved[QrTemplateComposer::VERIFICATION_BINDING],
+            'the QR must encode the page a phone camera opens, for the code minted for this document'
+        );
+
+        // 3. And that URL is one the public endpoint actually honours — the
+        //    check that would have caught a path built with the wrong prefix.
+        $verified = self::data($this->publicHandler->verify(
+            $this->anonymousRequest($token),
+            ['token' => $token]
+        ));
+        self::assertTrue($verified['verified']);
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
-    private function raise(int $actorId, string $title): int
+    private function raise(int $actorId, string $title, bool $render = false): int
     {
         $templateId = $this->createTemplate($actorId, $title . ' Template');
 
@@ -378,7 +440,7 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
             'POST',
             '/api/documents',
             [],
-            (string) json_encode(['document_template_id' => $templateId, 'title' => $title, 'render' => false])
+            (string) json_encode(['document_template_id' => $templateId, 'title' => $title, 'render' => $render])
         );
         $request->user = (object) ['profile_id' => $actorId, 'active_tenant_id' => self::TENANT];
 
