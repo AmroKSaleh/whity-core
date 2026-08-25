@@ -2895,6 +2895,19 @@ $router->register('POST',   '/api/branding/global/assets/{key}',    [$brandingHa
 $router->register('DELETE', '/api/branding/global/assets/{key}',    [$brandingHandler, 'clearGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PUT',    '/api/tenants/{id}/branding-host',      [$brandingHandler, 'setBrandingHost'], null, null, CorePermissions::SETTINGS_MANAGE);
 
+// 13c-ter. UI display preferences (#1068) — public GET /api/v1/ui/preferences.
+// Registered here rather than beside the settings routes because it resolves
+// its tenant exactly as branding does (JWT context, else request host, else the
+// global layer) and so needs the $hostResolver built just above.
+//
+// UNGATED, and that is the point of it existing separately from
+// /api/v1/settings: `settings:read` is an administrative right, and a
+// preference about how every screen renders has to reach every reader,
+// including the ones who will never open the settings console. The payload is
+// one boolean about presentation and carries no tenant data.
+$uiPreferencesHandler = new \Whity\Api\UiPreferencesApiHandler($settingsService, $hostResolver);
+$router->register('GET', '/api/ui/preferences', [$uiPreferencesHandler, 'get'], null, null, null);
+
 // 12b. Theme Override API (WC-242) — public GET, unauthenticated by design
 // (like branding, called on every page load before login is even possible).
 // The handler enforces whatever permission the contributing plugin's OWN

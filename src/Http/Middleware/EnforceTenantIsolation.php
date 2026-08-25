@@ -144,6 +144,13 @@ class EnforceTenantIsolation
         // WC-233: public effective branding endpoint — resolves tenant by host,
         // returns only branding fields (never other settings), no auth required.
         '/api/v1/branding',
+        // #1068: how this tenant wants its interface to PRESENT itself (today,
+        // one boolean: whether dates are shown at all). Public for branding's
+        // reason and resolved on branding's ladder — the sign-in screen and the
+        // public status page both render dates before any session exists, so a
+        // gated answer would arrive after the screens it governs. It returns no
+        // tenant data and no other setting.
+        '/api/v1/ui/preferences',
         // KeyHub KiCad plugin native-client login — issues JWTs to the desktop app.
         '/api/v1/keyhub/auth/token',
         // WC-b-device-tokens: device-credential exchange. Self-authenticating via
