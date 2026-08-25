@@ -1116,7 +1116,7 @@ export interface paths {
         };
         /**
          * The verification code on a document, and the record of it being scanned
-         * @description The record page panel. `enabled` composes the tenant setting with the template flag; `configured` is separate because "this instance has no public address" and "this tenant switched it off" are different problems with different fixes. Anonymous scans appear with `scanner_profile_id: null` and carry nothing else about the scanner — no address, no device — because nothing else is stored.
+         * @description The record page panel. `enabled` composes the tenant setting with the template flag; `configured` is separate because "this instance has no public address" and "this tenant switched it off" are different problems with different fixes. `token` is null in TWO different states — never minted, and withdrawn — so `retired` is what separates them: it lists the codes this document has carried and stopped honouring, newest first, each with the reason (`withdrawn` or `superseded`). A retired entry carries the human reference, never the token and never a verification URL. Anonymous scans appear with `scanner_profile_id: null` and carry nothing else about the scanner — no address, no device — because nothing else is stored.
          */
         get: operations["get_api_v1_documents_id_qr"];
         put?: never;
@@ -12224,6 +12224,17 @@ export interface operations {
                                 issued_at?: string | null;
                                 issued_by?: number | null;
                             } | null;
+                            retired?: {
+                                total?: number;
+                                recent?: {
+                                    reference?: string;
+                                    issued_at?: string | null;
+                                    revoked_at?: string;
+                                    revoked_by?: number | null;
+                                    /** @enum {string} */
+                                    reason?: "withdrawn" | "superseded";
+                                }[];
+                            };
                             scans?: {
                                 total?: number;
                                 recent?: {
