@@ -28433,6 +28433,14 @@
                         "items": {
                             "$ref": "#/components/schemas/DocumentRouteEdge"
                         }
+                    },
+                    "default_quorum": {
+                        "type": "string",
+                        "enum": [
+                            "all",
+                            "any",
+                            "majority"
+                        ]
                     }
                 },
                 "required": [
@@ -28441,7 +28449,8 @@
                     "title",
                     "created_at",
                     "steps",
-                    "edges"
+                    "edges",
+                    "default_quorum"
                 ]
             },
             "DocumentRouteActionRequest": {

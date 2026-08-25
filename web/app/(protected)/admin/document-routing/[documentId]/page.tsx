@@ -435,7 +435,23 @@ export default function DocumentRoutingPage() {
         <p className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
           {routes.error}
         </p>
-      ) : routes.loading ? (
+      ) : routes.loading && routes.data === null ? (
+        /*
+          FIRST LOAD ONLY, and this gate is the reason to say so twice.
+
+          `useFetch` raises `loading` on every refetch, and an act triggers one
+          for BOTH requests. Gating on `loading` alone replaced the entire route
+          list — every card, every act panel — with the word "Loading…" the
+          instant somebody approved, which threw away the sentence the panel
+          exists to show them ("your approval is recorded; this step is not
+          approved yet") before anybody could read it.
+
+          The recipients gate below had the identical defect and was fixed first;
+          this one sat two lines away and stayed green through 1,794 unit tests,
+          because the panel's own tests mount the panel and never the host. It
+          was found by opening the page (#1041). `document-routing-refresh.test.tsx`
+          now holds both.
+        */
         <p className="text-sm text-muted-foreground">{t('routing.loading', 'Loading…')}</p>
       ) : routeList.length === 0 ? (
         /*
@@ -480,10 +496,21 @@ export default function DocumentRoutingPage() {
                   `routes` and `recipients` are two requests and the routes
                   resolve first, which is exactly why the gap is visible rather
                   than theoretical.
+
+                  The gate is the FIRST load only — `loading` with nothing held
+                  yet. `useFetch` raises `loading` again on every refetch, and an
+                  act triggers one, so gating on `loading` alone UNMOUNTED the
+                  act panel the instant somebody acted. That threw away the one
+                  sentence the panel exists to show them ("your approval is
+                  recorded; this step is still waiting on the others") before it
+                  could be read (#1041). Holding the previous rows for the length
+                  of a refetch does not reintroduce the #1039 defect: the claim
+                  that was false was "this route reached nobody", and rows we
+                  already have are not nobody.
                 */}
                 {recipients.error !== null ? (
                   <p className="text-sm text-muted-foreground">{recipients.error}</p>
-                ) : recipients.loading ? (
+                ) : recipients.loading && recipients.data === null ? (
                   <p className="text-sm text-muted-foreground" data-slot="routing-recipients-loading">
                     {t('routing.recipients.loading', 'Working out who this reached…')}
                   </p>

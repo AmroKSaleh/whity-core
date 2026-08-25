@@ -42,12 +42,25 @@ final class RoutingPresenter
      * ids, because by then they do. {@see DocumentRouter::issue()} is the one
      * place the two spellings meet.
      *
+     * `default_quorum` rides along for the reason
+     * {@see \Whity\Core\Document\RouteTemplate\RouteTemplatePresenter::graph()}
+     * sends it to the editor, and the reason is sharper here (#1041). A step's
+     * own `decision_quorum` is NULL far more often than not, and NULL means
+     * "follow the tenant's setting" rather than "no quorum" — so a client that
+     * only had the step could not tell an approver whether their single approval
+     * carries the gate or is one of four hundred required. The answer lives in
+     * the settings chain, and the person standing on a decision step is the least
+     * likely person in the tenant to hold `settings:read`: asking them to fetch
+     * it would 403 exactly the reader who needs it.
+     *
      * @param array<string, mixed>       $route
      * @param list<array<string, mixed>> $steps
      * @param list<array<string, mixed>> $edges
+     * @param string $defaultQuorum What a step with a NULL `decision_quorum`
+     *        actually does, already resolved through the tenant's settings chain.
      * @return array<string, mixed>
      */
-    public static function route(array $route, array $steps, array $edges = []): array
+    public static function route(array $route, array $steps, array $edges = [], string $defaultQuorum = RouteQuorum::ALL): array
     {
         return [
             'id' => (int) $route['id'],
@@ -57,6 +70,7 @@ final class RoutingPresenter
             'created_at' => (string) $route['created_at'],
             'steps' => array_map(self::step(...), $steps),
             'edges' => array_map(self::edge(...), $edges),
+            'default_quorum' => $defaultQuorum,
         ];
     }
 

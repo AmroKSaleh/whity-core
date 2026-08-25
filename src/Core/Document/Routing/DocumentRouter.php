@@ -820,6 +820,28 @@ final class DocumentRouter
             return $onStep;
         }
 
+        return $this->defaultQuorum($tenantId);
+    }
+
+    /**
+     * The bottom three layers of {@see approvalQuorum()}: what a step that names
+     * NO quorum of its own actually does in this tenant.
+     *
+     * Public because a READER needs the same answer the engine will use (#1041).
+     * A recipient standing on a decision step whose `decision_quorum` is null —
+     * which is most of them — cannot otherwise be told whether their approval
+     * carries the gate or is one of four hundred required, and the settings chain
+     * that holds the answer is behind `settings:read`, which that person will not
+     * hold. `RoutingPresenter::route()` publishes what this returns.
+     *
+     * Extracted rather than reimplemented on the API handler on purpose: a second
+     * copy of this fallback ladder is a copy that can disagree with the engine
+     * about what a route is going to do, and it would disagree SILENTLY — the
+     * screen would name one rule and the engine apply another, which is the exact
+     * class of failure {@see RouteQuorum} exists to make impossible.
+     */
+    public function defaultQuorum(int $tenantId): string
+    {
         $effective = $this->settings->effective($tenantId);
         $configured = $effective[SettingsRegistry::DOCUMENTS_ROUTING_APPROVAL_QUORUM] ?? null;
         if (is_string($configured) && RouteQuorum::isValid($configured)) {

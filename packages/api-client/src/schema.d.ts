@@ -4021,6 +4021,8 @@ export interface components {
             created_at: string;
             steps: components["schemas"]["DocumentRouteStep"][];
             edges: components["schemas"]["DocumentRouteEdge"][];
+            /** @enum {string} */
+            default_quorum: "all" | "any" | "majority";
         };
         DocumentRouteActionRequest: {
             /** @enum {string} */

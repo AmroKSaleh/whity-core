@@ -607,7 +607,7 @@ final class DocumentDemoSeeder
         /**
          * @var list<array{
          *     title: string, template: string, raiser: string, route: string,
-         *     steps: list<array{rule_kind: string, rule_config: array<string, mixed>, label: string}>,
+         *     steps: list<array{rule_kind: string, rule_config: array<string, mixed>, label: string, decision?: bool}>,
          *     acts: list<array{actor: string, action: string, note: ?string}>,
          *     corrections: int, captions: list<string>
          * }> $declared
@@ -652,9 +652,24 @@ final class DocumentDemoSeeder
                 'captions' => ['Circulated to every department.', 'Demo fixture — not a real circular.'],
             ],
 
-            // D2. AWAITING ONE NAMED PERSON. A single-step `role` route with one
-            // holder: exactly one open recipient row, no trail beyond `issued`.
-            // This is the folder that must not be confusable with an empty one.
+            // D2. AWAITING ONE NAMED PERSON, AND ASKING THEM TO DECIDE. A
+            // single-step `role` route with one holder: exactly one open
+            // recipient row, no trail beyond `issued`. This is the folder that
+            // must not be confusable with an empty one.
+            //
+            // It is a DECISION step (#1014), and it was not until #1041 — which
+            // made this fixture the only thing in the demo that lied. The route
+            // is called "Dean's approval" and the artifact is captioned
+            // "Awaiting approval", and what the dean was actually offered was an
+            // acknowledgement: "I saw this". A route that says approval and
+            // records circulation is precisely the confusion the verdict column
+            // exists to remove, and a demo that shows it is the version of the
+            // problem that teaches it to everybody who opens the demo.
+            //
+            // Deliberately left UNANSWERED, unlike D3 and D6. A decision anybody
+            // can walk up to and answer is the only way the acting half is
+            // visible at all: sign in as the dean and there are two buttons that
+            // exist nowhere else in this dataset.
             [
                 'title' => 'Demo equipment purchase request',
                 'template' => self::TPL_CIVIL_WORKS_ORDER,
@@ -665,11 +680,16 @@ final class DocumentDemoSeeder
                         'rule_kind' => RoutingRuleRegistry::KIND_ROLE,
                         'rule_config' => ['role_id' => $dean],
                         'label' => 'The dean',
+                        // One holder, so `all`, `any` and `majority` are the same
+                        // rule here and no quorum is named — which is also why
+                        // the panel shows no quorum block for it. The fan-out
+                        // case where they differ is D7.
+                        'decision' => true,
                     ],
                 ],
                 'acts' => [],
                 'corrections' => 0,
-                'captions' => ['Awaiting approval.', 'Demo fixture.'],
+                'captions' => ['Awaiting the dean’s decision.', 'Demo fixture.'],
             ],
 
             // D3. ALREADY ACTED ON, plus the append-only correction, plus TWO
@@ -817,6 +837,45 @@ final class DocumentDemoSeeder
                 'corrections' => 0,
                 'captions' => ['Issued centrally, from no unit.', 'Demo fixture.'],
             ],
+
+            // D7. A DECISION STEP THAT FANS OUT, which is the only shape where a
+            // quorum means anything (#1014, #1041).
+            //
+            // `all`, `any` and `majority` are the SAME rule for the single
+            // approver of D2 — and for the "the dean signs off" step that is most
+            // real approval steps. They differ exactly here, where one node is a
+            // TYPE of person and resolves to several: the standing requirement
+            // behind the whole feature is "you can put nodes for all 1000
+            // instructors but you can say instructors in one node", and this is
+            // that node with two people in it instead of a thousand.
+            //
+            // Left with NOTHING recorded on purpose. The state worth being able
+            // to walk up to is the one between the first answer and the last:
+            // sign in as one technician and approve, and the answer is "your
+            // approval is recorded, this step is not approved yet"; sign in as
+            // the other and approve, and only then has the step approved. Seeding
+            // the first approval would hand somebody the second half and hide the
+            // half that is easy to get wrong.
+            [
+                'title' => 'Demo workshop safety sign-off',
+                'template' => self::TPL_MECHANICAL_REPORT,
+                'raiser' => DemoOrganisationSeeder::MECHANICAL_HEAD,
+                'route' => 'Both technicians must sign off',
+                'steps' => [
+                    [
+                        'rule_kind' => RoutingRuleRegistry::KIND_ROLE,
+                        'rule_config' => ['role_id' => $technician],
+                        'label' => 'Every technician in the tenant',
+                        'decision' => true,
+                    ],
+                ],
+                'acts' => [],
+                'corrections' => 0,
+                'captions' => [
+                    'Needs every technician’s approval before the workshop reopens.',
+                    'Demo fixture.',
+                ],
+            ],
         ];
 
         $ids = [];
@@ -834,7 +893,7 @@ final class DocumentDemoSeeder
      * @param array<string, int> $templateIds
      * @param array{
      *     title: string, template: string, raiser: string, route: string,
-     *     steps: list<array{rule_kind: string, rule_config: array<string, mixed>, label: string}>,
+     *     steps: list<array{rule_kind: string, rule_config: array<string, mixed>, label: string, decision?: bool}>,
      *     acts: list<array{actor: string, action: string, note: ?string}>,
      *     corrections: int, captions: list<string>
      * } $spec
