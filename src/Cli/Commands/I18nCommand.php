@@ -23,9 +23,17 @@ use Whity\Database\Database;
  *   whity-cli i18n:coverage           # per-domain translated/missing, no database
  *
  * The order matters, and so does the direction. `extract` reads code and writes
- * a file; `sync` reads that file and writes rows. Nothing ever flows back: the
- * database holds human work — an edited English string, a finished Arabic
- * translation — and no command here overwrites it.
+ * a file; `sync` reads that file and writes rows. Nothing ever flows back.
+ *
+ * `sync` INSERTS new keys and REFRESHES rows that still say what the file last
+ * said — that second half is #1057, and without it a correction to an existing
+ * string never reached an install that had already been seeded, because the
+ * runtime prefers a stored row over the English in the call site. What it will
+ * not touch is human work: an English string edited in the console, or a
+ * finished Arabic translation, is reported as divergent and left, because saving
+ * a string in /admin/translations clears the row's `source_managed` flag and
+ * `sync`'s UPDATE requires it. Run `--dry-run` first to read every sentence it
+ * would change.
  *
  * `--language=` DOES NOT MACHINE-TRANSLATE, and it is worth being explicit about
  * that, because a flag named for a language on a command that seeds strings
@@ -263,8 +271,10 @@ final class I18nCommand implements NamedSubcommand
      * @param array{
      *     language: array{code: string, id: int},
      *     inserted: list<array{domain: string, key: string, text: string}>,
+     *     updated: list<array{domain: string, key: string, from: string, to: string}>,
      *     present: int,
      *     divergent: list<array{domain: string, key: string, database: string, source: string}>,
+     *     overridden: array{rows: int, tenants: int},
      *     dead: list<array{domain: string, key: string, text: string}>,
      *     unmanaged: array<string, int>,
      *     dryRun: bool
@@ -273,28 +283,71 @@ final class I18nCommand implements NamedSubcommand
     private static function printSyncReport(array $report): void
     {
         $code = $report['language']['code'];
+
+        // THE HEADLINE IS THREE NUMBERS, AND THE THIRD IS THE POINT.
+        //
+        // This command now both writes and declines to write, and a line saying
+        // "synced" leaves an operator exactly as uncertain as they were before
+        // running it. So the summary separates what arrived (inserted,
+        // refreshed) from what was deliberately left alone (kept), because on a
+        // customised install the second is the number they are actually worried
+        // about — and it is the one that should be non-zero.
+        $kept = count($report['divergent']) + $report['overridden']['rows'];
+
         printf(
-            "\n%s [%s]: %d key(s) %s, %d already present (untouched).\n",
+            "\n%s [%s]: %d inserted, %d refreshed, %d left alone (%d already matched the file).\n",
             $report['dryRun'] ? 'DRY RUN' : 'Synced',
             $code,
             count($report['inserted']),
-            $report['dryRun'] ? 'would insert' : 'inserted',
-            $report['present']
+            count($report['updated']),
+            $kept,
+            $report['present'] - count($report['updated']) - count($report['divergent'])
         );
 
         foreach (self::groupByDomain($report['inserted']) as $domain => $keys) {
             printf("  + %-24s %d key(s)\n", $domain, count($keys));
         }
 
+        // Printed key by key with both texts, not summarised. A refresh is the
+        // one thing this command does that CHANGES what a user already reads, so
+        // an operator running --dry-run before a deploy has to be able to see
+        // every sentence it would change, not a count of them.
+        if ($report['updated'] !== []) {
+            printf(
+                "\n%d key(s) whose source text changed and whose row nobody had edited — %s to match\n"
+                . "the committed file. This is how a correction reaches an install that was already seeded:\n",
+                count($report['updated']),
+                $report['dryRun'] ? 'would be refreshed' : 'refreshed'
+            );
+            foreach ($report['updated'] as $row) {
+                printf("  ~ %s / %s\n      was: %s\n      now: %s\n", $row['domain'], $row['key'], $row['from'], $row['to']);
+            }
+        }
+
         if ($report['divergent'] !== []) {
             printf(
-                "\n%d key(s) whose text in the database differs from the committed file. LEFT AS THEY ARE —\n"
-                . "someone edited them in the console, and that edit outranks a file:\n",
+                "\n%d system-default key(s) whose text in the database differs from the committed file.\n"
+                . "LEFT AS THEY ARE — somebody saved them in /admin/translations, which cleared the row's\n"
+                . "`source_managed` flag, and that edit outranks a file. Delete the row in the console if\n"
+                . "you want the file's wording back:\n",
                 count($report['divergent'])
             );
             foreach ($report['divergent'] as $row) {
                 printf("  ~ %s / %s\n      database: %s\n      file:     %s\n", $row['domain'], $row['key'], $row['database'], $row['source']);
             }
+        }
+
+        // Counted, never listed — the wording belongs to the tenants. See
+        // TranslationSync::tenantOverrides().
+        if ($report['overridden']['rows'] > 0) {
+            printf(
+                "\n%d tenant override row(s) across %d tenant(s) shadow keys in this catalogue, and were\n"
+                . "NOT VISITED. A tenant's wording is a separate row carrying its tenant_id; every statement\n"
+                . "in the sync is scoped to `tenant_id IS NULL`, so a refresh cannot reach one. This number\n"
+                . "staying the same across a deploy is what proves that:\n",
+                $report['overridden']['rows'],
+                $report['overridden']['tenants']
+            );
         }
 
         if ($report['dead'] !== []) {

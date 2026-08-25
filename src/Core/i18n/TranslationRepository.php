@@ -233,9 +233,14 @@ final class TranslationRepository implements TranslationRepositoryInterface
         }
 
         try {
+            // `source_managed = FALSE` is stated rather than left to the column
+            // default (#1057): a key created through the console was authored by
+            // a person, and the row must say so where a reader of this statement
+            // can see it. Only TranslationSync's INSERT may claim a row for the
+            // catalogue.
             $stmt = $this->pdo->prepare(
-                'INSERT INTO translations (language_id, domain, key, translation, tenant_id, created_at, updated_at)
-                 VALUES (:language_id, :domain, :key, :translation, :tenant_id, NOW(), NOW())'
+                'INSERT INTO translations (language_id, domain, key, translation, tenant_id, source_managed, created_at, updated_at)
+                 VALUES (:language_id, :domain, :key, :translation, :tenant_id, FALSE, NOW(), NOW())'
             );
             $stmt->execute([
                 ':language_id' => $languageId,
@@ -258,18 +263,32 @@ final class TranslationRepository implements TranslationRepositoryInterface
      * Update a translation row's text, scoped to the EXPECTED tenant so the
      * mutating statement itself carries the tenant predicate (WC-190
      * defense-in-depth) — not merely an earlier guard read.
+     *
+     * CLEARS `source_managed` (#1057), and that is the whole point of doing it
+     * here rather than in the handler. This statement is reached only from
+     * {@see \Whity\Api\TranslationsApiHandler::update()} — a person saving a
+     * string in /admin/translations behind `translations:manage` — so it is the
+     * exact moment a row stops being the committed catalogue's and starts being
+     * theirs. From here on {@see TranslationSync} cannot touch it: its refresh
+     * requires `source_managed = TRUE`, so a later deploy will report the row as
+     * divergent and leave the human wording alone.
+     *
+     * Setting it in the same statement as the text is deliberate. If it were a
+     * second statement, a failure between the two would leave a row carrying a
+     * human's words and the catalogue's claim on them — which the next sync
+     * would silently revert, in exactly the way this column exists to prevent.
      */
     public function update(int $id, string $translation, ?int $expectedTenantId): bool
     {
         if ($expectedTenantId === null) {
             $stmt = $this->pdo->prepare(
-                'UPDATE translations SET translation = :translation, updated_at = NOW()
+                'UPDATE translations SET translation = :translation, source_managed = FALSE, updated_at = NOW()
                  WHERE id = :id AND tenant_id IS NULL'
             );
             $stmt->execute([':translation' => $translation, ':id' => $id]);
         } else {
             $stmt = $this->pdo->prepare(
-                'UPDATE translations SET translation = :translation, updated_at = NOW()
+                'UPDATE translations SET translation = :translation, source_managed = FALSE, updated_at = NOW()
                  WHERE id = :id AND tenant_id = :tenant_id'
             );
             $stmt->execute([':translation' => $translation, ':id' => $id, ':tenant_id' => $expectedTenantId]);
