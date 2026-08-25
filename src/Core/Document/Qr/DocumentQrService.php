@@ -124,6 +124,30 @@ final class DocumentQrService
     }
 
     /**
+     * Every code this document has ever carried, newest first — live and retired.
+     *
+     * WHY THE RECORD PANEL READS THIS RATHER THAN {@see active()}. `active()`
+     * answers null in two states that are not the same fact: nothing was ever
+     * minted, and the code that was minted has been withdrawn. A panel that
+     * cannot tell them apart says "this document has no verification code" to an
+     * operator who withdrew one thirty seconds ago — a true-sounding sentence
+     * that hides the state the whole feature exists for, which is that paper is
+     * out there carrying a symbol the server has stopped honouring.
+     *
+     * Reading the whole list ALSO makes the two halves of the panel consistent
+     * with each other. Asking `active()` and then asking for the retired ones is
+     * two reads with a rotation able to land between them, which can render a
+     * live code beside "withdrawn", or worse, "withdrawn" for a document that
+     * has a live code. One statement cannot disagree with itself.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function history(int $tenantId, int $documentId): array
+    {
+        return $this->tokens->listForDocument($tenantId, $documentId);
+    }
+
+    /**
      * The code in force, minting one if the document has none.
      *
      * The idempotent entry point: every render path calls this, and calling it

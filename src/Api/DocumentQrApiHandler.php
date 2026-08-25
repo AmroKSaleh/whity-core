@@ -64,6 +64,17 @@ final class DocumentQrApiHandler
     /** Scans returned with the panel. A page, not a log; the total is exact. */
     private const RECENT_SCANS = 25;
 
+    /**
+     * Retired codes returned with the panel, newest first.
+     *
+     * Capped for the same reason the scans are, and reported alongside an exact
+     * `total` for the same reason: a truncated list beside no total reads as the
+     * whole list. A document accumulates one retired row per rotation, so in
+     * practice this cap is never reached — which is precisely why it must exist,
+     * because the pathological case is the one nobody sees before it ships.
+     */
+    private const RETIRED_CODES = 10;
+
     public function __construct(
         private readonly DocumentRepository $documents,
         private readonly DocumentTemplateRepository $templates,
@@ -87,6 +98,24 @@ final class DocumentQrApiHandler
      * download the artifact, which has the code printed on it. Refusing to show
      * it in the panel while serving the PDF that carries it would be theatre.
      *
+     * RETIRED CODES ARE RETURNED TOO, and they are what makes the panel able to
+     * tell the truth. `token: null` is TWO different facts — nothing was ever
+     * minted, and the code that was minted has been withdrawn — and a screen that
+     * cannot separate them tells an operator who has just withdrawn a code that
+     * this document "has no verification code", which is the exact state the
+     * feature exists to make visible: paper in the field carrying a symbol the
+     * server no longer honours.
+     *
+     * A retired entry carries the human REFERENCE, never the token and never a
+     * verification URL. The reference is a 48-bit prefix, is not accepted as a
+     * credential anywhere ({@see DocumentQrService::resolve()} takes the whole
+     * 64-character value or nothing), and is already in this caller's hands: it
+     * is printed under the symbol on the artifacts they can download. What it
+     * buys is the one thing an investigation needs — matching the sheet in
+     * somebody's hand to a row on this screen. The URL is withheld because
+     * following it would be an internal user scanning their own document, which
+     * appends a `refused` row to the very trail they are reading.
+     *
      * @param array<string, string> $params
      */
     public function show(Request $request, array $params): Response
@@ -99,7 +128,40 @@ final class DocumentQrApiHandler
         $documentId = (int) $document['id'];
 
         try {
-            $token = $this->qr->active($tenantId, $documentId);
+            // ONE read for both halves. Asking `active()` and then asking for the
+            // retired rows is two statements a rotation can land between, and the
+            // two renderings that produces are both lies: a live code beside
+            // "withdrawn", or "withdrawn" for a document that has a live code.
+            // Derived from a single ordered list, the panel cannot contradict
+            // itself.
+            $history = $this->qr->history($tenantId, $documentId);
+            $token = null;
+            $retired = [];
+            foreach ($history as $row) {
+                if (($row['revoked_at'] ?? null) === null) {
+                    // Newest first, so the first un-revoked row IS the live one —
+                    // the same row `findActiveForDocument()` would return, by the
+                    // same ordering.
+                    $token ??= $row;
+                    continue;
+                }
+                $retired[] = [
+                    'reference' => $this->qr->reference((string) $row['token']),
+                    'issued_at' => $row['issued_at'] ?? null,
+                    'revoked_at' => $row['revoked_at'],
+                    'revoked_by' => $row['revoked_by'] ?? null,
+                    // `withdrawn` or `superseded` — the CHECK-constrained
+                    // vocabulary, passed through rather than collapsed into a
+                    // boolean. They mean opposite things to the person holding
+                    // the paper: one says the organisation stopped standing
+                    // behind this document, the other says their copy is simply
+                    // an older printing.
+                    // Never null on a revoked row: migration 122's CHECK is
+                    // `revoked_at IS NOT NULL AND revoked_reason IN (...)`, so
+                    // the pair moves together or the write is refused.
+                    'reason' => (string) $row['revoked_reason'],
+                ];
+            }
 
             return Response::json([
                 'data' => [
@@ -115,6 +177,10 @@ final class DocumentQrApiHandler
                         'verification_url' => $this->qr->verificationUrl((string) $token['token']),
                         'issued_at' => $token['issued_at'] ?? null,
                         'issued_by' => $token['issued_by'] ?? null,
+                    ],
+                    'retired' => [
+                        'total' => count($retired),
+                        'recent' => array_slice($retired, 0, self::RETIRED_CODES),
                     ],
                     'scans' => [
                         'total' => $this->scans->countForDocument($tenantId, $documentId),
