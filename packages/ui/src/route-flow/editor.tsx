@@ -557,7 +557,10 @@ function RouteFlowTransitionEdge({
       label={data?.text}
       labelX={labelX}
       labelY={labelY + LABEL_NUDGE[data?.on ?? 'continue']}
-      labelStyle={{ fontSize: 10 }}
+      // SVG text defaults to black and `@xyflow/react` sets no fill of its own,
+      // so an edge label was black on a near-black canvas in dark mode. Both
+      // colours come from the theme, so the chip and its text move together.
+      labelStyle={{ fontSize: 10, fill: 'var(--color-muted-foreground, #64748b)' }}
       labelShowBg
       labelBgPadding={[4, 2]}
       labelBgBorderRadius={3}
