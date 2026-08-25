@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@amroksaleh/ui/select';
+import { ViewToggle } from '@amroksaleh/ui/view-toggle';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -313,60 +314,30 @@ export function LibraryToolbar({
           </DropdownMenu>
         )}
 
-        {/* A pair of toggle buttons rather than a Select: two mutually exclusive
-            options are a radio group, and `aria-pressed` on a button pair is how
-            assistive technology is told which one is on. No `rtl:` variants —
-            the icons are symmetrical and the group flows along the inline axis
-            by itself. */}
-        <div
-          role="group"
-          aria-label={t('organizer.layout.label', 'Layout')}
-          className="flex items-center rounded-md border border-border"
-        >
-          <LayoutButton
-            active={layout === 'list'}
-            label={t('organizer.layout.list', 'List')}
-            onClick={() => onLayoutChange('list')}
-          >
-            <IconList size={16} aria-hidden />
-          </LayoutButton>
-          <LayoutButton
-            active={layout === 'grid'}
-            label={t('organizer.layout.grid', 'Grid')}
-            onClick={() => onLayoutChange('grid')}
-          >
-            <IconLayoutGrid size={16} aria-hidden />
-          </LayoutButton>
-        </div>
+        {/* `ViewToggle` from the kit, not a pair of buttons written here.
+            Nothing about "pick one of these and show me which is on" is about
+            documents, and the first draft of this file had it inline — which is
+            exactly how a second screen ends up with a copy that disagrees about
+            the accessible name or the pressed state. The labels stay here
+            because they are translated, and the kit holds no catalogue. */}
+        <ViewToggle<LibraryLayout>
+          label={t('organizer.layout.label', 'Layout')}
+          value={layout}
+          onChange={onLayoutChange}
+          options={[
+            {
+              value: 'list',
+              label: t('organizer.layout.list', 'List'),
+              icon: <IconList size={16} aria-hidden />,
+            },
+            {
+              value: 'grid',
+              label: t('organizer.layout.grid', 'Grid'),
+              icon: <IconLayoutGrid size={16} aria-hidden />,
+            },
+          ]}
+        />
       </div>
     </div>
-  );
-}
-
-function LayoutButton({
-  active,
-  label,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={label}
-      title={label}
-      className={[
-        'flex h-9 w-9 items-center justify-center transition-colors',
-        active ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60',
-      ].join(' ')}
-    >
-      {children}
-    </button>
   );
 }
