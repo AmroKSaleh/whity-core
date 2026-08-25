@@ -457,7 +457,13 @@ export function DocumentQrPanel({
       {canWrite && (
         <div className="flex flex-wrap gap-2" data-testid="document-record-qr-actions">
           <Button
-            variant={live_ === null ? 'default' : 'outline'}
+            // Prominent ONLY for a document that has never carried a code,
+            // where issuing one is the obvious next step. After a withdrawal it
+            // is deliberately quiet: an operator who has just decided a code is
+            // not to be trusted should not be met with a primary button that
+            // reads as the recommended fix, and the code it would issue is a
+            // different one that appears on nothing already printed.
+            variant={live_ === null && lastRetired === null ? 'default' : 'outline'}
             onClick={() => setPending('mint')}
             disabled={mintBlocked || busy !== null}
             data-testid="document-record-qr-mint"
@@ -602,10 +608,21 @@ function ScanTrail({
 
   return (
     <div className="space-y-2" data-testid="document-record-qr-scans">
+      {/*
+        A KEY PER GRAMMATICAL CASE, chosen here, because this platform's `t()`
+        does no plural selection — it interpolates and nothing else. Rendering
+        "Scanned 1 times." was on screen in the browser pass, which is the kind
+        of thing types cannot see and a passing test suite will happily ship.
+        Choosing in the component also lets each language phrase its own way:
+        the Arabic plural form is written count-neutral rather than trying to
+        satisfy its number-noun agreement with one string.
+      */}
       <p className="text-xs font-medium text-foreground" data-testid="document-record-qr-scan-total">
         {data.scans.total === 0
           ? t('record.qr.scans.none', 'This document has not been scanned.')
-          : t('record.qr.scans.total', 'Scanned {count} times.', { count: data.scans.total })}
+          : data.scans.total === 1
+            ? t('record.qr.scans.totalOne', 'Scanned once.')
+            : t('record.qr.scans.total', 'Scanned {count} times.', { count: data.scans.total })}
       </p>
 
       <p className="text-xs text-muted-foreground">
@@ -741,11 +758,16 @@ function WithdrawDialog({
 
         <div className="space-y-1 text-sm text-muted-foreground">
           <p>
-            {t(
-              'record.qr.withdrawDialog.paper',
-              'All {versions} issued versions of this document carry this code. Every copy already printed keeps the symbol and stops confirming anything.',
-              { versions: versionCount }
-            )}
+            {versionCount === 1
+              ? t(
+                  'record.qr.withdrawDialog.paperOne',
+                  'The one issued version of this document carries this code. Every copy already printed keeps the symbol and stops confirming anything.'
+                )
+              : t(
+                  'record.qr.withdrawDialog.paper',
+                  'All {versions} issued versions of this document carry this code. Every copy already printed keeps the symbol and stops confirming anything.',
+                  { versions: versionCount }
+                )}
           </p>
           <p>
             {t(
@@ -759,9 +781,14 @@ function WithdrawDialog({
                   'record.qr.withdrawDialog.scansNone',
                   'No scan of this code has been recorded yet.'
                 )
-              : t('record.qr.withdrawDialog.scans', '{count} scans of it are already recorded.', {
-                  count: scanTotal,
-                })}
+              : scanTotal === 1
+                ? t(
+                    'record.qr.withdrawDialog.scansOne',
+                    'One scan of it is already recorded.'
+                  )
+                : t('record.qr.withdrawDialog.scans', '{count} scans of it are already recorded.', {
+                    count: scanTotal,
+                  })}
           </p>
         </div>
 

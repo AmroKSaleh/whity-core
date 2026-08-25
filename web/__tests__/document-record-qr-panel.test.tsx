@@ -421,7 +421,7 @@ describe('withdrawing is made legible before the click', () => {
     expect(dialog).toHaveTextContent(/never be un-withdrawn/i);
     // Concretely how much paper, and how much has already been checked — a bare
     // "this cannot be undone" is a phrase people click past.
-    expect(dialog).toHaveTextContent(/All 1 issued versions/i);
+    expect(dialog).toHaveTextContent(/The one issued version of this document carries this code/i);
     expect(screen.getByTestId('document-record-qr-withdraw-scans')).toHaveTextContent('12 scans');
 
     // Opening a confirm is not the act. Nothing has gone out.
@@ -598,6 +598,31 @@ describe('scan history', () => {
     expect(screen.getByTestId('document-record-qr-scans-more')).toHaveTextContent(
       'Showing the 3 most recent of 300'
     );
+  });
+
+  /**
+   * THE BROWSER PASS FOUND THIS ONE, and no type and no assertion elsewhere
+   * could have.
+   *
+   * The panel rendered "Scanned 1 times." on a real document with one real
+   * scan. `t()` on this platform interpolates and does no plural selection, so
+   * a single string cannot cover both cases — the component has to choose the
+   * key, and this is the pin that says so. The negative assertion is the one
+   * that matters: it fails the moment somebody collapses the two branches back
+   * into one string.
+   */
+  it('agrees with its own numbers rather than rendering "1 times"', async () => {
+    serve({
+      qrPanels: [
+        livePanel({ scans: { total: 1, recent: [SCANS.recent[1]] } }),
+      ],
+    });
+
+    render(<DocumentRecordPage />);
+
+    const total = await screen.findByTestId('document-record-qr-scan-total');
+    expect(total).toHaveTextContent('Scanned once.');
+    expect(total).not.toHaveTextContent(/1 times/);
   });
 
   it('says a document has not been scanned rather than showing an empty table', async () => {
