@@ -70,6 +70,7 @@
     "./top-nav": "./src/top-nav.tsx",
     "./theme-mode": "./src/theme-mode.ts",
     "./tooltip": "./src/tooltip.tsx",
+    "./view-toggle": "./src/view-toggle.tsx",
     "./utils": "./src/utils.ts",
     "./globals.css": "./src/globals.css"
   },

@@ -78,8 +78,10 @@ export default defineConfig({
       // `document-record` (#993) joins the admin allow-list rather than being
       // picked up automatically: this is an explicit per-project list, so a new
       // spec file that is not named here runs under NO project at all and
-      // silently never executes.
-      testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile|website-settings|branding|global-settings|sso|email-settings|document-designer|document-record|rtl-direction|user-groups)\.spec\.ts/,
+      // silently never executes. `document-library` (#1006) is here for exactly
+      // that reason — it was written against an earlier version of this list and
+      // would otherwise have been dropped by the rewrite that added the others.
+      testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile|website-settings|branding|global-settings|sso|email-settings|document-designer|document-record|document-library|rtl-direction|user-groups)\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
     },

@@ -915,6 +915,18 @@
           "type": "registry:ui"
         }
       ]
+    },
+    {
+      "name": "view-toggle",
+      "type": "registry:ui",
+      "title": "View Toggle",
+      "description": "Segmented single-choice control for switching between views (list/grid).",
+      "files": [
+        {
+          "path": "../packages/ui/src/view-toggle.tsx",
+          "type": "registry:ui"
+        }
+      ]
     }
   ]
 }

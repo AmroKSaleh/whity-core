@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\OpenAPI;
 
+use Whity\Core\Document\Organizer\DocumentSortField;
 use Whity\Core\Ou\OuTypeRegistry;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\PasswordPolicy;
@@ -3069,7 +3070,27 @@ final class CoreApiSchemas
                     'ou_id' => self::int(true),
                     'collection_id' => self::int(true),
                 ], ['key']),
-            ], ['data', 'pagination', 'view']),
+                // The order APPLIED, for the same reason `view.ou_id` is echoed:
+                // `direction` has a per-field default (A-Z for text,
+                // newest-first for a date), so a client that assumed one would
+                // draw its arrow the wrong way round half the time. A null
+                // `field` is the order documents were RECORDED in, which is not
+                // `created_at` under another name -- see
+                // DocumentRepository::orderSql().
+                'sort' => self::object([
+                    // Read from the enum rather than written out, the same way
+                    // the password fields are read from PasswordPolicy: a
+                    // hand-copied list is one that drifts the first time a
+                    // sortable column is added, and a generated client would
+                    // then refuse a value the API accepts.
+                    'field' => [
+                        'type' => 'string',
+                        'nullable' => true,
+                        'enum' => [...array_column(DocumentSortField::cases(), 'value'), null],
+                    ],
+                    'direction' => ['type' => 'string', 'enum' => ['asc', 'desc']],
+                ], ['field', 'direction']),
+            ], ['data', 'pagination', 'view', 'sort']),
             'DocumentResponse' => self::dataEnvelope(SchemaBuilder::ref('Document')),
 
             // The FRONT DOOR (#947 item 1, the half that was missing). Naming a
@@ -6573,10 +6594,25 @@ final class CoreApiSchemas
                     ),
                     self::queryParam('collection_id', 'integer', 'Required by the "collection" view'),
                     self::queryParam('q', 'string', 'Case-insensitive substring of the document title'),
+                    self::queryParam(
+                        'sort',
+                        'string',
+                        'Order by one of "title", "created_at" or "template_name". Omit for the order '
+                        . 'documents were recorded in, newest first. An unknown value is a 400 rather '
+                        . 'than an ignored parameter, so a client can never draw a sort indicator on a '
+                        . 'column the rows are not ordered by.'
+                    ),
+                    self::queryParam(
+                        'direction',
+                        'string',
+                        '"asc" or "desc". Defaults per field — ascending for the two text columns, '
+                        . 'descending for created_at — and the order actually applied is echoed back '
+                        . 'in `sort`. Requires `sort`.'
+                    ),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The documents the caller may see, with pagination', 'DocumentListResponse'),
-                    400 => self::errorResponse('A required view parameter is missing, or ou_id is not a unit in this tenant'),
+                    400 => self::errorResponse('A required view parameter is missing, ou_id is not a unit in this tenant, or the sort is not one this list offers'),
                     404 => self::errorResponse(
                         'No such view, this installation cannot compute it, or the named collection '
                         . 'belongs to somebody else'

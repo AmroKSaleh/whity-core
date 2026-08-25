@@ -37,6 +37,18 @@ export interface ViewRailProps {
   onSelectView: (key: string) => void;
   onSelectCollection: (collectionId: number) => void;
   onCreateCollection: () => void;
+  /**
+   * Why a collection cannot be created right now, or null.
+   *
+   * Case 2 above, applied to a WRITE. When the collection list could not be read
+   * the create control is disabled carrying that sentence, not hidden: a name
+   * checked against a list we do not have would collide on the unique index and
+   * come back as a bare 409 the person has no way to interpret. Hiding the
+   * button instead would make "your collections failed to load" look exactly
+   * like "this installation has no collections", which is the conflation this
+   * whole rail exists to refuse.
+   */
+  createDisabledReason?: string | null;
 }
 
 /**
@@ -163,6 +175,7 @@ export function ViewRail({
   onSelectView,
   onSelectCollection,
   onCreateCollection,
+  createDisabledReason = null,
 }: ViewRailProps) {
   const t = useTranslation('documents');
 
@@ -220,10 +233,22 @@ export function ViewRail({
               />
             ))}
 
-          <Button variant="ghost" size="sm" className="w-full justify-start" onClick={onCreateCollection}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start"
+            disabled={createDisabledReason !== null}
+            title={createDisabledReason ?? undefined}
+            onClick={onCreateCollection}
+          >
             <IconPlus size={14} className="me-2" aria-hidden />
             {t('organizer.collection.new', 'New collection')}
           </Button>
+          {createDisabledReason !== null && (
+            // Visible, not only a `title`: hover is touch-inaccessible, and the
+            // reason is the whole reason the disabled control is still here.
+            <p className="px-2 pb-1 text-xs text-muted-foreground">{createDisabledReason}</p>
+          )}
         </RailSection>
       )}
 

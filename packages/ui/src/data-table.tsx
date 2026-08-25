@@ -285,7 +285,23 @@ export function DataTable<TData>({
     const visibleCount = table.getVisibleLeafColumns().length
     return (
       <div className={cn("rounded-lg border border-border", className)}>
-        <Table aria-label={ariaLabel}>
+        {/* `aria-busy` marks this as the PLACEHOLDER, not the data.
+            It carries the same `aria-label` as the real table — deliberately,
+            so assistive technology names the region consistently while it
+            loads — and the consequence is that `getByRole('table', {name})`
+            matches this skeleton exactly as it matches a populated table. A
+            test written against that selector can be satisfied by five rows of
+            grey bars: it passes when the data arrived, when the folder is
+            empty and the assertion merely won the race, and when the request
+            failed and the retry is in flight. One shipped that way (#1006's
+            "the pane is never simply blank" asserted `toBeVisible()` and
+            `not.toBeEmpty()` and both were true of THIS markup), passed
+            locally, and failed in CI on the one stack where the fetch resolved
+            first — which is the only run that was telling the truth.
+            `aria-busy` is the standard signal for it and is additive, so no
+            existing selector changes. Prefer waiting on a terminal state
+            (a row, or the empty state's own text) over waiting on the table. */}
+        <Table aria-label={ariaLabel} aria-busy="true">
           <TableHeader>
             <TableRow>
               {columns.map((column, index) => (

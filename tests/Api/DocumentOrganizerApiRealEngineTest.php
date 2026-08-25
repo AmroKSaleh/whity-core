@@ -766,6 +766,209 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         self::assertSame([], self::titles(self::decode($this->list(self::AUDITOR, ['q' => '%']))));
     }
 
+    // ── 2b. sorting is the SERVER's, and it is echoed back ─────────────────
+
+    /**
+     * The three sortable columns actually order the whole result set.
+     *
+     * Asserted through the API rather than the repository because the ordering
+     * only means anything in combination with the pagination the handler
+     * applies: a client-side sort of a server-paginated page sorts one page and
+     * calls it a sorted list, which is the failure this endpoint exists to make
+     * impossible.
+     *
+     * The titles are chosen so alphabetical order and issue order DISAGREE — a
+     * fixture where they coincide passes with no ORDER BY at all.
+     */
+    public function testEachSortableColumnOrdersTheWholeList(): void
+    {
+        // Issued newest-last, so the recorded order is Zebra, apple, Mango.
+        $this->issue(self::AUDITOR, 'Zebra file');
+        $this->issue(self::AUDITOR, 'apple file');
+        $this->issue(self::AUDITOR, 'Mango file');
+
+        // Default: the order they were recorded in, newest first.
+        self::assertSame(
+            ['Mango file', 'apple file', 'Zebra file'],
+            self::titles(self::decode($this->list(self::AUDITOR, [])))
+        );
+
+        // Title ascends by default, and CASE-INSENSITIVELY: without LOWER() the
+        // lowercase 'apple' sorts after both capitals on PostgreSQL's C locale,
+        // and an "alphabetical" list is not one.
+        self::assertSame(
+            ['apple file', 'Mango file', 'Zebra file'],
+            self::titles(self::decode($this->list(self::AUDITOR, ['sort' => 'title'])))
+        );
+        self::assertSame(
+            ['Zebra file', 'Mango file', 'apple file'],
+            self::titles(self::decode($this->list(self::AUDITOR, ['sort' => 'title', 'direction' => 'desc'])))
+        );
+
+        // The template name is the SNAPSHOT on the row; `issue()` names each
+        // template after its document, so this orders by a second column that
+        // is not the title and is not the id.
+        self::assertSame(
+            ['apple file', 'Mango file', 'Zebra file'],
+            self::titles(self::decode($this->list(self::AUDITOR, ['sort' => 'template_name'])))
+        );
+
+        // created_at is set EXPLICITLY here, and the first draft of this test is
+        // why. All three documents were issued inside the same second, so they
+        // shared a timestamp to the resolution the column stores — asc and desc
+        // then returned the same list, decided entirely by the `id` tie-breaker.
+        // That is the tie-breaker working, and it also means a test that did not
+        // separate the timestamps would assert nothing about created_at at all.
+        $this->setCreatedAt('Zebra file', '2026-03-01 09:00:00');
+        $this->setCreatedAt('apple file', '2026-01-01 09:00:00');
+        $this->setCreatedAt('Mango file', '2026-02-01 09:00:00');
+
+        // Descends by default — the recent thing is the one being looked for.
+        self::assertSame(
+            ['Zebra file', 'Mango file', 'apple file'],
+            self::titles(self::decode($this->list(self::AUDITOR, ['sort' => 'created_at'])))
+        );
+        self::assertSame(
+            ['apple file', 'Mango file', 'Zebra file'],
+            self::titles(self::decode($this->list(self::AUDITOR, ['sort' => 'created_at', 'direction' => 'asc'])))
+        );
+    }
+
+    /**
+     * The response reports the order APPLIED, not the one asked for.
+     *
+     * `direction` defaults PER FIELD, so a client that assumed a single default
+     * would draw its arrow the wrong way round on one of the three columns. The
+     * echo is what makes that rule discoverable instead of folklore — the same
+     * reason `view.ou_id` is echoed.
+     */
+    public function testTheAppliedSortIsEchoedIncludingItsPerFieldDirectionDefault(): void
+    {
+        $this->issue(self::AUDITOR, 'Invoice');
+
+        self::assertSame(
+            ['field' => 'title', 'direction' => 'asc'],
+            self::decode($this->list(self::AUDITOR, ['sort' => 'title']))['sort']
+        );
+        self::assertSame(
+            ['field' => 'created_at', 'direction' => 'desc'],
+            self::decode($this->list(self::AUDITOR, ['sort' => 'created_at']))['sort']
+        );
+        self::assertSame(
+            ['field' => 'template_name', 'direction' => 'desc'],
+            self::decode($this->list(self::AUDITOR, ['sort' => 'template_name', 'direction' => 'desc']))['sort']
+        );
+        // No sort named: the order documents were RECORDED in, which is not
+        // created_at under another name — see DocumentRepository::orderSql().
+        self::assertSame(
+            ['field' => null, 'direction' => 'desc'],
+            self::decode($this->list(self::AUDITOR, []))['sort']
+        );
+    }
+
+    /**
+     * A sort this list does not offer is REFUSED, never ignored.
+     *
+     * Ignoring it returns 200 with rows ordered by something else, and the
+     * client draws an indicator on a column the rows are not sorted by — the
+     * reader then trusts a claim the response never made. `origin_ou_id` is in
+     * the list because it is a visible column that is deliberately NOT sortable
+     * (it displays a name resolved from a separately-permissioned request), so
+     * it is exactly the plausible guess a client would make.
+     */
+    public function testAnUnknownOrUnbackedSortIsRefusedRatherThanIgnored(): void
+    {
+        $this->issue(self::AUDITOR, 'Invoice');
+
+        foreach (['id', 'origin_ou_id', 'created_by', 'title; DROP TABLE documents'] as $field) {
+            $res = $this->list(self::AUDITOR, ['sort' => $field]);
+            self::assertSame(400, $res->getStatusCode(), "sort={$field} must be refused, not ignored");
+            // The error names the vocabulary: it is the only way a caller can
+            // discover it without fetching a schema.
+            self::assertStringContainsString('template_name', $res->getBody());
+        }
+
+        // The table is still there — the injection attempt never reached SQL,
+        // because the request names an enum case or nothing at all.
+        $count = $this->pdo->prepare('SELECT COUNT(*) FROM documents WHERE tenant_id = :tenant_id');
+        $count->execute([':tenant_id' => self::TENANT]);
+        self::assertSame(1, (int) $count->fetchColumn());
+
+        // A direction that is neither, and a direction with nothing to order by.
+        self::assertSame(
+            400,
+            $this->list(self::AUDITOR, ['sort' => 'title', 'direction' => 'sideways'])->getStatusCode()
+        );
+        self::assertSame(400, $this->list(self::AUDITOR, ['direction' => 'asc'])->getStatusCode());
+    }
+
+    /**
+     * A tie in the sort key is broken by `id DESC`, so a sorted list pages
+     * without losing or repeating a row.
+     *
+     * WHY THIS ASSERTS AN EXACT ORDER AND NOT MERELY "NO DUPLICATES"
+     * -------------------------------------------------------------
+     * It used to assert only that four page-walks yielded four distinct titles,
+     * and that version PASSED with the `, id DESC` tie-breaker deleted from
+     * {@see \Whity\Core\Document\DocumentRepository::orderSql()} — on SQLite
+     * and on real PostgreSQL both. It was not evidence for the property it
+     * describes, and nobody had watched it fail.
+     *
+     * The reason is that duplication across pages needs the engine to order the
+     * tied rows DIFFERENTLY between two separate queries, and on a four-row heap
+     * it has no reason to: a sequential scan returns physical order, which is
+     * insertion order, which is stable. The bug is real at volume — once a plan
+     * flips to an index scan, or a row is updated and moves in the heap, or the
+     * rows arrive from parallel workers — and none of that is reproducible in a
+     * fixture.
+     *
+     * What IS deterministic is WHICH order a total sort must produce. All four
+     * documents share one `template_name`, so the sort key ties on every one of
+     * them and the tie-breaker alone decides: `id DESC`, newest first, the exact
+     * reverse of the order they were issued in. Without the tie-breaker both
+     * engines fall back to insertion order and return the reverse of that. So
+     * the assertion below fails the moment the tie-breaker is gone, which is the
+     * only mechanism that makes the paging safe in the first place.
+     *
+     * The page-walk is kept because it is the property being protected — it just
+     * cannot carry the proof on its own.
+     */
+    public function testASortedListPagesWithoutLosingOrRepeatingARow(): void
+    {
+        $templateId = $this->createTemplate(self::AUDITOR, 'Shared');
+        foreach (['One', 'Two', 'Three', 'Four'] as $title) {
+            $this->issueFromTemplate(self::AUDITOR, $templateId, $title);
+        }
+
+        // Every row ties on the sort key, so the tie-breaker decides the whole
+        // order: `id DESC` is newest-issued first.
+        $expected = ['Four', 'Three', 'Two', 'One'];
+
+        self::assertSame(
+            $expected,
+            self::titles(self::decode($this->list(self::AUDITOR, ['sort' => 'template_name']))),
+            'a tie in the sort key must be broken by id DESC, not left to the engine'
+        );
+
+        // The same order, arrived at one page at a time. A page-walk that
+        // disagrees with the unpaged read is the loss/repetition this guards.
+        $seen = [];
+        for ($page = 1; $page <= 4; $page++) {
+            $body = self::decode($this->list(self::AUDITOR, [
+                'sort' => 'template_name',
+                'page' => (string) $page,
+                'per_page' => '1',
+            ]));
+            $seen = [...$seen, ...self::titles($body)];
+        }
+
+        self::assertSame($expected, $seen, 'paging must not reorder, drop or repeat a tied row');
+        // A positive control on the same data: four DISTINCT titles were issued,
+        // so an assertion that passed on an empty or short walk would be passing
+        // on nothing.
+        self::assertCount(4, array_unique($seen));
+    }
+
     // ── 3. visibility is re-applied through every folder ───────────────────
 
     /**
@@ -1355,7 +1558,23 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
     {
         TenantContext::reset();
         TenantContext::setTenantId(self::TENANT);
-        $templateId = $this->createTemplate($actorId, $title . ' Template');
+
+        return $this->issueFromTemplate(
+            $actorId,
+            $this->createTemplate($actorId, $title . ' Template'),
+            $title
+        );
+    }
+
+    /**
+     * Issue from an EXISTING template, so several documents can share one
+     * `template_name` snapshot — which is what makes a tie in that sort key
+     * reachable.
+     */
+    private function issueFromTemplate(int $actorId, int $templateId, string $title): int
+    {
+        TenantContext::reset();
+        TenantContext::setTenantId(self::TENANT);
         $req = new Request(
             'POST',
             "/api/document-templates/{$templateId}/render",
@@ -1368,6 +1587,23 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         self::assertSame(201, $res->getStatusCode(), 'fixture setup: the persisted render must succeed');
 
         return (int) self::data($res)['id'];
+    }
+
+    /**
+     * Fixture surgery: give a document a distinct `created_at`.
+     *
+     * The render path stamps `NOW()`, so documents issued in one test share a
+     * timestamp to the second and a date sort has nothing to order by. Written
+     * directly rather than by sleeping between renders — a test that takes three
+     * seconds to establish a fixture is a test people stop running.
+     */
+    private function setCreatedAt(string $title, string $timestamp): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE documents SET created_at = :created_at WHERE tenant_id = :tenant_id AND title = :title'
+        );
+        $stmt->execute([':created_at' => $timestamp, ':tenant_id' => self::TENANT, ':title' => $title]);
+        self::assertSame(1, $stmt->rowCount(), "fixture setup: no document titled '{$title}'");
     }
 
     private function createTemplate(int $actorId, string $name): int
