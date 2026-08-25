@@ -51,6 +51,36 @@ function elementLabel(el: DocElement, t: TranslateFn): string {
  * toolbar's insert group) so every command lives in the chrome and the rail is
  * purely about what is already ON the page.
  */
+/**
+ * The display name of a block's visibility tier.
+ *
+ * `BLOCK_SCOPES` lives in the kit (`@amroksaleh/ui/documents/blocks`) and
+ * carries English labels, which is correct — a kit constant may not reach for a
+ * translator, and the English is the right default for any consumer that has
+ * none. Translating is the CONSUMER's job, and until this existed nobody did
+ * it: the designer's block palette rendered "SYSTEM" and "TENANT-WIDE" as
+ * headings, and "System"/"Personal"/"Tenant-wide"/"Global" inside every scope
+ * dropdown, in the middle of an otherwise Arabic editor.
+ *
+ * Literal `t()` calls per id rather than `t('palette.scope.' + id)`, because a
+ * computed key is invisible to `i18n:extract` and would never reach a
+ * translator. A scope the kit adds later falls back to its English label.
+ */
+function scopeLabel(t: ReturnType<typeof useTranslation>, scope: { id: BlockScope; label: string }): string {
+  switch (scope.id) {
+    case 'system':
+      return t('palette.scope.system', 'System');
+    case 'personal':
+      return t('palette.scope.personal', 'Personal');
+    case 'tenant':
+      return t('palette.scope.tenant', 'Tenant-wide');
+    case 'global':
+      return t('palette.scope.global', 'Global');
+    default:
+      return scope.label;
+  }
+}
+
 export function Palette({
   elements,
   selectedIds,
@@ -89,7 +119,7 @@ export function Palette({
           </h3>
           {BLOCK_SCOPES.filter((s) => blocks.some((b) => b.scope === s.id)).map((s) => (
             <div key={s.id} className="space-y-1">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{s.label}</div>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{scopeLabel(t, s)}</div>
               {blocks
                 .filter((b) => b.scope === s.id)
                 .map((b) => (
@@ -116,7 +146,7 @@ export function Palette({
                     >
                       {BLOCK_SCOPES.map((sc) => (
                         <option key={sc.id} value={sc.id}>
-                          {sc.label}
+                          {scopeLabel(t, sc)}
                         </option>
                       ))}
                     </select>
