@@ -34,7 +34,7 @@ import {
   CreateDocumentDialog,
   type CreatableTemplate,
 } from '@/components/documents/create-document-dialog';
-import { ViewRail, viewLabel } from './view-rail';
+import { ViewRail, viewLabel, viewDescription } from './view-rail';
 import type {
   DocumentCollection,
   DocumentListResponse,
@@ -568,7 +568,7 @@ export default function DocumentLibraryPage() {
                 ? ((collections.data ?? []).find((c) => c.id === collectionId)?.name ?? '')
                 : viewLabel(t, selectedView)}
               {' — '}
-              {selectedView.description}
+              {viewDescription(t, selectedView)}
             </p>
           )}
 

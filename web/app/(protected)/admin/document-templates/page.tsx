@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { IconExternalLink, IconMenu2, IconShieldLock } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 import { collectBlockIds } from '@amroksaleh/ui/documents/blocks';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
@@ -83,6 +83,7 @@ export default function DocumentTemplatesPage() {
   const { addToast } = useToast();
   const { hasPermission, permissions } = useCapabilities();
   const t = useTranslation('admin');
+  const locale = useFormattingLocale();
 
   const canWrite = hasPermission(DOCUMENTS_WRITE);
   const canPublish = hasPermission(DOCUMENTS_PUBLISH);
@@ -395,10 +396,10 @@ export default function DocumentTemplatesPage() {
         accessorKey: 'updated_at',
         header: t('documentTemplates.table.updated', 'Updated'),
         enableSorting: true,
-        cell: (row) => <span className="text-muted-foreground">{formatStamp(row.updated_at)}</span>,
+        cell: (row) => <span className="text-muted-foreground">{formatStamp(row.updated_at, locale)}</span>,
       },
     ],
-    [t, visibilityCell, placementCell, permissionCell]
+    [t, locale, visibilityCell, placementCell, permissionCell]
   );
 
   // ── blocks tab ──────────────────────────────────────────────────────────────
@@ -487,10 +488,10 @@ export default function DocumentTemplatesPage() {
         accessorKey: 'updated_at',
         header: t('documentTemplates.table.updated', 'Updated'),
         enableSorting: true,
-        cell: (row) => <span className="text-muted-foreground">{formatStamp(row.updated_at)}</span>,
+        cell: (row) => <span className="text-muted-foreground">{formatStamp(row.updated_at, locale)}</span>,
       },
     ],
-    [t, visibilityCell, placementCell, permissionCell, blockUsage, blocks.loading]
+    [t, locale, visibilityCell, placementCell, permissionCell, blockUsage, blocks.loading]
   );
 
   // ── render ──────────────────────────────────────────────────────────────────
@@ -684,15 +685,21 @@ function isForbidden(error: string | null): boolean {
 }
 
 /**
- * A timestamp, rendered by the viewer's locale.
+ * A timestamp, rendered in the language the reader chose.
  *
- * `toLocaleString` with no explicit locale on purpose: the browser's own
- * resolution follows the reader, which is what an Arabic reader needs, and
- * hardcoding a locale here would override a preference this page has no business
- * having an opinion about. An unparseable stamp is shown verbatim rather than as
- * "Invalid Date".
+ * This used to pass no locale at all, on the stated grounds that "the browser's
+ * own resolution follows the reader, which is what an Arabic reader needs".
+ * It does not: the browser follows whoever set the machine up. Rendered side by
+ * side with the organizer after that screen was fixed, this one printed
+ * `8/24/2026, 3:42:57 PM` where the organizer printed `24‏/8‏/2026، 3:42:59 م` —
+ * two different date formats, in two different languages, on two tables of the
+ * same records.
+ *
+ * `undefined` still means "whatever the runtime would have done", so a caller
+ * with no resolved language behaves exactly as before. An unparseable stamp is
+ * shown verbatim rather than as "Invalid Date".
  */
-function formatStamp(value: string): string {
+function formatStamp(value: string, locale?: string): string {
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(locale);
 }
