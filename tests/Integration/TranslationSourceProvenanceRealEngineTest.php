@@ -406,6 +406,7 @@ final class TranslationSourceProvenanceRealEngineTest extends TestCase
     private function scalar(string $sql): string
     {
         $statement = $this->pdo->prepare($sql);
+        self::assertNotFalse($statement, "Could not prepare: {$sql}");
         $statement->execute();
 
         return (string) $statement->fetchColumn();
