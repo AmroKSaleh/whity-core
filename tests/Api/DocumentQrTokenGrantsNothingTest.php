@@ -428,12 +428,62 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
         self::assertTrue($verified['verified']);
     }
 
+    /**
+     * With the switch OFF, an authored code is REMOVED from what the renderer is
+     * sent — and no token is minted for the document at all.
+     *
+     * The converse of the test above, and the one that is easy to leave out. A
+     * template keeps its QR element after a tenant switches verification off;
+     * the element resolves against a binding nothing supplies, and the designer
+     * renders an unresolved QR as a dashed placeholder box. Every document that
+     * tenant issued would carry an empty square in the corner — which reads, to
+     * the person holding it, as a verification feature that is broken rather
+     * than one that is off.
+     */
+    public function testWithTheSwitchOffAnAuthoredCodeIsStrippedAndNothingIsMinted(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_QR_ENABLED, 'false');
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_PERSIST_ENABLED, 'true');
+
+        $templateId = $this->createTemplate(self::OWNER, 'Certificate', withAuthoredCode: true);
+        $documentId = $this->raiseFromTemplate(self::OWNER, $templateId, 'Certificate', render: true);
+
+        self::assertNotSame([], $this->renderService->calls, 'fixture: the render must have been attempted');
+        $bindings = [];
+        foreach ($this->renderService->calls[0]['template']['pages'] as $page) {
+            foreach ($page['elements'] as $element) {
+                if (isset($element['binding'])) {
+                    $bindings[] = $element['binding'];
+                }
+            }
+        }
+
+        self::assertNotContains(
+            QrTemplateComposer::VERIFICATION_BINDING,
+            $bindings,
+            'a code the tenant switched off must not be sent to the renderer to draw as an empty box'
+        );
+        self::assertNull(
+            $this->qr->active(self::TENANT, $documentId),
+            'nothing should be minted for a document that carries no code'
+        );
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
     private function raise(int $actorId, string $title, bool $render = false): int
     {
-        $templateId = $this->createTemplate($actorId, $title . ' Template');
+        return $this->raiseFromTemplate(
+            $actorId,
+            $this->createTemplate($actorId, $title . ' Template'),
+            $title,
+            $render,
+        );
+    }
 
+    private function raiseFromTemplate(int $actorId, int $templateId, string $title, bool $render = false): int
+    {
         TenantContext::reset();
         TenantContext::setTenantId(self::TENANT);
         $request = new Request(
@@ -450,8 +500,21 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
         return (int) self::data($response)['id'];
     }
 
-    private function createTemplate(int $actorId, string $name): int
+    private function createTemplate(int $actorId, string $name, bool $withAuthoredCode = false): int
     {
+        $elements = $withAuthoredCode ? [[
+            'id' => 'authored-code',
+            'type' => 'qr',
+            'x' => 20.0,
+            'y' => 20.0,
+            'w' => 25.0,
+            'h' => 25.0,
+            'rotation' => 0,
+            'z' => 3,
+            'value' => '',
+            'binding' => QrTemplateComposer::VERIFICATION_BINDING,
+        ]] : [];
+
         return $this->templates->create(self::TENANT, [
             'name' => $name,
             'data' => [
@@ -459,7 +522,7 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
                 'name' => $name,
                 'page' => ['widthMm' => 210, 'heightMm' => 297, 'marginMm' => 10, 'background' => '#fff'],
                 'placeholders' => [],
-                'pages' => [['id' => 'p1', 'elements' => []]],
+                'pages' => [['id' => 'p1', 'elements' => $elements]],
             ],
             'scope' => 'tenant',
             'required_permission' => null,
