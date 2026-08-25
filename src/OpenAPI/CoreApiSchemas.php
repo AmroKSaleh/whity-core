@@ -115,6 +115,7 @@ final class CoreApiSchemas
             self::documentRoutingRoutes(),
             self::meInboxRoutes(),
             self::userGroupRoutes(),
+            self::documentRouteTemplateRoutes(),
             self::documentCollectionRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
@@ -3481,6 +3482,108 @@ final class CoreApiSchemas
                 'id' => self::int(),
                 'deleted' => self::bool(),
             ], ['id', 'deleted'])),
+
+            // #1027 — reusable, BRANCHING ROUTE TEMPLATES: the designs the
+            // node-based flow editor edits. A template is to a route what
+            // `document_templates` is to `documents` — the thing DESIGNED, with a
+            // different lifetime from the thing that HAPPENED.
+            //
+            // `step_count` is the only decoration on a list row. A resolved-people
+            // count is deliberately absent: it would resolve every rule of every
+            // step on every render, and report a number already stale by the time
+            // it was drawn. That count belongs to `POST /api/user-groups/preview`,
+            // one rule at a time, where somebody asked for it.
+            'RouteTemplate' => self::object([
+                'id' => self::int(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'step_count' => self::int(),
+                // Null once the person who designed it has been deleted. The
+                // design survives them: it is the institution's process, not that
+                // person's private filing.
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'name', 'step_count', 'created_at', 'updated_at']),
+            // One stage. It names a RULE and never a person — there is no profile
+            // field here and none in the table behind it, which is what makes
+            // "one node for a thousand instructors" a property of the schema
+            // rather than a convention the editor is trusted to keep.
+            //
+            // `decision` says whether the stage is a GATE. `decision_quorum` says
+            // what "this node approved" means when the rule resolves to a
+            // thousand people, and NULL means "follow the tenant setting" rather
+            // than "no quorum" — the same reading migration 118 gives the
+            // identical column on `document_route_steps`.
+            //
+            // Addressed by `position`, never by a database id: the ids churn on
+            // every save because a graph write replaces rather than diffs, so
+            // publishing one would invite a client to hold it across a save.
+            'RouteTemplateStep' => self::object([
+                'position' => self::int(),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+                'label' => self::str(true),
+                'decision' => self::bool(),
+                'decision_quorum' => self::str(true),
+                'canvas_x' => self::int(),
+                'canvas_y' => self::int(),
+            ], ['position', 'rule_kind', 'rule_config', 'decision']),
+            // One transition, keyed by the verdict that takes it (#1014's
+            // vocabulary, mirrored — `approved` or `rejected`).
+            //
+            // There is NO unconditional edge. A step with no edge for the verdict
+            // it received falls through to the NEXT POSITION on an approval and
+            // ends the chain on a rejection, so a plain linear route is a template
+            // with steps and no edges at all — and the forward arrows an editor
+            // draws come from `position` rather than from stored rows that could
+            // disagree with it.
+            'RouteTemplateEdge' => self::object([
+                'from' => self::int(),
+                'to' => self::int(),
+                'verdict' => self::str(),
+            ], ['from', 'to', 'verdict']),
+            'RouteTemplateListResponse' => self::paginatedListEnvelope('RouteTemplate'),
+            'RouteTemplateResponse' => self::dataEnvelope(SchemaBuilder::ref('RouteTemplate')),
+            // The whole canvas. `default_quorum` and `max_steps` ride along so the
+            // editor can show what an unset quorum will do and how many nodes it
+            // may draw WITHOUT holding `settings:read` — which somebody who may
+            // design a flow need not hold.
+            'RouteTemplateGraphResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'step_count' => self::int(),
+                'default_quorum' => self::str(),
+                'max_steps' => self::int(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+                'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('RouteTemplateStep')],
+                'edges' => ['type' => 'array', 'items' => SchemaBuilder::ref('RouteTemplateEdge')],
+            ], ['id', 'name', 'default_quorum', 'max_steps', 'steps', 'edges'])),
+            'RouteTemplateCreateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+            ], ['name']),
+            // PATCH: omitted fields keep their value. The GRAPH is not here — it
+            // has its own verb, because renaming a design and redrawing it are
+            // different acts, and a PATCH carrying both would make an omitted
+            // `steps` indistinguishable from an author who meant to clear it.
+            'RouteTemplateUpdateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+            ], []),
+            // PUT: REPLACES. `steps` is required and an empty array is a valid,
+            // meaningful value — an author who really did delete every node.
+            'RouteTemplateGraphRequest' => self::object([
+                'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('RouteTemplateStep')],
+                'edges' => ['type' => 'array', 'items' => SchemaBuilder::ref('RouteTemplateEdge')],
+            ], ['steps']),
+            'RouteTemplateDeleteResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'deleted' => self::bool(),
+            ], ['id', 'deleted'])),
             // The rule kinds a GROUP DEFINITION may name — a subset of
             // `/api/routing-rules`, excluding `group` itself and any plugin kind
             // that needs the document it is routed with. Same row shape as
@@ -6686,6 +6789,121 @@ final class CoreApiSchemas
                 'responses' => [
                     200 => self::jsonResponse('The deleted group id', 'UserGroupDeleteResponse'),
                     404 => self::errorResponse('Group not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Document ROUTE TEMPLATES (#1027) — the API the node-based flow editor
+     * speaks.
+     *
+     * A template is a reusable, BRANCHING route DESIGN: the seam migration 112
+     * named ("a `document_route_templates` / `document_route_template_steps`
+     * pair") and migration 120 takes. It is to a route what `document_templates`
+     * is to `documents` — the thing DESIGNED, with a different lifetime from the
+     * thing that HAPPENED, and the append-only trail hangs off the second.
+     *
+     * READING A DESIGN AND DESIGNING ONE ARE SEPARATE PERMISSIONS
+     * -----------------------------------------------------------
+     * `route_templates:read` and `route_templates:write`, not one slug and not
+     * `documents:route`. Routing a document is an everyday act many people
+     * perform; designing the flow every document of a kind will follow is an act
+     * of organisational policy. A clerk who may send a form onward should not
+     * thereby be able to rewrite where every form goes, and collapsing the two
+     * would make that distinction inexpressible.
+     *
+     * THE GRAPH HAS ITS OWN VERB, AND IT IS A PUT
+     * --------------------------------------------
+     * `PATCH /{id}` renames; `PUT /{id}/graph` replaces the canvas. The editor's
+     * unit of work is the whole drawing — an author moves four nodes, deletes
+     * one, draws an edge and presses save — and expressing that as a diff would
+     * mean the client computing which was which, on the side of the wire that
+     * cannot verify it.
+     *
+     * THERE IS NO PREVIEW ROUTE HERE, AND THAT IS THE POINT
+     * -----------------------------------------------------
+     * "How many people does this node reach?" is already answered exactly by
+     * `POST /api/user-groups/preview` (#1003) — a count plus a sample bounded by
+     * `groups.preview_sample_size`. The editor calls it per node. A second
+     * preview would be a second implementation of the resolver's semantics
+     * (active memberships only, the direct membership role, resource-scoped
+     * grants excluded) free to drift from the first in whichever direction was
+     * last edited.
+     *
+     * NOTHING HERE INSTANTIATES A TEMPLATE ONTO A DOCUMENT
+     * ----------------------------------------------------
+     * That needs the engine to follow verdict edges (#1014). A route that
+     * "applied" a branching design today would have to flatten it into a linear
+     * one — silently doing less than the canvas draws, which is the precise
+     * failure the routing subsystem is written against. Filed with migration
+     * 112's own seam rather than half-built.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentRouteTemplateRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/document-route-templates', 'route_templates:read', [
+                'summary' => "This tenant's route template DESIGNS, by name (paginated, no people counts)",
+                'tags' => ['document-route-templates'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's route templates with pagination", 'RouteTemplateListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-route-templates', 'route_templates:write', [
+                'summary' => 'Start a route template. Created EMPTY — the graph is saved by its own verb',
+                'tags' => ['document-route-templates'],
+                'request' => 'RouteTemplateCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created template', 'RouteTemplateResponse'),
+                    409 => self::errorResponse('A template with that name already exists in this tenant'),
+                    422 => self::errorResponse('A missing, empty or over-long name'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/document-route-templates/{id:\\d+}/graph', 'route_templates:write', [
+                'summary' => 'REPLACE the template\'s whole graph — every step and every edge, atomically',
+                'tags' => ['document-route-templates'],
+                'request' => 'RouteTemplateGraphRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The saved graph', 'RouteTemplateGraphResponse'),
+                    404 => self::errorResponse('Route template not found in this tenant'),
+                    422 => self::errorResponse(
+                        'A rule kind nothing registered, a config the rule refused, an edge naming a position '
+                        . 'that is not on the canvas, an edge leaving a step that is not a decision, or more '
+                        . 'steps than documents.routing_max_steps allows'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-route-templates/{id:\\d+}', 'route_templates:read', [
+                'summary' => 'One design, with its steps, its edges and the quorum an unset step will follow',
+                'tags' => ['document-route-templates'],
+                'responses' => [
+                    200 => self::jsonResponse('The template and its graph', 'RouteTemplateGraphResponse'),
+                    404 => self::errorResponse('Route template not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-route-templates/{id:\\d+}', 'route_templates:write', [
+                'summary' => 'Rename or re-describe a template. The graph is untouched — it has its own verb',
+                'tags' => ['document-route-templates'],
+                'request' => 'RouteTemplateUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated template', 'RouteTemplateResponse'),
+                    404 => self::errorResponse('Route template not found in this tenant'),
+                    409 => self::errorResponse('Another template in this tenant already has that name'),
+                    422 => self::errorResponse('An empty or over-long name, or a non-text description'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-route-templates/{id:\\d+}', 'route_templates:write', [
+                'summary' => 'Discard a design. Routes already issued from it are untouched — they carry their own steps',
+                'tags' => ['document-route-templates'],
+                'responses' => [
+                    200 => self::jsonResponse('The deleted template id', 'RouteTemplateDeleteResponse'),
+                    404 => self::errorResponse('Route template not found in this tenant'),
                 ] + self::authErrors(),
             ]),
         ];

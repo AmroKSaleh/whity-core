@@ -235,6 +235,21 @@ final class CorePermissions
     public const GROUPS_READ = 'groups:read';
     public const GROUPS_WRITE = 'groups:write';
 
+    // Document ROUTE TEMPLATES (#1027, migration 118). A template is a reusable,
+    // branching flow design — the record the node-based editor edits.
+    //
+    // Deliberately NOT folded into `documents:route`. Routing a document is an
+    // everyday act many people perform; DESIGNING the flow that every document
+    // of a kind will follow is an act of organisational policy. A clerk who may
+    // send a form onward should not thereby be able to rewrite where every form
+    // goes, and collapsing the two would make that impossible to express.
+    //
+    // The split mirrors `groups:read` / `groups:write` above and for the same
+    // reason: reading a design is what a router needs to pick one, writing it is
+    // what a designer needs, and the two audiences are not the same people.
+    public const ROUTE_TEMPLATES_READ = 'route_templates:read';
+    public const ROUTE_TEMPLATES_WRITE = 'route_templates:write';
+
     // Generic async-job API (WC-jobs-api). Tenant-scoped submission + status.
     // submit = POST /api/jobs (enqueue an allow-listed job name for this tenant)
     // and read its own jobs; read = GET /api/jobs/{id} status/progress/result.
@@ -344,6 +359,8 @@ final class CorePermissions
             self::TAGS_MANAGE,
             self::GROUPS_READ,
             self::GROUPS_WRITE,
+            self::ROUTE_TEMPLATES_READ,
+            self::ROUTE_TEMPLATES_WRITE,
             self::JOBS_SUBMIT,
             self::JOBS_READ,
             self::NOTIFICATIONS_MANAGE,

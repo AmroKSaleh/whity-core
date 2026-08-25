@@ -144,6 +144,24 @@ export const DOCUMENTS_PUBLISH = 'documents:publish';
 export const DOCUMENTS_RENDER = 'documents:render';
 
 /**
+ * Document ROUTE TEMPLATES (#1027) — the reusable, branching flow designs the
+ * node-based editor edits.
+ *
+ * Two slugs rather than one, and separate from `documents:route`. Routing a
+ * document is an everyday act many people perform; DESIGNING the flow every
+ * document of a kind will follow is an act of organisational policy, so a clerk
+ * who may send a form onward should not thereby be able to rewrite where every
+ * form goes. Migration 120 grants both to whoever holds `roles:write`, and read
+ * additionally to whoever holds `documents:route` — the people who will PICK a
+ * design when routing.
+ *
+ * The editor gates its write controls on the second; the API enforces both
+ * regardless of what the client renders.
+ */
+export const ROUTE_TEMPLATES_READ = 'route_templates:read';
+export const ROUTE_TEMPLATES_WRITE = 'route_templates:write';
+
+/**
  * User groups — the named rules that say which people a set contains (#999).
  *
  * Two slugs because the server draws the line in two places, and for a reason

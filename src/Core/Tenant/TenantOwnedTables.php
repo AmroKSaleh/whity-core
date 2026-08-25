@@ -158,6 +158,29 @@ final class TenantOwnedTables
         // a join to the route.
         'document_route_edges'       => '119_add_route_verdicts_and_branching.php',
 
+        // #1027 — reusable, BRANCHING route TEMPLATES (migration 118): the record
+        // a node-based flow editor edits, and the two tables that hang off it.
+        //
+        // The design and the circulation are different records with different
+        // lifetimes, exactly as `document_templates` is a different record from
+        // `documents` — so these are three new tables rather than a nullable
+        // column on the four above.
+        //
+        // A template step carries `rule_kind` + `rule_config` and, like
+        // `document_route_steps`, has NOWHERE TO PUT A PERSON. That is what makes
+        // "one node for a thousand instructors" a property of the schema rather
+        // than a convention the editor is trusted to keep: a design authored in
+        // March and instantiated in November reaches whoever holds the role in
+        // November, because there is no roster to go stale.
+        //
+        // All three carry `tenant_id` NOT NULL and denormalise it onto the
+        // children rather than reaching it through `template_id`, so the
+        // predicate guard polices a step and an edge read DIRECTLY instead of
+        // trusting a join it cannot see.
+        'document_route_templates'      => '120_create_document_route_templates.php',
+        'document_route_template_steps' => '120_create_document_route_templates.php',
+        'document_route_template_edges' => '120_create_document_route_templates.php',
+
         // #999 — named USER GROUPS (migration 116). One row per group: a name
         // plus the `rule_kind` + `rule_config` pair that says which people it
         // contains. There is deliberately NO `user_group_members` table beside
