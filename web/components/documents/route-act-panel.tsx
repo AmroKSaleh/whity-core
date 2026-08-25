@@ -114,6 +114,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
+import { Textarea } from '@amroksaleh/ui/textarea';
 import { IconCheck, IconX } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { useAuth } from '@/lib/auth-context';
@@ -578,12 +579,19 @@ export function RouteActPanel({
               )
             : t('routing.act.note.label', 'Note (optional, appended to the trail)')}
         </label>
-        <textarea
+        {/*
+          The kit's Textarea rather than a bare element. It was a bare one until
+          #1041 and the difference is not cosmetic: the kit carries the focus
+          ring, the disabled affordances and the `aria-invalid` styling, and a
+          hand-rolled copy of a control silently stops tracking the design system
+          the other two clients of this component render against.
+        */}
+        <Textarea
           id={`route-note-${route.id}`}
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={3}
-          className="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm text-foreground"
+          className="mt-1"
           placeholder={t('routing.act.note.placeholder', 'What should the record say?')}
         />
         <p
