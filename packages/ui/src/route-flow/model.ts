@@ -332,6 +332,50 @@ export function resolveTransitions(graph: RouteFlowGraph): RouteFlowResolution {
 }
 
 /**
+ * One semantic note on a stage: a fact about the DESIGN that the arrows alone
+ * do not say.
+ *
+ * Kinds, not sentences, because every string a person reads is a label the host
+ * supplies; the canvas maps these onto them.
+ */
+export type RouteFlowNote =
+  | { kind: 'merge' }
+  | { kind: 'cycle' }
+  | { kind: 'terminal'; on: RouteFlowVerdict | 'continue' };
+
+/**
+ * Every note one stage carries, in the order they are read.
+ *
+ * Lives here rather than inside the canvas's render pass for two reasons. The
+ * first is that it can then be TESTED — the clipping bug in #1042 was a claim
+ * about how many notes exist meeting a clamp that assumed fewer, and neither
+ * side of that was reachable from a test while the note list was assembled
+ * inline in an effect. The second is {@link ROUTE_FLOW_MAX_NOTES}: a bound on
+ * this function's output is what the card's height is budgeted against, so the
+ * two have to be able to see each other.
+ *
+ * The merge note comes FIRST: it is the more surprising of the two markers, and
+ * the one a reader is most likely to have assumed the opposite of.
+ */
+export function notesFor(position: number, resolution: RouteFlowResolution): RouteFlowNote[] {
+  const notes: RouteFlowNote[] = [];
+
+  if (resolution.merges.includes(position)) {
+    notes.push({ kind: 'merge' });
+  }
+  if (resolution.cycles.includes(position)) {
+    notes.push({ kind: 'cycle' });
+  }
+  for (const terminal of resolution.terminals) {
+    if (terminal.from === position) {
+      notes.push({ kind: 'terminal', on: terminal.on });
+    }
+  }
+
+  return notes;
+}
+
+/**
  * The effective quorum for a step: its own, or the tenant's.
  *
  * One function so the node card, the inspector and any future summary cannot
@@ -353,13 +397,89 @@ export type RouteFlowDirection = 'ltr' | 'rtl';
  * numbers instead of each carrying its own copy.
  */
 export const ROUTE_FLOW_NODE_WIDTH = 224;
+
 /**
- * Tall enough for the two note lines a stage can carry at once — "Paths merge
- * here" and "Rejected: Ends here" are both facts about the same node, and a
- * card that clipped one would hide exactly the semantics the notes exist to
- * state. The layout strides are derived from this constant, so spacing follows.
+ * Every text row a card draws, and the line box each one occupies.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * WHY THE HEIGHT IS A SUM AND NOT A NUMBER
+ * ─────────────────────────────────────────────────────────────────────────
+ * It used to be a literal (`124`), and the note clamp on the card was a
+ * separate literal (`line-clamp-2`). Nothing tied them together, so they
+ * drifted: the height was raised to hold three note lines and the clamp stayed
+ * at two, and a stage carrying merge + loop + "Rejected: Ends here" silently
+ * dropped the third — the canvas going quiet about the fact that rejection ends
+ * the chain, in a card with visible empty space underneath (#1042).
+ *
+ * So the height is now DERIVED from the rows, and the clamp is derived from
+ * {@link ROUTE_FLOW_MAX_NOTES}, which is the same number the height budget uses.
+ * Adding a row, or making a fourth note reachable, moves both at once or moves
+ * neither; it can no longer move one.
+ *
+ * The values are the rendered line boxes of the classes the card uses, measured
+ * in a browser rather than guessed: `text-sm` (20), `text-xs` (16) and
+ * `text-[10px] leading-tight` (12.6, rounded up to 13).
  */
-export const ROUTE_FLOW_NODE_HEIGHT = 124;
+const NODE_ROW = {
+  /** The stage's title, `text-sm`. */
+  title: 20,
+  /** The rule the stage names, `text-xs` — always visible, never only the label. */
+  rule: 16,
+  /** How many people the rule reaches, `text-xs`. */
+  audience: 16,
+  /** What counts as approved, `text-xs`. Its own row, so a long audience line cannot truncate it. */
+  quorum: 16,
+  /** One semantic note, `text-[10px] leading-tight`. */
+  note: 13,
+} as const;
+
+/** `px-3 py-2` top + bottom. */
+const NODE_PADDING_Y = 8 * 2;
+/** The 1px border, top + bottom. */
+const NODE_BORDER_Y = 1 * 2;
+/** `gap-1` between the four flex children (title+rule block, audience, quorum, notes). */
+const NODE_GAPS_Y = 4 * 3;
+
+/**
+ * The most semantic notes one stage can ever carry — and it is a PROVEN
+ * maximum, not a chosen one.
+ *
+ * {@link notesFor} can emit at most four things: the merge note, the loop note,
+ * and one terminal per verdict that ends the chain there. Three is the ceiling
+ * because the fourth is unreachable:
+ *
+ *  - A step showing BOTH an "approved: ends here" and a "rejected: ends here"
+ *    has no outgoing transition at all, so nothing can lead back to it and
+ *    {@link RouteFlowResolution.cycles} cannot contain it. Two terminals
+ *    therefore exclude the loop note.
+ *  - A step with only ONE terminal leaves room for merge and loop, which is
+ *    three.
+ *  - A non-decision step has at most one terminal ('continue'), so it is
+ *    bounded by the same three.
+ *
+ * `route-flow-model.test.ts` asserts this over the constructed shapes rather
+ * than trusting the argument, because the argument is only as good as
+ * {@link resolveTransitions} staying the way it is.
+ */
+export const ROUTE_FLOW_MAX_NOTES = 3;
+
+/**
+ * Tall enough for everything a stage can say at once.
+ *
+ * Derived, so the card cannot be given a row it has no room to draw. The layout
+ * strides are derived from this in turn, so spacing follows the card rather than
+ * being kept in step with it by hand.
+ */
+export const ROUTE_FLOW_NODE_HEIGHT =
+  NODE_PADDING_Y +
+  NODE_BORDER_Y +
+  NODE_ROW.title +
+  NODE_ROW.rule +
+  NODE_ROW.audience +
+  NODE_ROW.quorum +
+  NODE_GAPS_Y +
+  ROUTE_FLOW_MAX_NOTES * NODE_ROW.note;
+
 const GAP_ALONG = 72;
 const GAP_ACROSS = 40;
 

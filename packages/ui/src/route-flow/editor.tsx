@@ -4,22 +4,28 @@ import * as React from 'react';
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
   Controls,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
+  getBezierPath,
   useNodesState,
   type Connection,
   type Edge,
+  type EdgeProps,
+  type EdgeTypes,
   type Node,
   type NodeProps,
   type NodeTypes,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { cn } from '../utils';
 import {
   ROUTE_FLOW_MAX_NODES,
+  ROUTE_FLOW_MAX_NOTES,
   ROUTE_FLOW_NODE_HEIGHT,
   ROUTE_FLOW_NODE_WIDTH,
   autoLayout,
@@ -27,6 +33,7 @@ import {
   handleFaces,
   needsAutoLayout,
   nextSlot,
+  notesFor,
   renumber,
   resolveTransitions,
   stepsInOrder,
@@ -106,6 +113,16 @@ export interface RouteFlowEditorLabels {
   /** Prefix for the resolved audience, e.g. "reaches 1,043 people". */
   reaches: string;
   people: string;
+  /**
+   * The singular of {@link RouteFlowEditorLabels.people}.
+   *
+   * A separate label rather than a rule applied to `people`, because which
+   * counts take which form is a property of the LANGUAGE and not of this
+   * component: English splits at one, Arabic splits at one, two and eleven. A
+   * host with a plural-aware translator passes the form its own rules chose;
+   * this only ever asks for "the word for a count of 1".
+   */
+  person: string;
   /** Shown in place of a count the host could not resolve and gave no reason for. */
   audienceUnavailable: string;
   approved: string;
@@ -149,6 +166,7 @@ const DEFAULT_LABELS: RouteFlowEditorLabels = {
   decision: 'Decision',
   reaches: 'Reaches',
   people: 'people',
+  person: 'person',
   audienceUnavailable: 'Audience size unavailable',
   approved: 'Approved',
   rejected: 'Rejected',
@@ -183,6 +201,21 @@ export interface RouteFlowEditorProps {
   /**
    * The reading direction. Mirrors every horizontal axis, including the handles,
    * so an arrow leaves the face a reader expects it to leave.
+   *
+   * "Including the handles" is load-bearing and was, for a while, untrue.
+   * `@xyflow/react` sets `direction: ltr` on its own container — deliberately,
+   * because its transforms are computed in one coordinate system — and that
+   * neutralises `insetInlineStart` on anything inside it. The verdict handles
+   * were positioned with exactly that property, so they stayed at 30% and 70%
+   * from the LEFT in Arabic while {@link slotAt} put the reject lane on the
+   * left, which is the "mirrored layout, unmirrored handles" failure
+   * {@link handleFaces} warns about: the reject arrow left the far side of its
+   * own card and crossed back underneath it.
+   *
+   * They are placed with a physical `left`, mirrored arithmetically from this
+   * prop, so the mirroring does not depend on a container's inherited direction.
+   * The card carries its own `dir` for the same reason — `text-start` inside the
+   * canvas would otherwise resolve to "left" and left-align Arabic.
    */
   direction?: RouteFlowDirection;
   /**
@@ -207,12 +240,67 @@ interface RouteFlowNodeData extends Record<string, unknown> {
   audience: RouteFlowAudience | undefined;
   selected: boolean;
   readOnly: boolean;
-  terminalNotes: string[];
+  notes: string[];
   labels: RouteFlowEditorLabels;
+  direction: RouteFlowDirection;
   sourceFace: Position;
   targetFace: Position;
   onSelect: (position: number) => void;
   onDelete: (position: number) => void;
+}
+
+/**
+ * How big a handle is drawn.
+ *
+ * `@xyflow/react`'s default is 6×6 CSS px, which the canvas zoom then shrinks:
+ * at the zoom a four-stage flow fits at, the measured target was 5.4px on
+ * screen. Starting an edge meant hitting a 5px dot, and the alternative gesture
+ * a person tries first — dropping on the target CARD — does nothing, because a
+ * connection has to end on a handle. 12px is a target a hand can find, and it is
+ * still small enough that two of them sit on one 224px face without touching.
+ *
+ * The other half of that fix is {@link CONNECTION_RADIUS}.
+ */
+const HANDLE_CLASS = '!h-3 !w-3 !border-2 !border-card !bg-muted-foreground/60';
+
+/**
+ * How far from a handle a drop still counts as landing on it.
+ *
+ * `@xyflow/react` defaults to 20px, so a connection had to be released within
+ * 20px of a 5px dot; releasing over the target CARD — the gesture people try
+ * first — did nothing at all, and did it silently.
+ *
+ * Widened to reach from the target handle (top-centre of a card) across most of
+ * the card it belongs to, so dropping ON the node connects. Deliberately NOT
+ * wide enough to span the gap to the next node: {@link ROUTE_FLOW_NODE_HEIGHT}
+ * plus its layout gap is the distance between two stages, and this is well
+ * inside half of that, so a drop is never claimed by the card an author was not
+ * pointing at.
+ */
+const CONNECTION_RADIUS = 80;
+
+/**
+ * Where a verdict handle sits along the source face, as a physical inset.
+ *
+ * PHYSICAL, not logical. `insetInlineStart` would be the idiomatic choice and it
+ * is the one that was here; it does not work, because `@xyflow/react` forces
+ * `direction: ltr` on its container and a logical inset resolves against that
+ * rather than against the document. So the mirroring is done here, from the
+ * direction the host passed, where nothing can quietly undo it.
+ */
+function verdictInset(
+  direction: RouteFlowDirection,
+  percentFromReadingStart: number
+): React.CSSProperties {
+  // Mirrored by arithmetic and still written as `left`, NOT by switching to
+  // `right`. `@xyflow/react` centres a handle on its inset with a
+  // `translateX(-50%)` of its own; anchoring from the other edge leaves that
+  // translation pulling the wrong way and lands the handle half its own width
+  // off — measured 0.65 where 0.70 was meant. One physical property, one
+  // percentage, nothing left for a transform to disagree with.
+  const fromLeft = direction === 'rtl' ? 100 - percentFromReadingStart : percentFromReadingStart;
+
+  return { left: `${fromLeft}%` };
 }
 
 const FACE: Record<string, Position> = {
@@ -243,8 +331,9 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
     audience,
     selected,
     readOnly,
-    terminalNotes,
+    notes,
     labels,
+    direction,
     sourceFace,
     targetFace,
     onSelect,
@@ -255,6 +344,11 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
 
   return (
     <div
+      // The card carries its OWN `dir`. `@xyflow/react` forces `direction: ltr`
+      // on its container, so without this every `text-start` and every `end-*`
+      // inside a node resolves to the left-to-right answer and Arabic labels sit
+      // left-aligned in a right-to-left page.
+      dir={direction}
       className={cn(
         'flex flex-col gap-1 rounded-lg border bg-card px-3 py-2 text-start shadow-sm transition-colors',
         selected ? 'border-primary ring-2 ring-primary/30' : 'border-border'
@@ -264,7 +358,7 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
       data-position={step.position}
       data-decision={step.decision ? 'true' : 'false'}
     >
-      <Handle type="target" position={targetFace} className="!bg-muted-foreground/50" />
+      <Handle type="target" position={targetFace} className={HANDLE_CLASS} />
 
       <button
         type="button"
@@ -286,34 +380,55 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
       </button>
 
       {/* THE COUNT, NEVER A ROSTER — the line that makes a type-node honest: one
-          card, and the number of people behind it.
+          card, and the number of people behind it. */}
+      <span className="truncate text-xs text-muted-foreground">
+        {audience === undefined
+          ? ' '
+          : audience.count !== null
+            ? `${labels.reaches} ${audience.count.toLocaleString()} ${
+                audience.count === 1 ? labels.person : labels.people
+              }`
+            : (audience.unavailableReason ?? labels.audienceUnavailable)}
+      </span>
 
-          The QUORUM is shown for every decision stage, INDEPENDENTLY of whether
-          the count resolved. It used to be rendered inside the count branch, so
-          a viewer who could not preview audiences (a 403 there is ordinary — the
+      {/* THE QUORUM, on its own row.
+
+          It is shown for every decision stage, INDEPENDENTLY of whether the
+          count resolved. It used to be rendered inside the count branch, so a
+          viewer who could not preview audiences (a 403 there is ordinary — the
           draft preview needs `groups:write`, which designing a flow does not
           imply) saw a gate with no indication of what would satisfy it. The two
           facts have different sources and only one of them can fail; binding
           them together made the reliable one vanish with the unreliable one.
 
-          One line rather than two because the card height is fixed: a third row
-          would push the terminal note out of the box. */}
+          It was then joined onto the COUNT's line with a separator, and the pair
+          overflowed one 224px row: "Reaches 1 people · all must appr…" — a
+          quorum made unconditionally visible and then truncated mid-word, which
+          is the same disappearance by a slower route (#1042). Its own row costs
+          16px of a height that is now derived from the rows it holds, and no
+          audience string can crowd it out. */}
       <span className="truncate text-xs text-muted-foreground">
-        {[
-          audience === undefined
-            ? null
-            : audience.count !== null
-              ? `${labels.reaches} ${audience.count.toLocaleString()} ${labels.people}`
-              : (audience.unavailableReason ?? labels.audienceUnavailable),
-          step.decision ? quorumText : null,
-        ]
-          .filter((part): part is string => part !== null)
-          .join(' · ')}
+        {step.decision ? quorumText : ' '}
       </span>
 
-      {terminalNotes.length > 0 && (
-        <span className="line-clamp-2 text-[10px] uppercase leading-tight tracking-wide text-muted-foreground">
-          {terminalNotes.join(' · ')}
+      {notes.length > 0 && (
+        <span
+          data-slot="route-flow-notes"
+          // Clamped from the SAME constant the card's height is budgeted against
+          // (see ROUTE_FLOW_MAX_NOTES). Tailwind's `line-clamp-N` is a static
+          // class and could only repeat the number as a literal, which is
+          // precisely how the two drifted apart: the height was raised to hold
+          // three lines while the clamp stayed at two, and a stage carrying
+          // merge + loop + "Rejected: Ends here" dropped the last of them.
+          style={{
+            display: '-webkit-box',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: ROUTE_FLOW_MAX_NOTES,
+            overflow: 'hidden',
+          }}
+          className="text-[10px] uppercase leading-tight tracking-wide text-muted-foreground"
+        >
+          {notes.join(' · ')}
         </span>
       )}
 
@@ -329,38 +444,149 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
       )}
 
       {/* A decision step's two verdict handles are stacked on the source face and
-          coloured, so the gesture and the picture agree before an edge exists. */}
+          coloured, so the gesture and the picture agree before an edge exists.
+
+          On a horizontal face the two are offset along the VERTICAL axis, which
+          no reading direction mirrors, so only the top/bottom case consults
+          `direction`. */}
       {step.decision ? (
         <>
           <Handle
             id="approved"
             type="source"
             position={sourceFace}
-            style={sourceFace === Position.Bottom || sourceFace === Position.Top
-              ? { insetInlineStart: '30%' }
-              : { top: '35%' }}
-            className="!bg-emerald-500"
+            style={
+              sourceFace === Position.Bottom || sourceFace === Position.Top
+                ? verdictInset(direction, 30)
+                : { top: '35%' }
+            }
+            className={cn(HANDLE_CLASS, '!bg-emerald-500')}
             data-testid={`approve-handle-${step.position}`}
           />
           <Handle
             id="rejected"
             type="source"
             position={sourceFace}
-            style={sourceFace === Position.Bottom || sourceFace === Position.Top
-              ? { insetInlineStart: '70%' }
-              : { top: '70%' }}
-            className="!bg-rose-500"
+            style={
+              sourceFace === Position.Bottom || sourceFace === Position.Top
+                ? verdictInset(direction, 70)
+                : { top: '70%' }
+            }
+            className={cn(HANDLE_CLASS, '!bg-rose-500')}
             data-testid={`reject-handle-${step.position}`}
           />
         </>
       ) : (
-        <Handle type="source" position={sourceFace} className="!bg-muted-foreground/50" />
+        <Handle type="source" position={sourceFace} className={HANDLE_CLASS} />
       )}
     </div>
   );
 }
 
 const nodeTypes: NodeTypes = { routeFlowStep: RouteFlowNodeCard };
+
+interface RouteFlowEdgeData extends Record<string, unknown> {
+  kind: 'drawn' | 'derived';
+  on: RouteFlowVerdict | 'continue';
+  text: string;
+}
+
+/**
+ * How far a transition's label is nudged off the middle of its own curve, by
+ * verdict.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * WHY A LABEL NEEDS AN OFFSET AT ALL
+ * ─────────────────────────────────────────────────────────────────────────
+ * Two transitions running BETWEEN THE SAME PAIR OF STAGES in opposite
+ * directions have, to within a few pixels, the same midpoint — and a built-in
+ * edge draws its label at exactly that midpoint. So a rework loop, which is the
+ * commonest real design there is, printed both labels on top of each other:
+ * "Approved (imp Rejected" (#1042).
+ *
+ * That is an anti-parallel PAIR, not "two edges leaving one node" — two edges
+ * leaving one node diverge, and their labels separate on their own. The pair is
+ * always a pair of DIFFERENT verdicts (one destination per verdict per stage is
+ * enforced by the schema and by `onConnect`), so nudging by verdict is enough to
+ * separate any pair that can exist, and it does it deterministically rather than
+ * by a collision search whose answer would move as nodes are dragged.
+ *
+ * Bigger than a label's own line box, so the two clear rather than touch.
+ */
+const LABEL_NUDGE: Record<RouteFlowVerdict | 'continue', number> = {
+  approved: -18,
+  continue: 0,
+  rejected: 18,
+};
+
+/**
+ * One transition.
+ *
+ * A custom edge only so the label can be moved; everything else is
+ * `@xyflow/react`'s own, including the invisible interaction path that makes an
+ * edge selectable and therefore deletable.
+ *
+ * The label is drawn on a background chip because it sits over a dotted
+ * background and, in a loop, over the other arrow.
+ */
+function RouteFlowTransitionEdge({
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+  markerEnd,
+  style,
+  data,
+}: EdgeProps<Edge<RouteFlowEdgeData>>) {
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+
+  return (
+    <BaseEdge
+      path={path}
+      markerEnd={markerEnd}
+      style={style}
+      label={data?.text}
+      labelX={labelX}
+      labelY={labelY + LABEL_NUDGE[data?.on ?? 'continue']}
+      // SVG text defaults to black and `@xyflow/react` sets no fill of its own,
+      // so an edge label was black on a near-black canvas in dark mode. Both
+      // colours come from the theme, so the chip and its text move together.
+      labelStyle={{ fontSize: 10, fill: 'var(--color-muted-foreground, #64748b)' }}
+      labelShowBg
+      labelBgPadding={[4, 2]}
+      labelBgBorderRadius={3}
+      labelBgStyle={{ fill: 'var(--color-card, #ffffff)', fillOpacity: 0.92 }}
+    />
+  );
+}
+
+const edgeTypes: EdgeTypes = { routeFlowTransition: RouteFlowTransitionEdge };
+
+/**
+ * How the canvas frames itself.
+ *
+ * `maxZoom` is the important one and it was missing. `@xyflow/react` defaults a
+ * fit to a maximum of 2×, and `fitView` runs on MOUNT — which, for a template
+ * being authored from nothing, is the moment the FIRST node appears. One node
+ * fits at 2×, the viewport froze there, and stages 2, 3 and 4 were then added
+ * off-screen: the measured result was `scale(2)` with one of four nodes visible,
+ * for every new flow anybody made (#1042).
+ *
+ * Capped at 1 rather than at some larger number because a node card is designed
+ * at a fixed pixel size and a magnified one is not more legible, only bigger.
+ * This bounds the automatic fit ONLY — the `maxZoom` prop is left at its default
+ * so a person can still zoom in past this by hand.
+ */
+const FIT_VIEW = { maxZoom: 1, padding: 0.15 };
 
 export function RouteFlowEditor({
   graph,
@@ -389,10 +615,8 @@ export function RouteFlowEditor({
   const cut = ordered.length > maxNodes;
   const drawn = cut ? ordered.slice(0, maxNodes) : ordered;
 
-  const { transitions, terminals, merges, cycles } = React.useMemo(
-    () => resolveTransitions(graph),
-    [graph]
-  );
+  const resolution = React.useMemo(() => resolveTransitions(graph), [graph]);
+  const { transitions } = resolution;
 
   const quorumLabel = React.useCallback(
     (step: RouteFlowStep): string => {
@@ -446,25 +670,21 @@ export function RouteFlowEditor({
 
     setNodes(
       placed.map((step) => {
-        const notes: string[] = [];
-        // The merge note comes FIRST: it is the more surprising of the two, and
-        // the one a reader is most likely to have assumed the opposite of.
-        if (merges.includes(step.position)) {
-          notes.push(labels.arrivalsMerge);
-        }
-        if (cycles.includes(step.position)) {
-          notes.push(labels.inCycle);
-        }
-        for (const terminal of terminals) {
-          if (terminal.from !== step.position) continue;
+        // WHICH notes a stage carries is decided in the model, by `notesFor`,
+        // and only the wording is decided here. That split is what lets
+        // ROUTE_FLOW_MAX_NOTES — the number the card's height is budgeted
+        // against — be an assertion a test can make.
+        const notes = notesFor(step.position, resolution).map((note) => {
+          if (note.kind === 'merge') return labels.arrivalsMerge;
+          if (note.kind === 'cycle') return labels.inCycle;
           const on =
-            terminal.on === 'approved'
+            note.on === 'approved'
               ? labels.approved
-              : terminal.on === 'rejected'
+              : note.on === 'rejected'
                 ? labels.rejected
                 : labels.continues;
-          notes.push(`${on}: ${labels.ends}`);
-        }
+          return `${on}: ${labels.ends}`;
+        });
 
         return {
           id: String(step.position),
@@ -478,8 +698,9 @@ export function RouteFlowEditor({
             audience: audienceFor?.(step),
             selected: selectedPosition === step.position,
             readOnly,
-            terminalNotes: notes,
+            notes,
             labels,
+            direction,
             sourceFace,
             targetFace,
             onSelect: (p: number) => onSelectStep?.(p),
@@ -500,13 +721,11 @@ export function RouteFlowEditor({
     quorumLabel,
     readOnly,
     ruleLabelFor,
-    cycles,
-    merges,
+    resolution,
     selectedPosition,
     setNodes,
     sourceFace,
     targetFace,
-    terminals,
   ]);
 
   const edges = React.useMemo<Edge[]>(() => {
@@ -529,7 +748,7 @@ export function RouteFlowEditor({
           source: String(t.from),
           target: String(t.to),
           sourceHandle: isApprove || isReject ? t.on : undefined,
-          type: 'default',
+          type: 'routeFlowTransition',
           // A DERIVED transition is dashed and says so. It is a real arrow — the
           // engine will take it — but it is not one the author drew, and it
           // cannot be deleted except by reordering the steps that imply it.
@@ -542,10 +761,14 @@ export function RouteFlowEditor({
                 ? 'var(--color-emerald-500, #10b981)'
                 : undefined,
           },
-          label: t.kind === 'derived' ? `${label} (${labels.implicit})` : label,
-          labelStyle: { fontSize: 10 },
           markerEnd: { type: MarkerType.ArrowClosed },
-          data: { kind: t.kind },
+          // The label travels in `data` rather than in `label`, because the
+          // custom edge draws it at a nudged position — see LABEL_NUDGE.
+          data: {
+            kind: t.kind,
+            on: t.on,
+            text: t.kind === 'derived' ? `${label} (${labels.implicit})` : label,
+          },
         } satisfies Edge;
       });
   }, [drawn, labels, transitions]);
@@ -597,6 +820,38 @@ export function RouteFlowEditor({
     [emit, graph, readOnly]
   );
 
+  /**
+   * Re-frame the canvas when the flow gains or loses a stage.
+   *
+   * `fitView` alone only ever fires once, on mount. Everything an author does
+   * after that — and on a new template, everything they do at all — happens to a
+   * viewport that was framed for a graph with one node in it.
+   *
+   * Keyed on the node COUNT and nothing else, deliberately. Re-fitting on every
+   * graph change would yank the canvas out from under someone who had panned to
+   * a corner and was renaming a stage; adding or deleting a stage is the one
+   * edit that changes what there is to look at.
+   *
+   * `requestAnimationFrame` because the fit needs the new node MEASURED, and
+   * this effect runs in the same commit that first renders it.
+   */
+  const instance = React.useRef<ReactFlowInstance<Node<RouteFlowNodeData>, Edge> | null>(null);
+  const onInit = React.useCallback(
+    (next: ReactFlowInstance<Node<RouteFlowNodeData>, Edge>) => {
+      instance.current = next;
+    },
+    []
+  );
+
+  const nodeCount = drawn.length;
+  React.useEffect(() => {
+    if (nodeCount === 0) return undefined;
+    const frame = requestAnimationFrame(() => {
+      void instance.current?.fitView(FIT_VIEW);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [nodeCount]);
+
   const onNodeDragStop = React.useCallback(
     (_event: MouseEvent | TouchEvent, node: Node) => {
       if (readOnly) return;
@@ -632,6 +887,8 @@ export function RouteFlowEditor({
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onInit={onInit}
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
           onConnect={onConnect}
@@ -639,7 +896,9 @@ export function RouteFlowEditor({
           nodesDraggable={!readOnly}
           nodesConnectable={!readOnly}
           elementsSelectable
+          connectionRadius={CONNECTION_RADIUS}
           fitView
+          fitViewOptions={FIT_VIEW}
           // react-flow's default minZoom (0.5) defeats fitView on anything wider
           // than about twice the canvas: the fit clamps at 0.5 and centres,
           // silently clipping the outermost nodes. The OU hub hit this first and
