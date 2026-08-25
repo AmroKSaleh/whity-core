@@ -3188,6 +3188,15 @@ final class CoreApiSchemas
                 'document_id' => self::int(),
                 'title' => self::str(),
                 'created_by' => self::int(true),
+                // #1031, migration 123. WHICH DESIGN THIS CIRCULATION CAME FROM.
+                // Both halves are published because neither implies the other:
+                // `template_id` is null for a route composed by hand AND for one
+                // whose design has since been deleted, while `template_name` is
+                // the snapshot taken at issue and survives only the second case.
+                // The steps below are a COPY, not a view - editing the design
+                // afterwards cannot change a circulation already under way.
+                'template_id' => self::int(true),
+                'template_name' => self::str(true),
                 'created_at' => self::str(),
                 'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteStep')],
                 'edges' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteEdge')],
@@ -3245,6 +3254,21 @@ final class CoreApiSchemas
                     ], ['rule_kind']),
                 ],
             ], ['steps']),
+
+            // #1031. Applying a DESIGN carries the design's id and nothing else -
+            // no steps, deliberately. The stages are read from the template
+            // server-side and converted there, so a client cannot send a
+            // `template_id` beside steps of its own and have the pair recorded as
+            // though the design produced them. The tenant's
+            // `documents.routing_max_steps` is re-checked at this moment, since
+            // the setting can have moved since the design was authored.
+            'DocumentRouteFromTemplateRequest' => self::object([
+                'template_id' => self::int(),
+                // Left out, the ROUTE is named after the DESIGN rather than after
+                // the document - an author who applied "Purchase approval" is
+                // naming the circulation after the flow it follows.
+                'title' => self::str(true),
+            ], ['template_id']),
 
             // The trail. Every field is a COLUMN (migration 112) rather than a
             // JSONB key, because the shape is fixed and known to core - which is
@@ -6606,6 +6630,35 @@ final class CoreApiSchemas
                     ),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute(
+                'POST',
+                '/api/documents/{id:\\d+}/routes/from-template',
+                'documents:route',
+                [
+                    'summary' => 'Apply a route template to a document: copy its stages and branches into a live route',
+                    'tags' => ['documents'],
+                    'request' => 'DocumentRouteFromTemplateRequest',
+                    'responses' => [
+                        201 => self::jsonResponse(
+                            'The issued route with the copied steps and edges, its template provenance, '
+                            . 'and how many recipients the first step resolved to and delivered',
+                            'DocumentRouteResponse'
+                        ),
+                        403 => self::errorResponse(
+                            'The caller may route documents but may not read route templates '
+                            . '(route_templates:read)'
+                        ),
+                        404 => self::errorResponse(
+                            'Document not visible to the caller, or no such template in this tenant'
+                        ),
+                        422 => self::errorResponse(
+                            'A design with no stages, a branch leaving a stage that produces no verdict, '
+                            . 'a rule kind nothing registers any more, or more stages than the tenant\'s '
+                            . 'documents.routing_max_steps allows right now'
+                        ),
+                    ] + self::authErrors(),
+                ]
+            ),
             self::permissionRoute('GET', '/api/documents/{id:\\d+}/routes', 'documents:read', [
                 'summary' => 'List the circulations of a document, newest first, each with its steps',
                 'tags' => ['documents'],

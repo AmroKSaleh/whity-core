@@ -7,6 +7,9 @@ namespace Whity\Api;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
+use Whity\Core\Document\RouteTemplate\RouteTemplateInstantiation;
+use Whity\Core\Document\RouteTemplate\RouteTemplateRejectedException;
+use Whity\Core\Document\RouteTemplate\RouteTemplateRepository;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RouteAction;
 use Whity\Core\Document\Routing\RouteEdgeRepository;
@@ -18,6 +21,7 @@ use Whity\Core\Document\Routing\RouteVerdict;
 use Whity\Core\Document\Routing\RoutingPresenter;
 use Whity\Core\Document\Routing\RoutingRejectedException;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -30,6 +34,7 @@ use Whity\Http\PaginationParams;
  *
  *   GET  /api/routing-rules                        (documents:read)
  *   POST /api/documents/{id}/routes                (documents:route)
+ *   POST /api/documents/{id}/routes/from-template  (documents:route + route_templates:read)
  *   GET  /api/documents/{id}/routes                (documents:read)
  *   GET  /api/documents/{id}/trail                 (documents:read)
  *   GET  /api/documents/{id}/recipients            (documents:read)
@@ -108,6 +113,7 @@ final class DocumentRoutingApiHandler
         private readonly RoutingRuleRegistry $rules,
         private readonly DocumentVisibilityPolicy $visibility,
         private readonly RoleChecker $roleChecker,
+        private readonly RouteTemplateRepository $templates,
     ) {
     }
 
@@ -191,6 +197,133 @@ final class DocumentRoutingApiHandler
                 $issued['route'],
                 $issued['steps'],
                 $issued['edges'],
+                $this->router->defaultQuorum($tenantId),
+            ),
+            'resolved' => $issued['resolved'],
+            'delivered' => $issued['delivered'],
+        ], 201);
+    }
+
+    /**
+     * POST /api/documents/{id}/routes/from-template — apply a design (#1031).
+     *
+     * WHY THIS IS ITS OWN ENDPOINT AND NOT A FIELD ON `POST .../routes`
+     * -----------------------------------------------------------------
+     * The two requests have disjoint bodies: one carries a `steps` array the
+     * caller composed, the other carries a `template_id` and nothing else. Folded
+     * into one endpoint they would need an "exactly one of" rule, and a caller
+     * that sent both would be answered by whichever check happened to run first.
+     * More importantly the two differ in what the SERVER may assert: a route
+     * issued here carries provenance the server derived, and one issued there
+     * carries none — a distinction that would evaporate the moment a client could
+     * send `template_id` alongside its own hand-written steps and have the pair
+     * stored as though the design produced them.
+     *
+     * TWO PERMISSIONS, AND THE SECOND IS CHECKED HERE RATHER THAN AT THE ROUTE
+     * ------------------------------------------------------------------------
+     * The route gates on `documents:route`, because issuing a circulation is the
+     * act. Reading somebody's DESIGN is a second question — the 201 body contains
+     * every stage of it — so `route_templates:read` is required too, and the
+     * router carries one permission per route. Migration 120 grants that slug to
+     * `documents:route` holders precisely because "the people who will pick one
+     * when routing a document" are an audience for it, so on an ordinary install
+     * the check never fires; on a deployment that revoked it deliberately, it
+     * does, and it says which slug is missing rather than reporting the template
+     * as absent.
+     *
+     * THE STEP CEILING IS THE ENGINE'S, DELIBERATELY
+     * -----------------------------------------------
+     * #1031 asks that a template exceeding `documents.routing_max_steps` be
+     * refused AT THIS MOMENT rather than only when it was authored, because the
+     * setting can move in between. It is —
+     * {@see \Whity\Core\Document\Routing\DocumentRouter::validateSteps()} resolves
+     * the tenant's effective value on every issue and refuses with a message
+     * naming both numbers and the setting to raise. A second check here would be
+     * a second reading of one tenant-configurable number.
+     *
+     * @param array<string, string> $params
+     */
+    public function createFromTemplate(Request $request, array $params): Response
+    {
+        $resolved = $this->resolveVisibleDocument($request, $params);
+        if ($resolved instanceof Response) {
+            return $resolved;
+        }
+        [$tenantId, $callerId, $document] = $resolved;
+
+        if (!$this->permissionResolver($callerId, $tenantId)(CorePermissions::ROUTE_TEMPLATES_READ)) {
+            return Response::error(
+                'Applying a route template requires ' . CorePermissions::ROUTE_TEMPLATES_READ,
+                403
+            );
+        }
+
+        $body = JsonBody::parsed($request);
+
+        $templateId = $body['template_id'] ?? null;
+        if (!is_int($templateId) || $templateId < 1) {
+            return Response::error("'template_id' must be the id of a route template", 422);
+        }
+
+        $template = $this->templates->findById($templateId, $tenantId);
+        if ($template === null) {
+            // Absent, never forbidden: a template id is an enumerable integer and
+            // a 403 would confirm which ids exist. Same posture as the templates
+            // surface itself.
+            return Response::error('Route template not found', 404);
+        }
+
+        $title = $body['title'] ?? null;
+        // Falls back to the DESIGN's name rather than the document's, which is
+        // the one place this endpoint differs from its hand-composed sibling: an
+        // author who applied "Purchase approval" is naming the circulation after
+        // the flow it follows, and a list of routes on a document reads better
+        // for it. `template_name` is stored separately regardless, so the two do
+        // not become one fact.
+        $title = is_string($title) && trim($title) !== ''
+            ? trim($title)
+            : (string) $template['name'];
+        if (mb_strlen($title) > 255) {
+            return Response::error("'title' must be 255 characters or fewer", 422);
+        }
+
+        try {
+            $steps = RouteTemplateInstantiation::toRouteSteps(
+                $this->templates->stepsFor($templateId, $tenantId),
+                $this->templates->edgesFor($templateId, $tenantId),
+            );
+        } catch (RouteTemplateRejectedException $e) {
+            // ->clientMessage, never ->getMessage(): the same rule the routing
+            // exception below follows, and ExceptionLeakageTest enforces it
+            // statically over this directory.
+            return Response::error($e->clientMessage, 422);
+        }
+
+        try {
+            $issued = $this->router->issue(
+                $tenantId,
+                $callerId,
+                $document,
+                $title,
+                $steps,
+                $templateId,
+                (string) $template['name'],
+            );
+        } catch (RoutingRejectedException $e) {
+            return Response::error($e->clientMessage, 422);
+        }
+
+        return Response::json([
+            'data' => RoutingPresenter::route(
+                $issued['route'],
+                $issued['steps'],
+                $issued['edges'],
+                // #1041's `default_quorum`, resolved through the ENGINE's own
+                // reader rather than re-derived here. An applied design is the
+                // route most likely to carry a gate with no explicit quorum —
+                // the canvas leaves it NULL by default — so omitting it would
+                // publish `all` to the one reader who most needs the tenant's
+                // real answer, on the response that first shows them the gate.
                 $this->router->defaultQuorum($tenantId),
             ),
             'resolved' => $issued['resolved'],
