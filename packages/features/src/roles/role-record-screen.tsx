@@ -71,11 +71,10 @@ import {
   RecordPageSkeleton,
   RecordTimeline,
   RecordTimelineItem,
-  formatRecordDate,
-  formatRecordDateTime,
   sectionAccessFrom,
   useRecordResource,
 } from '../record';
+import { useDateDisplay } from '../datetime';
 import type { RecordFactsFn, RecordResource, RecordSectionSpec } from '../record';
 import { identityTranslate } from '../nav/types';
 import { PermissionsGrid } from './permissions-grid';
@@ -173,7 +172,7 @@ function localizeDenial(
  * What the page SAYS about a role — a pure projection, at module scope, of the
  * record and the dictionary. There is no `can` in scope for it to reach for.
  */
-const roleFacts: RecordFactsFn<RoleRecordFields> = (role, t) => ({
+const roleFacts: RecordFactsFn<RoleRecordFields> = (role, t, dates) => ({
   title: role.name,
   subtitle: role.description || t('roles.record.subtitle', 'Role record'),
   badges: role.global
@@ -196,11 +195,19 @@ const roleFacts: RecordFactsFn<RoleRecordFields> = (role, t) => ({
       label: t('roles.record.stat.permissions', 'Permissions granted'),
       value: role.permissionCount,
     },
-    {
-      key: 'created',
-      label: t('roles.record.stat.created', 'Created'),
-      value: formatRecordDate(role.createdAt),
-    },
+    // #1068: the stat GOES when this tenant hides dates, rather than
+    // surviving as "Created —". A label with an em dash under it is a
+    // question the screen is refusing to answer; an absent stat is simply a
+    // fact the page does not report.
+    ...(dates.hidden
+      ? []
+      : [
+          {
+            key: 'created',
+            label: t('roles.record.stat.created', 'Created'),
+            value: dates.date(role.createdAt),
+          },
+        ]),
     {
       key: 'scope',
       label: t('roles.record.stat.scope', 'Scope'),
@@ -259,6 +266,8 @@ export function RoleRecordScreen({
   className,
 }: RoleRecordScreenProps) {
   const t: RolesTranslate = injectedT ?? identityTranslate;
+  // #1068: the only sanctioned way to put a date on a screen.
+  const dates = useDateDisplay();
 
   // The RECORD, and then the picker source it is edited against — SEQUENTIALLY,
   // which is a change #910 forced and an improvement it happens to bring.
@@ -709,17 +718,24 @@ export function RoleRecordScreen({
               {(items) => (
                 <RecordList>
                   {items.map((holder) => {
-                    const when = formatRecordDate(holder.assignedAt);
+                    const when = dates.date(holder.assignedAt);
                     return (
                       <RecordListItem
                         key={holder.membershipId}
                         primary={holder.displayName || holder.email || `#${holder.profileId}`}
+                        // #1068: NO secondary line at all when dates are
+                        // hidden — not "assignment date unknown", which would
+                        // be untrue. The date is known; this tenant has asked
+                        // not to see it, and saying the record is incomplete
+                        // to cover for that is a worse answer than silence.
                         secondary={
-                          when !== null
-                            ? t('roles.record.holders.assignedOn', 'assigned {date}', {
-                                date: when,
-                              })
-                            : t('roles.record.holders.assignedUnknown', 'assignment date unknown')
+                          dates.hidden
+                            ? undefined
+                            : when !== null
+                              ? t('roles.record.holders.assignedOn', 'assigned {date}', {
+                                  date: when,
+                                })
+                              : t('roles.record.holders.assignedUnknown', 'assignment date unknown')
                         }
                       />
                     );
@@ -748,10 +764,19 @@ export function RoleRecordScreen({
                       // verbatim and never enters the catalogue — the same rule
                       // permission slugs follow.
                       title={entry.action}
+                      // #1068: the WHO survives, the WHEN goes. A trail's
+                      // value is the ordered sequence of what happened and by
+                      // whom, and the ordering is still on the screen — the
+                      // rows are in order. "— · by user 4" would be a
+                      // separator with nothing on one side of it.
                       meta={
                         <>
-                          {formatRecordDateTime(entry.createdAt) ?? '—'}
-                          {' · '}
+                          {!dates.hidden && (
+                            <>
+                              {dates.dateTime(entry.createdAt) ?? '—'}
+                              {' · '}
+                            </>
+                          )}
                           {entry.actorUserId !== null
                             ? t('roles.record.activity.actor', 'by user {id}', {
                                 id: entry.actorUserId,

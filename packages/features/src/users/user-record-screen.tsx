@@ -92,11 +92,11 @@ import {
   RecordPageSkeleton,
   RecordTimeline,
   RecordTimelineItem,
-  formatRecordDate,
-  formatRecordDateTime,
   resolveAccess,
   useRecordResource,
 } from '../record';
+import { useDateDisplay } from '../datetime';
+import type { DateDisplay } from '../datetime';
 import type { RecordBadge, RecordFactsFn } from '../record';
 import { identityTranslate } from '../nav/types';
 import { USERS_WRITE } from './capabilities';
@@ -153,7 +153,7 @@ interface UserRecordFields {
  * record and the dictionary. There is no `can` in scope for it to reach for, and
  * the fields type it receives could not carry one if there were.
  */
-const userFacts: RecordFactsFn<UserRecordFields> = (user, t) => {
+const userFacts: RecordFactsFn<UserRecordFields> = (user, t, dates) => {
   const badges: RecordBadge[] = [];
   if (user.accountStatus === 'inactive') {
     badges.push({
@@ -208,11 +208,18 @@ const userFacts: RecordFactsFn<UserRecordFields> = (user, t) => {
         label: t('users.record.stat.memberships', 'Roles held'),
         value: user.membershipCount,
       },
-      {
-        key: 'created',
-        label: t('users.record.stat.created', 'Joined'),
-        value: formatRecordDate(user.createdAt),
-      },
+      // #1068: the stat GOES when this tenant hides dates. "Joined —" is a
+      // label refusing to answer its own question; an absent stat is a fact
+      // the page simply does not report.
+      ...(dates.hidden
+        ? []
+        : [
+            {
+              key: 'created',
+              label: t('users.record.stat.created', 'Joined'),
+              value: dates.date(user.createdAt),
+            },
+          ]),
     ],
   };
 };
@@ -239,7 +246,11 @@ function metaNumber(metadata: Record<string, unknown>, key: string): number | nu
  * what turns a list of action keys into "manager, held since 3 March — revoked".
  * Nothing consumed it before this page.
  */
-function activityDetail(entry: UserActivityEntry, t: UsersTranslate): string | null {
+function activityDetail(
+  entry: UserActivityEntry,
+  t: UsersTranslate,
+  dates: DateDisplay,
+): string | null {
   const parts: string[] = [];
 
   const roleName = metaString(entry.metadata, 'role_name');
@@ -252,7 +263,9 @@ function activityDetail(entry: UserActivityEntry, t: UsersTranslate): string | n
     parts.push(t('users.record.activity.ou', 'in unit {id}', { id: ouId }));
   }
 
-  const grantedAt = formatRecordDate(metaString(entry.metadata, 'granted_at'));
+  // #1068: the clause is DROPPED rather than emptied. "manager, held since —"
+  // reads as a broken sentence; "manager" reads as a complete one.
+  const grantedAt = dates.date(metaString(entry.metadata, 'granted_at'));
   if (grantedAt !== null) {
     parts.push(t('users.record.activity.heldSince', 'held since {date}', { date: grantedAt }));
   }
@@ -304,6 +317,8 @@ export function UserRecordScreen({
   className,
 }: UserRecordScreenProps) {
   const t: UsersTranslate = injectedT ?? identityTranslate;
+  // #1068: the only sanctioned way to put a date on a screen.
+  const dates = useDateDisplay();
 
   const loaded = useRecordResource<UserRecord>(
     () => adapter.getUser(userId),
@@ -784,10 +799,16 @@ export function UserRecordScreen({
                     // not a source string — it renders verbatim and never enters
                     // the catalogue, the same rule permission slugs follow.
                     title={entry.action}
+                    // #1068: the WHO survives, the WHEN goes — the rows are
+                    // still in order, which is what a trail is for.
                     meta={
                       <>
-                        {formatRecordDateTime(entry.createdAt) ?? '—'}
-                        {' · '}
+                        {!dates.hidden && (
+                          <>
+                            {dates.dateTime(entry.createdAt) ?? '—'}
+                            {' · '}
+                          </>
+                        )}
                         {entry.actorUserId !== null
                           ? t('users.record.activity.actor', 'by user {id}', {
                               id: entry.actorUserId,
@@ -795,7 +816,7 @@ export function UserRecordScreen({
                           : t('users.record.activity.unknownActor', 'by the system')}
                       </>
                     }
-                    detail={activityDetail(entry, t) ?? undefined}
+                    detail={activityDetail(entry, t, dates) ?? undefined}
                   />
                 ))}
               </RecordTimeline>

@@ -44,13 +44,12 @@ import {
   RecordPageError,
   RecordPageShell,
   RecordPageSkeleton,
-  formatRecordDate,
-  formatRecordDateTime,
   resolveAccess,
   useRecordResource,
   type RecordFactsFn,
   type RecordResource,
 } from '@amroksaleh/features/record';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Input } from '@/components/ui/input';
@@ -107,7 +106,7 @@ interface TenantRecordFields {
 }
 
 /** A pure projection of the record and the dictionary, at module scope (#895). */
-const tenantFacts: RecordFactsFn<TenantRecordFields> = (tenant, t) => ({
+const tenantFacts: RecordFactsFn<TenantRecordFields> = (tenant, t, dates) => ({
   title: tenant.name,
   subtitle: t('tenants.record.subtitle', 'Workspace record'),
   stats: [
@@ -121,11 +120,17 @@ const tenantFacts: RecordFactsFn<TenantRecordFields> = (tenant, t) => ({
       label: t('tenants.record.stat.slug', 'Slug'),
       value: tenant.slug,
     },
-    {
-      key: 'created',
-      label: t('tenants.record.stat.created', 'Created'),
-      value: formatRecordDate(tenant.createdAt),
-    },
+    // #1068: the stat GOES when this tenant hides dates, rather than
+    // surviving as "Created —".
+    ...(dates.hidden
+      ? []
+      : [
+          {
+            key: 'created',
+            label: t('tenants.record.stat.created', 'Created'),
+            value: dates.date(tenant.createdAt),
+          },
+        ]),
   ],
 });
 
@@ -502,6 +507,7 @@ export function TenantRecordScreen({
  */
 function BillingPanel({ subscription }: { subscription: RecordResource<Subscription> }) {
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
 
   const resource: RecordResource<readonly Subscription[]> =
     subscription.status === 'ready'
@@ -536,12 +542,22 @@ function BillingPanel({ subscription }: { subscription: RecordResource<Subscript
               // permission slugs follow.
               secondary={value.effective_enforcement_mode}
             />
-            {value.current_period_end != null && (
-              <RecordListItem
-                primary={t('tenants.record.billing.periodEnd', 'Current period ends')}
-                secondary={formatRecordDateTime(value.current_period_end) ?? EMPTY_VALUE}
-              />
-            )}
+            {/*
+              #1068: the whole ROW goes, not just its value. "Current period
+              ends —" is a billing statement with the only fact it carries
+              removed; a reader is better served by the row not being there.
+            */}
+            {(() => {
+              const periodEnd = dates.dateTime(value.current_period_end);
+              if (periodEnd === null) return null;
+
+              return (
+                <RecordListItem
+                  primary={t('tenants.record.billing.periodEnd', 'Current period ends')}
+                  secondary={periodEnd}
+                />
+              );
+            })()}
           </RecordList>
         );
       }}

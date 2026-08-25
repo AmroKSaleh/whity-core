@@ -31,7 +31,6 @@ import {
   RecordPageError,
   RecordPageShell,
   RecordPageSkeleton,
-  formatRecordDate,
   resolveAccess,
   useRecordResource,
   type RecordFactsFn,
@@ -87,7 +86,7 @@ interface TagGroupRecordFields {
 }
 
 /** A pure projection of the record and the dictionary, at module scope (#895). */
-const tagGroupFacts: RecordFactsFn<TagGroupRecordFields> = (group, t) => ({
+const tagGroupFacts: RecordFactsFn<TagGroupRecordFields> = (group, t, dates) => ({
   title: group.label,
   // The key, verbatim: it is the token plugins and imports address the group by,
   // not prose, so it never translates.
@@ -98,11 +97,17 @@ const tagGroupFacts: RecordFactsFn<TagGroupRecordFields> = (group, t) => ({
       label: t('tagGroups.record.stat.tags', 'Tags'),
       value: group.tagCount,
     },
-    {
-      key: 'created',
-      label: t('tagGroups.record.stat.created', 'Created'),
-      value: formatRecordDate(group.createdAt),
-    },
+    // #1068: the stat GOES when this tenant hides dates, rather than
+    // surviving as "Created —".
+    ...(dates.hidden
+      ? []
+      : [
+          {
+            key: 'created',
+            label: t('tagGroups.record.stat.created', 'Created'),
+            value: dates.date(group.createdAt),
+          },
+        ]),
   ],
 });
 

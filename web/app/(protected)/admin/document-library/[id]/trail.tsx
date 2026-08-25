@@ -47,8 +47,9 @@
  */
 
 import { IconArrowRight } from '@tabler/icons-react';
-import { RecordTimeline, RecordTimelineItem, formatRecordDateTime } from '@amroksaleh/features/record';
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { RecordTimeline, RecordTimelineItem } from '@amroksaleh/features/record';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Pagination } from '@/components/ui/pagination';
 
@@ -148,7 +149,7 @@ export interface DocumentTrailProps {
  */
 export function DocumentTrail({ events, pagination, directory, onPageChange }: DocumentTrailProps) {
   const t = useTranslation('documents');
-  const locale = useFormattingLocale();
+  const dates = useDateDisplay();
 
   return (
     <div className="space-y-3" data-testid="document-record-trail">
@@ -156,14 +157,29 @@ export function DocumentTrail({ events, pagination, directory, onPageChange }: D
         {events.map((event) => {
           const moved = event.from_ou_id !== null || event.to_ou_id !== null;
 
+          const who = personName(t, directory, event.actor_profile_id);
+          const when = dates.dateTime(event.occurred_at);
+
           return (
             <RecordTimelineItem
               key={event.id}
               title={actionLabel(t, event.action)}
-              meta={t('record.trail.by', '{who} — {when}', {
-                who: personName(t, directory, event.actor_profile_id),
-                when: formatRecordDateTime(event.occurred_at, locale) ?? event.occurred_at,
-              })}
+              // #1068: the WHO alone when dates are hidden, and the composed
+              // sentence otherwise — never "Amal — —". The story survives: the
+              // verbs are still here and the rows are still in order, which is
+              // what an oldest-first trail is for.
+              //
+              // The old code read `formatRecordDateTime(…) ?? event.occurred_at`,
+              // falling back to the RAW wire string when a value would not
+              // parse. That fallback is exactly how a setting like this leaks —
+              // a formatter is asked, declines, and the caller prints the
+              // timestamp anyway — which is why the guard now refuses a
+              // fallback that is not a literal.
+              meta={
+                when === null
+                  ? who
+                  : t('record.trail.by', '{who} — {when}', { who, when })
+              }
               detail={
                 moved || event.note !== null ? (
                   <span className="block space-y-1">

@@ -36,8 +36,9 @@
 
 import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
-import { RecordList, RecordListItem, formatRecordDateTime } from '@amroksaleh/features/record';
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { RecordList, RecordListItem } from '@amroksaleh/features/record';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 import { personName, unitName } from './trail';
 import type { Directory, RouteRecipient } from './types';
@@ -78,7 +79,7 @@ export function OpenRecipients({
   awaitingViewer,
 }: OpenRecipientsProps) {
   const t = useTranslation('documents');
-  const locale = useFormattingLocale();
+  const dates = useDateDisplay();
 
   const open = recipients.filter((recipient) => recipient.open);
   const closed = recipients.length - open.length;
@@ -121,6 +122,7 @@ export function OpenRecipients({
                 : (byId.get(recipient.parent_recipient_id) ?? null);
             const isViewer =
               viewerProfileId !== null && recipient.profile_id === viewerProfileId;
+            const when = dates.dateTime(recipient.created_at);
 
             return (
               <RecordListItem
@@ -138,22 +140,34 @@ export function OpenRecipients({
                     )}
                   </>
                 }
+                // #1068: a DATELESS sentence, not the dated one with a gap in
+                // it. "In Registry since —" reads as a record that lost its
+                // timestamp; "In Registry" reads as a complete statement, and
+                // the fan-out edge below it — which is the part a reader
+                // tracing a document actually needs — survives either way.
                 secondary={
                   parent === null
-                    ? t('record.recipients.since', 'In {unit} since {when}', {
-                        unit: unitName(t, directory, recipient.ou_id),
-                        when:
-                          formatRecordDateTime(recipient.created_at, locale) ?? recipient.created_at,
-                      })
+                    ? when === null
+                      ? t('record.recipients.in', 'In {unit}', {
+                          unit: unitName(t, directory, recipient.ou_id),
+                        })
+                      : t('record.recipients.since', 'In {unit} since {when}', {
+                          unit: unitName(t, directory, recipient.ou_id),
+                          when,
+                        })
                     : // The fan-out edge, said out loud: a reader tracing a
                       // document needs to know it arrived by being forwarded and
                       // by whom, which is the one thing the flat list hides.
-                      t('record.recipients.sinceVia', 'In {unit} since {when}, forwarded by {who}', {
-                        unit: unitName(t, directory, recipient.ou_id),
-                        when:
-                          formatRecordDateTime(recipient.created_at, locale) ?? recipient.created_at,
-                        who: personName(t, directory, parent.profile_id),
-                      })
+                      when === null
+                      ? t('record.recipients.inVia', 'In {unit}, forwarded by {who}', {
+                          unit: unitName(t, directory, recipient.ou_id),
+                          who: personName(t, directory, parent.profile_id),
+                        })
+                      : t('record.recipients.sinceVia', 'In {unit} since {when}, forwarded by {who}', {
+                          unit: unitName(t, directory, recipient.ou_id),
+                          when,
+                          who: personName(t, directory, parent.profile_id),
+                        })
                 }
               />
             );

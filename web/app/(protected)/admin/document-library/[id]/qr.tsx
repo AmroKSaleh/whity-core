@@ -98,8 +98,10 @@ import {
   TableRow,
 } from '@amroksaleh/ui/table';
 import { BarcodeSvg } from '@amroksaleh/ui/documents/barcode-svg';
-import { RecordList, RecordListItem, formatRecordDateTime } from '@amroksaleh/features/record';
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { RecordList, RecordListItem } from '@amroksaleh/features/record';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
+import type { DateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import {
   Dialog,
   DialogContent,
@@ -174,7 +176,7 @@ export function DocumentQrPanel({
   apiClient,
 }: DocumentQrPanelProps) {
   const t = useTranslation('documents');
-  const locale = useFormattingLocale();
+  const dates = useDateDisplay();
 
   const [data, setData] = useState<DocumentQrPanelData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -406,16 +408,32 @@ export function DocumentQrPanel({
               </span>
             </div>
 
-            <p className="text-xs text-muted-foreground" data-testid="document-record-qr-issued">
-              {code.issued_by === null
-                ? t('record.qr.issued', 'Issued {when}', {
-                    when: formatRecordDateTime(code.issued_at ?? '', locale) ?? '—',
-                  })
-                : t('record.qr.issuedBy', 'Issued {when} by {who}', {
-                    when: formatRecordDateTime(code.issued_at ?? '', locale) ?? '—',
-                    who: personName(t, directory, code.issued_by),
-                  })}
-            </p>
+            {/*
+              #1068: a DATELESS sentence, or — when the date was the only thing
+              the line had to say — no line at all. "Issued —" is worse than
+              silence: the reference and the status badge above already identify
+              the code, so this paragraph earns its place only when it names a
+              person.
+            */}
+            {(() => {
+              const issuedWhen = dates.dateTime(code.issued_at ?? '');
+              if (issuedWhen === null && code.issued_by === null) return null;
+
+              return (
+                <p className="text-xs text-muted-foreground" data-testid="document-record-qr-issued">
+                  {code.issued_by === null
+                    ? t('record.qr.issued', 'Issued {when}', { when: issuedWhen ?? '—' })
+                    : issuedWhen === null
+                      ? t('record.qr.issuedByOnly', 'Issued by {who}', {
+                          who: personName(t, directory, code.issued_by),
+                        })
+                      : t('record.qr.issuedBy', 'Issued {when} by {who}', {
+                          when: issuedWhen,
+                          who: personName(t, directory, code.issued_by),
+                        })}
+                </p>
+              );
+            })()}
 
             <p className="text-sm text-muted-foreground">
               {t(
@@ -440,22 +458,48 @@ export function DocumentQrPanel({
         <Alert variant="destructive" data-testid="document-record-qr-withdrawn">
           <AlertTitle>{t('record.qr.withdrawn.title', 'This code was withdrawn')}</AlertTitle>
           <AlertDescription>
+            {/*
+              #1068: a dateless variant rather than a gap. This alert is the one
+              that has to land — the code no longer verifies — and a sentence
+              with a hole where a date was reads as a rendering fault on exactly
+              the message that must not look faulty.
+            */}
             <p>
-              {withdrawn.revoked_by === null
-                ? t('record.qr.withdrawn.when', 'Reference {reference} stopped being honoured {when}.', {
-                    reference: withdrawn.reference,
-                    when: formatRecordDateTime(withdrawn.revoked_at, locale) ?? withdrawn.revoked_at,
-                  })
-                : t(
-                    'record.qr.withdrawn.whenBy',
-                    'Reference {reference} stopped being honoured {when}, withdrawn by {who}.',
-                    {
-                      reference: withdrawn.reference,
-                      when:
-                        formatRecordDateTime(withdrawn.revoked_at, locale) ?? withdrawn.revoked_at,
-                      who: personName(t, directory, withdrawn.revoked_by),
-                    }
-                  )}
+              {(() => {
+                const revokedWhen = dates.dateTime(withdrawn.revoked_at);
+                if (withdrawn.revoked_by === null) {
+                  return revokedWhen === null
+                    ? t(
+                        'record.qr.withdrawn.plain',
+                        'Reference {reference} stopped being honoured.',
+                        { reference: withdrawn.reference }
+                      )
+                    : t(
+                        'record.qr.withdrawn.when',
+                        'Reference {reference} stopped being honoured {when}.',
+                        { reference: withdrawn.reference, when: revokedWhen }
+                      );
+                }
+
+                return revokedWhen === null
+                  ? t(
+                      'record.qr.withdrawn.plainBy',
+                      'Reference {reference} stopped being honoured, withdrawn by {who}.',
+                      {
+                        reference: withdrawn.reference,
+                        who: personName(t, directory, withdrawn.revoked_by),
+                      }
+                    )
+                  : t(
+                      'record.qr.withdrawn.whenBy',
+                      'Reference {reference} stopped being honoured {when}, withdrawn by {who}.',
+                      {
+                        reference: withdrawn.reference,
+                        when: revokedWhen,
+                        who: personName(t, directory, withdrawn.revoked_by),
+                      }
+                    );
+              })()}
             </p>
             <p className="mt-2">
               {t(
@@ -471,16 +515,21 @@ export function DocumentQrPanel({
         <Alert variant="warning" data-testid="document-record-qr-stranded">
           <AlertTitle>{t('record.qr.stranded.title', 'No code is in force')}</AlertTitle>
           <AlertDescription>
-            {t(
-              'record.qr.stranded.body',
-              'Reference {reference} was retired {when} when a newer code was issued, but this document is not carrying one now.',
-              {
-                reference: strandedSuperseded.reference,
-                when:
-                  formatRecordDateTime(strandedSuperseded.revoked_at, locale) ??
-                  strandedSuperseded.revoked_at,
-              }
-            )}
+            {(() => {
+              const retiredWhen = dates.dateTime(strandedSuperseded.revoked_at);
+
+              return retiredWhen === null
+                ? t(
+                    'record.qr.stranded.bodyPlain',
+                    'Reference {reference} was retired when a newer code was issued, but this document is not carrying one now.',
+                    { reference: strandedSuperseded.reference }
+                  )
+                : t(
+                    'record.qr.stranded.body',
+                    'Reference {reference} was retired {when} when a newer code was issued, but this document is not carrying one now.',
+                    { reference: strandedSuperseded.reference, when: retiredWhen }
+                  );
+            })()}
           </AlertDescription>
         </Alert>
       )}
@@ -566,7 +615,7 @@ export function DocumentQrPanel({
               <RecordListItem
                 key={`${code.reference}-${code.revoked_at}`}
                 primary={<span className="font-mono">{code.reference}</span>}
-                secondary={retiredLine(t, locale, code)}
+                secondary={retiredLine(t, dates, code)}
               />
             ))}
           </RecordList>
@@ -583,7 +632,7 @@ export function DocumentQrPanel({
 
       <Separator />
 
-      <ScanTrail data={data} directory={directory} t={t} locale={locale} />
+      <ScanTrail data={data} directory={directory} t={t} dates={dates} />
 
       {pending === 'withdraw' && code !== null && (
         <WithdrawDialog
@@ -659,8 +708,23 @@ function normalize(data: Partial<DocumentQrPanelData>): DocumentQrPanelData {
  * printing of a document that is fine. An unrecognised verb renders as itself
  * rather than as a blank, so a newer server cannot make a row say nothing.
  */
-function retiredLine(t: Translate, locale: string | undefined, code: QrRetiredCode): string {
-  const when = formatRecordDateTime(code.revoked_at, locale) ?? code.revoked_at;
+function retiredLine(t: Translate, dates: DateDisplay, code: QrRetiredCode): string {
+  const when = dates.dateTime(code.revoked_at);
+
+  // #1068: the VERB is the load-bearing half of this line and stands on its
+  // own. "Withdrawn" and "Replaced by a newer code" still mean opposite things
+  // to whoever holds the sheet, which is the whole reason the verb is rendered
+  // rather than a generic "retired".
+  if (when === null) {
+    if (code.reason === 'withdrawn') {
+      return t('record.qr.retired.withdrawnPlain', 'Withdrawn');
+    }
+    if (code.reason === 'superseded') {
+      return t('record.qr.retired.supersededPlain', 'Replaced by a newer code');
+    }
+    return t('record.qr.retired.otherPlain', 'Retired ({reason})', { reason: code.reason });
+  }
+
   if (code.reason === 'withdrawn') {
     return t('record.qr.retired.withdrawn', 'Withdrawn {when}', { when });
   }
@@ -688,12 +752,12 @@ function ScanTrail({
   data,
   directory,
   t,
-  locale,
+  dates,
 }: {
   data: DocumentQrPanelData;
   directory: Directory;
   t: Translate;
-  locale: string | undefined;
+  dates: DateDisplay;
 }) {
   const anyRefused = data.scans.recent.some((scan) => scan.outcome === 'refused');
 
@@ -727,9 +791,17 @@ function ScanTrail({
         <>
           <div className="overflow-x-auto">
             <Table>
+              {/*
+                #1068: the "When" column GOES, header and cells together, rather
+                than becoming a column of em dashes under a heading that asks
+                the question this tenant has said it does not want asked. What
+                the table is FOR survives without it — how many scans, by
+                members of the public or by named readers, and whether any were
+                refused.
+              */}
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t('record.qr.scans.when', 'When')}</TableHead>
+                  {!dates.hidden && <TableHead>{t('record.qr.scans.when', 'When')}</TableHead>}
                   <TableHead>{t('record.qr.scans.who', 'Who')}</TableHead>
                   <TableHead>{t('record.qr.scans.result', 'Result')}</TableHead>
                 </TableRow>
@@ -737,9 +809,9 @@ function ScanTrail({
               <TableBody>
                 {data.scans.recent.map((scan) => (
                   <TableRow key={scan.id} data-testid={`document-record-qr-scan-${scan.id}`}>
-                    <TableCell>
-                      {formatRecordDateTime(scan.scanned_at, locale) ?? scan.scanned_at}
-                    </TableCell>
+                    {!dates.hidden && (
+                      <TableCell>{dates.dateTime(scan.scanned_at) ?? '—'}</TableCell>
+                    )}
                     <TableCell>
                       {scan.scanner_profile_id === null
                         ? // NOT "unknown" and NOT an empty cell. Both would read

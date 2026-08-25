@@ -67,7 +67,6 @@ export {
 export { RecordSection } from './record-section';
 export type { RecordSectionProps } from './record-section';
 export { resolveAccess, resolveSectionAccess, sectionAccessFrom } from './access';
-export { formatRecordDate, formatRecordDateTime } from './format';
 export { useRecordResource } from './use-record-resource';
 export type {
   CallerFlagInRecordFields,
