@@ -113,6 +113,7 @@ final class CoreApiSchemas
             self::documentBlockRoutes(),
             self::documentRecordRoutes(),
             self::documentRoutingRoutes(),
+            self::documentQrRoutes(),
             self::meInboxRoutes(),
             self::userGroupRoutes(),
             self::documentRouteTemplateRoutes(),
@@ -6970,6 +6971,230 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+        ];
+    }
+
+    /**
+     * QR verification on documents (#1036) — the public scan surface, and the
+     * authenticated code management beside it.
+     *
+     * THE SECURITY CLAIM THESE SHAPES ENCODE, because an OpenAPI document is
+     * where an integrator forms their model of what a token is worth: the token
+     * IDENTIFIES a document and never AUTHORISES access to one. The public route
+     * has no response field that could carry a document id, and the
+     * `by-verification` route is gated on `documents:read` and answers 404 to a
+     * caller the ordinary visibility policy refuses — the same 404, with the
+     * same sentence, that `GET /api/documents/{id}` gives them.
+     *
+     * Response schemas are declared INLINE rather than as named components.
+     * These four shapes have exactly one consumer each and none is referenced by
+     * another route, so a named component would be a second place to look for a
+     * thing that is only ever read here.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentQrRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/document-verifications/{token}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Verify a document from the QR code printed on it (public, rate-limited)',
+                    'description' =>
+                        'PUBLIC and unauthenticated by design: the caller is somebody holding a printed '
+                        . 'sheet, and the paper is the whole of their relationship with this system. '
+                        . 'Always 200. An unknown token, a malformed one, a withdrawn one and a superseded '
+                        . 'one produce the SAME body at the default disclosure level, so this endpoint '
+                        . 'cannot be asked whether a document exists. A tenant may raise '
+                        . '`documents.qr_public_detail` to `stage`, which adds the current routing verb '
+                        . 'and distinguishes a revoked code from an unrecognised one. It never returns a '
+                        . 'document id, a title, any content, any recipient, or any name of a person or '
+                        . 'unit — a signed-in reader who wants the record calls '
+                        . 'GET /api/documents/by-verification/{token}, where RBAC decides unchanged.',
+                    'tags' => ['documents'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Whether the code verifies, and the minimum that makes that meaningful',
+                            [
+                                'type' => 'object',
+                                'properties' => [
+                                    'data' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'verified' => ['type' => 'boolean'],
+                                            'reason' => [
+                                                'type' => 'string',
+                                                'description' =>
+                                                    'Present only when verified is false. `unrecognised` '
+                                                    . 'covers unknown, malformed, withdrawn and superseded '
+                                                    . 'at the default disclosure level.',
+                                                'enum' => ['unrecognised', 'withdrawn', 'superseded'],
+                                            ],
+                                            'revoked_on' => [
+                                                'type' => 'string',
+                                                'nullable' => true,
+                                                'description' => 'Date only, and only at the `stage` level',
+                                            ],
+                                            'reference' => [
+                                                'type' => 'string',
+                                                'description' => 'The short reference printed beneath the code',
+                                            ],
+                                            'issuer' => [
+                                                'type' => 'string',
+                                                'description' => 'The issuing ORGANISATION, never a person or a unit',
+                                            ],
+                                            'issued_on' => ['type' => 'string', 'nullable' => true],
+                                            'stage' => [
+                                                'type' => 'string',
+                                                'description' => 'Only at the `stage` disclosure level',
+                                                'enum' => ['issued', 'forwarded', 'acknowledged', 'returned', 'noted'],
+                                            ],
+                                            'stage_on' => ['type' => 'string', 'nullable' => true],
+                                        ],
+                                        'required' => ['verified'],
+                                    ],
+                                ],
+                            ]
+                        ),
+                        429 => self::errorResponse('Too many verification attempts from this address'),
+                        503 => self::errorResponse('Verification is temporarily unavailable'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/documents/by-verification/{token}', 'documents:read', [
+                'summary' => 'Resolve a scanned QR code to the record it names, under the existing RBAC',
+                'description' =>
+                    'The scan-through. The token selects a ROW; DocumentVisibilityPolicy then decides, '
+                    . 'unchanged and with no knowledge that a token was involved. A caller without reach '
+                    . 'gets 404 with the same message GET /api/documents/{id} gives them — holding the '
+                    . 'paper confers nothing. A code minted in another tenant collapses into the same 404. '
+                    . '`code_honoured` says whether the printing that got the caller here is still the '
+                    . 'current one.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The document this code names', [
+                        'type' => 'object',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'id' => ['type' => 'integer'],
+                                    'code_honoured' => ['type' => 'boolean'],
+                                ],
+                                'required' => ['id', 'code_honoured'],
+                            ],
+                        ],
+                    ]),
+                    404 => self::errorResponse(
+                        'No such code, or the document it names is not visible to the caller'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\d+}/qr', 'documents:read', [
+                'summary' => 'The verification code on a document, and the record of it being scanned',
+                'description' =>
+                    'The record page panel. `enabled` composes the tenant setting with the template '
+                    . 'flag; `configured` is separate because "this instance has no public address" and '
+                    . '"this tenant switched it off" are different problems with different fixes. '
+                    . 'Anonymous scans appear with `scanner_profile_id: null` and carry nothing else '
+                    . 'about the scanner — no address, no device — because nothing else is stored.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The live code, if any, and the scan trail', [
+                        'type' => 'object',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'enabled' => ['type' => 'boolean'],
+                                    'configured' => ['type' => 'boolean'],
+                                    'token' => [
+                                        'type' => 'object',
+                                        'nullable' => true,
+                                        'properties' => [
+                                            'reference' => ['type' => 'string'],
+                                            'verification_url' => ['type' => 'string'],
+                                            'issued_at' => ['type' => 'string', 'nullable' => true],
+                                            'issued_by' => ['type' => 'integer', 'nullable' => true],
+                                        ],
+                                    ],
+                                    'scans' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'total' => ['type' => 'integer'],
+                                            'recent' => [
+                                                'type' => 'array',
+                                                'items' => [
+                                                    'type' => 'object',
+                                                    'properties' => [
+                                                        'id' => ['type' => 'integer'],
+                                                        'document_id' => ['type' => 'integer'],
+                                                        'qr_token_id' => ['type' => 'integer'],
+                                                        'scanner_profile_id' => [
+                                                            'type' => 'integer',
+                                                            'nullable' => true,
+                                                        ],
+                                                        'outcome' => [
+                                                            'type' => 'string',
+                                                            'enum' => ['verified', 'refused'],
+                                                        ],
+                                                        'scanned_at' => ['type' => 'string'],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ]),
+                    404 => self::errorResponse('No such document, or it is not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/documents/{id:\d+}/qr', 'documents:render', [
+                'summary' => 'Issue a new verification code, retiring the current one',
+                'description' =>
+                    'ALWAYS ROTATES. The previous code is retired as `superseded` in the same '
+                    . 'transaction, so anybody holding an older printing stops being able to confirm it — '
+                    . 'which is the reason to call this, and why re-rendering a document deliberately '
+                    . 'does NOT do it.',
+                'tags' => ['documents'],
+                'responses' => [
+                    201 => self::jsonResponse('The new code', [
+                        'type' => 'object',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'reference' => ['type' => 'string'],
+                                    'verification_url' => ['type' => 'string'],
+                                    'issued_at' => ['type' => 'string', 'nullable' => true],
+                                    'issued_by' => ['type' => 'integer', 'nullable' => true],
+                                ],
+                            ],
+                        ],
+                    ]),
+                    404 => self::errorResponse('No such document, or it is not visible to the caller'),
+                    409 => self::errorResponse('QR verification is switched off for this template or tenant'),
+                    503 => self::errorResponse('This instance has no public address configured'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/documents/{id:\d+}/qr', 'documents:render', [
+                'summary' => 'Stop honouring the verification code on a document',
+                'description' =>
+                    'The answer to "paper cannot be recalled". The symbol stays legible on every copy in '
+                    . 'the world and stops confirming anything; the row survives with its timestamps. '
+                    . '204 whether or not a code was live, so a second click is not an error and the '
+                    . 'route does not report whether a document has one.',
+                'tags' => ['documents'],
+                'responses' => [
+                    204 => ['description' => 'The code is no longer honoured'],
+                    404 => self::errorResponse('No such document, or it is not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 

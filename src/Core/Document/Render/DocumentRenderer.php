@@ -6,6 +6,8 @@ namespace Whity\Core\Document\Render;
 
 use Whity\Core\Document\BlockReferenceScanner;
 use Whity\Core\Document\DocumentBlockRepository;
+use Whity\Core\Document\Qr\DocumentQrStamp;
+use Whity\Core\Document\Qr\QrTemplateComposer;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 
@@ -52,13 +54,31 @@ final class DocumentRenderer
      * @param array<string, mixed> $templateData The verbatim client DocTemplate JSON.
      * @param mixed                $rawDataRows  The request's `dataRows`, unvalidated.
      * @param mixed                $rawSheet     The request's `sheet`, unvalidated.
+     * @param DocumentQrStamp|null $qr           The document's verification code, or
+     *        null when it carries none. See {@see QrTemplateComposer::compose()} — null is not
+     *        merely "do nothing", it actively REMOVES an authored code, which is
+     *        what stops a template with a QR element placed from printing an
+     *        empty dashed box on every document of a tenant that has the feature
+     *        switched off.
      *
      * @throws DocumentRenderRejectedException   Bad input, or a ceiling exceeded.
      * @throws RenderServiceUnavailableException The render service failed.
      */
-    public function render(int $tenantId, array $templateData, mixed $rawDataRows, mixed $rawSheet): string
-    {
+    public function render(
+        int $tenantId,
+        array $templateData,
+        mixed $rawDataRows,
+        mixed $rawSheet,
+        ?DocumentQrStamp $qr = null,
+    ): string {
         $effective = $this->settings->effective($tenantId);
+
+        // BEFORE the size ceiling, deliberately. Composition can ADD elements —
+        // the supplied default placement is a QR plus its caption — so measuring
+        // the template first would let a document sail past a limit the bytes
+        // actually sent then exceed. The ceiling exists to bound what crosses
+        // the wire, so it has to measure what crosses the wire.
+        $templateData = QrTemplateComposer::compose($templateData, $qr !== null)['data'];
 
         $templateBytes = strlen((string) json_encode($templateData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
         $maxTemplateBytes = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES]
@@ -78,6 +98,16 @@ final class DocumentRenderer
         $dataRows = VariableData::normalizeRows($rawDataRows, $templateData);
         if ($dataRows === null) {
             throw DocumentRenderRejectedException::because('dataRows must be a list of flat string maps');
+        }
+
+        // The reserved verification values are merged into every row AFTER
+        // normalisation, so they cannot be refused by the flat-string-map check
+        // and cannot be overwritten by a template that declares a placeholder of
+        // the same dotted name. Every row, not the first: a label sheet is one
+        // document of N physical things, and a code on only the top one would
+        // make the rest unverifiable while looking exactly like the part that is.
+        if ($qr !== null) {
+            $dataRows = QrTemplateComposer::rowsWith($dataRows, $qr->url, $qr->reference);
         }
 
         $maxRows = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_ROWS]

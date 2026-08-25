@@ -972,6 +972,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-verifications/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verify a document from the QR code printed on it (public, rate-limited)
+         * @description PUBLIC and unauthenticated by design: the caller is somebody holding a printed sheet, and the paper is the whole of their relationship with this system. Always 200. An unknown token, a malformed one, a withdrawn one and a superseded one produce the SAME body at the default disclosure level, so this endpoint cannot be asked whether a document exists. A tenant may raise `documents.qr_public_detail` to `stage`, which adds the current routing verb and distinguishes a revoked code from an unrecognised one. It never returns a document id, a title, any content, any recipient, or any name of a person or unit — a signed-in reader who wants the record calls GET /api/documents/by-verification/{token}, where RBAC decides unchanged.
+         */
+        get: operations["get_api_v1_document_verifications_token"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -990,6 +1010,26 @@ export interface paths {
          * @description The record is the deliverable and the rendered artifact is opportunistic. `documents.render_enabled` defaults to FALSE, so on a default install this returns a document with no artifact and `content_url: null` — which is a complete, routable document, not a degraded one: the values it was raised with are stored on the record, and POST /api/documents/{id}/render mints the artifact from them if the tier is later switched on. The `render` block says what happened. Sending `render: true` turns "could not render" into a 503 instead, for a caller who genuinely requires the bytes. A template the caller cannot SEE is a 404, never a 403, and the check is the designer's own visibility policy — creating from a gated template must not be a way to read it.
          */
         post: operations["post_api_v1_documents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/by-verification/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a scanned QR code to the record it names, under the existing RBAC
+         * @description The scan-through. The token selects a ROW; DocumentVisibilityPolicy then decides, unchanged and with no knowledge that a token was involved. A caller without reach gets 404 with the same message GET /api/documents/{id} gives them — holding the paper confers nothing. A code minted in another tenant collapses into the same 404. `code_honoured` says whether the printing that got the caller here is still the current one.
+         */
+        get: operations["get_api_v1_documents_by_verification_token"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1062,6 +1102,34 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/qr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The verification code on a document, and the record of it being scanned
+         * @description The record page panel. `enabled` composes the tenant setting with the template flag; `configured` is separate because "this instance has no public address" and "this tenant switched it off" are different problems with different fixes. Anonymous scans appear with `scanner_profile_id: null` and carry nothing else about the scanner — no address, no device — because nothing else is stored.
+         */
+        get: operations["get_api_v1_documents_id_qr"];
+        put?: never;
+        /**
+         * Issue a new verification code, retiring the current one
+         * @description ALWAYS ROTATES. The previous code is retired as `superseded` in the same transaction, so anybody holding an older printing stops being able to confirm it — which is the reason to call this, and why re-rendering a document deliberately does NOT do it.
+         */
+        post: operations["post_api_v1_documents_id_qr"];
+        /**
+         * Stop honouring the verification code on a document
+         * @description The answer to "paper cannot be recalled". The symbol stays legible on every copy in the world and stops confirming anything; the row survives with its timestamps. 204 whether or not a code was live, so a second click is not an error and the route does not report whether a document has one.
+         */
+        delete: operations["delete_api_v1_documents_id_qr"];
         options?: never;
         head?: never;
         patch?: never;
@@ -11466,6 +11534,95 @@ export interface operations {
             };
         };
     };
+    get_api_v1_document_verifications_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether the code verifies, and the minimum that makes that meaningful */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            verified: boolean;
+                            /**
+                             * @description Present only when verified is false. `unrecognised` covers unknown, malformed, withdrawn and superseded at the default disclosure level.
+                             * @enum {string}
+                             */
+                            reason?: "unrecognised" | "withdrawn" | "superseded";
+                            /** @description Date only, and only at the `stage` level */
+                            revoked_on?: string | null;
+                            /** @description The short reference printed beneath the code */
+                            reference?: string;
+                            /** @description The issuing ORGANISATION, never a person or a unit */
+                            issuer?: string;
+                            issued_on?: string | null;
+                            /**
+                             * @description Only at the `stage` disclosure level
+                             * @enum {string}
+                             */
+                            stage?: "issued" | "forwarded" | "acknowledged" | "returned" | "noted";
+                            stage_on?: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many verification attempts from this address */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verification is temporarily unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_documents: {
         parameters: {
             query?: {
@@ -11649,6 +11806,78 @@ export interface operations {
             };
             /** @description render:true was requested and rendering or persistence is disabled on this instance */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_documents_by_verification_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document this code names */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            id: number;
+                            code_honoured: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such code, or the document it names is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11934,6 +12163,253 @@ export interface operations {
             };
             /** @description The stored artifact could not be read from storage */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_documents_id_qr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The live code, if any, and the scan trail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            enabled?: boolean;
+                            configured?: boolean;
+                            token?: {
+                                reference?: string;
+                                verification_url?: string;
+                                issued_at?: string | null;
+                                issued_by?: number | null;
+                            } | null;
+                            scans?: {
+                                total?: number;
+                                recent?: {
+                                    id?: number;
+                                    document_id?: number;
+                                    qr_token_id?: number;
+                                    scanner_profile_id?: number | null;
+                                    /** @enum {string} */
+                                    outcome?: "verified" | "refused";
+                                    scanned_at?: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such document, or it is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_documents_id_qr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new code */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            reference?: string;
+                            verification_url?: string;
+                            issued_at?: string | null;
+                            issued_by?: number | null;
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such document, or it is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description QR verification is switched off for this template or tenant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This instance has no public address configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_documents_id_qr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The code is no longer honoured */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such document, or it is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

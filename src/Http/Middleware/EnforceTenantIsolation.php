@@ -207,6 +207,22 @@ class EnforceTenantIsolation
         // but "the next route under this prefix is public unless someone
         // notices" is not a property worth keeping.
         '#^/api/v1/translations/[^/]+/[^/]+$#',
+        // #1036: the PUBLIC document verification page's data source. A courier,
+        // a ministry clerk or a citizen holding a printed decision has no
+        // session and never will — the paper is the whole of their relationship
+        // with this system — so there is nothing here to resolve a tenant from.
+        // The 256-bit token names its own tenant, exactly as an invitation does
+        // above, and every read the handler makes after the lookup binds it.
+        //
+        // ANCHORED to exactly one segment, deliberately, following the lesson
+        // `/api/v1/translations/` records above: an open prefix would make the
+        // next route added under `/document-verifications/` public by default,
+        // and this is the surface where that mistake would be worst.
+        //
+        // GET-only in practice: the route is registered for GET alone, so a
+        // POST to this path is a 404 from the router rather than an
+        // unauthenticated write that got this far.
+        '#^/api/v1/document-verifications/[^/]+$#',
     ];
 
     /**

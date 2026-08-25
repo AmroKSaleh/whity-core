@@ -2228,6 +2228,33 @@ $documentViews = new \Whity\Core\Document\Organizer\DocumentViewRegistry($docume
 
 $documentCollectionRepository = new \Whity\Core\Document\DocumentCollectionRepository($db->getPdo());
 
+// 13a-nonies-quinquies. QR VERIFICATION ON DOCUMENTS (#1036). A code printed on
+// a document that anybody can scan to confirm it is genuine, and that a
+// signed-in reader with reach can follow through to the record.
+//
+// THE CONSTRAINT THIS WIRING EXISTS UNDER: the token IDENTIFIES a document and
+// must never AUTHORISE access to one. Note what is NOT passed to
+// DocumentQrService — no RoleChecker, no DocumentVisibilityPolicy, no permission
+// resolver of any kind. It has no collaborator that could answer an
+// authorization question, which is the structural half of the guarantee; the
+// other half is that the one route which turns a token into a record id
+// (`/api/documents/by-verification/{token}`) runs the UNCHANGED visibility
+// policy and answers 404 exactly as the id route does.
+//
+// The public base URL is the instance's own address (APP_URL, already trimmed
+// into $appUrl further up). An instance that has never been told its address
+// cannot mint at all — DocumentQrService::isConfigured() is false, minting
+// returns null, and the record panel reports `configured: false` — rather than
+// encoding a relative path into a QR that nothing can follow.
+$documentQrTokenRepository = new \Whity\Core\Document\Qr\DocumentQrTokenRepository($db->getPdo());
+$documentQrScanRepository = new \Whity\Core\Document\Qr\DocumentQrScanRepository($db->getPdo());
+$documentQrService = new \Whity\Core\Document\Qr\DocumentQrService(
+    $db->getPdo(),
+    $documentQrTokenRepository,
+    $documentQrScanRepository,
+    $appUrl
+);
+
 $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     $documentRepository,
     $documentArtifactRepository,
@@ -2266,8 +2293,29 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     // rule could be spelled, and migration 112's partial unique index is the
     // only definition of open there should ever be.
     $routeEventRepository,
-    $routeRecipientRepository
+    $routeRecipientRepository,
+    // #1036: minting the verification code at CREATE time, before the render, so
+    // the first artifact can carry it — which is only possible because create()
+    // commits the record first. Also the `qr` record-page region's predicate.
+    $documentQrService
 );
+$documentQrHandler = new \Whity\Api\DocumentQrApiHandler(
+    $documentRepository,
+    $documentTemplateRepository,
+    $documentVisibilityPolicy,
+    $documentQrService,
+    $documentQrScanRepository,
+    $roleChecker,
+    $settingsService
+);
+$documentVerificationHandler = new \Whity\Api\DocumentVerificationApiHandler(
+    $documentQrService,
+    $documentRepository,
+    $routeEventRepository,
+    $settingsService,
+    new DatabaseSharedStore($db->getPdo())
+);
+
 // `/api/documents/views` is registered BEFORE the `{id:\d+}` routes and cannot
 // collide with them: the id constraint is digits-only, so `views` was never a
 // candidate match. Spelling that out because the reverse order would look
@@ -2295,6 +2343,42 @@ $router->register('GET',  '/api/documents/{id:\d+}',                            
 $router->register('GET',  '/api/documents/{id:\d+}/content',                           [$documentsHandler, 'content'],         null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/artifacts/{artifactId:\d+}/content', [$documentsHandler, 'artifactContent'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST', '/api/documents/{id:\d+}/render',                            [$documentsHandler, 'rerender'],        null, null, CorePermissions::DOCUMENTS_RENDER);
+
+// #1036: the document's verification code.
+//
+// `by-verification` cannot collide with the `{id:\d+}` routes above: the id
+// constraint is digits-only, so this literal segment was never a candidate
+// match — the same reasoning `/api/documents/views` carries, spelled out
+// because the order below would look wrong without it. It is the SCAN-THROUGH: a signed-in person scans a printed
+// document and this turns the code into the record id their browser navigates
+// to. Gated on DOCUMENTS_READ like every other document read, and the handler
+// then runs the UNCHANGED DocumentVisibilityPolicy, so a caller without reach
+// gets the same 404 the id route gives them. Holding the paper is not reach.
+$router->register('GET',    '/api/documents/by-verification/{token}',                  [$documentQrHandler, 'resolveToken'], null, null, CorePermissions::DOCUMENTS_READ);
+// The record page's panel: the live code, its URL (so the client draws the
+// symbol with the barcode renderer already in @amroksaleh/ui) and the scan
+// trail. Read gate matches the region's declaration in
+// DocumentsApiHandler::recordSections() — #975's rule that a region's dedicated
+// route carries the same gate as the region.
+$router->register('GET',    '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
+// Rotating and withdrawing are gated on DOCUMENTS_RENDER — the slug that
+// already means "may change what this document's paper says", held by the
+// seeded admin role and four of the five demo roles, so the gate is a gate
+// rather than a lockout (the same argument POST /api/documents makes above).
+$router->register('POST',   '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'mint'],   null, null, CorePermissions::DOCUMENTS_RENDER);
+$router->register('DELETE', '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'revoke'], null, null, CorePermissions::DOCUMENTS_RENDER);
+
+// THE PUBLIC END. Unauthenticated by construction — a courier holding a printed
+// decision has no session, and the whole point is that they do not need one. It
+// is GET-only (so CsrfGuard, which exempts reads, needs no accommodation and is
+// not weakened), it is throttled per IP inside the handler BEFORE the token is
+// examined, and it sits on EnforceTenantIsolation's public-path list as an
+// ANCHORED PATTERN rather than an open prefix.
+//
+// It cannot return a document id, a title, any content, or any person's or
+// unit's name — see DocumentVerificationApiHandler and VerificationPresenter for
+// what it discloses and why each field earns its place.
+$router->register('GET', '/api/document-verifications/{token}', [$documentVerificationHandler, 'verify'], null);
 
 // 13a-nonies-ter. DOCUMENT ROUTING (#947 item 3) — routes, ordered steps, the
 // append-only trail, and recipients as the inbox.

@@ -49,6 +49,7 @@ final class SettingsRegistryTest extends TestCase
              // ceilings are, and NOT governance: it grants nobody anything, it
              // says how many of the people already asked have to say yes.
              'documents.routing_approval_quorum',
+             'documents.qr_enabled', 'documents.qr_public_detail',
              // #999: how many people a USER GROUP preview SHOWS beside its
              // (always exact) count. Tenant-overridable — see the governance
              // test below for why this one is not operator-only.
@@ -150,7 +151,32 @@ final class SettingsRegistryTest extends TestCase
         self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_approval_quorum'));
         self::assertSame('all', SettingsRegistry::defaultFor('documents.routing_approval_quorum'));
 
-        self::assertCount(16, SettingsRegistry::tenantTextKeys());
+        // 17 since #1036: the QR master switch and the public-disclosure level.
+        // Both are per-tenant and NEITHER is governance, which is the claim this
+        // block exists to make rather than assume.
+        //
+        // `documents.qr_enabled` is per-tenant for a reason the render master
+        // switch is NOT: that one asks whether a Chromium container exists on
+        // this machine, which no tenant can answer for itself, while this asks
+        // whether an ORGANISATION publishes verifiable documents. A registry
+        // issuing certificates and a workshop circulating internal memos want
+        // different answers on the same instance.
+        //
+        // `documents.qr_public_detail` is per-tenant because #1036 says in so
+        // many words that what a stranger holding the paper is told is a
+        // TENANT'S decision — some institutions want a holder to see where a
+        // document sits, and some would consider the same sentence a leak.
+        //
+        // Both DEFAULT to the closed position: off, and minimal disclosure. An
+        // operator who sets neither gets exactly today's behaviour.
+        self::assertContains('documents.qr_enabled', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.qr_enabled'));
+        self::assertSame('false', SettingsRegistry::defaultFor('documents.qr_enabled'));
+        self::assertContains('documents.qr_public_detail', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.qr_public_detail'));
+        self::assertSame('minimal', SettingsRegistry::defaultFor('documents.qr_public_detail'));
+        // 18: 16 on develop (#1014's quorum was the sixteenth) plus these two.
+        self::assertCount(18, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -274,7 +300,8 @@ final class SettingsRegistryTest extends TestCase
     {
         $describe = SettingsRegistry::describe();
         // 58 since #1014 added documents.routing_approval_quorum.
-        self::assertCount(58, $describe);
+        // 60 since #1036 added documents.qr_enabled + documents.qr_public_detail.
+        self::assertCount(60, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

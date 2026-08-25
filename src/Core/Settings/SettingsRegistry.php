@@ -273,6 +273,48 @@ final class SettingsRegistry
     // (`the dean signs off`) `all` and `any` are the same rule anyway, so the
     // default only differs from `any` exactly where `any` is dangerous.
     public const DOCUMENTS_ROUTING_APPROVAL_QUORUM = 'documents.routing_approval_quorum';
+    // The master switch for QR verification codes on documents (#1036), scope 1
+    // of three — the tenant setting, the per-template flag inside
+    // `document_templates.data`, and where the element sits on the page. They
+    // compose in {@see \Whity\Core\Document\Qr\DocumentQrPolicy}, which is also
+    // where the reasoning for the polarity of each one lives.
+    //
+    // TENANT-OVERRIDABLE, unlike DOCUMENTS_RENDER_ENABLED above, and the
+    // difference is real rather than a preference: the render switch asks
+    // whether a Chromium container exists on this machine, which no tenant can
+    // answer for itself. This one asks whether an ORGANISATION publishes
+    // verifiable documents, which is exactly a per-tenant decision — a registry
+    // issuing certificates and a workshop circulating internal memos want
+    // different answers on the same instance.
+    //
+    // Default FALSE. Turning it on publishes an UNAUTHENTICATED verification
+    // surface for that tenant's documents: anyone holding a printed sheet learns
+    // that the organisation issued a document on a date. That discloses nothing
+    // the paper does not already say, which is why it is safe to offer at all —
+    // but it is still a decision about what the organisation says to strangers,
+    // and a default that made it for them would be making it silently.
+    //
+    // Not a FEATURE_FLAG_KEY, deliberately. That tab is instance-wide capability
+    // toggles with no per-tenant surface, and putting a tenant-overridable key
+    // there would give an operator a switch that looks global and is not.
+    public const DOCUMENTS_QR_ENABLED = 'documents.qr_enabled';
+
+    // What the PUBLIC verification page discloses (#1036). The whole vocabulary
+    // and the argument for where it stops are in
+    // {@see \Whity\Core\Document\Qr\VerificationPresenter}.
+    //
+    //   minimal — the default: genuine or not, the issuing ORGANISATION, the
+    //             date, and the reference printed on the paper. Nothing else,
+    //             and every way a code can fail collapses to one answer, so the
+    //             endpoint cannot be asked "does this document exist".
+    //   stage   — adds the current routing verb and its date, and tells a
+    //             withdrawn or superseded code apart from an unrecognised one.
+    //
+    // Tenant-overridable because #1036 is explicit that this is a tenant's
+    // decision: some institutions want a holder to see where a document sits,
+    // and some would consider the same sentence a leak. Defaulting to `minimal`
+    // is defaulting to the version that cannot leak.
+    public const DOCUMENTS_QR_PUBLIC_DETAIL = 'documents.qr_public_detail';
 
     // How many people a USER GROUP preview SHOWS (#999). Not a ceiling on
     // resolution — the count a preview reports is always exact — but the size of
@@ -454,6 +496,7 @@ final class SettingsRegistry
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
         self::DOCUMENTS_PERSIST_ENABLED,
+        self::DOCUMENTS_QR_ENABLED,
         self::I18N_ENABLED,
     ];
 
@@ -522,6 +565,14 @@ final class SettingsRegistry
         // the safe global default (never blocks); the operator raises it globally
         // or per-tenant. Kept in sync with SubscriptionService enforcement modes.
         self::BILLING_ENFORCEMENT_DEFAULT => ['off', 'warn', 'block_writes', 'block_all'],
+        // What a STRANGER holding a printed document is told when they scan it
+        // (#1036). Two levels rather than a boolean because the second one adds
+        // two distinct disclosures — the routing verb, and telling a withdrawn
+        // code apart from an unrecognised one — and a tenant choosing between
+        // them is choosing a posture, not toggling a field. The vocabulary and
+        // the argument for where it stops are in
+        // {@see \Whity\Core\Document\Qr\VerificationPresenter}.
+        self::DOCUMENTS_QR_PUBLIC_DETAIL => ['minimal', 'stage'],
         // 'internal' stores errors in this deployment's own database (no extra
         // infrastructure); 'sentry' ships them to any Sentry-PROTOCOL backend —
         // hosted Sentry, or a self-hosted GlitchTip/Bugsink — via the encrypted
@@ -629,6 +680,12 @@ final class SettingsRegistry
         // what most tenants want; it is the reading that fails loudly when it is
         // wrong, on a value whose other reading fails silently.
         self::DOCUMENTS_ROUTING_APPROVAL_QUORUM => 'all',
+        // Off. Turning it on publishes an unauthenticated verification surface
+        // for this tenant's documents — see the constant.
+        self::DOCUMENTS_QR_ENABLED => 'false',
+        // The minimum that satisfies verification. See the constant, and
+        // VerificationPresenter for what each level does and does not say.
+        self::DOCUMENTS_QR_PUBLIC_DETAIL => 'minimal',
         // Ten faces. Enough to recognise a group at a glance — "yes, those are
         // the instructors" — and small enough that nobody mistakes the sample
         // for the list. The COUNT beside it is exact and unbounded, which is
@@ -930,6 +987,8 @@ final class SettingsRegistry
             self::DOCUMENTS_ROUTING_MAX_STEPS => self::validateRoutingMaxSteps($value),
             self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => self::validateRoutingMaxRecipients($value),
             self::DOCUMENTS_ROUTING_APPROVAL_QUORUM => self::validateRoutingApprovalQuorum($value),
+            self::DOCUMENTS_QR_ENABLED => self::validateBoolean($value, self::DOCUMENTS_QR_ENABLED),
+            self::DOCUMENTS_QR_PUBLIC_DETAIL => self::validateEnum($key, $value),
             self::GROUPS_PREVIEW_SAMPLE_SIZE => self::validateGroupsPreviewSampleSize($value),
             self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
             // Error tracking. These five were declared with defaults, types,
