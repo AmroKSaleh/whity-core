@@ -3337,8 +3337,17 @@ final class CoreApiSchemas
                 'created_by_event_id' => self::int(),
                 'closed_by_event_id' => self::int(true),
                 'open' => self::bool(),
+                // #1054. TRUE when this row was closed by the document reaching
+                // the person rather than by their acting — the rows a
+                // `satisfied_by: delivery` step opens. Without it a delivery
+                // step's three hundred closed rows read exactly like three
+                // hundred people who acted.
+                'closed_by_delivery' => self::bool(),
                 'created_at' => self::str(),
-            ], ['id', 'document_id', 'route_id', 'step_id', 'profile_id', 'created_by_event_id', 'open', 'created_at']),
+            ], [
+                'id', 'document_id', 'route_id', 'step_id', 'profile_id', 'created_by_event_id',
+                'open', 'closed_by_delivery', 'created_at',
+            ]),
             'DocumentRouteRecipientListResponse' => self::listEnvelope('DocumentRouteRecipient'),
 
             'DocumentRouteActionRequest' => self::object([

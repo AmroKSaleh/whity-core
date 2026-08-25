@@ -22,6 +22,7 @@ use Whity\Core\Document\Routing\RouteRepository;
 use Whity\Core\Document\Routing\RouteSatisfaction;
 use Whity\Core\Document\Routing\RouteStepRepository;
 use Whity\Core\Document\Routing\RoutingRejectedException;
+use Whity\Core\Document\Routing\RoutingPresenter;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
 use Whity\Core\Group\GroupResolver;
 use Whity\Core\Group\GroupRuleResolver;
@@ -260,6 +261,38 @@ final class DocumentRouterDeliveryStepRealEngineTest extends TestCase
             $history[0]->meta['satisfied_by'] ?? null,
             'a client needs this before it renders anything: on a delivery item every act is a 422, so '
             . 'the three ordinary buttons are three buttons that cannot work'
+        );
+    }
+
+    public function testTheDocumentsOwnRecipientListSaysWhichRowsNobodyClosedByActing(): void
+    {
+        // The screen that asks "who did this reach, and what became of it for
+        // each of them". Without a flag here a delivery stage's rows read exactly
+        // like people who acted — the same misattribution the "Awaiting me"
+        // phantom was, one screen over and pointing the other way.
+        $documentId = $this->seedDocument();
+        $route = $this->issueCircularWithATailStep($documentId);
+        $this->router->act(self::TENANT, self::HEAD_A, $route, RouteAction::FORWARDED, null);
+
+        $published = [];
+        foreach ($this->recipients->listForDocument($documentId, self::TENANT) as $row) {
+            $wire = RoutingPresenter::recipient($row);
+            $published[(int) $wire['profile_id']] = [$wire['open'], $wire['closed_by_delivery']];
+        }
+        ksort($published);
+
+        self::assertSame(
+            [
+                // The head: closed, and closed BY ACTING — they forwarded it.
+                self::HEAD_A => [false, false],
+                self::TECH_A => [true, false],
+                self::INSTRUCTOR_A => [false, true],
+                self::INSTRUCTOR_B => [false, true],
+                self::INSTRUCTOR_C => [false, true],
+            ],
+            $published,
+            'three states, and the middle one is the whole point: closed-by-acting and '
+            . 'closed-by-delivery must not render alike'
         );
     }
 

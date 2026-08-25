@@ -195,6 +195,25 @@ final class RoutingPresenter
             'created_by_event_id' => (int) $recipient['created_by_event_id'],
             'closed_by_event_id' => $recipient['closed_by_event_id'],
             'open' => $recipient['closed_by_event_id'] === null,
+            // #1054. WAS THIS CLOSED BY A PERSON, OR BY THE DOCUMENT REACHING
+            // THEM? Without it a delivery step's three hundred rows read exactly
+            // like three hundred people who acted, which is the same
+            // misattribution the "Awaiting me" phantom was, arriving one screen
+            // over — and this is the list a reader opens to ask precisely "what
+            // became of it for each of them".
+            //
+            // DERIVED FROM THE ROW ITSELF, from a shape no human act can produce:
+            // acting closes a row with a LATER event than the one that opened it,
+            // always, because the act happens after the arrival. Only
+            // {@see DocumentRouter::openChain()} closes a row with its own
+            // creating event.
+            //
+            // The AUTHORITY is still the step's `satisfied_by` — this is the
+            // row-local witness of it, published so a client reading a recipient
+            // list need not join every row back to its step to render the one
+            // thing that distinguishes them.
+            'closed_by_delivery' => $recipient['closed_by_event_id'] !== null
+                && (int) $recipient['closed_by_event_id'] === (int) $recipient['created_by_event_id'],
             'created_at' => (string) $recipient['created_at'],
         ];
     }

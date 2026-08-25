@@ -28791,6 +28791,9 @@
                     "open": {
                         "type": "boolean"
                     },
+                    "closed_by_delivery": {
+                        "type": "boolean"
+                    },
                     "created_at": {
                         "type": "string"
                     }
@@ -28803,6 +28806,7 @@
                     "profile_id",
                     "created_by_event_id",
                     "open",
+                    "closed_by_delivery",
                     "created_at"
                 ]
             },

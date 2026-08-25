@@ -4100,6 +4100,7 @@ export interface components {
             created_by_event_id: number;
             closed_by_event_id?: number | null;
             open: boolean;
+            closed_by_delivery: boolean;
             created_at: string;
         };
         DocumentRouteRecipientListResponse: {
