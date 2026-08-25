@@ -28,6 +28,7 @@ class CliRunner
         'health:watch' => 'Whity\Cli\Commands\HealthWatchCommand',
         'i18n:extract' => 'Whity\Cli\Commands\I18nCommand',
         'i18n:sync' => 'Whity\Cli\Commands\I18nCommand',
+        'i18n:coverage' => 'Whity\Cli\Commands\I18nCommand',
     ];
 
     /**
@@ -97,7 +98,8 @@ class CliRunner
         echo "  scale:seed Bulk-insert a parameterized, deterministic large-scale multi-tenant dataset\n";
         echo "  health:watch Sample service health for the public /status page (runs outside the app)\n";
         echo "  i18n:extract Rebuild the English translation catalogue from the t() calls in the source\n";
-        echo "  i18n:sync    Seed catalogue keys missing from the translations table (never overwrites)\n\n";
+        echo "  i18n:sync    Seed catalogue keys missing from the translations table (never overwrites)\n";
+        echo "  i18n:coverage Per-domain translated/missing counts for every committed language\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }

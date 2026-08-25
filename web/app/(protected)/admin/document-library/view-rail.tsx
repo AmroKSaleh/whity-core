@@ -83,6 +83,64 @@ export function viewLabel(t: ReturnType<typeof useTranslation>, view: DocumentVi
   }
 }
 
+/**
+ * The sentence under a folder's name, translated the same way its label is.
+ *
+ * Both halves come from the server's view registry
+ * (`src/Core/Document/Organizer/CoreDocumentViews.php`) as English literals.
+ * `viewLabel` above has always translated the label; the DESCRIPTION was
+ * rendered straight from the wire, so an Arabic organizer read
+ *
+ *   كل المستندات — Every document you can see in this tenant, newest first.
+ *
+ * — the folder named in Arabic and explained in English, on the same line.
+ * Exactly the same fallback rule applies: a folder this build has never heard
+ * of (a later release, a plugin) keeps the server's sentence, because that is
+ * the only one anybody has.
+ */
+export function viewDescription(
+  t: ReturnType<typeof useTranslation>,
+  view: DocumentView,
+): string {
+  switch (view.key) {
+    case 'all':
+      return t('organizer.viewDesc.all', 'Every document you can see in this tenant, newest first.');
+    case 'created-by-me':
+      return t('organizer.viewDesc.createdByMe', 'Documents you raised.');
+    case 'raised-by-my-unit':
+      return t(
+        'organizer.viewDesc.raisedByMyUnit',
+        'Documents raised from your own unit — or from a unit you select.'
+      );
+    case 'below-my-unit':
+      return t(
+        'organizer.viewDesc.belowMyUnit',
+        'Documents raised from your unit or any unit beneath it in the hierarchy.'
+      );
+    case 'awaiting-me':
+      return t('organizer.viewDesc.awaitingMe', 'Documents routed to you that you have not yet acted on.');
+    case 'acted-on-by-me':
+      return t(
+        'organizer.viewDesc.actedOnByMe',
+        'Documents whose routing trail records you as the actor — including ones you have passed on.'
+      );
+    case 'passed-through-my-unit':
+      return t(
+        'organizer.viewDesc.passedThroughMyUnit',
+        'Documents whose routing left or reached your unit, or any unit beneath it.'
+      );
+    case 'starred':
+      return t(
+        'organizer.viewDesc.starred',
+        'Documents you starred. Starring is a collection with a well-known name, not a separate mark.'
+      );
+    case 'collection':
+      return t('organizer.viewDesc.collection', 'Documents you filed into one of your own collections.');
+    default:
+      return view.description;
+  }
+}
+
 export function ViewRail({
   views,
   collections,

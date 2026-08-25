@@ -283,13 +283,37 @@ function alignToolbarLabels(t: TranslateFn): Record<AlignKind, string> {
   };
 }
 
+/**
+ * The display name of a block's visibility tier.
+ *
+ * `BLOCK_SCOPES` is a kit constant and carries English labels, which is right —
+ * a kit constant may not reach for a translator. Translating is the consumer's
+ * job. Literal `t()` calls per id, never `t('commands.blockScope.' + id)`: a
+ * computed key is invisible to `i18n:extract` and would never reach a
+ * translator. A scope the kit adds later falls back to its English label.
+ */
+function blockScopeLabel(t: TranslateFn, scope: { id: string; label: string }): string {
+  switch (scope.id) {
+    case 'system':
+      return t('commands.blockScope.system', 'System');
+    case 'personal':
+      return t('commands.blockScope.personal', 'Personal');
+    case 'tenant':
+      return t('commands.blockScope.tenant', 'Tenant-wide');
+    case 'global':
+      return t('commands.blockScope.global', 'Global');
+    default:
+      return scope.label;
+  }
+}
+
 /** Blocks as menu nodes, grouped under a heading per visibility scope. */
-function blockNodes(ctx: EditorCommandContext): MenuBarNode[] {
+function blockNodes(ctx: EditorCommandContext, t: TranslateFn): MenuBarNode[] {
   const out: MenuBarNode[] = [];
   for (const scope of BLOCK_SCOPES) {
     const inScope = ctx.blocks.filter((b) => b.scope === scope.id);
     if (inScope.length === 0) continue;
-    out.push({ kind: 'label', id: `block-scope-${scope.id}`, label: scope.label });
+    out.push({ kind: 'label', id: `block-scope-${scope.id}`, label: blockScopeLabel(t, scope) });
     for (const b of inScope) {
       out.push({
         id: `insert-block-${b.id}`,
@@ -381,7 +405,7 @@ export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): Men
           id: 'insert-block',
           label: t('commands.insert.block', 'Block'),
           icon: <IconComponents />,
-          items: blockNodes(ctx),
+          items: blockNodes(ctx, t),
           emptyLabel: t('commands.insert.blockEmpty', 'No blocks in your library'),
         },
         { kind: 'separator', id: 'insert-sep-2' },

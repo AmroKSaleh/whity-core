@@ -184,39 +184,77 @@ final class LanguageRegistry implements HostWiredService
             $this->boot();
         }
 
-        // If language is not in cache, fall back to the source language.
+        // If the language is not in the cache at all, there is nothing of its
+        // own to find and the whole lookup is an English one.
         if (!isset($this->translations[$languageCode])) {
             $languageCode = self::SOURCE_LANGUAGE;
         }
 
-        // If domain is not in cache, fall back to the source language if not already.
-        if (!isset($this->translations[$languageCode][$domain])) {
-            if ($languageCode !== self::SOURCE_LANGUAGE
-                && isset($this->translations[self::SOURCE_LANGUAGE][$domain])) {
-                $languageCode = self::SOURCE_LANGUAGE;
-            } else {
-                return $key;
+        // THE CHAIN IS PER KEY, NOT PER DOMAIN, and that distinction is the
+        // whole of this method.
+        //
+        // It used to ask only whether the language had the DOMAIN, and fall back
+        // to English when it did not. That reads as equivalent and is not: the
+        // fallback stops working the moment a language has ONE row in a domain.
+        // Every key still missing from that domain then fell past the lookup and
+        // rendered as its own key — a reader seeing `organizer.table.title`
+        // where the English build says "Title".
+        //
+        // Nobody had seen it because no language had ever had a row in most
+        // domains, so the domain test was always true and always fell through to
+        // English. Seeding Arabic is what made the condition reachable.
+        //
+        // The state that triggers it is not exotic, it is the NORMAL one: a
+        // developer adds an English string today and its translation lands in a
+        // later PR, so between the two every other language is partially
+        // translated in that domain. The CI catalogue gate is deliberately built
+        // around that (missing keys are reported, never failed), which means a
+        // per-domain fallback would put raw keys in front of users routinely.
+        // #984 is that failure having already happened once.
+        foreach (self::resolutionOrder($languageCode) as $code) {
+            // A tenant's own override outranks the system default IN THE SAME
+            // LANGUAGE, so both are tried at each step before moving to English.
+            // Resolving the language first and then looking for an override
+            // would silently ignore a tenant's Arabic wording for any key whose
+            // Arabic system default has not been seeded yet.
+            //
+            // Tenant 0 is the system tenant, whose strings ARE the system
+            // defaults (`translations.tenant_id IS NULL`); it can never own an
+            // override row, so the lookup is skipped rather than issued as a
+            // query that can only come back empty.
+            if ($tenantId !== null && $tenantId !== self::SYSTEM_TENANT_ID) {
+                $override = $this->getTranslationForTenant($code, $domain, $key, $tenantId);
+                if ($override !== null) {
+                    return $override;
+                }
+            }
+
+            $default = $this->translations[$code][$domain][$key] ?? null;
+            if ($default !== null) {
+                return $default;
             }
         }
 
-        // Check if a tenant override exists. Tenant 0 is the system tenant,
-        // whose strings ARE the system defaults (translations.tenant_id IS
-        // NULL) — it can never own an override row, so skip the lookup rather
-        // than issue a query that can only come back empty.
-        if ($tenantId !== null && $tenantId !== self::SYSTEM_TENANT_ID) {
-            $tenantOverride = $this->getTranslationForTenant(
-                $languageCode,
-                $domain,
-                $key,
-                $tenantId
-            );
-            if ($tenantOverride !== null) {
-                return $tenantOverride;
-            }
-        }
+        // Nothing anywhere. The key is the last resort and is deliberately
+        // visible: a blank would be indistinguishable from a string that is
+        // meant to be empty.
+        return $key;
+    }
 
-        // Fall back to system default.
-        return $this->translations[$languageCode][$domain][$key] ?? $key;
+    /**
+     * The languages a lookup tries, in order: the one asked for, then the
+     * source language.
+     *
+     * A single-element list when they are the same, so English never queries
+     * itself twice.
+     *
+     * @return list<string>
+     */
+    private static function resolutionOrder(string $languageCode): array
+    {
+        return $languageCode === self::SOURCE_LANGUAGE
+            ? [self::SOURCE_LANGUAGE]
+            : [$languageCode, self::SOURCE_LANGUAGE];
     }
 
     /**

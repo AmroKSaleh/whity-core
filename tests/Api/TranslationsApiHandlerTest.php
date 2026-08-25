@@ -379,9 +379,13 @@ final class TranslationsApiHandlerTest extends TestCase
     public function testCoverageReportsTheGapPerLanguageAndDomain(): void
     {
         $arabicLanguageId = $this->languageId('ar');
-        // `auth` is already seeded in BOTH languages by migration 091, so it
-        // contributes nothing to the gap — which is exactly the shape a real
-        // instance has: some domains done, some untouched.
+        // `auth` is already seeded in BOTH languages (migration 091, and now 121
+        // for every committed catalogue), so it contributes nothing to the gap.
+        // That is the point rather than an accident: a key seeded in both
+        // languages cancels out of the difference, so the numbers this test
+        // asserts about the GAP are independent of how much of the catalogue
+        // ships. `greeting`/`farewell`/`notFound` are keys no catalogue has, so
+        // they are the whole of the gap it constructs.
         $this->translationRepository->create($this->englishLanguageId, 'common', 'greeting', 'Hello', null);
         $this->translationRepository->create($this->englishLanguageId, 'common', 'farewell', 'Bye', null);
         $this->translationRepository->create($this->englishLanguageId, 'errors', 'notFound', 'Not found', null);
@@ -398,10 +402,33 @@ final class TranslationsApiHandlerTest extends TestCase
         $this->assertSame($byLanguage['en']['total'], $byLanguage['ar']['total'], 'the universe of keys is the source language, not what Arabic happens to have');
         $this->assertSame(2, $byLanguage['ar']['missing']);
 
+        // THE GAP IS THE SUBJECT, AND THE GAP IS STABLE. `missing` stays a
+        // literal because it counts exactly what this test made missing:
+        // migration 121 seeds every committed catalogue in BOTH languages, so
+        // every seeded key is translated on both sides and cancels out of the
+        // difference. `farewell` is the one English key with no Arabic, and it
+        // stays 1 however large the catalogue grows.
+        //
+        // `total` and `translated` are NOT stable, and asserting them as
+        // literals was really asserting that the `common` domain was otherwise
+        // empty — true only while no language shipped with any strings in it.
+        // They are pinned to the invariant that actually holds instead of to
+        // today's catalogue size, which would break on the next key anyone adds
+        // in any language.
         $byDomain = array_column($byLanguage['ar']['domains'], null, 'domain');
-        $this->assertSame(2, $byDomain['common']['total']);
-        $this->assertSame(1, $byDomain['common']['translated']);
-        $this->assertSame(1, $byDomain['common']['missing']);
+        $commonEnglish = array_column($byLanguage['en']['domains'], null, 'domain')['common'];
+
+        $this->assertSame(
+            $commonEnglish['total'],
+            $byDomain['common']['total'],
+            'a domain is measured against the source language, not against what Arabic has'
+        );
+        $this->assertSame(
+            $byDomain['common']['total'],
+            $byDomain['common']['translated'] + $byDomain['common']['missing'],
+            'every key in a domain is either translated or missing'
+        );
+        $this->assertSame(1, $byDomain['common']['missing'], 'exactly the one key given no Arabic');
         $this->assertSame(1, $byDomain['errors']['missing'], 'a domain Arabic has NO rows in must still be reported, or it is invisible');
         $this->assertSame(0, $byDomain['auth']['missing']);
     }

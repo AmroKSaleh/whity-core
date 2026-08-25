@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Core\i18n;
 
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 use Whity\Core\i18n\TranslationCatalog;
 
 /**
@@ -189,6 +190,190 @@ final class TranslationCatalogTest extends TestCase
             TranslationCatalog::fileNameFor('acme__catalog'),
             'Two distinct legal domains must never share one catalogue file.'
         );
+    }
+
+    // ─── Locale catalogues: the half a human writes ──────────────────────────
+
+    /**
+     * THE REGRESSION THAT WOULD DESTROY THE MOST WORK, so it is the first test
+     * here.
+     *
+     * `write()` MIRRORS the source: a domain that leaves the code loses its
+     * file, and the deletion sweep removes anything in the directory it did not
+     * expect. A hand-written language lives INSIDE that same directory. If the
+     * sweep treated `ar/` as an unexpected entry, one ordinary
+     * `whity-cli i18n:extract` — the command every frontend PR is told to run —
+     * would silently delete every translation anyone had ever written, and the
+     * diff would look like a normal regeneration.
+     *
+     * `is_file()` is the whole guard. This test is what stops someone
+     * "simplifying" it to a `.json` suffix check.
+     */
+    public function testEnglishRegenerationNeverTouchesALocaleDirectory(): void
+    {
+        $catalog = new TranslationCatalog($this->baseDir());
+        $catalog->write(['auth' => ['login.submit' => 'Sign in'], 'retired' => ['old.key' => 'Old']]);
+        $catalog->writeLocale('ar', ['auth' => ['login.submit' => 'تسجيل الدخول']]);
+
+        // A regeneration that RETIRES a whole domain — the case that deletes.
+        $result = $catalog->write(['auth' => ['login.submit' => 'Sign in']]);
+
+        self::assertSame(['retired.json'], $result['deleted'], 'The English file still goes.');
+        self::assertSame(
+            ['auth' => ['login.submit' => 'تسجيل الدخول']],
+            $catalog->readLocale('ar'),
+            'The Arabic survived a full English regeneration, untouched.'
+        );
+        self::assertSame(['ar'], $catalog->localeCodes());
+    }
+
+    /**
+     * The mirror of the above: the English read must not pick the locale
+     * directory up as a domain either. `ar/auth.json` is not a domain called
+     * `ar`, and a `read()` that returned one would feed it straight into the
+     * drift comparison as an unexplained extra domain.
+     */
+    public function testEnglishReadDoesNotSeeALocaleDirectory(): void
+    {
+        $catalog = new TranslationCatalog($this->baseDir());
+        $catalog->write(['auth' => ['login.submit' => 'Sign in']]);
+        $catalog->writeLocale('ar', ['auth' => ['login.submit' => 'تسجيل الدخول']]);
+
+        self::assertSame(['auth'], array_keys($catalog->read()));
+    }
+
+    /**
+     * Regression: writing a language is ADDITIVE, unlike writing English.
+     * There is no generator that could put a hand-written domain back, so a
+     * `writeLocale` that mirrored would delete a translator's work the first
+     * time somebody saved one domain in isolation.
+     */
+    public function testWriteLocaleDoesNotPruneDomainsItWasNotGiven(): void
+    {
+        $catalog = new TranslationCatalog($this->baseDir());
+        $catalog->writeLocale('ar', [
+            'auth' => ['login.submit' => 'تسجيل الدخول'],
+            'documents' => ['organizer.title' => 'المستندات'],
+        ]);
+
+        $catalog->writeLocale('ar', ['auth' => ['login.submit' => 'تسجيل الدخول']]);
+
+        self::assertSame(
+            ['auth', 'documents'],
+            array_keys($catalog->readLocale('ar')),
+            'A domain absent from the write keeps its file.'
+        );
+    }
+
+    /**
+     * Regression: the locale file's bytes are a function of its strings, for the
+     * same reason the English one's are — the guard re-renders and compares, so
+     * a translator whose editor reorders keys must see one fixable complaint
+     * rather than a diff nobody can review.
+     */
+    public function testRenderLocaleIsSortedAndByteStable(): void
+    {
+        $one = TranslationCatalog::renderLocale('auth', 'ar', ['b.two' => 'اثنان', 'a.one' => 'واحد']);
+        $two = TranslationCatalog::renderLocale('auth', 'ar', ['a.one' => 'واحد', 'b.two' => 'اثنان']);
+
+        self::assertSame($one, $two);
+        self::assertLessThan((int) strpos($one, '"b.two"'), (int) strpos($one, '"a.one"'));
+        self::assertStringContainsString('"language": "ar"', $one);
+        self::assertStringContainsString('واحد', $one, 'Arabic is written raw, not as escapes.');
+        self::assertSame(rtrim($one, "\n") . "\n", $one);
+    }
+
+    /**
+     * Regression: a language code becomes a PATH SEGMENT. Traversal or an
+     * absolute path here would let a catalogue be read from, or written to,
+     * anywhere the process can reach.
+     */
+    public function testALanguageCodeThatIsNotAUsablePathSegmentIsRefused(): void
+    {
+        $catalog = new TranslationCatalog($this->baseDir());
+
+        foreach (['..', '../../etc', 'ar/../..', '/etc', 'AR', '', 'a', 'toolongcode'] as $bad) {
+            try {
+                $catalog->localeDirectory($bad);
+                self::fail("'{$bad}' must not be accepted as a language code.");
+            } catch (RuntimeException) {
+                self::assertTrue(true);
+            }
+        }
+
+        foreach (['ar', 'en', 'en-US', 'zh-Hant'] as $good) {
+            self::assertStringEndsWith('/' . $good, $catalog->localeDirectory($good));
+        }
+    }
+
+    /**
+     * Regression: coverage counts against the ENGLISH catalogue, so "100%"
+     * means "every key a screen can ask for", not "every key this file happens
+     * to contain". Counting the other way round would report a language with
+     * three stale strings in it as complete.
+     */
+    public function testCoverageCountsAgainstTheEnglishCatalogue(): void
+    {
+        $coverage = TranslationCatalog::coverage(
+            ['auth' => ['a' => 'A', 'b' => 'B'], 'documents' => ['c' => 'C']],
+            ['auth' => ['a' => 'أ']]
+        );
+
+        self::assertSame(3, $coverage['total']);
+        self::assertSame(1, $coverage['translated']);
+        self::assertSame(2, $coverage['missing']);
+        self::assertSame(0, $coverage['orphans']);
+        self::assertSame(
+            ['total' => 2, 'translated' => 1, 'missing' => 1, 'orphans' => []],
+            $coverage['domains']['auth']
+        );
+        self::assertSame(
+            ['total' => 1, 'translated' => 0, 'missing' => 1, 'orphans' => []],
+            $coverage['domains']['documents'],
+            'A domain with no file at all is 0/n, not absent from the report.'
+        );
+    }
+
+    /**
+     * Regression: an orphan is the one failure that LOOKS like progress. A key
+     * renamed at the call site leaves its translation behind; the file gets
+     * longer, and a coverage number that counted it would go UP while the screen
+     * stayed English. It must be reported, and it must not be counted as
+     * translated.
+     */
+    public function testCoverageReportsOrphansAndNeverCountsThemAsTranslated(): void
+    {
+        $coverage = TranslationCatalog::coverage(
+            ['auth' => ['kept' => 'Kept']],
+            ['auth' => ['kept' => 'محفوظ', 'renamed.away' => 'يتيم'], 'retired' => ['x' => 'س']]
+        );
+
+        self::assertSame(1, $coverage['total'], 'Only English keys are in the denominator.');
+        self::assertSame(1, $coverage['translated']);
+        self::assertSame(2, $coverage['orphans']);
+        self::assertSame(['renamed.away'], $coverage['domains']['auth']['orphans']);
+        self::assertSame(
+            ['x'],
+            $coverage['domains']['retired']['orphans'],
+            'A domain English has retired entirely is all orphans, not silently skipped.'
+        );
+    }
+
+    /**
+     * Regression: an EMPTY translation is worse than a missing one — it renders
+     * as an empty string rather than falling back to English — so it must never
+     * be counted as done. The CI guard rejects it outright; this pins the
+     * counting half.
+     */
+    public function testCoverageDoesNotCountAnEmptyStringAsTranslated(): void
+    {
+        $coverage = TranslationCatalog::coverage(
+            ['auth' => ['a' => 'A', 'b' => 'B']],
+            ['auth' => ['a' => '', 'b' => 'ب']]
+        );
+
+        self::assertSame(1, $coverage['translated']);
+        self::assertSame(1, $coverage['missing']);
     }
 
     // ─── The drift gate's comparison ─────────────────────────────────────────

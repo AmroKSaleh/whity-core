@@ -26,7 +26,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { IconFilePlus, IconStar, IconStarFilled, IconTrash } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 import { useRouter } from 'next/navigation';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { DOCUMENTS_RENDER, DOCUMENTS_ROUTE } from '@/lib/capabilities';
@@ -34,7 +34,7 @@ import {
   CreateDocumentDialog,
   type CreatableTemplate,
 } from '@/components/documents/create-document-dialog';
-import { ViewRail, viewLabel } from './view-rail';
+import { ViewRail, viewLabel, viewDescription } from './view-rail';
 import type {
   DocumentCollection,
   DocumentListResponse,
@@ -106,6 +106,7 @@ export default function DocumentLibraryPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const t = useTranslation('documents');
+  const locale = useFormattingLocale();
   const router = useRouter();
   // UI hints only — the server is authoritative on both. `has()` fails CLOSED, so
   // a payload it could not parse hides the New button rather than dangling an
@@ -412,7 +413,7 @@ export default function DocumentLibraryPage() {
       {
         id: 'created_at',
         header: t('organizer.table.created', 'Created'),
-        cell: (row) => new Date(row.created_at).toLocaleString(),
+        cell: (row) => new Date(row.created_at).toLocaleString(locale),
       },
       {
         id: 'artifacts',
@@ -567,7 +568,7 @@ export default function DocumentLibraryPage() {
                 ? ((collections.data ?? []).find((c) => c.id === collectionId)?.name ?? '')
                 : viewLabel(t, selectedView)}
               {' — '}
-              {selectedView.description}
+              {viewDescription(t, selectedView)}
             </p>
           )}
 

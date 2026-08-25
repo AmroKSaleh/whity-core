@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect } from 'react';
+import { Direction as RadixDirection } from 'radix-ui';
 import { useLanguageDirection } from '@amroksaleh/features/i18n';
 
 /**
@@ -43,6 +44,53 @@ export type Direction = 'ltr' | 'rtl';
  */
 const RETIRED_STORAGE_KEY = 'whity.dir';
 
+/**
+ * Where the last resolved direction is remembered, purely so the blocking
+ * script below can apply it before first paint.
+ *
+ * NOT a preference, and nothing reads it as one. The language is still the only
+ * input to direction; this is a cache of the answer, refreshed on every render
+ * that resolves one, and a stale value is corrected within a frame of the
+ * provider mounting. It is deliberately separate from the language key: the
+ * script must not need to know that 'ar' means RTL, because the whole point of
+ * `languages.direction` is that no code anywhere tests a language code.
+ */
+const DIRECTION_CACHE_KEY = 'whity.dir.resolved';
+
+/** Where LanguageProvider remembers the last resolved language code. */
+const LANGUAGE_CACHE_KEY = 'i18n_language';
+
+/**
+ * Applies the remembered direction to <html> BEFORE the browser paints.
+ *
+ * The comment on ThemeModeInitScript used to say a wrong-then-corrected
+ * direction, unlike a wrong colour scheme, was not worth blocking for. That is
+ * backwards. `dir` was applied in a useEffect that runs after the language has
+ * been fetched over the network, so an Arabic user's every full page load began
+ * left-to-right and in English: the sidebar on the wrong side, every panel
+ * mirrored, text ragged on the wrong edge, then the whole layout jumping when
+ * the fetch returned. A colour flash changes how the page looks; this one
+ * changes where everything IS.
+ *
+ * Same shape as ThemeModeInitScript: synchronous, tiny, wrapped in try/catch so
+ * a browser with storage disabled falls through to the server-rendered default
+ * rather than throwing before any of the bundle has run.
+ */
+const BLOCKING_SCRIPT = `(function(){try{` +
+  `var d=localStorage.getItem('${DIRECTION_CACHE_KEY}');` +
+  `if(d==='rtl'||d==='ltr'){document.documentElement.dir=d;}` +
+  `var l=localStorage.getItem('${LANGUAGE_CACHE_KEY}');` +
+  `if(l){document.documentElement.lang=l;}` +
+  `}catch(e){}})();`;
+
+/**
+ * Renders the blocking anti-flash script. MUST be placed in <head>, as early as
+ * the theme's equivalent, so `dir` lands before the first paint.
+ */
+export function DirectionInitScript() {
+  return <script dangerouslySetInnerHTML={{ __html: BLOCKING_SCRIPT }} />;
+}
+
 interface DirectionContextValue {
   dir: Direction;
 }
@@ -52,9 +100,16 @@ const DirectionContext = createContext<DirectionContextValue | null>(null);
 export function DirectionProvider({ children }: { children: React.ReactNode }) {
   const dir = useLanguageDirection();
 
-  // Reflect the language's direction onto <html> (DOM mutation, not React state).
+  // Reflect the language's direction onto <html> (DOM mutation, not React state),
+  // and remember it so the next page load can apply it before paint.
   useEffect(() => {
     document.documentElement.dir = dir;
+    try {
+      localStorage.setItem(DIRECTION_CACHE_KEY, dir);
+    } catch {
+      // Storage disabled (private mode): the only cost is that the next load
+      // starts LTR and corrects itself, which is exactly the old behaviour.
+    }
   }, [dir]);
 
   // Drop the retired toggle's key once, so it cannot linger in a browser
@@ -67,7 +122,30 @@ export function DirectionProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  return <DirectionContext.Provider value={{ dir }}>{children}</DirectionContext.Provider>;
+  // RADIX HAS ITS OWN DIRECTION CHANNEL, AND IT DEFAULTS TO LTR.
+  //
+  // Every Radix primitive resolves direction from `DirectionProvider` context
+  // and falls back to 'ltr' when there is none — it does not read <html dir>.
+  // `Tabs` acts on that immediately by stamping `dir="ltr"` onto its own root,
+  // and CSS direction inherits, so everything inside a tab panel flipped back
+  // to left-to-right INSIDE an otherwise correct right-to-left page.
+  //
+  // The visible damage was worst where it was least obvious. On
+  // /admin/document-templates the whole table re-laid out left-to-right — Name
+  // in the leftmost column instead of the rightmost — and, because the page
+  // around it was still RTL, the table's own width then overflowed the wrong
+  // edge and clipped its last two columns off-screen entirely. It reads as a
+  // width bug, and no amount of logical-property work would have fixed it.
+  //
+  // One provider fixes every Radix component at once (Tabs, DropdownMenu,
+  // Select, Slider, Toast, ContextMenu…), which is the reason to do it here
+  // rather than pass `dir` at each call site: the next component someone adds
+  // is correct without anyone remembering.
+  return (
+    <DirectionContext.Provider value={{ dir }}>
+      <RadixDirection.Provider dir={dir}>{children}</RadixDirection.Provider>
+    </DirectionContext.Provider>
+  );
 }
 
 export function useDirection(): DirectionContextValue {

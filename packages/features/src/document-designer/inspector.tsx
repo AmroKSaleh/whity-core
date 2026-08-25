@@ -810,7 +810,7 @@ function BatchTab({
               disabled={batch.index <= 0}
               onClick={() => onIndex(batch.index - 1)}
             >
-              <IconChevronLeft className="h-4 w-4" />
+              <IconChevronLeft className="h-4 w-4 rtl:rotate-180" />
             </Button>
             <span className="text-xs tabular-nums" data-testid="doc-batch-rowcount">
               {t('inspector.batch.rowCount', 'Row {index} / {total}', {
@@ -826,7 +826,7 @@ function BatchTab({
               disabled={batch.index >= batch.total - 1}
               onClick={() => onIndex(batch.index + 1)}
             >
-              <IconChevronRight className="h-4 w-4" />
+              <IconChevronRight className="h-4 w-4 rtl:rotate-180" />
             </Button>
           </div>
           <p className="text-[10px] text-muted-foreground">

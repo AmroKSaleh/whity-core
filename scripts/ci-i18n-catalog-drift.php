@@ -44,6 +44,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 use Whity\Core\i18n\TranslationCatalog;
+use Whity\Core\i18n\TranslationDomain;
 use Whity\Core\i18n\TranslationKeyExtractor;
 
 $baseDir = dirname(__DIR__);
@@ -116,4 +117,132 @@ printf(
     count($report['catalog']),
     $report['files']
 );
+
+/*
+ * ─── The other languages ─────────────────────────────────────────────────────
+ *
+ * Everything above guards the GENERATED half: English is a projection of the
+ * code, so the only question worth asking is whether the projection is current.
+ * A hand-written language cannot be checked that way — there is nothing to
+ * regenerate it from, and its answer to "is it complete?" is nearly always "no",
+ * legitimately, because English gains a key the instant a developer writes one
+ * and the translation follows in a later PR.
+ *
+ * So this half checks the things that ARE decidable, and counts the rest:
+ *
+ *   FAIL — an orphan key. Translated, but no English key of that name exists, so
+ *          nothing will ever render it. This is what a rename leaves behind, and
+ *          it is the one failure that masquerades as finished work: the file
+ *          gets longer, the coverage percentage goes UP, and the screen stays
+ *          English. This is also the direction that makes "a key added to one
+ *          locale and not another" a build failure rather than a discovery
+ *          six months later.
+ *   FAIL — an empty translation. Renders as an empty string, not as the English
+ *          fallback, so it is strictly worse than leaving the key out.
+ *   FAIL — bytes that are not what renderLocale() produces. Same reasoning as
+ *          the English catalogue: a translator's editor must not be able to
+ *          reorder the file and bury the next real change in noise.
+ *   REPORT — missing keys, as a per-domain count. Never a failure; failing here
+ *          would mean no English string could be added without a translator in
+ *          the same PR, and the practical effect of that rule is that people
+ *          stop using t() at all.
+ */
+
+$localeFailures = [];
+$catalogSource = $report['catalog'];
+$localeCodes = $catalog->localeCodes();
+
+foreach ($localeCodes as $code) {
+    $localeDirectory = $catalog->localeDirectory($code);
+
+    foreach (scandir($localeDirectory) ?: [] as $entry) {
+        $path = $localeDirectory . '/' . $entry;
+        if (!is_file($path) || !str_ends_with($entry, '.json')) {
+            continue;
+        }
+
+        $domain = TranslationCatalog::domainFromFileName($entry);
+        if (!TranslationDomain::isValid($domain)) {
+            $localeFailures[] = [
+                'where' => TranslationCatalog::DIRECTORY . "/{$code}/{$entry}",
+                'detail' => "'{$domain}' is not a valid translation domain, so no lookup will ever ask for it.",
+            ];
+            continue;
+        }
+
+        $contents = (string) file_get_contents($path);
+        $decoded = json_decode($contents, true);
+        if (!is_array($decoded)) {
+            $localeFailures[] = [
+                'where' => TranslationCatalog::DIRECTORY . "/{$code}/{$entry}",
+                'detail' => 'Not valid JSON.',
+            ];
+            continue;
+        }
+
+        $keys = [];
+        foreach ((array) ($decoded['keys'] ?? []) as $key => $text) {
+            if (is_string($key) && is_string($text)) {
+                $keys[$key] = $text;
+            }
+        }
+
+        $expected = TranslationCatalog::renderLocale($domain, $code, $keys);
+        if (str_replace("\r\n", "\n", $contents) !== $expected) {
+            $localeFailures[] = [
+                'where' => TranslationCatalog::DIRECTORY . "/{$code}/{$entry}",
+                'detail' => 'Not in canonical form (sorted keys, the "domain"/"language"/"notice"/"keys" header, '
+                    . 'four-space indent, exactly one trailing newline). Reformat it and commit.',
+            ];
+        }
+
+        foreach ($keys as $key => $text) {
+            if (trim($text) === '') {
+                $localeFailures[] = [
+                    'where' => TranslationCatalog::DIRECTORY . "/{$code}/{$entry}",
+                    'detail' => "'{$key}' is empty. An empty translation renders as nothing — it does NOT fall "
+                        . 'back to English. Delete the key instead.',
+                ];
+            }
+        }
+    }
+
+    $coverage = TranslationCatalog::coverage($catalogSource, $catalog->readLocale($code));
+    foreach ($coverage['domains'] as $domain => $row) {
+        foreach ($row['orphans'] as $key) {
+            $localeFailures[] = [
+                'where' => TranslationCatalog::DIRECTORY . '/' . $code . '/' . TranslationCatalog::fileNameFor($domain),
+                'detail' => "'{$key}' is translated but no English key of that name exists. It was renamed or "
+                    . 'deleted at the call site; move the translation to the new key, or drop it.',
+            ];
+        }
+    }
+}
+
+if ($localeFailures !== []) {
+    fwrite(STDERR, "\nFAIL: " . count($localeFailures) . " problem(s) in the hand-written locale catalogues.\n\n");
+    foreach ($localeFailures as $failure) {
+        fwrite(STDERR, sprintf("  %s\n    %s\n\n", $failure['where'], $failure['detail']));
+    }
+
+    exit(1);
+}
+
+foreach ($localeCodes as $code) {
+    $coverage = TranslationCatalog::coverage($catalogSource, $catalog->readLocale($code));
+    printf(
+        "OK: %s is %d/%d (%.1f%%), %d key(s) still English. Per domain: %s\n",
+        $code,
+        $coverage['translated'],
+        $coverage['total'],
+        $coverage['total'] === 0 ? 0.0 : ($coverage['translated'] / $coverage['total']) * 100,
+        $coverage['missing'],
+        implode(', ', array_map(
+            static fn (string $domain, array $row): string => "{$domain} {$row['translated']}/{$row['total']}",
+            array_keys($coverage['domains']),
+            array_values($coverage['domains'])
+        ))
+    );
+}
+
 exit(0);

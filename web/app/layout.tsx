@@ -14,6 +14,7 @@ import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 import { getThemeOverrides } from "@/lib/theme";
 import { ThemeModeProvider, ThemeModeInitScript } from "@/lib/theme-mode-context";
+import { DirectionInitScript } from "@/lib/direction-context";
 import { AppLanguageProvider } from "@/lib/app-language-provider";
 
 // Design-token font families (see src/design/tokens/base.json): Noto Sans
@@ -59,7 +60,15 @@ export default async function RootLayout({
     .join("");
   return (
     <html
+      // `lang` and `dir` are the SERVER's best guess and nothing more. The
+      // server cannot know the reader's language: the durable preference lives
+      // on their profile and is fetched after hydration. So this is the neutral
+      // starting point, and DirectionInitScript (in <head>) corrects both from
+      // the last resolved values BEFORE first paint — which is the difference
+      // between an Arabic reader seeing a mirrored interface immediately and
+      // watching an English left-to-right one flip a moment later.
       lang="en"
+      dir="ltr"
       className={cn(
         "h-full",
         "antialiased",
@@ -68,9 +77,10 @@ export default async function RootLayout({
         geistMono.variable,
         "font-sans"
       )}
-      // The blocking init script (see <head> below) toggles the `dark` class
-      // on this element before hydration, based on localStorage/system
-      // preference the server can't know — an expected, benign mismatch.
+      // The blocking init scripts (see <head> below) set the `dark` class and
+      // the `dir`/`lang` attributes on this element before hydration, from
+      // localStorage and system preferences the server can't know — expected,
+      // benign mismatches.
       suppressHydrationWarning
     >
       <head>
@@ -80,6 +90,12 @@ export default async function RootLayout({
           of globals.css, rather than left to ThemeModeProvider's own effects.
         */}
         <ThemeModeInitScript />
+        {/*
+          Blocking for the same reason, and a louder one: `dir` decides where
+          everything on the page IS. Applied after the theme script only because
+          both are synchronous and the order between them does not matter.
+        */}
+        <DirectionInitScript />
       </head>
       {/*
         suppressHydrationWarning (one level deep, body attributes only): browser

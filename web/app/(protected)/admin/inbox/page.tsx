@@ -58,7 +58,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { useAuth } from '@/lib/auth-context';
@@ -76,6 +76,7 @@ const DOCUMENT_ROUTING_SOURCE = 'document_routing';
 
 export default function InboxPage() {
   const t = useTranslation('documents');
+  const locale = useFormattingLocale();
   const { apiClient } = useAuth();
   const router = useRouter();
 
@@ -188,7 +189,7 @@ export default function InboxPage() {
         cell: (row) =>
           row.timestamp === null ? null : (
             <span className="text-xs text-muted-foreground">
-              {new Date(row.timestamp).toLocaleString()}
+              {new Date(row.timestamp).toLocaleString(locale)}
             </span>
           ),
       },
