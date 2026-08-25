@@ -183,8 +183,8 @@ export function DocumentQrPanel({
     if (!response.ok) {
       throw new Error(String(response.status));
     }
-    const body = (await response.json()) as { data?: DocumentQrPanelData };
-    return body.data ?? null;
+    const body = (await response.json()) as { data?: Partial<DocumentQrPanelData> };
+    return body.data === undefined ? null : normalize(body.data);
   }, [apiClient, documentId]);
 
   useEffect(() => {
@@ -557,6 +557,42 @@ export function DocumentQrPanel({
       )}
     </div>
   );
+}
+
+/**
+ * Fill in what a payload did not carry, so a MISSING half never becomes a blank
+ * record page.
+ *
+ * `retired` arrived with #1052; a web build deployed against a backend that
+ * predates it gets a payload without the key, and `data.retired.recent` would
+ * then throw during render. A throw in one region is not contained — it takes
+ * the whole record page with it, so a mixed-version deployment would lose the
+ * document, its versions and its trail to a panel that could simply have said
+ * "no retired codes".
+ *
+ * WHAT IS NOT DEFAULTED HERE, and this is the important half: nothing that
+ * would state a fact the server did not. `enabled` and `configured` default to
+ * FALSE, so an unanswered instance renders as one that cannot mint rather than
+ * one that can — the direction that withholds a control rather than offering a
+ * broken one. Absent lists default to empty WITH a zero total, which is what
+ * "the server sent none" honestly means; an absent total beside present rows
+ * would be the "unknown rendered as zero" failure, and that case cannot arise
+ * because the two always travel together.
+ */
+function normalize(data: Partial<DocumentQrPanelData>): DocumentQrPanelData {
+  return {
+    enabled: data.enabled === true,
+    configured: data.configured === true,
+    token: data.token ?? null,
+    retired: {
+      total: data.retired?.total ?? 0,
+      recent: data.retired?.recent ?? [],
+    },
+    scans: {
+      total: data.scans?.total ?? 0,
+      recent: data.scans?.recent ?? [],
+    },
+  };
 }
 
 /**

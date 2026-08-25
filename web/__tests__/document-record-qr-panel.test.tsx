@@ -719,6 +719,55 @@ describe('the region is the server’s decision', () => {
     });
   });
 
+  /**
+   * A PAYLOAD FROM AN OLDER BACKEND MUST NOT BLANK THE RECORD PAGE.
+   *
+   * `retired` arrived with #1052, so a web build deployed against a backend that
+   * predates it receives a payload without the key. Reading `retired.recent` off
+   * that throws during render — and a throw in one region is not contained: it
+   * takes the document, its versions and its trail down with it. Defaulting is
+   * the cheaper failure by a wide margin, and the defaults are chosen to
+   * withhold controls rather than to offer broken ones.
+   */
+  it('survives a payload from a backend that predates the retired list', async () => {
+    serve({
+      qrPanels: [
+        {
+          enabled: true,
+          configured: true,
+          token: LIVE_CODE,
+          scans: { total: 0, recent: [] },
+          // no `retired` key at all
+        },
+      ],
+    });
+
+    render(<DocumentRecordPage />);
+
+    expect(await screen.findByTestId('document-record-qr-live')).toBeInTheDocument();
+    expect(screen.getByTestId('document-record-qr-reference')).toHaveTextContent('9F2A-4C11-8B03');
+    // Absent, not empty-and-broken: there is nothing retired to list.
+    expect(screen.queryByTestId('document-record-qr-retired')).not.toBeInTheDocument();
+    // The rest of the record survived, which is the point.
+    expect(screen.getByTestId('document-record-section-trail')).toBeInTheDocument();
+  });
+
+  /**
+   * And an ABSENT flag withholds the control rather than offering it. An
+   * unanswered `configured` must not read as "yes, this instance has an
+   * address" — the direction that offers a mint the server would refuse.
+   */
+  it('treats an unanswered configuration flag as no, never as yes', async () => {
+    serve({
+      qrPanels: [{ token: null, scans: { total: 0, recent: [] }, retired: { total: 0, recent: [] } }],
+    });
+
+    render(<DocumentRecordPage />);
+
+    expect(await screen.findByTestId('document-record-qr-unconfigured')).toBeInTheDocument();
+    expect(screen.getByTestId('document-record-qr-mint')).toBeDisabled();
+  });
+
   it('shows the code and the scans read-only when a permission refuses the writes', async () => {
     serve({
       sections: {
