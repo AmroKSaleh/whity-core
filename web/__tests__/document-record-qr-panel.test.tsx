@@ -489,10 +489,13 @@ describe('a mint that would be refused is refused here first', () => {
       /APP_URL/
     );
     expect(screen.getByTestId('document-record-qr-mint')).toBeDisabled();
-    // And no symbol is drawn: with no public address the minted url is a bare
-    // path, and a code encoding it would be a picture of a link that leads
-    // nowhere — which looks exactly like a working one.
+    // No symbol, AND no url. The url is composed at read time from the
+    // instance's own address while the symbol on the paper was composed at mint
+    // time from whatever that address was then — so with none configured, both
+    // would be claims about the printed sheet that this instance is in no
+    // position to make.
     expect(screen.getByTestId('document-record-qr-no-symbol')).toBeInTheDocument();
+    expect(screen.queryByTestId('document-record-qr-url')).not.toBeInTheDocument();
     await waitFor(() => expect(qrMutations()).toEqual([]));
   });
 
@@ -709,7 +712,16 @@ describe('the panel survives its own refetch', () => {
     expect(screen.getByTestId('document-record-qr')).toBe(panel);
   });
 
-  it('keeps the code on screen when the act fails, and says why', async () => {
+  /**
+   * A REFUSAL HAS TO LAND WHERE THE OPERATOR IS LOOKING.
+   *
+   * The confirm stays open on a failure, so an error rendered in the panel body
+   * would sit BEHIND the modal overlay: the operator presses "Issue the code",
+   * gets a 409, and sees a dialog that appears to have simply stopped
+   * responding. `within(dialog)` is the whole assertion — a `getByTestId` over
+   * the document would pass just as happily against the invisible rendering.
+   */
+  it('shows a refusal inside the confirm, not behind it', async () => {
     const user = userEvent.setup();
     serve({
       qrPanels: [livePanel()],
@@ -721,11 +733,39 @@ describe('the panel survives its own refetch', () => {
     await user.click(await screen.findByTestId('document-record-qr-mint'));
     await user.click(await screen.findByTestId('document-record-qr-mint-confirm'));
 
-    // The server's own sentence, which says WHICH switch — more useful than
-    // "that did not work" — and the live code is still on screen.
-    expect(await screen.findByTestId('document-record-qr-act-error')).toHaveTextContent(
-      'switched off for this template'
+    const dialog = await screen.findByTestId('document-record-qr-mint-dialog');
+    // Localized by STATUS rather than by echoing the server's prose. The server
+    // says which switch is off, usefully, and says it in English — and this
+    // dialog is read in Arabic as often as not, so the panel names the state
+    // itself from the 409 and keeps the sentence translatable.
+    await waitFor(() =>
+      expect(within(dialog).getByTestId('document-record-qr-mint-error')).toHaveTextContent(
+        /switched off for this template or this organisation/i
+      )
     );
+    // Not duplicated behind the overlay, and the live code is untouched.
+    expect(screen.queryByTestId('document-record-qr-act-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('document-record-qr-live')).toBeInTheDocument();
+  });
+
+  it('shows a refused withdrawal inside its own confirm too', async () => {
+    const user = userEvent.setup();
+    serve({
+      qrPanels: [livePanel()],
+      qrMutation: { status: 503, body: { error: 'The verification code could not be withdrawn' } },
+    });
+
+    render(<DocumentRecordPage />);
+
+    await user.click(await screen.findByTestId('document-record-qr-withdraw'));
+    await user.click(await screen.findByTestId('document-record-qr-withdraw-confirm'));
+
+    const dialog = await screen.findByTestId('document-record-qr-withdraw-dialog');
+    await waitFor(() =>
+      expect(within(dialog).getByTestId('document-record-qr-withdraw-error')).toBeInTheDocument()
+    );
+    // The code is still live, so the destructive control is still the right one
+    // to offer — a failed withdrawal must not read as a successful one.
     expect(screen.getByTestId('document-record-qr-live')).toBeInTheDocument();
   });
 });

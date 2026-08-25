@@ -185,11 +185,11 @@ export function DocumentQrPanel({
   // Guards the two async paths against a late resolve landing on an unmounted
   // tree — the same cancellation `useRecordResource` does, written here because
   // this panel owns its own requests.
-  const live = useRef(true);
+  const mounted = useRef(true);
   useEffect(() => {
-    live.current = true;
+    mounted.current = true;
     return () => {
-      live.current = false;
+      mounted.current = false;
     };
   }, []);
 
@@ -240,40 +240,53 @@ export function DocumentQrPanel({
           method: kind === 'mint' ? 'POST' : 'DELETE',
         });
         if (!response.ok) {
-          // The server's own sentence where it sent one: a 409 says WHICH switch
-          // is off and a 503 says the instance has no address, and both are more
-          // useful than "that did not work".
-          let detail: string | null = null;
-          try {
-            const body = (await response.json()) as { error?: unknown };
-            detail = typeof body.error === 'string' && body.error !== '' ? body.error : null;
-          } catch {
-            detail = null;
-          }
+          // LOCALIZED BY STATUS, not by passing the server's prose through.
+          //
+          // The server sends a genuinely useful sentence — a 409 says which
+          // switch is off — but it sends it in English, and this dialog is read
+          // in Arabic as often as not. Rendering it verbatim would put an
+          // untranslated string in front of the one audience least able to act
+          // on it. A STATUS is language-free, and the one refusal worth
+          // distinguishing has a status of its own: 409 is "switched off",
+          // which is a real state an operator reaches by having the record open
+          // while somebody else changes the setting.
+          //
+          // Anything else falls back to the localized sentence for the act.
+          // That does lose the server's wording for an unforeseen status — the
+          // trade is deliberate: the two states the panel can name are named,
+          // and the rest say what happened rather than saying it in a language
+          // the reader did not choose.
           setActError(
-            detail ??
-              (kind === 'mint'
+            response.status === 409
+              ? t(
+                  'record.qr.error.switchedOff',
+                  'QR verification has been switched off for this template or this organisation, so no code can be issued.'
+                )
+              : kind === 'mint'
                 ? t('record.qr.error.mint', 'The verification code could not be issued')
-                : t('record.qr.error.withdraw', 'The verification code could not be withdrawn'))
+                : t('record.qr.error.withdraw', 'The verification code could not be withdrawn')
           );
           return;
         }
+        // Only on success. A refusal leaves the confirm open with its reason
+        // rendered INSIDE it — see below — because closing the dialog would put
+        // the explanation behind the operator rather than in front of them.
         setPending(null);
         const next = await read();
-        if (!live.current) return;
+        if (!mounted.current) return;
         if (next !== null) {
           setData(next);
           setLoadError(null);
         }
       } catch {
-        if (!live.current) return;
+        if (!mounted.current) return;
         setActError(
           kind === 'mint'
             ? t('record.qr.error.mint', 'The verification code could not be issued')
             : t('record.qr.error.withdraw', 'The verification code could not be withdrawn')
         );
       } finally {
-        if (live.current) setBusy(null);
+        if (mounted.current) setBusy(null);
       }
     },
     [apiClient, documentId, read, t]
@@ -291,12 +304,12 @@ export function DocumentQrPanel({
     );
   }
 
-  const live_ = data.token;
+  const code = data.token;
   const lastRetired: QrRetiredCode | null = data.retired.recent[0] ?? null;
   const withdrawn =
-    live_ === null && lastRetired !== null && lastRetired.reason === 'withdrawn' ? lastRetired : null;
+    code === null && lastRetired !== null && lastRetired.reason === 'withdrawn' ? lastRetired : null;
   const strandedSuperseded =
-    live_ === null && lastRetired !== null && lastRetired.reason !== 'withdrawn' ? lastRetired : null;
+    code === null && lastRetired !== null && lastRetired.reason !== 'withdrawn' ? lastRetired : null;
 
   // DISABLED BEFORE ANY REQUEST, not after a refusal — the shape #1022 settled
   // for a destructive control next door. The 503 (no public address) and the 409
@@ -307,7 +320,7 @@ export function DocumentQrPanel({
   // Whether anybody at all is named on this panel. Only these three render a
   // profile id: the retired list shows references and dates, never actors.
   const namesSomebody =
-    live_?.issued_by != null ||
+    code?.issued_by != null ||
     withdrawn?.revoked_by != null ||
     data.scans.recent.some((scan) => scan.scanner_profile_id !== null);
 
@@ -331,14 +344,14 @@ export function DocumentQrPanel({
 
       {!data.enabled && (
         <Alert
-          variant={live_ === null ? 'warning' : 'info'}
+          variant={code === null ? 'warning' : 'info'}
           data-testid="document-record-qr-disabled"
         >
           <AlertTitle>
             {t('record.qr.disabled.title', 'QR verification is switched off here')}
           </AlertTitle>
           <AlertDescription>
-            {live_ === null
+            {code === null
               ? t(
                   'record.qr.disabled.body',
                   'It is off for this template or for this organisation, so this document cannot be given a code. The switch is an organisation setting, and a template can opt out of it on its own.'
@@ -354,27 +367,31 @@ export function DocumentQrPanel({
         </Alert>
       )}
 
-      {live_ !== null && (
+      {code !== null && (
         <div className="flex flex-wrap items-start gap-4" data-testid="document-record-qr-live">
           {data.configured ? (
             // Drawn from the URL the SERVER minted, never from one composed
             // here, so what a phone camera reads and what the server honours
             // cannot drift apart.
             <div className="size-40 shrink-0 rounded-md border border-border bg-white p-2">
-              <BarcodeSvg symbology="qrcode" value={live_.verification_url} eclevel="M" />
+              <BarcodeSvg symbology="qrcode" value={code.verification_url} eclevel="M" />
             </div>
           ) : (
-            // With no public address the minted URL is a bare path, and a symbol
-            // encoding it would be a picture of something no camera can follow.
-            // Better to draw nothing and say so than to draw a working-looking
-            // code that is not one.
+            // The URL is composed at READ time from the instance's own public
+            // address, while the symbol on the paper was composed at MINT time
+            // from whatever that address was then. With no address configured
+            // the panel can only produce a bare path — so drawing a symbol from
+            // it would be a picture of a link no camera can follow, and printing
+            // the path as "what the code carries" would be a claim about the
+            // paper that this instance is in no position to make. Neither is
+            // shown, and the reason is.
             <p
               className="text-sm text-muted-foreground"
               data-testid="document-record-qr-no-symbol"
             >
               {t(
                 'record.qr.noSymbol',
-                'The symbol is not drawn here: with no public address configured, the code has no address to encode.'
+                'The symbol and its address are not shown: this installation has not been told its own public address, so it cannot say what the printed code carries.'
               )}
             </p>
           )}
@@ -385,18 +402,18 @@ export function DocumentQrPanel({
                 {t('record.qr.inForce', 'In force')}
               </Badge>
               <span className="font-mono text-sm font-medium" data-testid="document-record-qr-reference">
-                {live_.reference}
+                {code.reference}
               </span>
             </div>
 
             <p className="text-xs text-muted-foreground" data-testid="document-record-qr-issued">
-              {live_.issued_by === null
+              {code.issued_by === null
                 ? t('record.qr.issued', 'Issued {when}', {
-                    when: formatRecordDateTime(live_.issued_at ?? '', locale) ?? '—',
+                    when: formatRecordDateTime(code.issued_at ?? '', locale) ?? '—',
                   })
                 : t('record.qr.issuedBy', 'Issued {when} by {who}', {
-                    when: formatRecordDateTime(live_.issued_at ?? '', locale) ?? '—',
-                    who: personName(t, directory, live_.issued_by),
+                    when: formatRecordDateTime(code.issued_at ?? '', locale) ?? '—',
+                    who: personName(t, directory, code.issued_by),
                   })}
             </p>
 
@@ -407,9 +424,14 @@ export function DocumentQrPanel({
               )}
             </p>
 
-            <p className="break-all font-mono text-xs text-muted-foreground" data-testid="document-record-qr-url">
-              {live_.verification_url}
-            </p>
+            {data.configured && (
+              <p
+                className="break-all font-mono text-xs text-muted-foreground"
+                data-testid="document-record-qr-url"
+              >
+                {code.verification_url}
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -463,7 +485,7 @@ export function DocumentQrPanel({
         </Alert>
       )}
 
-      {live_ === null && lastRetired === null && data.enabled && data.configured && (
+      {code === null && lastRetired === null && data.enabled && data.configured && (
         <p className="text-sm text-muted-foreground" data-testid="document-record-qr-none">
           {t(
             'record.qr.none',
@@ -472,7 +494,14 @@ export function DocumentQrPanel({
         </p>
       )}
 
-      {actError !== null && (
+      {/*
+        The panel-level rendering of a refusal, for the case where no confirm is
+        open. While one IS open it is rendered inside the dialog instead: this
+        paragraph sits behind the modal overlay, so an operator who pressed
+        "Withdraw the code" and got a 409 would be looking at a dialog that had
+        simply stopped responding, with the reason hidden behind it.
+      */}
+      {actError !== null && pending === null && (
         <p className="text-sm text-destructive" data-testid="document-record-qr-act-error">
           {actError}
         </p>
@@ -487,12 +516,12 @@ export function DocumentQrPanel({
             // not to be trusted should not be met with a primary button that
             // reads as the recommended fix, and the code it would issue is a
             // different one that appears on nothing already printed.
-            variant={live_ === null && lastRetired === null ? 'default' : 'outline'}
+            variant={code === null && lastRetired === null ? 'default' : 'outline'}
             onClick={() => setPending('mint')}
             disabled={mintBlocked || busy !== null}
             data-testid="document-record-qr-mint"
           >
-            {live_ === null
+            {code === null
               ? t('record.qr.action.issue', 'Issue a code')
               : // Never "refresh": minting retires the previous code, and
                 // re-rendering — which does not — is a different act entirely.
@@ -507,7 +536,7 @@ export function DocumentQrPanel({
             never given a reason to believe a withdrawn code could be withdrawn
             again — or un-withdrawn.
           */}
-          {live_ !== null && (
+          {code !== null && (
             <Button
               variant="destructive"
               onClick={() => setPending('withdraw')}
@@ -556,14 +585,15 @@ export function DocumentQrPanel({
 
       <ScanTrail data={data} directory={directory} t={t} locale={locale} />
 
-      {pending === 'withdraw' && live_ !== null && (
+      {pending === 'withdraw' && code !== null && (
         <WithdrawDialog
           t={t}
           documentTitle={documentTitle}
-          reference={live_.reference}
+          reference={code.reference}
           versionCount={versionCount}
           scanTotal={data.scans.total}
           submitting={busy === 'withdraw'}
+          error={actError}
           onCancel={() => setPending(null)}
           onConfirm={() => void act('withdraw')}
         />
@@ -573,8 +603,9 @@ export function DocumentQrPanel({
         <MintDialog
           t={t}
           documentTitle={documentTitle}
-          replacing={live_?.reference ?? null}
+          replacing={code?.reference ?? null}
           submitting={busy === 'mint'}
+          error={actError}
           onCancel={() => setPending(null)}
           onConfirm={() => void act('mint')}
         />
@@ -778,6 +809,7 @@ function WithdrawDialog({
   versionCount,
   scanTotal,
   submitting,
+  error,
   onCancel,
   onConfirm,
 }: {
@@ -787,6 +819,8 @@ function WithdrawDialog({
   versionCount: number;
   scanTotal: number;
   submitting: boolean;
+  /** A refusal from the server, rendered here rather than behind the overlay. */
+  error: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -852,6 +886,12 @@ function WithdrawDialog({
           </p>
         </div>
 
+        {error !== null && (
+          <p className="text-sm text-destructive" data-testid="document-record-qr-withdraw-error">
+            {error}
+          </p>
+        )}
+
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={submitting}>
             {t('record.qr.cancel', 'Cancel')}
@@ -888,6 +928,7 @@ function MintDialog({
   documentTitle,
   replacing,
   submitting,
+  error,
   onCancel,
   onConfirm,
 }: {
@@ -896,6 +937,8 @@ function MintDialog({
   /** The reference about to be retired, or null when there is nothing to retire. */
   replacing: string | null;
   submitting: boolean;
+  /** A refusal from the server, rendered here rather than behind the overlay. */
+  error: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -946,6 +989,12 @@ function MintDialog({
             )}
           </AlertDescription>
         </Alert>
+
+        {error !== null && (
+          <p className="text-sm text-destructive" data-testid="document-record-qr-mint-error">
+            {error}
+          </p>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={submitting}>
