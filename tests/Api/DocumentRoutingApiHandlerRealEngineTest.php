@@ -13,6 +13,8 @@ use Whity\Auth\RoleChecker;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
+use Whity\Core\Document\RouteTemplate\RouteTemplateGraph;
+use Whity\Core\Document\RouteTemplate\RouteTemplateRepository;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\DocumentRoutingInboxSource;
 use Whity\Core\Document\Routing\RouteAction;
@@ -82,6 +84,8 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
     private PDO $pdo;
     private DocumentRoutingApiHandler $handler;
     private RouteRecipientRepository $recipients;
+    private RouteTemplateRepository $templates;
+    private RouteTemplateGraph $templateGraph;
     private InboxSourceRegistry $inboxSources;
     private int $documentId;
 
@@ -145,8 +149,13 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
             ),
             $rules,
             $visibility,
-            new RoleChecker($db, new PermissionRegistry())
+            new RoleChecker($db, new PermissionRegistry()),
+            // #1031. The same store the templates surface uses - a stub here
+            // would let this file assert against a design production could not
+            // have saved.
+            $this->templates = new RouteTemplateRepository($this->pdo)
         );
+        $this->templateGraph = new RouteTemplateGraph($rules);
 
         // Routing's recipients register as a SOURCE, exactly as public/index.php
         // wires them — the test reads the inbox the way production does, through
@@ -530,6 +539,193 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
 
     // -- helpers ------------------------------------------------------------
 
+    // -- applying a route template (#1031) ------------------------------------
+
+    public function testApplyingATemplateIssuesItsStagesAndRecordsWhereTheyCameFrom(): void
+    {
+        $templateId = $this->seedTemplate('Purchase approval');
+
+        $response = $this->post(
+            "/api/documents/{$this->documentId}/routes/from-template",
+            self::DEAN,
+            ['template_id' => $templateId],
+            ['id' => (string) $this->documentId]
+        );
+
+        self::assertSame(201, $response->getStatusCode());
+        $body = $this->json($response);
+        /** @var array<string, mixed> $data */
+        $data = $body['data'];
+
+        self::assertSame($templateId, $data['template_id']);
+        self::assertSame('Purchase approval', $data['template_name']);
+        self::assertSame(
+            'Purchase approval',
+            $data['title'],
+            'left unnamed, a circulation is named after the DESIGN it follows rather than the document'
+        );
+        /** @var list<array<string, mixed>> $steps */
+        $steps = $data['steps'];
+        self::assertCount(2, $steps);
+        self::assertTrue($steps[1]['decision'], 'the gate must arrive as a gate');
+        self::assertSame([self::HEAD_A, self::HEAD_B], $this->reachedProfiles());
+    }
+
+    public function testAHandComposedRouteStillReportsNoTemplate(): void
+    {
+        // The provenance fields are on every route, so a client cannot tell
+        // "composed by hand" from "the field is missing" unless the ad-hoc path
+        // states it. Asserted on the ORIGINAL endpoint, which #1031 must not have
+        // changed.
+        $data = $this->json($this->issueRoute())['data'];
+
+        self::assertNull($data['template_id']);
+        self::assertNull($data['template_name']);
+    }
+
+    public function testATemplateFromAnotherTenantIsReportedAsAbsent(): void
+    {
+        $templateId = $this->seedTemplate('Elsewhere', tenantId: self::OTHER_TENANT);
+
+        $response = $this->post(
+            "/api/documents/{$this->documentId}/routes/from-template",
+            self::DEAN,
+            ['template_id' => $templateId],
+            ['id' => (string) $this->documentId]
+        );
+
+        self::assertSame(
+            404,
+            $response->getStatusCode(),
+            'a template id is an enumerable integer, so a 403 would confirm which ids exist'
+        );
+    }
+
+    public function testRoutingADocumentDoesNotByItselfConferReadingSomebodysDesign(): void
+    {
+        // The dean holds `documents:route` (the route's own gate) but this
+        // deployment has not granted `route_templates:read`. The reply would
+        // contain every stage of the design, so the second slug is required and
+        // the refusal NAMES it — an author told "not found" would go looking for
+        // a template that is sitting right there.
+        //
+        // This test is written to be non-inert: the assertion below would pass
+        // just as well if the document were invisible or the template missing, so
+        // the first two lines prove the request otherwise succeeds.
+        $templateId = $this->seedTemplate('Purchase approval');
+        $granted = $this->post(
+            "/api/documents/{$this->documentId}/routes/from-template",
+            self::DEAN,
+            ['template_id' => $templateId],
+            ['id' => (string) $this->documentId]
+        );
+        self::assertSame(201, $granted->getStatusCode(), 'the same request must succeed while the grant stands');
+
+        $this->revoke(self::ROLE_DEAN, CorePermissions::ROUTE_TEMPLATES_READ);
+        RoleChecker::clearCache();
+
+        $refused = $this->post(
+            "/api/documents/{$this->documentId}/routes/from-template",
+            self::DEAN,
+            ['template_id' => $templateId],
+            ['id' => (string) $this->documentId]
+        );
+
+        self::assertSame(403, $refused->getStatusCode());
+        self::assertStringContainsString(
+            CorePermissions::ROUTE_TEMPLATES_READ,
+            (string) $this->json($refused)['error']
+        );
+    }
+
+    public function testATemplateWithNothingDrawnOnItIsRefusedInItsOwnWords(): void
+    {
+        $templateId = $this->templates->create(self::TENANT, 'Empty', null, self::DEAN);
+
+        $response = $this->post(
+            "/api/documents/{$this->documentId}/routes/from-template",
+            self::DEAN,
+            ['template_id' => $templateId],
+            ['id' => (string) $this->documentId]
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('no stages yet', (string) $this->json($response)['error']);
+        self::assertSame([], $this->reachedProfiles(), 'a refused apply must write nothing');
+    }
+
+    public function testAMissingTemplateIdIsRefusedRatherThanTreatedAsZero(): void
+    {
+        $response = $this->post(
+            "/api/documents/{$this->documentId}/routes/from-template",
+            self::DEAN,
+            [],
+            ['id' => (string) $this->documentId]
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('template_id', (string) $this->json($response)['error']);
+    }
+
+    // -- helpers -------------------------------------------------------------
+
+    /**
+     * A two-stage design saved THROUGH the real graph validator: circulate to the
+     * heads, then a gate held by the dean with no outgoing edge - the terminal
+     * gate that an edge-inferred `decision` would silently demote.
+     */
+    private function seedTemplate(string $name, int $tenantId = self::TENANT): int
+    {
+        $id = $this->templates->create($tenantId, $name, null, self::DEAN);
+        $validated = $this->templateGraph->validate([
+            [
+                'position' => 1,
+                'rule_kind' => 'role',
+                'rule_config' => ['role_id' => self::ROLE_HEAD],
+                'decision' => false,
+                'canvas_x' => 0,
+                'canvas_y' => 0,
+            ],
+            [
+                'position' => 2,
+                'rule_kind' => 'role',
+                'rule_config' => ['role_id' => self::ROLE_DEAN],
+                'decision' => true,
+                'canvas_x' => 0,
+                'canvas_y' => 0,
+            ],
+        ], [], 50);
+        $this->templates->replaceGraph($id, $tenantId, $validated['steps'], $validated['edges']);
+
+        return $id;
+    }
+
+    /**
+     * Who this document's routes have reached, from the recipient rows rather
+     * than from any response body.
+     *
+     * @return list<int>
+     */
+    private function reachedProfiles(): array
+    {
+        $ids = array_map(
+            static fn (array $r): int => (int) $r['profile_id'],
+            $this->recipients->listForDocument($this->documentId, self::TENANT)
+        );
+        sort($ids);
+
+        return array_values($ids);
+    }
+
+    private function revoke(int $roleId, string $permission): void
+    {
+        $this->pdo->prepare(
+            'DELETE FROM role_permissions
+              WHERE role_id = ?
+                AND permission_id = (SELECT id FROM permissions WHERE name = ?)'
+        )->execute([$roleId, $permission]);
+    }
+
     private function issueRoute(): Response
     {
         return $this->post("/api/documents/{$this->documentId}/routes", self::DEAN, [
@@ -547,6 +743,11 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
         $request->user = (object) ['profile_id' => $callerId];
 
         return match (true) {
+            // Before the bare `/routes` arm: `str_ends_with` would never match
+            // this path, but the ordering says out loud which is the more
+            // specific route, as the router's own registration order does.
+            str_ends_with($path, '/routes/from-template')
+                => $this->handler->createFromTemplate($request, $params),
             str_ends_with($path, '/routes') => $this->handler->create($request, $params),
             str_contains($path, '/actions') => $this->handler->act($request, $params),
             default => throw new \LogicException("no POST mapping for {$path}"),
@@ -677,6 +878,10 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
         // proves acting needs no permission.
         $this->grant($pdo, self::ROLE_DEAN, CorePermissions::DOCUMENTS_READ);
         $this->grant($pdo, self::ROLE_DEAN, CorePermissions::DOCUMENTS_ROUTE);
+        // Migration 120 grants this to `documents:route` holders, because the
+        // people who pick a design when routing a document are an audience for
+        // it. Mirrored here so the fixture matches a real install.
+        $this->grant($pdo, self::ROLE_DEAN, CorePermissions::ROUTE_TEMPLATES_READ);
         $this->grant($pdo, self::ROLE_HEAD, CorePermissions::DOCUMENTS_READ);
         $this->grant($pdo, 103, CorePermissions::DOCUMENTS_READ);
         $this->grant($pdo, 104, CorePermissions::DOCUMENTS_READ);
