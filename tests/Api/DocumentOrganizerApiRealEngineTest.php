@@ -903,13 +903,35 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
     }
 
     /**
-     * A sorted list still pages without losing or repeating a row.
+     * A tie in the sort key is broken by `id DESC`, so a sorted list pages
+     * without losing or repeating a row.
      *
-     * The tie-breaker is the point: three documents sharing a template name have
-     * no defined order among themselves, so the engine may return them
-     * differently for page 1 and page 2, and a row that crosses the boundary is
-     * shown twice or never. Nothing errors and the total still adds up — the
-     * symptom is a document the reader concludes was never issued.
+     * WHY THIS ASSERTS AN EXACT ORDER AND NOT MERELY "NO DUPLICATES"
+     * -------------------------------------------------------------
+     * It used to assert only that four page-walks yielded four distinct titles,
+     * and that version PASSED with the `, id DESC` tie-breaker deleted from
+     * {@see \Whity\Core\Document\DocumentRepository::orderSql()} — on SQLite
+     * and on real PostgreSQL both. It was not evidence for the property it
+     * describes, and nobody had watched it fail.
+     *
+     * The reason is that duplication across pages needs the engine to order the
+     * tied rows DIFFERENTLY between two separate queries, and on a four-row heap
+     * it has no reason to: a sequential scan returns physical order, which is
+     * insertion order, which is stable. The bug is real at volume — once a plan
+     * flips to an index scan, or a row is updated and moves in the heap, or the
+     * rows arrive from parallel workers — and none of that is reproducible in a
+     * fixture.
+     *
+     * What IS deterministic is WHICH order a total sort must produce. All four
+     * documents share one `template_name`, so the sort key ties on every one of
+     * them and the tie-breaker alone decides: `id DESC`, newest first, the exact
+     * reverse of the order they were issued in. Without the tie-breaker both
+     * engines fall back to insertion order and return the reverse of that. So
+     * the assertion below fails the moment the tie-breaker is gone, which is the
+     * only mechanism that makes the paging safe in the first place.
+     *
+     * The page-walk is kept because it is the property being protected — it just
+     * cannot carry the proof on its own.
      */
     public function testASortedListPagesWithoutLosingOrRepeatingARow(): void
     {
@@ -918,6 +940,18 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             $this->issueFromTemplate(self::AUDITOR, $templateId, $title);
         }
 
+        // Every row ties on the sort key, so the tie-breaker decides the whole
+        // order: `id DESC` is newest-issued first.
+        $expected = ['Four', 'Three', 'Two', 'One'];
+
+        self::assertSame(
+            $expected,
+            self::titles(self::decode($this->list(self::AUDITOR, ['sort' => 'template_name']))),
+            'a tie in the sort key must be broken by id DESC, not left to the engine'
+        );
+
+        // The same order, arrived at one page at a time. A page-walk that
+        // disagrees with the unpaged read is the loss/repetition this guards.
         $seen = [];
         for ($page = 1; $page <= 4; $page++) {
             $body = self::decode($this->list(self::AUDITOR, [
@@ -928,8 +962,11 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             $seen = [...$seen, ...self::titles($body)];
         }
 
-        self::assertCount(4, $seen);
-        self::assertCount(4, array_unique($seen), 'a tie in the sort key must not repeat a row across pages');
+        self::assertSame($expected, $seen, 'paging must not reorder, drop or repeat a tied row');
+        // A positive control on the same data: four DISTINCT titles were issued,
+        // so an assertion that passed on an empty or short walk would be passing
+        // on nothing.
+        self::assertCount(4, array_unique($seen));
     }
 
     // ── 3. visibility is re-applied through every folder ───────────────────
