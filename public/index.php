@@ -2112,6 +2112,10 @@ $routeRepository = new \Whity\Core\Document\Routing\RouteRepository($db->getPdo(
 $routeStepRepository = new \Whity\Core\Document\Routing\RouteStepRepository($db->getPdo());
 $routeEventRepository = new \Whity\Core\Document\Routing\RouteEventRepository($db->getPdo());
 $routeRecipientRepository = new \Whity\Core\Document\Routing\RouteRecipientRepository($db->getPdo());
+// #1014 — the verdict edges. Shared by the engine (which reads one edge per
+// decided act) and the handler (which lists a route's whole graph back to an
+// editor), for the same reason the recipient repository is shared above.
+$routeEdgeRepository = new \Whity\Core\Document\Routing\RouteEdgeRepository($db->getPdo());
 
 // Resource-scoped role grants. Built HERE rather than inline at the grants
 // handler further down (and now above the DESIGNER handlers too, because the
@@ -2267,6 +2271,7 @@ $documentRouter = new \Whity\Core\Document\Routing\DocumentRouter(
     $routeStepRepository,
     $routeEventRepository,
     $routeRecipientRepository,
+    $routeEdgeRepository,
     $routingRuleRegistry,
     $settingsService,
     $hookManager
@@ -2277,6 +2282,7 @@ $documentRoutingHandler = new \Whity\Api\DocumentRoutingApiHandler(
     $routeStepRepository,
     $routeEventRepository,
     $routeRecipientRepository,
+    $routeEdgeRepository,
     $documentRouter,
     $routingRuleRegistry,
     $documentVisibilityPolicy,

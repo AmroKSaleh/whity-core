@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Core\Document\Organizer;
 
+use Whity\Core\Document\Routing\RouteVerdict;
+
 /**
  * The folders core ships (#978, implementing #947 item 5; completed here).
  *
@@ -85,6 +87,8 @@ final class CoreDocumentViews
     public const BELOW_MY_UNIT = 'below-my-unit';
     public const AWAITING_ME = 'awaiting-me';
     public const ACTED_ON_BY_ME = 'acted-on-by-me';
+    public const APPROVED_BY_ME = 'approved-by-me';
+    public const REJECTED_BY_ME = 'rejected-by-me';
     public const PASSED_THROUGH_MY_UNIT = 'passed-through-my-unit';
     public const STARRED = 'starred';
     public const COLLECTION = 'collection';
@@ -225,6 +229,58 @@ final class CoreDocumentViews
                 new DocumentCriteria(actedOnByProfileId: $ctx->callerProfileId)
             ),
             60,
+        ));
+
+        // ── #1014's two VERDICT folders ─────────────────────────────────────
+        //
+        // "Acted on by me" above is deliberately left alone and still means every
+        // act, notes included. These two are not a replacement for it and not a
+        // narrowing of it: a person looking for "the thing I approved last
+        // Tuesday" and a person looking for "everything I have touched" are
+        // asking different questions, and answering the second with the first is
+        // what makes a folder stop being opened.
+        //
+        // TWO FOLDERS RATHER THAN ONE WITH A PARAMETER. A `verdict` parameter on
+        // a single "decided by me" would put the difference behind a control, and
+        // the difference is the whole point — approved and rejected are the two
+        // states #1014 says a user will expect to tell apart at a glance. The
+        // unit folders take a parameter because "my unit" and "that unit" are the
+        // same question about a different subject; these are different questions.
+        //
+        // Both anchor on the caller and therefore need no `unanchored` branch: a
+        // person who has approved nothing gets an honest empty page, which is
+        // checkable, unlike "your unit has raised nothing" said to somebody with
+        // no unit.
+        $registry->register(new DocumentView(
+            self::APPROVED_BY_ME,
+            'Approved by me',
+            'Documents you authorised at an approval step.',
+            self::GROUP_DERIVED,
+            [CoreDocumentSubstrates::ROUTING_VERDICT],
+            [],
+            static fn (DocumentViewContext $ctx): DocumentViewResolution => DocumentViewResolution::of(
+                new DocumentCriteria(
+                    verdictByProfileId: $ctx->callerProfileId,
+                    verdict: RouteVerdict::APPROVED,
+                )
+            ),
+            61,
+        ));
+
+        $registry->register(new DocumentView(
+            self::REJECTED_BY_ME,
+            'Rejected by me',
+            'Documents you refused at an approval step.',
+            self::GROUP_DERIVED,
+            [CoreDocumentSubstrates::ROUTING_VERDICT],
+            [],
+            static fn (DocumentViewContext $ctx): DocumentViewResolution => DocumentViewResolution::of(
+                new DocumentCriteria(
+                    verdictByProfileId: $ctx->callerProfileId,
+                    verdict: RouteVerdict::REJECTED,
+                )
+            ),
+            62,
         ));
 
         // THE SUBTREE, not the single unit. "Passed through my unit" asked of a

@@ -103,7 +103,13 @@ final class SettingsApiRealEngineTest extends TestCase
         // ten faces is enough to recognise a departmental group and not enough
         // to recognise a faculty-wide one, and an operator running both should be
         // able to raise one without raising the other.
-        self::assertCount(15, $data['registry']);
+        // 16 since #1014 added documents.routing_approval_quorum - what "this
+        // node approved" MEANS when an approval step fans out to many people.
+        // Per-tenant rather than governance: it grants nobody anything, it says
+        // how many of the people already asked have to say yes, and one tenant
+        // routing three-person sign-offs wants a different answer from one
+        // circulating faculty-wide notices.
+        self::assertCount(16, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

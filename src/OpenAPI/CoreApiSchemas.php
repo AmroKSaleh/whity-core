@@ -3159,7 +3159,28 @@ final class CoreApiSchemas
                 'rule_kind' => self::str(),
                 'rule_config' => ['type' => 'object', 'additionalProperties' => true],
                 'label' => self::str(true),
-            ], ['id', 'position', 'rule_kind', 'rule_config']),
+                // #1014. `decision` is whether this step is a GATE - answered
+                // with a verdict rather than a forward. Published rather than
+                // inferred from the edges, because a gate at the END of a route
+                // has no outgoing edge and still demands one.
+                'decision' => self::bool(),
+                // The step's own override of what "this node approved" means when
+                // it fans out to many people. NULL is not "no quorum": it defers
+                // to the tenant's `documents.routing_approval_quorum` setting,
+                // which defaults to `all`.
+                'decision_quorum' => ['type' => 'string', 'enum' => ['all', 'any', 'majority'], 'nullable' => true],
+            ], ['id', 'position', 'rule_kind', 'rule_config', 'decision']),
+            // Where a settled VERDICT sends the document (#1014, migration 119).
+            // A flat list on the route rather than fields on a step, because an
+            // edge is a relationship between two steps and belongs to neither -
+            // and because a node editor reads a node list and an edge list.
+            'DocumentRouteEdge' => self::object([
+                'id' => self::int(),
+                'route_id' => self::int(),
+                'from_step_id' => self::int(),
+                'to_step_id' => self::int(),
+                'verdict' => ['type' => 'string', 'enum' => ['approved', 'rejected']],
+            ], ['id', 'route_id', 'from_step_id', 'to_step_id', 'verdict']),
             'DocumentRoute' => self::object([
                 'id' => self::int(),
                 'document_id' => self::int(),
@@ -3167,7 +3188,8 @@ final class CoreApiSchemas
                 'created_by' => self::int(true),
                 'created_at' => self::str(),
                 'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteStep')],
-            ], ['id', 'document_id', 'title', 'created_at', 'steps']),
+                'edges' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteEdge')],
+            ], ['id', 'document_id', 'title', 'created_at', 'steps', 'edges']),
             'DocumentRouteListResponse' => self::listEnvelope('DocumentRoute'),
             // `resolved` and `delivered` are on the envelope rather than on the
             // route, because they describe what THIS request did rather than a
@@ -3191,6 +3213,25 @@ final class CoreApiSchemas
                         'rule_kind' => self::str(),
                         'rule_config' => ['type' => 'object', 'additionalProperties' => true],
                         'label' => self::str(true),
+                        // #1014. `decision` turns the step into a gate. The other
+                        // three are refused outright when it is absent or false -
+                        // a quorum or an edge on a step that produces no verdict
+                        // is a stored intention that silently does nothing.
+                        'decision' => self::bool(true),
+                        'decision_quorum' => [
+                            'type' => 'string',
+                            'enum' => ['all', 'any', 'majority'],
+                            'nullable' => true,
+                        ],
+                        // Targets are named by 1-BASED POSITION in this same
+                        // `steps` array, not by id: while a route is being
+                        // composed its steps have no ids yet, and the position is
+                        // the only handle an author has. Reads publish ids.
+                        // Backwards edges are legal ("rejected goes back to
+                        // step 1 for correction"); an edge onto the step itself
+                        // is not.
+                        'on_approved' => self::int(true),
+                        'on_rejected' => self::int(true),
                     ], ['rule_kind']),
                 ],
             ], ['steps']),
@@ -3214,6 +3255,11 @@ final class CoreApiSchemas
                 // was never involved.
                 'to_ou_id' => self::int(true),
                 'note' => self::str(true),
+                // #1014: what the actor DECIDED, which is a different fact from
+                // what they DID. NULL on every act that decided nothing - every
+                // act on a circulation step, every note, and every event recorded
+                // before migration 119. It never means "not approved".
+                'verdict' => ['type' => 'string', 'enum' => ['approved', 'rejected'], 'nullable' => true],
                 'occurred_at' => self::str(),
             ], ['id', 'document_id', 'route_id', 'action', 'occurred_at']),
             'DocumentTrailListResponse' => self::paginatedListEnvelope('DocumentTrailEvent'),
@@ -3245,11 +3291,22 @@ final class CoreApiSchemas
                 // Required for `noted` (an empty note records nothing), optional
                 // on the other three.
                 'note' => self::str(true),
+                // #1014. REQUIRED with `acknowledged` on a decision step and
+                // refused everywhere else - including on a circulation step,
+                // where a recorded verdict nothing routes on would read later as
+                // an authorisation that was never asked for.
+                'verdict' => ['type' => 'string', 'enum' => ['approved', 'rejected'], 'nullable' => true],
             ], ['action']),
             'DocumentRouteActionResponse' => self::object([
                 'data' => SchemaBuilder::ref('DocumentTrailEvent'),
                 'resolved' => self::int(),
                 'delivered' => self::int(),
+                // What the STEP concluded, which is NOT what the caller said: a
+                // quorum of `all` means two of three approvals conclude nothing,
+                // and this stays null until the third arrives. On the envelope
+                // rather than on the event for the reason the two counts are - it
+                // describes what this request did, not a property of the record.
+                'decided' => ['type' => 'string', 'enum' => ['approved', 'rejected'], 'nullable' => true],
             ], ['data', 'resolved', 'delivered']),
 
             // -- The inbox (#881, first source contributed by #947 item 3) -----

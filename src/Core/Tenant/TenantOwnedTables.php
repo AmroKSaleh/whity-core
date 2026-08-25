@@ -150,6 +150,14 @@ final class TenantOwnedTables
         'document_route_events'      => '112_create_document_routing.php',
         'document_route_recipients'  => '112_create_document_routing.php',
 
+        // #1014 — where a VERDICT sends a document (migration 119). The
+        // branching seam migration 112 named and deliberately left unbuilt, keyed
+        // by the verdict because that is the condition an editor can draw.
+        // Tenant-owned with an explicit `tenant_id` like its four siblings, so
+        // the predicate guard polices an edge read directly rather than through
+        // a join to the route.
+        'document_route_edges'       => '119_add_route_verdicts_and_branching.php',
+
         // #999 — named USER GROUPS (migration 116). One row per group: a name
         // plus the `rule_kind` + `rule_config` pair that says which people it
         // contains. There is deliberately NO `user_group_members` table beside

@@ -3898,16 +3898,21 @@ export interface components {
             created_by?: number | null;
             created_at: string;
             steps: components["schemas"]["DocumentRouteStep"][];
+            edges: components["schemas"]["DocumentRouteEdge"][];
         };
         DocumentRouteActionRequest: {
             /** @enum {string} */
             action: "forwarded" | "acknowledged" | "returned" | "noted";
             note?: string | null;
+            /** @enum {string|null} */
+            verdict?: "approved" | "rejected" | null;
         };
         DocumentRouteActionResponse: {
             data: components["schemas"]["DocumentTrailEvent"];
             resolved: number;
             delivered: number;
+            /** @enum {string|null} */
+            decided?: "approved" | "rejected" | null;
         };
         DocumentRouteCreateRequest: {
             title?: string | null;
@@ -3917,7 +3922,20 @@ export interface components {
                     [key: string]: unknown;
                 };
                 label?: string | null;
+                decision?: boolean | null;
+                /** @enum {string|null} */
+                decision_quorum?: "all" | "any" | "majority" | null;
+                on_approved?: number | null;
+                on_rejected?: number | null;
             }[];
+        };
+        DocumentRouteEdge: {
+            id: number;
+            route_id: number;
+            from_step_id: number;
+            to_step_id: number;
+            /** @enum {string} */
+            verdict: "approved" | "rejected";
         };
         DocumentRouteListResponse: {
             data: components["schemas"]["DocumentRoute"][];
@@ -3951,6 +3969,9 @@ export interface components {
                 [key: string]: unknown;
             };
             label?: string | null;
+            decision: boolean;
+            /** @enum {string|null} */
+            decision_quorum?: "all" | "any" | "majority" | null;
         };
         DocumentStarResponse: {
             data: components["schemas"]["DocumentCollection"] | null;
@@ -4015,6 +4036,8 @@ export interface components {
             from_ou_id?: number | null;
             to_ou_id?: number | null;
             note?: string | null;
+            /** @enum {string|null} */
+            verdict?: "approved" | "rejected" | null;
             occurred_at: string;
         };
         DocumentTrailListResponse: {

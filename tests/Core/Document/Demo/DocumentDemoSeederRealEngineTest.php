@@ -24,6 +24,7 @@ use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
 use Whity\Core\Document\Routing\RoleRuleResolver;
+use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
@@ -169,6 +170,7 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
                 new RouteStepRepository($this->pdo),
                 new RouteEventRepository($this->pdo),
                 new RouteRecipientRepository($this->pdo),
+                new RouteEdgeRepository($this->pdo),
                 $rules,
                 $settings,
                 null

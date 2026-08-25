@@ -16,6 +16,7 @@ use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\DocumentRoutingInboxSource;
 use Whity\Core\Document\Routing\RouteAction;
+use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
@@ -117,6 +118,8 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
             new TenantSettingsRepository($this->pdo)
         );
 
+        $edges = new RouteEdgeRepository($this->pdo);
+
         $visibility = new DocumentVisibilityPolicy(
             $this->recipients,
             new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
@@ -128,7 +131,18 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
             $steps,
             $events,
             $this->recipients,
-            new DocumentRouter($this->pdo, $routes, $steps, $events, $this->recipients, $rules, $settings, null),
+            $edges,
+            new DocumentRouter(
+                $this->pdo,
+                $routes,
+                $steps,
+                $events,
+                $this->recipients,
+                $edges,
+                $rules,
+                $settings,
+                null
+            ),
             $rules,
             $visibility,
             new RoleChecker($db, new PermissionRegistry())

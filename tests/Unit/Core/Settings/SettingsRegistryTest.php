@@ -44,6 +44,11 @@ final class SettingsRegistryTest extends TestCase
              'documents.persist_enabled',
              // #947 item 3 - routing ceilings, tenant-overridable like the render ones.
              'documents.routing_max_steps', 'documents.routing_max_recipients_per_step',
+             // #1014: what "this node approved" MEANS when an approval step fans
+             // out to many people. Tenant-overridable for the same reason the
+             // ceilings are, and NOT governance: it grants nobody anything, it
+             // says how many of the people already asked have to say yes.
+             'documents.routing_approval_quorum',
              // #999: how many people a USER GROUP preview SHOWS beside its
              // (always exact) count. Tenant-overridable — see the governance
              // test below for why this one is not operator-only.
@@ -135,7 +140,17 @@ final class SettingsRegistryTest extends TestCase
         self::assertContains('groups.preview_sample_size', SettingsRegistry::tenantTextKeys());
         self::assertFalse(SettingsRegistry::isGlobalOnly('groups.preview_sample_size'));
         self::assertSame('10', SettingsRegistry::defaultFor('groups.preview_sample_size'));
-        self::assertCount(15, SettingsRegistry::tenantTextKeys());
+
+        // #1014's approval quorum is per-tenant overridable too, and its default
+        // is the STRICTEST rule rather than the most convenient one: approving
+        // with too few people is a silent authority failure found in an audit
+        // years later, while requiring too many is a document that visibly stops
+        // and a complaint the same afternoon.
+        self::assertContains('documents.routing_approval_quorum', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_approval_quorum'));
+        self::assertSame('all', SettingsRegistry::defaultFor('documents.routing_approval_quorum'));
+
+        self::assertCount(16, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -258,8 +273,8 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        // 57 since #999 added groups.preview_sample_size.
-        self::assertCount(57, $describe);
+        // 58 since #1014 added documents.routing_approval_quorum.
+        self::assertCount(58, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

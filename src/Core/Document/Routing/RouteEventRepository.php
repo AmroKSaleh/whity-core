@@ -71,17 +71,24 @@ final class RouteEventRepository
      * outside {@see RouteAction::all()} is refused by the database rather than
      * stored as a row nothing renders.
      *
+     * `verdict` (#1014, migration 119) is NULL for every act that said nothing
+     * about approval — which is every act on a circulation step, every `noted`,
+     * and every row written before that migration. It is never a way of saying
+     * "not approved": absence and refusal are different facts, and a reader that
+     * conflated them would invent a rejection for every document ever
+     * circulated. {@see RouteVerdict}.
+     *
      * @param array{route_id: int, step_id?: ?int, actor_profile_id?: ?int, action: string,
-     *              from_ou_id?: ?int, to_ou_id?: ?int, note?: ?string} $event
+     *              from_ou_id?: ?int, to_ou_id?: ?int, note?: ?string, verdict?: ?string} $event
      */
     public function append(int $tenantId, int $documentId, array $event): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_route_events
                  (tenant_id, document_id, route_id, step_id, actor_profile_id,
-                  action, from_ou_id, to_ou_id, note, occurred_at)
+                  action, from_ou_id, to_ou_id, note, verdict, occurred_at)
              VALUES (:tenant_id, :document_id, :route_id, :step_id, :actor_profile_id,
-                     :action, :from_ou_id, :to_ou_id, :note, NOW())'
+                     :action, :from_ou_id, :to_ou_id, :note, :verdict, NOW())'
         );
         $stmt->execute([
             ':tenant_id' => $tenantId,
@@ -93,6 +100,7 @@ final class RouteEventRepository
             ':from_ou_id' => $event['from_ou_id'] ?? null,
             ':to_ou_id' => $event['to_ou_id'] ?? null,
             ':note' => $event['note'] ?? null,
+            ':verdict' => $event['verdict'] ?? null,
         ]);
 
         return (int) $this->db->lastInsertId();
@@ -107,7 +115,7 @@ final class RouteEventRepository
     {
         $stmt = $this->db->prepare(
             'SELECT id, tenant_id, document_id, route_id, step_id, actor_profile_id,
-                    action, from_ou_id, to_ou_id, note, occurred_at
+                    action, from_ou_id, to_ou_id, note, verdict, occurred_at
                FROM document_route_events
               WHERE id = :id AND tenant_id = :tenant_id'
         );
@@ -131,7 +139,7 @@ final class RouteEventRepository
     {
         $stmt = $this->db->prepare(
             'SELECT id, tenant_id, document_id, route_id, step_id, actor_profile_id,
-                    action, from_ou_id, to_ou_id, note, occurred_at
+                    action, from_ou_id, to_ou_id, note, verdict, occurred_at
                FROM document_route_events
               WHERE tenant_id = :tenant_id AND document_id = :document_id
               ORDER BY id ASC
@@ -187,6 +195,9 @@ final class RouteEventRepository
             'from_ou_id' => $row['from_ou_id'] !== null ? (int) $row['from_ou_id'] : null,
             'to_ou_id' => $row['to_ou_id'] !== null ? (int) $row['to_ou_id'] : null,
             'note' => $row['note'] !== null ? (string) $row['note'] : null,
+            // NULL means "this act said nothing about approval", never "not
+            // approved". See append().
+            'verdict' => isset($row['verdict']) && $row['verdict'] !== null ? (string) $row['verdict'] : null,
             'occurred_at' => (string) $row['occurred_at'],
         ];
     }

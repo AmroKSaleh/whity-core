@@ -9,10 +9,12 @@ use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RouteAction;
+use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
 use Whity\Core\Document\Routing\RouteStepRepository;
+use Whity\Core\Document\Routing\RouteVerdict;
 use Whity\Core\Document\Routing\RoutingPresenter;
 use Whity\Core\Document\Routing\RoutingRejectedException;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
@@ -53,6 +55,25 @@ use Whity\Http\PaginationParams;
  * visibility of the document, because the person best placed to correct the
  * record is often one who has already acted and whose row is closed.
  *
+ * A DECISION STEP CHANGES WHAT `/actions` ACCEPTS (#1014)
+ * ------------------------------------------------------
+ * On a step marked `decision`, the only answer is `acknowledged` carrying a
+ * `verdict` of `approved` or `rejected`; `forwarded` is refused, and a verdict
+ * on a circulation step is refused too. Both refusals are 422s that say which
+ * kind of step the caller is standing on, because the alternative — accepting
+ * and ignoring — writes an approval nobody asked for onto a trail that cannot be
+ * corrected.
+ *
+ * The response's `decided` is NOT the caller's own verdict. It is what the STEP
+ * concluded, which stays null while a quorum is still short: under the default
+ * `all`, two of three approvals conclude nothing, and a client that rendered the
+ * caller's verdict as the outcome would tell two people a document was approved
+ * before it was.
+ *
+ * The step is not gated by a permission any more than acting is. Whether a
+ * verdict is available to you is decided by the route that reached you, not by a
+ * tenant-wide grant — see above.
+ *
  * NO 403s ON A MISS
  * -----------------
  * A document the caller may not see is reported as missing. A 403 confirms the
@@ -76,6 +97,7 @@ final class DocumentRoutingApiHandler
         private readonly RouteStepRepository $steps,
         private readonly RouteEventRepository $events,
         private readonly RouteRecipientRepository $recipients,
+        private readonly RouteEdgeRepository $edges,
         private readonly DocumentRouter $router,
         private readonly RoutingRuleRegistry $rules,
         private readonly DocumentVisibilityPolicy $visibility,
@@ -159,7 +181,7 @@ final class DocumentRoutingApiHandler
         }
 
         return Response::json([
-            'data' => RoutingPresenter::route($issued['route'], $issued['steps']),
+            'data' => RoutingPresenter::route($issued['route'], $issued['steps'], $issued['edges']),
             'resolved' => $issued['resolved'],
             'delivered' => $issued['delivered'],
         ], 201);
@@ -182,7 +204,8 @@ final class DocumentRoutingApiHandler
         $data = array_map(
             fn (array $route): array => RoutingPresenter::route(
                 $route,
-                $this->steps->listForRoute((int) $route['id'], $tenantId)
+                $this->steps->listForRoute((int) $route['id'], $tenantId),
+                $this->edges->listForRoute((int) $route['id'], $tenantId)
             ),
             $this->routes->listForDocument($documentId, $tenantId)
         );
@@ -283,6 +306,18 @@ final class DocumentRoutingApiHandler
             );
         }
 
+        // #1014. Validated for SHAPE here and for FITNESS in the engine, which is
+        // the same split the action vocabulary already has: this check can name
+        // the two verdicts, while only the engine knows whether the step the
+        // caller is standing on is a gate at all.
+        $verdict = $body['verdict'] ?? null;
+        if ($verdict !== null && (!is_string($verdict) || !RouteVerdict::isValid($verdict))) {
+            return Response::error(
+                "'verdict' must be one of: " . implode(', ', RouteVerdict::all()),
+                422
+            );
+        }
+
         $note = $body['note'] ?? null;
         if ($note !== null && !is_string($note)) {
             return Response::error("'note' must be a string when present", 422);
@@ -295,7 +330,14 @@ final class DocumentRoutingApiHandler
         }
 
         try {
-            $outcome = $this->router->act($tenantId, $callerId, $route, $action, $note);
+            $outcome = $this->router->act(
+                $tenantId,
+                $callerId,
+                $route,
+                $action,
+                $note,
+                is_string($verdict) ? $verdict : null,
+            );
         } catch (RoutingRejectedException $e) {
             return Response::error($e->clientMessage, 422);
         }
@@ -304,6 +346,12 @@ final class DocumentRoutingApiHandler
             'data' => RoutingPresenter::event($outcome['event']),
             'resolved' => $outcome['resolved'],
             'delivered' => $outcome['delivered'],
+            // What the STEP concluded, which is not what the caller said: under a
+            // quorum of `all`, two of three approvals conclude nothing. Null
+            // while the step is still open, and the reason it is on the envelope
+            // rather than on the event is the reason `resolved`/`delivered` are —
+            // it describes what THIS request did, not a property of the record.
+            'decided' => $outcome['decided'],
         ], 201);
     }
 

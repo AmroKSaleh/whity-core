@@ -161,6 +161,14 @@ final class DocumentViewRegistryTest extends TestCase
             // column on the recipient row rather than a question for the trail.
             CoreDocumentViews::AWAITING_ME => [CoreDocumentSubstrates::ROUTING_RECIPIENTS],
             CoreDocumentViews::ACTED_ON_BY_ME => [CoreDocumentSubstrates::ROUTING_TRAIL],
+            // #1014's two verdict folders declare ROUTING_VERDICT and NOT
+            // ROUTING_TRAIL, even though they query the same table. A column is
+            // the fact they need; naming the coarser substrate as well would
+            // make them available on an installation that has the trail without
+            // the verdict column, where they would render an empty page that
+            // reads as "you have approved nothing".
+            CoreDocumentViews::APPROVED_BY_ME => [CoreDocumentSubstrates::ROUTING_VERDICT],
+            CoreDocumentViews::REJECTED_BY_ME => [CoreDocumentSubstrates::ROUTING_VERDICT],
             // Two, and neither is `documents.origin_ou`: the trail's own unit
             // columns, plus a hierarchy to walk them against.
             CoreDocumentViews::PASSED_THROUGH_MY_UNIT => [
@@ -228,6 +236,8 @@ final class DocumentViewRegistryTest extends TestCase
             [
                 CoreDocumentViews::AWAITING_ME,
                 CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::APPROVED_BY_ME,
+                CoreDocumentViews::REJECTED_BY_ME,
                 CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
             ] as $key
         ) {
@@ -246,11 +256,22 @@ final class DocumentViewRegistryTest extends TestCase
             $substrates->unavailable()
         );
         self::assertEqualsCanonicalizing(
-            [CoreDocumentSubstrates::ROUTING_RECIPIENTS, CoreDocumentSubstrates::ROUTING_TRAIL],
+            [
+                CoreDocumentSubstrates::ROUTING_RECIPIENTS,
+                CoreDocumentSubstrates::ROUTING_TRAIL,
+                CoreDocumentSubstrates::ROUTING_VERDICT,
+            ],
             $missing
         );
-        foreach ($substrates->unavailable() as $substrate) {
-            self::assertStringContainsString('migration 112', (string) $substrate->provenance);
+        // Each names the work that supplies it, and they do not all name the
+        // same one: the verdict arrived in 118, and an operator told to run 112
+        // when what they are missing is 118 has been sent to the wrong place.
+        $provenance = array_map(
+            static fn (DocumentSubstrate $s): string => (string) $s->provenance,
+            $substrates->unavailable()
+        );
+        foreach ($provenance as $text) {
+            self::assertMatchesRegularExpression('/migration 11[29]/', $text);
         }
     }
 
@@ -275,6 +296,43 @@ final class DocumentViewRegistryTest extends TestCase
         self::assertContains(CoreDocumentViews::AWAITING_ME, $keys, 'the inbox reads recipients, not the trail');
         self::assertNotContains(CoreDocumentViews::ACTED_ON_BY_ME, $keys);
         self::assertNotContains(CoreDocumentViews::PASSED_THROUGH_MY_UNIT, $keys);
+        // The verdict folders read a COLUMN on the trail, so losing the table
+        // takes them as well — but by their own declaration, not by borrowing
+        // the trail substrate's.
+        self::assertNotContains(CoreDocumentViews::APPROVED_BY_ME, $keys);
+        self::assertNotContains(CoreDocumentViews::REJECTED_BY_ME, $keys);
+    }
+
+    /**
+     * An installation on migration 112 but not 118 keeps its three routing
+     * folders and loses exactly the two verdict ones.
+     *
+     * This is what the separate substrate BUYS, and it is asserted rather than
+     * described because the tempting declaration — adding `verdict` to the trail
+     * substrate — passes every other test in this file while making "acted on by
+     * me" and "passed through my unit" vanish on a half-migrated installation,
+     * for a reason that has nothing to do with either of them.
+     */
+    public function testTheVerdictColumnGoingMissingTakesOnlyTheVerdictFolders(): void
+    {
+        $schema = $this->fullSchema();
+        $schema['document_route_events'] = array_values(array_filter(
+            $schema['document_route_events'],
+            static fn (string $c): bool => $c !== 'verdict'
+        ));
+
+        $substrates = new DocumentSubstrateRegistry($this->schema($schema));
+        CoreDocumentSubstrates::registerInto($substrates);
+        $views = new DocumentViewRegistry($substrates);
+        CoreDocumentViews::registerInto($views);
+
+        $keys = array_map(static fn (DocumentView $v): string => $v->key, $views->available());
+
+        self::assertContains(CoreDocumentViews::ACTED_ON_BY_ME, $keys);
+        self::assertContains(CoreDocumentViews::PASSED_THROUGH_MY_UNIT, $keys);
+        self::assertContains(CoreDocumentViews::AWAITING_ME, $keys);
+        self::assertNotContains(CoreDocumentViews::APPROVED_BY_ME, $keys);
+        self::assertNotContains(CoreDocumentViews::REJECTED_BY_ME, $keys);
     }
 
     /**
@@ -331,10 +389,19 @@ final class DocumentViewRegistryTest extends TestCase
         CoreDocumentSubstrates::registerInto($partial);
 
         self::assertFalse($partial->isAvailable(CoreDocumentSubstrates::ROUTING_TRAIL));
+        self::assertFalse(
+            $partial->isAvailable(CoreDocumentSubstrates::ROUTING_VERDICT),
+            'the verdict lives on the trail table, so it cannot outlive it'
+        );
         self::assertTrue($partial->isAvailable(CoreDocumentSubstrates::ROUTING_RECIPIENTS));
-        $missing = $partial->unavailable();
-        self::assertCount(1, $missing);
-        self::assertStringContainsString('#947 item 3', (string) $missing[0]->provenance);
+        $missing = array_map(
+            static fn (DocumentSubstrate $s): string => $s->key,
+            $partial->unavailable()
+        );
+        self::assertEqualsCanonicalizing(
+            [CoreDocumentSubstrates::ROUTING_TRAIL, CoreDocumentSubstrates::ROUTING_VERDICT],
+            $missing
+        );
     }
 
     // ── 3. gating is per substrate ──────────────────────────────────────────
@@ -391,7 +458,7 @@ final class DocumentViewRegistryTest extends TestCase
         self::assertContains(CoreDocumentViews::ACTED_ON_BY_ME, $keys);
     }
 
-    /** On a fully migrated schema, all nine core folders are computable, in rail order. */
+    /** On a fully migrated schema, every core folder is computable, in rail order. */
     public function testAFullyMigratedSchemaOffersEveryCoreFolderInRailOrder(): void
     {
         $views = $this->coreRegistry();
@@ -404,6 +471,8 @@ final class DocumentViewRegistryTest extends TestCase
                 CoreDocumentViews::BELOW_MY_UNIT,
                 CoreDocumentViews::AWAITING_ME,
                 CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::APPROVED_BY_ME,
+                CoreDocumentViews::REJECTED_BY_ME,
                 CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
                 CoreDocumentViews::STARRED,
                 CoreDocumentViews::COLLECTION,
@@ -763,7 +832,7 @@ final class DocumentViewRegistryTest extends TestCase
      * Pinned against the constructor by
      * {@see testTheSlotInventoryCannotDriftFromTheCriteria()}.
      *
-     * @return array<string, int|bool|list<int>|null>
+     * @return array<string, int|bool|string|list<int>|null>
      */
     private static function viewSlots(DocumentCriteria $criteria): array
     {
@@ -773,6 +842,8 @@ final class DocumentViewRegistryTest extends TestCase
             'inCollectionId' => $criteria->inCollectionId,
             'awaitingProfileId' => $criteria->awaitingProfileId,
             'actedOnByProfileId' => $criteria->actedOnByProfileId,
+            'verdictByProfileId' => $criteria->verdictByProfileId,
+            'verdict' => $criteria->verdict,
             'routedThroughOuIds' => $criteria->routedThroughOuIds,
             'matchesNothing' => $criteria->matchesNothing,
         ];
@@ -816,6 +887,11 @@ final class DocumentViewRegistryTest extends TestCase
             ],
             'document_route_events' => [
                 'id', 'tenant_id', 'document_id', 'actor_profile_id', 'from_ou_id', 'to_ou_id',
+                // #1014 (migration 119). Declared by `routing.verdict` and by
+                // nothing else, which is the point: an installation on 112 but
+                // not 118 loses the two verdict folders and keeps the other
+                // three.
+                'verdict',
             ],
         ];
     }
