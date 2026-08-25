@@ -40,6 +40,42 @@ async function openLibrary(page: Page) {
   await expect(page.getByRole('navigation', { name: 'Document folders' })).toBeVisible();
 }
 
+/**
+ * Wait for the document pane to reach a TERMINAL state, and report which one.
+ *
+ * WHY NOT `getByRole('table', { name: 'Documents' })`
+ * --------------------------------------------------
+ * That is what this file used, and it was wrong in a way that passed. The kit's
+ * `DataTable` renders a `<Table aria-label={ariaLabel}>` for its LOADING
+ * skeleton too — same role, same accessible name, five rows of grey bars inside
+ * it. So `expect(table).toBeVisible()` and `expect(table).not.toBeEmpty()` are
+ * both satisfied by the placeholder, and the assertion that was supposed to pin
+ * #756 ("never render placeholder rows") was being satisfied by placeholder
+ * rows. It passed locally against a seeded stack because there really were
+ * documents, and passed against an EMPTY stack because it won the race with the
+ * fetch — then failed in CI, on the one run where the request resolved first and
+ * the empty state had replaced the skeleton. The failing run was the honest one.
+ *
+ * So this waits on markup that exists in NEITHER the skeleton nor the loading
+ * state: a real row's link, or the empty state's own sentence. `.or()` auto-waits
+ * for whichever arrives, which is the property that matters most here — a guard
+ * that does not wait reports "no documents" for a library that simply had not
+ * loaded yet, and a spec built on that skips itself with a reason that is false.
+ * That exact mechanism was found in `document-record.spec.ts` (a `count()` taken
+ * too early), and this helper exists so it is not reintroduced one file over.
+ *
+ * The CI e2e stack seeds with a plain `php public/index.php seed` — no
+ * `--with-fixtures`, no `--with-document-demo` — so the library there has ZERO
+ * documents, while a developer running this locally against a demo-seeded stack
+ * has seven. Both are legitimate; a spec that only holds on one of them is not.
+ */
+async function paneSettled(page: Page): Promise<'rows' | 'empty'> {
+  const anyRow = page.locator('[data-testid^="document-row-"]').first();
+  const emptyTitle = page.getByText('No documents in this folder', { exact: true });
+  await expect(anyRow.or(emptyTitle).first()).toBeVisible({ timeout: 20_000 });
+  return (await page.locator('[data-testid^="document-row-"]').count()) > 0 ? 'rows' : 'empty';
+}
+
 test.describe('the document library', () => {
   test.afterEach(async ({ page }) => {
     // Collections are per-user, so a leftover is invisible to everybody else —
@@ -71,9 +107,29 @@ test.describe('the document library', () => {
     // #756: the pane says something true whether or not there are documents. A
     // library with none must SAY so — never render nothing, and never render
     // placeholder rows.
-    const table = page.getByRole('table', { name: 'Documents' });
-    await expect(table).toBeVisible();
-    await expect(table).not.toBeEmpty();
+    //
+    // Asserted against a TERMINAL state, because the loading skeleton is itself
+    // a `<table aria-label="Documents">` full of placeholder rows — see
+    // paneSettled(). Both branches below assert something substantive, so this
+    // cannot degrade into "whatever the pane did was fine": an empty library
+    // must carry BOTH halves of its explanation, and a populated one must show
+    // a real row with a real address.
+    const state = await paneSettled(page);
+    if (state === 'rows') {
+      const first = page.locator('[data-testid^="document-row-"]').first();
+      await expect(first).toBeVisible();
+      await expect(first).toHaveAttribute('href', /\/admin\/document-library\/\d+$/);
+    } else {
+      await expect(page.getByText('No documents in this folder', { exact: true })).toBeVisible();
+      // The description, not just the title: "says something true" means the
+      // reader is told WHY the folder is empty, which is the half that stops an
+      // empty query reading as a broken screen.
+      await expect(
+        page.getByText(/This folder is a query over what documents record/)
+      ).toBeVisible();
+    }
+    // Whichever state it is, the pane is not the placeholder any more.
+    await expect(page.locator('table[aria-busy="true"]')).toHaveCount(0);
 
     // Every rail entry is either usable or explains itself. A disabled folder
     // with no visible reason is the #951 regression, and it is the one thing
@@ -87,24 +143,49 @@ test.describe('the document library', () => {
 
   test('the layout choice survives a reload', async ({ page }) => {
     await openLibrary(page);
-    await expect(page.getByRole('table', { name: 'Documents' })).toBeVisible();
+    const state = await paneSettled(page);
+    const listBtn = page.getByRole('button', { name: 'List', exact: true });
+    const gridBtn = page.getByRole('button', { name: 'Grid', exact: true });
 
-    await page.getByRole('button', { name: 'Grid', exact: true }).click();
-    await expect(page.getByRole('table', { name: 'Documents' })).toHaveCount(0);
+    // The toggle's own pressed state is the property this test is named for —
+    // it is what localStorage round-trips — and it is the ONLY observable that
+    // distinguishes the two layouts on an empty library, where both render the
+    // same empty state. The previous version asserted `table` counts instead;
+    // on the CI stack (zero documents) `toHaveCount(0)` was trivially true
+    // whether or not the switch had done anything, which is an empty result
+    // standing in for a positive one.
+    await expect(listBtn).toHaveAttribute('aria-pressed', 'true');
+
+    await gridBtn.click();
+    await expect(gridBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(listBtn).toHaveAttribute('aria-pressed', 'false');
+
+    // Where there ARE documents, the pane must genuinely swap markup — a toggle
+    // that flips its own highlight and changes nothing else is the failure the
+    // aria assertions alone cannot see. Where there are none, both layouts
+    // legitimately render the same empty state, and asserting it is still a
+    // positive claim about the grid having rendered at all.
+    if (state === 'rows') {
+      await expect(page.getByRole('list', { name: 'Documents' })).toBeVisible();
+      await expect(page.getByRole('table', { name: 'Documents' })).toHaveCount(0);
+    } else {
+      await expect(page.getByText('No documents in this folder', { exact: true })).toBeVisible();
+    }
 
     await page.reload();
 
     // Still a grid after hydration — the half jsdom cannot exercise.
     await expect(page.getByRole('navigation', { name: 'Document folders' })).toBeVisible();
-    await expect(page.getByRole('table', { name: 'Documents' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Grid', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    );
+    await paneSettled(page);
+    await expect(gridBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(listBtn).toHaveAttribute('aria-pressed', 'false');
 
     // Back to a list, so the next spec in this project starts where it expects.
-    await page.getByRole('button', { name: 'List', exact: true }).click();
-    await expect(page.getByRole('table', { name: 'Documents' })).toBeVisible();
+    await listBtn.click();
+    await expect(listBtn).toHaveAttribute('aria-pressed', 'true');
+    if (state === 'rows') {
+      await expect(page.getByRole('table', { name: 'Documents' })).toBeVisible();
+    }
   });
 
   test('the sort the toolbar offers is one the server accepts', async ({ page }) => {
@@ -150,7 +231,19 @@ test.describe('the document library', () => {
     await expect(entry).toBeVisible();
 
     await entry.click();
-    await expect(page.getByRole('table', { name: 'Documents' })).toBeVisible();
+    // A collection that was created four lines ago is EMPTY — on every stack,
+    // seeded or not. The old assertion here waited for a `<table>`, which could
+    // only ever be satisfied by the PREVIOUS folder's table still being on
+    // screen or by the loading skeleton; it was wrong even against a demo
+    // stack, and passed by racing.
+    //
+    // What is actually true: this collection is now the open folder, and the
+    // pane says the collection-specific thing rather than the generic one. That
+    // sentence is one of the five `libraryEmptyState` resolves and this is the
+    // only place it is exercised end-to-end.
+    await expect(entry).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByText('Nothing is filed here yet', { exact: true })).toBeVisible();
+    await expect(page.locator('table[aria-busy="true"]')).toHaveCount(0);
 
     const renamed = `${COLLECTION} renamed`;
     await page.getByRole('button', { name: 'This collection' }).click();

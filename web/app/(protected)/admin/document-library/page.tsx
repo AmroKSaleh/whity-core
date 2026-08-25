@@ -1,38 +1,38 @@
-"use client";
+'use client';
 
-import { useCallback, useMemo, useState } from "react";
-import { useAuth } from "@/lib/auth-context";
-import { useToast } from "@/lib/toast-context";
-import { useFetch } from "@/hooks/useFetch";
-import { fetchAllPages } from "@/lib/api/fetch-all-pages";
-import { AdminHeader } from "@/components/admin/admin-header";
-import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
-import { Button } from "@amroksaleh/ui/button";
-import { IconFilePlus } from "@tabler/icons-react";
-import { useFormattingLocale, useTranslation } from "@amroksaleh/features/i18n";
-import { useRouter } from "next/navigation";
-import { useCapabilities } from "@/hooks/useCapabilities";
-import { DOCUMENTS_RENDER, DOCUMENTS_ROUTE } from "@/lib/capabilities";
+import { useCallback, useMemo, useState } from 'react';
+import { useAuth } from '@/lib/auth-context';
+import { useToast } from '@/lib/toast-context';
+import { useFetch } from '@/hooks/useFetch';
+import { fetchAllPages } from '@/lib/api/fetch-all-pages';
+import { AdminHeader } from '@/components/admin/admin-header';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
+import { Button } from '@amroksaleh/ui/button';
+import { IconFilePlus } from '@tabler/icons-react';
+import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { useRouter } from 'next/navigation';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { DOCUMENTS_RENDER, DOCUMENTS_ROUTE } from '@/lib/capabilities';
 import {
   CreateDocumentDialog,
   type CreatableTemplate,
-} from "@/components/documents/create-document-dialog";
-import { ViewRail, viewLabel, viewDescription } from "./view-rail";
-import { LibraryToolbar } from "./library-toolbar";
-import { DocumentGrid } from "./document-grid";
+} from '@/components/documents/create-document-dialog';
+import { ViewRail, viewLabel, viewDescription } from './view-rail';
+import { LibraryToolbar } from './library-toolbar';
+import { DocumentGrid } from './document-grid';
 import {
   DocumentActions,
   DocumentTitle,
   StarButton,
   type DocumentItemHandlers,
-} from "./document-item";
+} from './document-item';
 import {
   CreateCollectionDialog,
   DeleteCollectionDialog,
   FileIntoCollectionDialog,
   RenameCollectionDialog,
-} from "./collection-dialogs";
-import { useLibraryEmptyState } from "./library-empty-state";
+} from './collection-dialogs';
+import { useLibraryEmptyState } from './library-empty-state';
 import type {
   AppliedSort,
   DocumentCollection,
@@ -43,7 +43,7 @@ import type {
   DocumentViewsResponse,
   LibraryLayout,
   SortDirection,
-} from "./types";
+} from './types';
 
 /**
  * The document library (#947 item 5) — a Drive-shaped browser over documents
@@ -134,7 +134,7 @@ interface OuOption {
   parent_id: number | null;
 }
 
-const DEFAULT_VIEW = "all";
+const DEFAULT_VIEW = 'all';
 
 /**
  * Where the layout choice is remembered.
@@ -146,28 +146,26 @@ const DEFAULT_VIEW = "all";
  * machine. The consequence is stated rather than hidden: this follows the
  * BROWSER, not the account.
  */
-const LAYOUT_STORAGE_KEY = "wc:document-library:layout";
+const LAYOUT_STORAGE_KEY = 'wc:document-library:layout';
 
 function storedLayout(): LibraryLayout {
-  if (typeof window === "undefined") {
-    return "list";
+  if (typeof window === 'undefined') {
+    return 'list';
   }
   // A try/catch because a browser with site data blocked THROWS on access
   // rather than returning null, and a library that fails to render because it
   // could not read a cosmetic preference is worse than one that opens as a list.
   try {
-    return window.localStorage.getItem(LAYOUT_STORAGE_KEY) === "grid"
-      ? "grid"
-      : "list";
+    return window.localStorage.getItem(LAYOUT_STORAGE_KEY) === 'grid' ? 'grid' : 'list';
   } catch {
-    return "list";
+    return 'list';
   }
 }
 
 export default function DocumentLibraryPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
-  const t = useTranslation("documents");
+  const t = useTranslation('documents');
   const locale = useFormattingLocale();
   const router = useRouter();
   // UI hints only — the server is authoritative on both. `has()` fails CLOSED, so
@@ -183,8 +181,8 @@ export default function DocumentLibraryPage() {
   // is what has been sent. Refetching per keystroke would issue a request per
   // character against a table that can be large, and debouncing here would make
   // the URL and the results disagree for a few hundred milliseconds.
-  const [search, setSearch] = useState("");
-  const [appliedSearch, setAppliedSearch] = useState("");
+  const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
 
   // Sort. `sortDirection` is null until the caller overrides it, because the
   // DEFAULT direction belongs to the server: A→Z for the text columns,
@@ -192,43 +190,33 @@ export default function DocumentLibraryPage() {
   // of the three columns open the wrong way round, and holding the server's rule
   // in two places would let them drift.
   const [sortField, setSortField] = useState<DocumentSortField | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection | null>(
-    null
-  );
+  const [sortDirection, setSortDirection] = useState<SortDirection | null>(null);
 
   const [layout, setLayout] = useState<LibraryLayout>(storedLayout);
 
   const [creatingDocument, setCreatingDocument] = useState(false);
   const [creatingCollection, setCreatingCollection] = useState(false);
-  const [newCollectionName, setNewCollectionName] = useState("");
-  const [renamingCollection, setRenamingCollection] =
-    useState<DocumentCollection | null>(null);
-  const [renameName, setRenameName] = useState("");
-  const [deletingCollection, setDeletingCollection] =
-    useState<DocumentCollection | null>(null);
-  const [filingDocument, setFilingDocument] = useState<DocumentRow | null>(
-    null
-  );
+  const [newCollectionName, setNewCollectionName] = useState('');
+  const [renamingCollection, setRenamingCollection] = useState<DocumentCollection | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [deletingCollection, setDeletingCollection] = useState<DocumentCollection | null>(null);
+  const [filingDocument, setFilingDocument] = useState<DocumentRow | null>(null);
   const [busy, setBusy] = useState(false);
 
   // ── the rail ────────────────────────────────────────────────────────────
 
   const views = useFetch<DocumentViewsResponse>(async () => {
-    const response = await apiClient("/api/v1/documents/views");
+    const response = await apiClient('/api/v1/documents/views');
     if (!response.ok) {
-      throw new Error(
-        t("organizer.error.views", "Failed to load the document folders")
-      );
+      throw new Error(t('organizer.error.views', 'Failed to load the document folders'));
     }
     return (await response.json()) as DocumentViewsResponse;
   }, [apiClient]);
 
   const collections = useFetch<DocumentCollection[]>(async () => {
-    const response = await apiClient("/api/v1/document-collections");
+    const response = await apiClient('/api/v1/document-collections');
     if (!response.ok) {
-      throw new Error(
-        t("organizer.error.collections", "Failed to load your collections")
-      );
+      throw new Error(t('organizer.error.collections', 'Failed to load your collections'));
     }
     const body = (await response.json()) as { data?: DocumentCollection[] };
     return body.data ?? [];
@@ -254,11 +242,9 @@ export default function DocumentLibraryPage() {
       id: number;
       name: string;
       data?: { placeholders?: unknown };
-    }>(apiClient, "/api/v1/document-templates");
+    }>(apiClient, '/api/v1/document-templates');
     if (!result.complete) {
-      throw new Error(
-        t("organizer.error.templates", "Failed to load the full template list")
-      );
+      throw new Error(t('organizer.error.templates', 'Failed to load the full template list'));
     }
     return result.items.map((row) => ({
       id: row.id,
@@ -268,23 +254,14 @@ export default function DocumentLibraryPage() {
       // instead of crashing the picker — it can still be raised from.
       placeholders: Array.isArray(row.data?.placeholders)
         ? row.data.placeholders.flatMap((p) => {
-            if (typeof p !== "object" || p === null) return [];
-            const candidate = p as {
-              key?: unknown;
-              label?: unknown;
-              sample?: unknown;
-            };
-            if (typeof candidate.key !== "string" || candidate.key === "")
-              return [];
+            if (typeof p !== 'object' || p === null) return [];
+            const candidate = p as { key?: unknown; label?: unknown; sample?: unknown };
+            if (typeof candidate.key !== 'string' || candidate.key === '') return [];
             return [
               {
                 key: candidate.key,
-                label:
-                  typeof candidate.label === "string"
-                    ? candidate.label
-                    : candidate.key,
-                sample:
-                  typeof candidate.sample === "string" ? candidate.sample : "",
+                label: typeof candidate.label === 'string' ? candidate.label : candidate.key,
+                sample: typeof candidate.sample === 'string' ? candidate.sample : '',
               },
             ];
           })
@@ -296,11 +273,9 @@ export default function DocumentLibraryPage() {
     // A partial walk is reported rather than presented as the whole tree: an
     // anchor list missing units silently scopes somebody's folder to less than
     // they asked for.
-    const result = await fetchAllPages<OuOption>(apiClient, "/api/v1/ous");
+    const result = await fetchAllPages<OuOption>(apiClient, '/api/v1/ous');
     if (!result.complete) {
-      throw new Error(
-        t("organizer.error.ous", "Failed to load the full unit list")
-      );
+      throw new Error(t('organizer.error.ous', 'Failed to load the full unit list'));
     }
     return result.items;
   }, [apiClient]);
@@ -313,13 +288,10 @@ export default function DocumentLibraryPage() {
   // Memoised so the `?? []` does not mint a new array every render and
   // invalidate the two useMemos below (which the lint rule catches, and which
   // would recompute the rail's props on every keystroke in the search box).
-  const collectionList = useMemo(
-    () => collections.data ?? [],
-    [collections.data]
-  );
+  const collectionList = useMemo(() => collections.data ?? [], [collections.data]);
 
   const starredCollection = useMemo(
-    () => collectionList.find((c) => c.system_key === "starred") ?? null,
+    () => collectionList.find((c) => c.system_key === 'starred') ?? null,
     [collectionList]
   );
 
@@ -332,17 +304,16 @@ export default function DocumentLibraryPage() {
 
   const documents = useFetch<DocumentListResponse>(async () => {
     const params = new URLSearchParams({ view: viewKey, page: String(page) });
-    if (anchorOuId !== null) params.set("ou_id", String(anchorOuId));
-    if (collectionId !== null)
-      params.set("collection_id", String(collectionId));
-    if (appliedSearch !== "") params.set("q", appliedSearch);
+    if (anchorOuId !== null) params.set('ou_id', String(anchorOuId));
+    if (collectionId !== null) params.set('collection_id', String(collectionId));
+    if (appliedSearch !== '') params.set('q', appliedSearch);
     if (sortField !== null) {
-      params.set("sort", sortField);
+      params.set('sort', sortField);
       // Sent only when the caller overrode it. The server refuses `direction`
       // without `sort` for a reason worth honouring here rather than working
       // around: the unnamed default order is a surrogate key, and reversing it
       // would publish that key as a sortable column.
-      if (sortDirection !== null) params.set("direction", sortDirection);
+      if (sortDirection !== null) params.set('direction', sortDirection);
     }
 
     const response = await apiClient(`/api/v1/documents?${params.toString()}`);
@@ -351,24 +322,11 @@ export default function DocumentLibraryPage() {
       // organizational unit" — and surfacing it verbatim is the point: a
       // generic "failed to load" would put this screen back in the position
       // #951 describes, where three unrelated causes read the same.
-      const body = (await response.json().catch(() => null)) as {
-        error?: string;
-      } | null;
-      throw new Error(
-        body?.error ?? t("organizer.error.list", "Failed to load documents")
-      );
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? t('organizer.error.list', 'Failed to load documents'));
     }
     return (await response.json()) as DocumentListResponse;
-  }, [
-    apiClient,
-    viewKey,
-    collectionId,
-    anchorOuId,
-    page,
-    appliedSearch,
-    sortField,
-    sortDirection,
-  ]);
+  }, [apiClient, viewKey, collectionId, anchorOuId, page, appliedSearch, sortField, sortDirection]);
 
   // `refetch` is stable (useFetch memoises it with no deps); the fetch RESULT
   // object is not, so the mutations below depend on these rather than on
@@ -388,7 +346,7 @@ export default function DocumentLibraryPage() {
   }, []);
 
   const selectCollection = useCallback((id: number) => {
-    setViewKey("collection");
+    setViewKey('collection');
     setCollectionId(id);
     setPage(1);
   }, []);
@@ -428,11 +386,11 @@ export default function DocumentLibraryPage() {
   // Falling back to the requested field with `desc` covers the first render only.
   const appliedSort: AppliedSort = documents.data?.sort ?? {
     field: sortField,
-    direction: sortDirection ?? "desc",
+    direction: sortDirection ?? 'desc',
   };
 
   const toggleSortDirection = useCallback(() => {
-    setSortDirection(appliedSort.direction === "asc" ? "desc" : "asc");
+    setSortDirection(appliedSort.direction === 'asc' ? 'desc' : 'asc');
     setPage(1);
   }, [appliedSort.direction]);
 
@@ -449,7 +407,7 @@ export default function DocumentLibraryPage() {
   const mutate = useCallback(
     async (
       path: string,
-      method: "PUT" | "POST" | "PATCH" | "DELETE",
+      method: 'PUT' | 'POST' | 'PATCH' | 'DELETE',
       fallbackMessage: string,
       body?: unknown
     ): Promise<boolean> => {
@@ -460,9 +418,7 @@ export default function DocumentLibraryPage() {
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         });
         if (!response.ok) {
-          const failure = (await response.json().catch(() => null)) as {
-            error?: string;
-          } | null;
+          const failure = (await response.json().catch(() => null)) as { error?: string } | null;
           throw new Error(failure?.error ?? fallbackMessage);
         }
         refetchDocuments();
@@ -471,10 +427,7 @@ export default function DocumentLibraryPage() {
         refetchCollections();
         return true;
       } catch (error) {
-        addToast(
-          error instanceof Error ? error.message : String(error),
-          "error"
-        );
+        addToast(error instanceof Error ? error.message : String(error), 'error');
         return false;
       } finally {
         setBusy(false);
@@ -487,8 +440,8 @@ export default function DocumentLibraryPage() {
     (row: DocumentRow) => {
       void mutate(
         `/api/v1/documents/${row.id}/star`,
-        row.starred ? "DELETE" : "PUT",
-        t("organizer.error.star", "Failed to update the star")
+        row.starred ? 'DELETE' : 'PUT',
+        t('organizer.error.star', 'Failed to update the star')
       );
     },
     [mutate, t]
@@ -496,14 +449,14 @@ export default function DocumentLibraryPage() {
 
   const createCollection = useCallback(async () => {
     const created = await mutate(
-      "/api/v1/document-collections",
-      "POST",
-      t("organizer.error.createCollection", "Failed to create the collection"),
+      '/api/v1/document-collections',
+      'POST',
+      t('organizer.error.createCollection', 'Failed to create the collection'),
       { name: newCollectionName }
     );
     if (created) {
       setCreatingCollection(false);
-      setNewCollectionName("");
+      setNewCollectionName('');
     }
   }, [mutate, newCollectionName, t]);
 
@@ -511,8 +464,8 @@ export default function DocumentLibraryPage() {
     if (renamingCollection === null) return;
     const renamed = await mutate(
       `/api/v1/document-collections/${renamingCollection.id}`,
-      "PATCH",
-      t("organizer.error.renameCollection", "Failed to rename the collection"),
+      'PATCH',
+      t('organizer.error.renameCollection', 'Failed to rename the collection'),
       { name: renameName }
     );
     if (renamed) {
@@ -524,8 +477,8 @@ export default function DocumentLibraryPage() {
     if (deletingCollection === null) return;
     const deleted = await mutate(
       `/api/v1/document-collections/${deletingCollection.id}`,
-      "DELETE",
-      t("organizer.error.deleteCollection", "Failed to delete the collection")
+      'DELETE',
+      t('organizer.error.deleteCollection', 'Failed to delete the collection')
     );
     if (deleted) {
       // The open folder just stopped existing. Navigating away is the honest
@@ -543,11 +496,8 @@ export default function DocumentLibraryPage() {
       if (filingDocument === null) return;
       void mutate(
         `/api/v1/document-collections/${targetCollectionId}/documents/${filingDocument.id}`,
-        next ? "PUT" : "DELETE",
-        t(
-          "organizer.error.file",
-          "Failed to change what this document is filed in"
-        )
+        next ? 'PUT' : 'DELETE',
+        t('organizer.error.file', 'Failed to change what this document is filed in')
       );
     },
     [mutate, filingDocument, t]
@@ -558,11 +508,8 @@ export default function DocumentLibraryPage() {
       if (collectionId === null) return;
       void mutate(
         `/api/v1/document-collections/${collectionId}/documents/${row.id}`,
-        "DELETE",
-        t(
-          "organizer.error.unfile",
-          "Failed to remove the document from this collection"
-        )
+        'DELETE',
+        t('organizer.error.unfile', 'Failed to remove the document from this collection')
       );
     },
     [mutate, collectionId, t]
@@ -576,7 +523,7 @@ export default function DocumentLibraryPage() {
         // Not "unknown": migration 108 records the absence of a unit as an
         // absence, and a raiser who belongs to none genuinely raised it from
         // nowhere.
-        return t("organizer.table.noUnit", "No unit");
+        return t('organizer.table.noUnit', 'No unit');
       }
       // A bare `#4` rather than a guess when the unit list could not be read —
       // and the notice below says why, so an id in this column is never mistaken
@@ -592,7 +539,7 @@ export default function DocumentLibraryPage() {
   // offer somewhere to file. When it could not be read the control is disabled
   // carrying that sentence rather than hidden (#951).
   const filingDisabledReason = collections.error
-    ? t("organizer.error.collections", "Failed to load your collections")
+    ? t('organizer.error.collections', 'Failed to load your collections')
     : null;
 
   const itemHandlers: DocumentItemHandlers = useMemo(
@@ -604,23 +551,16 @@ export default function DocumentLibraryPage() {
       // Offered ONLY inside an ordinary collection. In the starred folder the
       // star on the row already removes it, and two controls for one effect can
       // disagree on screen.
-      onRemoveFromOpenCollection:
-        collectionId !== null ? removeFromOpenCollection : undefined,
+      onRemoveFromOpenCollection: collectionId !== null ? removeFromOpenCollection : undefined,
     }),
-    [
-      busy,
-      filingDisabledReason,
-      toggleStar,
-      collectionId,
-      removeFromOpenCollection,
-    ]
+    [busy, filingDisabledReason, toggleStar, collectionId, removeFromOpenCollection]
   );
 
   const columns: DataTableColumn<DocumentRow>[] = useMemo(
     () => [
       {
-        id: "title",
-        header: t("organizer.table.title", "Title"),
+        id: 'title',
+        header: t('organizer.table.title', 'Title'),
         // No `enableSorting`. The shared table sorts CLIENT-side, which in
         // server-pagination mode would sort the twenty five rows it was handed
         // and present the result as a sorted library. Sorting is the toolbar's,
@@ -633,8 +573,8 @@ export default function DocumentLibraryPage() {
         ),
       },
       {
-        id: "template_name",
-        header: t("organizer.table.template", "Template"),
+        id: 'template_name',
+        header: t('organizer.table.template', 'Template'),
         cell: (row) => (
           <span dir="auto" className="truncate">
             {row.template_name}
@@ -642,18 +582,20 @@ export default function DocumentLibraryPage() {
         ),
       },
       {
-        id: "origin_ou_id",
-        header: t("organizer.table.raisedFrom", "Raised from"),
-        cell: (row) => <span dir="auto">{ouName(row.origin_ou_id)}</span>,
+        id: 'origin_ou_id',
+        header: t('organizer.table.raisedFrom', 'Raised from'),
+        cell: (row) => (
+          <span dir="auto">{ouName(row.origin_ou_id)}</span>
+        ),
       },
       {
-        id: "created_at",
-        header: t("organizer.table.created", "Created"),
+        id: 'created_at',
+        header: t('organizer.table.created', 'Created'),
         cell: (row) => new Date(row.created_at).toLocaleString(locale),
       },
       {
-        id: "artifacts",
-        header: t("organizer.table.versions", "Versions"),
+        id: 'artifacts',
+        header: t('organizer.table.versions', 'Versions'),
         // More than one artifact means the document has been re-rendered, and
         // every earlier one is still fetchable at its own URL (#947 item 1).
         cell: (row) => String(row.artifacts.length),
@@ -670,19 +612,19 @@ export default function DocumentLibraryPage() {
     viewKey,
     collection: openCollection,
     starredCollectionExists: starredCollection !== null,
-    searchApplied: appliedSearch !== "",
+    searchApplied: appliedSearch !== '',
     total: pagination?.total ?? 0,
   });
 
-  const tableLabel = t("organizer.table.label", "Documents");
+  const tableLabel = t('organizer.table.label', 'Documents');
 
   return (
     <div>
       <AdminHeader
-        title={t("organizer.title", "Documents")}
+        title={t('organizer.title', 'Documents')}
         description={t(
-          "organizer.description",
-          "Every folder here is a query over what documents record — nothing stores where a document lives. Collections are your own."
+          'organizer.description',
+          'Every folder here is a query over what documents record — nothing stores where a document lives. Collections are your own.'
         )}
         action={
           // Gated on `documents:render`, which is the capability the create
@@ -696,7 +638,7 @@ export default function DocumentLibraryPage() {
           hasCapability(DOCUMENTS_RENDER) ? (
             <Button onClick={() => setCreatingDocument(true)}>
               <IconFilePlus className="me-2 size-4" aria-hidden />
-              {t("organizer.new", "New document")}
+              {t('organizer.new', 'New document')}
             </Button>
           ) : undefined
         }
@@ -709,9 +651,7 @@ export default function DocumentLibraryPage() {
         templatesLoading={templates.loading}
         templatesError={templates.error}
         canRoute={hasCapability(DOCUMENTS_ROUTE)}
-        onSend={(documentId) =>
-          router.push(`/admin/document-routing/${documentId}`)
-        }
+        onSend={(documentId) => router.push(`/admin/document-routing/${documentId}`)}
         onCreated={() => {
           // The listing is refetched immediately, not on close: the document is
           // real the moment the server answered, and a browser that still shows
@@ -763,41 +703,41 @@ export default function DocumentLibraryPage() {
               empty would remove the remedy along with the symptom. */}
           {views.error === null && (
             <LibraryToolbar
-              search={search}
-              onSearchChange={setSearch}
-              onSearchSubmit={() => applySearch(search.trim())}
-              appliedSearch={appliedSearch}
-              onSearchClear={() => {
-                setSearch("");
-                applySearch("");
-              }}
-              anchorOuId={anchorOuId}
-              onAnchorChange={selectAnchor}
-              ous={ous.data ?? []}
-              selectedView={selectedView}
-              sortField={sortField}
-              sortDirection={appliedSort.direction}
-              onSortFieldChange={changeSortField}
-              onSortDirectionToggle={toggleSortDirection}
-              layout={layout}
-              onLayoutChange={chooseLayout}
-              openCollection={openCollection}
-              starredFolderOpen={viewKey === "starred"}
-              onRenameCollection={() => {
-                if (openCollection === null) return;
-                setRenameName(openCollection.name);
-                setRenamingCollection(openCollection);
-              }}
-              onDeleteCollection={() => setDeletingCollection(openCollection)}
-              collectionsUnavailableReason={filingDisabledReason}
+            search={search}
+            onSearchChange={setSearch}
+            onSearchSubmit={() => applySearch(search.trim())}
+            appliedSearch={appliedSearch}
+            onSearchClear={() => {
+              setSearch('');
+              applySearch('');
+            }}
+            anchorOuId={anchorOuId}
+            onAnchorChange={selectAnchor}
+            ous={ous.data ?? []}
+            selectedView={selectedView}
+            sortField={sortField}
+            sortDirection={appliedSort.direction}
+            onSortFieldChange={changeSortField}
+            onSortDirectionToggle={toggleSortDirection}
+            layout={layout}
+            onLayoutChange={chooseLayout}
+            openCollection={openCollection}
+            starredFolderOpen={viewKey === 'starred'}
+            onRenameCollection={() => {
+              if (openCollection === null) return;
+              setRenameName(openCollection.name);
+              setRenamingCollection(openCollection);
+            }}
+            onDeleteCollection={() => setDeletingCollection(openCollection)}
+            collectionsUnavailableReason={filingDisabledReason}
             />
           )}
 
           {ous.error && (
             <p className="mb-3 text-sm text-muted-foreground">
               {t(
-                "organizer.ous.unavailable",
-                "Unit names could not be loaded, so units are shown by id. Listing units needs the ous:read permission."
+                'organizer.ous.unavailable',
+                'Unit names could not be loaded, so units are shown by id. Listing units needs the ous:read permission.'
               )}
             </p>
           )}
@@ -805,11 +745,9 @@ export default function DocumentLibraryPage() {
           {selectedView && (
             <p className="mb-3 text-sm text-muted-foreground">
               <span dir="auto">
-                {openCollection !== null
-                  ? openCollection.name
-                  : viewLabel(t, selectedView)}
+                {openCollection !== null ? openCollection.name : viewLabel(t, selectedView)}
               </span>
-              {" — "}
+              {' — '}
               {viewDescription(t, selectedView)}
             </p>
           )}
@@ -821,7 +759,7 @@ export default function DocumentLibraryPage() {
             <p className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
               {listError}
             </p>
-          ) : layout === "grid" ? (
+          ) : layout === 'grid' ? (
             <DocumentGrid
               rows={rows}
               isLoading={documents.loading}
@@ -839,19 +777,13 @@ export default function DocumentLibraryPage() {
               getRowId={(row) => String(row.id)}
               isLoading={documents.loading}
               ariaLabel={tableLabel}
-              rowActions={(row) => (
-                <DocumentActions row={row} handlers={itemHandlers} />
-              )}
+              rowActions={(row) => <DocumentActions row={row} handlers={itemHandlers} />}
               emptyState={{
                 title: emptyState.title,
                 description: emptyState.description,
                 action: emptyState.pastTheEnd ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage(1)}
-                  >
-                    {t("organizer.empty.pastEndAction", "Go to the first page")}
+                  <Button variant="outline" size="sm" onClick={() => setPage(1)}>
+                    {t('organizer.empty.pastEndAction', 'Go to the first page')}
                   </Button>
                 ) : undefined,
               }}
@@ -906,7 +838,7 @@ export default function DocumentLibraryPage() {
         documentRow={
           filingDocument === null
             ? null
-            : rows.find((row) => row.id === filingDocument.id) ?? filingDocument
+            : (rows.find((row) => row.id === filingDocument.id) ?? filingDocument)
         }
         onClose={() => setFilingDocument(null)}
         collections={collectionList}
