@@ -7,7 +7,7 @@ namespace Whity\Core\Document\Routing;
 /**
  * The closed vocabulary of WHAT SETTLES A ROUTE STEP (#1054).
  *
- * Two values, CHECK-constrained in migration 124 so the database refuses a
+ * Two values, CHECK-constrained in migration 125 so the database refuses a
  * third — the same construction {@see RouteAction} and {@see RouteVerdict} have,
  * and closed for the same reason: what can settle a stage of a route is the
  * ENGINE's own semantics, and a third value would be a state transition core
@@ -61,7 +61,7 @@ final class RouteSatisfaction
     /**
      * A PERSON MUST ACT. The stage is settled by one of
      * {@see RouteAction::recipientActions()} — every step authored before
-     * migration 124, and every step that does not say otherwise.
+     * migration 125, and every step that does not say otherwise.
      *
      * The recipient rows it opens stay OPEN until their holder acts, which is
      * what puts the document in "Awaiting me" and in the #881 inbox and keeps it
@@ -102,7 +102,7 @@ final class RouteSatisfaction
     /**
      * Both values, in the order a reader meets them.
      *
-     * Must stay in step with the CHECK constraints migration 124 puts on
+     * Must stay in step with the CHECK constraints migration 125 puts on
      * `document_route_steps.satisfied_by` and
      * `document_route_template_steps.satisfied_by`.
      * {@see \Tests\Core\Document\Routing\RouteSatisfactionVocabularyTest} reads

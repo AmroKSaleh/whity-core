@@ -39,12 +39,12 @@ use Whity\Core\Document\Routing\RouteSatisfaction;
  */
 final class RouteSatisfactionVocabularyTest extends TestCase
 {
-    private const MIGRATION = __DIR__ . '/../../../../database/migrations/124_add_route_step_satisfaction.php';
+    private const MIGRATION = __DIR__ . '/../../../../database/migrations/125_add_route_step_satisfaction.php';
 
     private static function source(): string
     {
         $source = file_get_contents(self::MIGRATION);
-        self::assertIsString($source, 'migration 124 must be readable');
+        self::assertIsString($source, 'migration 125 must be readable');
 
         return $source;
     }
@@ -65,7 +65,7 @@ final class RouteSatisfactionVocabularyTest extends TestCase
         self::assertSame(
             2,
             $matches,
-            'migration 124 must constrain satisfied_by on BOTH document_route_steps and '
+            'migration 125 must constrain satisfied_by on BOTH document_route_steps and '
             . 'document_route_template_steps. A design that can express a satisfaction the engine cannot '
             . 'run is one that saves cleanly and does something else when it is applied.'
         );
@@ -78,7 +78,7 @@ final class RouteSatisfactionVocabularyTest extends TestCase
             self::assertSame(
                 $inPhp,
                 $found,
-                "RouteSatisfaction::all() and CHECK constraint #{$index} in migration 124 have drifted. "
+                "RouteSatisfaction::all() and CHECK constraint #{$index} in migration 125 have drifted. "
                 . 'One of them now admits a value the other refuses.'
             );
         }
@@ -87,7 +87,7 @@ final class RouteSatisfactionVocabularyTest extends TestCase
     public function testTheColumnDefaultsToActOnBothTables(): void
     {
         // Not a style point. Every step and every template stage written before
-        // migration 124 gets this value, so if the default were `delivery` the
+        // migration 125 gets this value, so if the default were `delivery` the
         // migration would silently convert every route in every tenant into one
         // that closes its recipients' items and moves on — a change of behaviour
         // to existing data, applied by an ALTER, reported nowhere.
@@ -185,7 +185,7 @@ final class RouteSatisfactionVocabularyTest extends TestCase
         self::assertCount(
             5,
             RouteAction::all(),
-            '#1054 must not have added a sixth action verb. If this fails, read migration 124 and '
+            '#1054 must not have added a sixth action verb. If this fails, read migration 125 and '
             . 'migration 119 before changing the number.'
         );
     }

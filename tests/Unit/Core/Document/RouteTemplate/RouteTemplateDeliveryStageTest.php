@@ -185,7 +185,7 @@ final class RouteTemplateDeliveryStageTest extends TestCase
     public function testAStageThatSaysNothingIsAnOrdinaryStage(): void
     {
         // Every design authored before #1054 omits the field entirely, and none
-        // of them may change behaviour because migration 124 ran.
+        // of them may change behaviour because migration 125 ran.
         $result = $this->graph()->validate([$this->drawn(1)], [], 20);
 
         self::assertSame(RouteSatisfaction::ACT, $result['steps'][0]['satisfied_by']);

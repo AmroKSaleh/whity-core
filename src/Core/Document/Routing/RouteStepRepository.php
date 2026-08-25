@@ -79,7 +79,7 @@ final class RouteStepRepository
      * for every step at once without a single row being rewritten.
      *
      * `satisfiedBy` is #1054's answer to WHETHER ANYBODY IS ASKED TO ACT here
-     * (migration 124). {@see RouteSatisfaction::ACT} is what every step written
+     * (migration 125). {@see RouteSatisfaction::ACT} is what every step written
      * before that migration carries and what every caller that does not ask for
      * a delivery step gets, so the default reproduces migration 112's behaviour
      * exactly. It is orthogonal to `decision`, which says what an answer must
@@ -126,7 +126,7 @@ final class RouteStepRepository
             // spelling {@see \Whity\Core\Identity\ProfileEmailRepository} uses.
             ':decision' => $decision ? 1 : 0,
             ':decision_quorum' => $decisionQuorum,
-            // #1054's satisfaction, CHECK-constrained by migration 124. A plain
+            // #1054's satisfaction, CHECK-constrained by migration 125. A plain
             // string needing no 1/0 dance like `decision` above: the column is
             // text on both engines, so execute()'s PARAM_STR binding is already
             // the right one.

@@ -113,7 +113,7 @@ use Whity\Sdk\Routing\RoutingRuleContext;
  * recipient row for ever — a permanent phantom item in "Awaiting me" and in the
  * #881 inbox that no act could clear, because there was no act to make.
  *
- * A step now declares {@see RouteSatisfaction} (migration 124), and three things
+ * A step now declares {@see RouteSatisfaction} (migration 125), and three things
  * about the implementation are worth stating against the code:
  *
  *  a. THE CLOSE APPENDS NOTHING AND CLAIMS NOTHING. {@see openChain()} closes a

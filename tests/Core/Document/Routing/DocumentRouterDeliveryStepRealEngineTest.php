@@ -73,7 +73,7 @@ use Whity\Core\Settings\TenantSettingsRepository;
  *     having written nothing.
  *
  * ENGINE. {@see SchemaFromMigrations::make()} returns real PostgreSQL when
- * PHPUNIT_PG_DSN is set and SQLite otherwise. Both matter: migration 124's CHECK
+ * PHPUNIT_PG_DSN is set and SQLite otherwise. Both matter: migration 125's CHECK
  * and NOT NULL are only enforced by a real engine, while the SQLite path is what
  * CI's unit job runs.
  */
