@@ -154,6 +154,20 @@ jobs:
               - 'src/Cli/Commands/I18nCommand.php'
               - 'scripts/ci-i18n-catalog-drift.php'
               - '.github/workflows/automated-tests.yml'
+            # #1068. Same shape as `i18n` directly above and for the same
+            # reason: the input is the FRONTEND and the guard is PHP, so
+            # `backend` would skip it on exactly the frontend-only PRs that can
+            # introduce a leak, and `frontend` runs a Node job with no PHP.
+            #
+            # `ui.hide_dates` promises a tenant that no date appears anywhere in
+            # the interface, and that promise is falsifiable by a single screen.
+            # A guard that skips on the PR adding that screen is not a guard.
+            date_display:
+              - 'web/**'
+              - 'packages/**'
+              - 'src/Core/Ui/**'
+              - 'scripts/ci-date-display-guard.php'
+              - '.github/workflows/automated-tests.yml'
 
   # The whole PHPUnit suite (the `default` testsuite = every *Test.php under
   # tests/) on SQLite, with pcov instrumentation — split across runners because
@@ -560,6 +574,50 @@ jobs:
 
       - name: i18n catalogue drift guard
         run: php scripts/ci-i18n-catalog-drift.php
+
+  # Date-display guard (#1068): fail CI when a date is formatted, or rendered
+  # raw, outside `useDateDisplay()`.
+  #
+  # A tenant may set `ui.hide_dates` and be told that no date or time appears
+  # anywhere in the interface. Unlike most settings that promise is falsifiable
+  # by a SINGLE screen, and the screen that leaks is by definition the one
+  # nobody checked — so consolidating every date onto one path made the promise
+  # true once, and this is what keeps it true.
+  #
+  # Its own job for the reason `i18n-catalogue` above has one: the input it
+  # reads is the FRONTEND and the guard is PHP. Under `backend` it would skip on
+  # every frontend-only PR, which is precisely the PR that adds the next screen.
+  date-display:
+    name: Date-display guard
+    needs: changes
+    if: needs.changes.outputs.date_display == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring
+          coverage: none
+
+      # Same key as static-analysis, so this job normally restores rather than
+      # resolves — the guard needs the autoloader and nothing else.
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Date-display guard
+        run: php scripts/ci-date-display-guard.php
 
   # Migrations / seed / idempotency and the Security suite against a real
   # PostgreSQL engine. Measured 3 s of migrate+seed+re-migrate and 33 s of
@@ -1230,6 +1288,7 @@ jobs:
       - static-analysis
       - history-guards
       - i18n-catalogue
+      - date-display
       - postgres-migrations
       - postgres-integration
       - postgres-dialect

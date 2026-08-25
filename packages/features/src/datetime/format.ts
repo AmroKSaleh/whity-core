@@ -156,4 +156,9 @@ export function relativeAge(value: string | null | undefined, now: number = Date
 export function isDateFieldName(name: string): boolean {
   return /(^|_|\b)(at|date|time|timestamp|expires|deadline|since|until)$/i.test(name)
     || /[a-z0-9](At|Date|Time|Timestamp|Expires|Deadline|Since|Until)$/.test(name)
+    // `_on` in SNAKE case only: `issued_on`, `revoked_on`, `stage_on` are this
+    // platform's vocabulary for a value the server has already reduced to a
+    // calendar date. Not the camel-case `On`, which reads as a boolean
+    // (`turnedOn`, `isOn`) far more often than as a date.
+    || /_on$/.test(name)
 }

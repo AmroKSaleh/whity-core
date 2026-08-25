@@ -2198,7 +2198,7 @@ function TimelineRenderer({ block }: { block: TimelineBlock }) {
     // value that will not parse also lands here, and that is the right answer
     // for a field a plugin declared as a timestamp and then filled with
     // something else.
-    timestamp: dates.dateTime(String(row[block.timestampField] ?? '')) ?? '',
+    timestampLabel: dates.dateTime(String(row[block.timestampField] ?? '')) ?? '',
     note: block.noteField !== undefined ? String(row[block.noteField] ?? '') : '',
     from: block.fromField !== undefined ? String(row[block.fromField] ?? '') : '',
     to: block.toField !== undefined ? String(row[block.toField] ?? '') : '',
@@ -2236,8 +2236,8 @@ function TimelineRenderer({ block }: { block: TimelineBlock }) {
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-sm font-medium text-foreground">{event.actor}</span>
               <span className="text-sm text-foreground">{event.action}</span>
-              {event.timestamp !== '' && (
-                <span className="text-xs text-muted-foreground">{event.timestamp}</span>
+              {event.timestampLabel !== '' && (
+                <span className="text-xs text-muted-foreground">{event.timestampLabel}</span>
               )}
             </div>
             {(event.from !== '' || event.to !== '') && (
@@ -2397,7 +2397,7 @@ function InboxRenderer({ block }: { block: InboxBlock }) {
         // #1068, exactly as the timeline block above: a declared timestamp
         // field goes through the one date path, and an empty result means the
         // third line of the item is simply not rendered.
-        timestamp:
+        timestampLabel:
           block.timestampField !== undefined
             ? (dates.dateTime(String(row[block.timestampField] ?? '')) ?? '')
             : '',
@@ -2558,8 +2558,8 @@ function InboxRenderer({ block }: { block: InboxBlock }) {
                 {item.subtitle !== '' && (
                   <p className="text-xs text-muted-foreground">{item.subtitle}</p>
                 )}
-                {item.timestamp !== '' && (
-                  <p className="text-xs text-muted-foreground">{item.timestamp}</p>
+                {item.timestampLabel !== '' && (
+                  <p className="text-xs text-muted-foreground">{item.timestampLabel}</p>
                 )}
               </div>
               {allowedActions.length > 0 && (
