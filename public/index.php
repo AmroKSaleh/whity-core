@@ -2267,6 +2267,19 @@ $documentArtifactRepository = new \Whity\Core\Document\DocumentArtifactRepositor
 // an entitled tenant's documents land in its own bucket, everyone else's on the
 // platform default, and there is exactly one storage story to keep correct.
 $documentArtifactStore = new \Whity\Core\Document\DocumentArtifactStore($storageDriver);
+// EXPOSED TO PLUGINS, and the reason is a defect visible in this repository
+// own consumers. Storing a file is a platform concern: it has to honour the
+// per-tenant routing above, the immutability rule the store enforces, and the
+// content-type-at-write-time constraint that no read-time lookup can repair.
+// None of that was reachable from a plugin, so a plugin needing to keep an
+// uploaded file did the only thing left to it and shipped its OWN storage
+// client, reading its own environment variables and bypassing per-tenant
+// storage configuration entirely. That is not a plugin author mistake; it is
+// what a missing seam produces. Registering these under their class names
+// makes the platform's storage the path of least resistance again.
+\Whity\register_service(\Whity\Core\Document\DocumentArtifactStore::class, $documentArtifactStore); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Core\Document\DocumentArtifactRepository::class, $documentArtifactRepository); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Storage\StorageDriverInterface::class, $storageDriver); // @phpstan-ignore-line
 $documentIssuer = new \Whity\Core\Document\DocumentIssuer(
     $db->getPdo(),
     $documentRepository,
