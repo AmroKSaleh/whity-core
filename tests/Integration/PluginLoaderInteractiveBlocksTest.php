@@ -282,6 +282,11 @@ PHP);
              'requiredRole' => null, 'requiredPermission' => 'r:manage'],
             ['method' => 'PATCH', 'path' => '/api/r/codes/{id:\d+}',   'handler' => $ok,
              'requiredRole' => null, 'requiredPermission' => 'r:manage'],
+            // WC-569: a constraint carrying a {n} QUANTIFIER. Router accepts and
+            // compiles it; the loader's path-key normaliser used to mis-collapse
+            // it and leave a stray brace, so no declaration could ever name it.
+            ['method' => 'PUT',   'path' => '/api/r/tokens/{id:[a-f0-9]{8}}', 'handler' => $ok,
+             'requiredRole' => null, 'requiredPermission' => 'r:manage'],
             ['method' => 'PUT',   'path' => '/api/r/locked/{id}',      'handler' => $ok,
              'requiredRole' => null, 'requiredPermission' => 'r:manage'],
             ['method' => 'DELETE','path' => '/api/r/items/{id}',       'handler' => $ok,
@@ -333,6 +338,21 @@ PHP);
                 'blocks' => [[
                     'type' => 'form',
                     'submit' => ['method' => 'PATCH', 'endpoint' => '/api/r/codes/{record}'],
+                    'requiredPermission' => 'r:manage',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // A constraint carrying a {n} QUANTIFIER (WC-569). Same principle
+            // as above and a different failure: the normaliser, not the literal
+            // comparison, was what refused this one.
+            [
+                'id' => 'r-put-quantifier-constrained',
+                'label' => 'R Put Quantifier Constrained',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/r/tokens/{record}'],
                     'requiredPermission' => 'r:manage',
                     'children' => [$field, $saveButton],
                 ]],
@@ -728,6 +748,39 @@ PHP);
         $this->assertSame(
             '/api/v1/r/codes/{record}',
             $byId['r-patch-constrained']['blocks'][0]['submit']['endpoint']
+        );
+    }
+
+    /**
+     * A registered route whose constraint carries a `{n}` QUANTIFIER.
+     *
+     * `Router::pathToPattern()` accepts `{id:[a-f0-9]{8}}` and compiles it
+     * (WC-569), but the loader's path-key normaliser closed the placeholder at
+     * the constraint's inner `}` and left a stray brace behind — so the key was
+     * `/api/r/tokens/{}}`, no declaration could ever equal it, and the whole
+     * feature dropped at load.
+     *
+     * A different failure from the literal comparison the other cases exercise:
+     * that one refused a differently-SPELLED parameter, this one refused a
+     * correctly-spelled parameter against a route it could not parse. Both end
+     * in the same silent drop, which is why both are pinned.
+     */
+    public function testATemplatedSubmitIsOwnedWhenTheRouteConstraintCarriesAQuantifier(): void
+    {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+
+        $this->assertArrayHasKey(
+            'r-put-quantifier-constrained',
+            $byId,
+            'A form submitting to a route registered as /api/r/tokens/{id:[a-f0-9]{8}} must be served '
+            . '— the quantifier belongs to the route, and the path key must collapse the whole '
+            . 'placeholder rather than stopping at the brace inside it'
+        );
+        $this->assertSame(
+            '/api/v1/r/tokens/{record}',
+            $byId['r-put-quantifier-constrained']['blocks'][0]['submit']['endpoint']
         );
     }
 
