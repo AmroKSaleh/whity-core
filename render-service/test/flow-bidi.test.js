@@ -63,6 +63,19 @@ describe('isolateForeignRuns in an RTL document', () => {
     expect(isolateForeignRuns('أ B ج', 'rtl')).toBe('أ <bdi>B</bdi> ج');
   });
 
+  // The multi-word rule started life as `TOKEN(?: +TOKEN)*` — a quantifier
+  // inside a quantifier, which backtracks polynomially on a long run of
+  // spaces. A caption is caller-supplied text, so that made this function the
+  // cheapest way to slow a render down. One character class matches the same
+  // runs in linear time; this is the input that told the difference.
+  test('a long run of spaces is handled in linear time and still correct', () => {
+    const text = 'نص A' + ' '.repeat(50000) + 'ب';
+    const started = Date.now();
+    const html = isolateForeignRuns(text, 'rtl');
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(html).toBe('نص <bdi>A</bdi>' + ' '.repeat(50000) + 'ب');
+  });
+
   test('escapes inside the isolate', () => {
     expect(isolateForeignRuns('نص <b>x</b>', 'rtl')).toBe('نص &lt;<bdi>b</bdi>&gt;<bdi>x</bdi>&lt;/<bdi>b</bdi>&gt;');
   });

@@ -43,15 +43,22 @@ function escapeHtml(value) {
  * (U+FE70-U+FEFF). */
 const RTL_CLASS = '\\u0590-\\u08FF\\uFB1D-\\uFDFF\\uFE70-\\uFEFF';
 
-/* A Latin/digit run plus the punctuation that binds an identifier together,
- * so "A-7", "12.3" and "ISO/9" are isolated whole rather than in pieces —
- * and, via the repeated group, so that a multi-word Latin phrase inside an
- * Arabic sentence ("Sample A-7") is isolated as ONE run. Isolating its words
- * separately would be correct bidi but wrong typography: each word would keep
- * its own order while the words themselves ran right-to-left. */
-const LTR_TOKEN = '[A-Za-z0-9][A-Za-z0-9._\\-\\/+:#()]*';
-const LTR_RUN = new RegExp(LTR_TOKEN + '(?:[ ]+' + LTR_TOKEN + ')*', 'g');
+/* A Latin/digit run: the punctuation that binds an identifier together, so
+ * "A-7", "12.3" and "ISO/9" are isolated whole rather than in pieces, plus the
+ * SPACE, so a multi-word Latin phrase inside an Arabic sentence ("Sample A-7")
+ * is isolated as ONE run. Isolating its words separately would be correct bidi
+ * and wrong typography: each word would keep its own order while the words
+ * themselves ran right-to-left.
+ *
+ * Deliberately one character class rather than `TOKEN(?: +TOKEN)*`, which is
+ * how this started: a quantifier inside a quantifier backtracks polynomially
+ * on a long run of spaces, so a caller could hand this a caption and make it
+ * the slowest thing in the render. One class matches the same runs in linear
+ * time. The trailing space it now also swallows is put back outside the
+ * isolate below, which the caller-facing behaviour already required. */
+const LTR_RUN = /[A-Za-z0-9][A-Za-z0-9._\-\/+:#() ]*/g;
 
+/* Also one class, also linear — see the note on LTR_RUN. */
 function rtlRun() {
   return new RegExp('[' + RTL_CLASS + '][' + RTL_CLASS + '\\s.,()\\-]*', 'g');
 }
@@ -78,7 +85,7 @@ function isolateForeignRuns(text, direction) {
   while (match !== null) {
     out += escapeHtml(source.slice(last, match.index));
     const run = match[0];
-    const trimmed = run.replace(/\s+$/, '');
+    const trimmed = run.trimEnd();
     out += '<bdi>' + escapeHtml(trimmed) + '</bdi>';
     // Trailing whitespace the run happened to swallow belongs OUTSIDE the
     // isolate; inside it, the gap between the isolated run and the next word

@@ -73,6 +73,15 @@ describe('validateFlowPayload', () => {
     expect(validateFlowPayload({ content: [{ type: 'table', rows: ['a'] }] })).toMatch(/arrays of cell values/);
   });
 
+  // `PAGE_PRESETS[name]` reaches Object.prototype, so an INHERITED name would
+  // otherwise pass validation and then resolve to something with no widthMm —
+  // an A4 page silently handed to a caller who asked for something else.
+  test('rejects an inherited property name as a preset', () => {
+    for (const name of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      expect(validateFlowPayload(minimal({ page: { preset: name } }))).toMatch(/page\.preset/);
+    }
+  });
+
   test('rejects an unknown front-matter kind', () => {
     expect(validateFlowPayload(minimal({ frontMatter: [{ kind: 'glossary' }] }))).toMatch(/frontMatter\[0\]\.kind/);
   });
@@ -177,6 +186,22 @@ describe('normaliseFlowDocument numbering', () => {
     });
     expect(d.content.map((b) => b.number)).toEqual(['1', '2']);
     expect(d.index.tables.map((t) => t.number)).toEqual(['2']);
+  });
+
+  // The heading level indexes the counter array, and this function is callable
+  // without the validator having run. It must clamp rather than write outside.
+  test('an out-of-range heading level cannot write outside the counter array', () => {
+    const d = normaliseFlowDocument({
+      content: [
+        { type: 'heading', level: 99, text: 'far too deep' },
+        { type: 'heading', level: -4, text: 'far too shallow' },
+        { type: 'heading', level: 'not a number', text: 'not a number at all' },
+      ],
+    });
+    expect(d.content.map((b) => b.level)).toEqual([6, 1, 1]);
+    for (const heading of d.content) {
+      expect(heading.number).toMatch(/^[0-9.]+$/);
+    }
   });
 
   test('rtl defaults to Arabic labels and lang, ltr to English', () => {

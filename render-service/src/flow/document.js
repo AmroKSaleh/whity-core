@@ -83,6 +83,21 @@ const DEFAULT_LABELS = {
   },
 };
 
+/**
+ * Whether `value` names one of the presets — as an OWN property.
+ *
+ * A bare `PAGE_PRESETS[name]` lookup reaches Object.prototype, so
+ * `preset: "constructor"` would pass validation and then resolve to something
+ * with no widthMm, silently giving an A4 page to a caller who asked for
+ * something else. Inherited names are not presets.
+ */
+function isKnownPreset(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return false;
+  }
+  return Object.prototype.hasOwnProperty.call(PAGE_PRESETS, String(value).toLowerCase());
+}
+
 function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -113,7 +128,7 @@ function validateFlowPayload(payload) {
     if (!isPlainObject(page)) {
       return '"page" must be an object';
     }
-    if (page.preset !== undefined && !PAGE_PRESETS[String(page.preset).toLowerCase()]) {
+    if (page.preset !== undefined && !isKnownPreset(page.preset)) {
       return `"page.preset" must be one of: ${Object.keys(PAGE_PRESETS).join(', ')}`;
     }
     if (page.preset === undefined) {
@@ -213,7 +228,7 @@ function validateFlowPayload(payload) {
 /** Resolve the physical page box, in mm. */
 function resolvePage(page) {
   const source = isPlainObject(page) ? page : {};
-  const preset = source.preset ? PAGE_PRESETS[String(source.preset).toLowerCase()] : null;
+  const preset = isKnownPreset(source.preset) ? PAGE_PRESETS[String(source.preset).toLowerCase()] : null;
   const widthMm = preset ? preset.widthMm : asFiniteNumber(source.widthMm);
   const heightMm = preset ? preset.heightMm : asFiniteNumber(source.heightMm);
   const margin = isPlainObject(source.margin) ? source.margin : {};
@@ -276,7 +291,12 @@ function normaliseFlowDocument(payload) {
     const block = { ...raw };
 
     if (block.type === 'heading') {
-      const level = block.level;
+      // Clamped here as well as validated in validateFlowPayload, because this
+      // value indexes an array and the two functions are separately callable:
+      // a level that arrived in a payload must not be able to write outside the
+      // counter array just because someone called the normaliser directly.
+      const level = Math.min(6, Math.max(1, Math.trunc(Number(block.level)) || 1));
+      block.level = level;
       headingCounters[level - 1] += 1;
       for (let i = level; i < headingCounters.length; i += 1) {
         headingCounters[i] = 0;
