@@ -87,7 +87,7 @@ final class ConveningFeatures
 
         return [
             self::bodiesFeature($bodies),
-            self::meetingsFeature($meetings),
+            self::meetingsFeature($meetings, $bodies),
             self::meetingDetailFeature($meetings, $agendaItems, $decisions, $invitations),
         ];
     }
@@ -126,6 +126,57 @@ final class ConveningFeatures
                             'value' => 'Standing bodies that meet, minute numbered decisions, and can '
                                 . 'approve or reject the documents put before them.',
                         ],
+                        // The `resource` declaration above does NOT produce
+                        // Create/Edit controls on a `screen: 'blocks'` feature —
+                        // the host renders the schema-driven CRUD screen only
+                        // when `screen === 'crud'`. So a body could be listed and
+                        // never created, which is what these declare instead.
+                        [
+                            'type' => 'modal',
+                            'id' => 'newBodyModal',
+                            'title' => 'New convening body',
+                            'trigger' => 'New body',
+                            'children' => [
+                                [
+                                    'type' => 'form',
+                                    'submit' => ['method' => 'POST', 'endpoint' => $bodiesPath],
+                                    'requiredPermission' => CorePermissions::CONVENING_MANAGE,
+                                    'children' => [
+                                        [
+                                            'type' => 'textInput',
+                                            'name' => 'body_key',
+                                            'label' => 'Key',
+                                            'placeholder' => 'kebab-case, unique in this tenant',
+                                            'required' => true,
+                                        ],
+                                        [
+                                            'type' => 'bilingualText',
+                                            'name' => 'name',
+                                            'label' => 'Name',
+                                            'required' => true,
+                                            'arLabel' => 'Arabic',
+                                            'enLabel' => 'English',
+                                        ],
+                                        [
+                                            'type' => 'referenceSelect',
+                                            'name' => 'ou_id',
+                                            'label' => 'Belongs to',
+                                            'source' => '/api/v1/ous',
+                                            'valueField' => 'id',
+                                            'labelField' => 'name',
+                                            'placeholder' => 'No particular unit',
+                                        ],
+                                        [
+                                            'type' => 'textArea',
+                                            'name' => 'description',
+                                            'label' => 'Description',
+                                            'rows' => 2,
+                                        ],
+                                        ['type' => 'submitButton', 'label' => 'Create body'],
+                                    ],
+                                ],
+                            ],
+                        ],
                         [
                             'type' => 'dataTable',
                             'source' => $bodiesPath,
@@ -141,6 +192,52 @@ final class ConveningFeatures
                                 ['key' => 'display_name', 'label' => 'Name', 'sortable' => true, 'filterable' => true],
                                 ['key' => 'description', 'label' => 'Description'],
                             ],
+                            // `open` publishes the row under the modal's id, so
+                            // the edit form addresses it as {editBodyModal.…}
+                            // without needing a second selector the API could
+                            // not filter anyway.
+                            'rowActions' => [
+                                ['label' => 'Edit', 'open' => 'editBodyModal'],
+                                [
+                                    'label' => 'Delete',
+                                    'endpoint' => $bodiesPath . '/{id}',
+                                    'method' => 'DELETE',
+                                    'confirm' => 'Meetings and decisions already minuted by this body stay '
+                                        . 'on the record. Delete the body?',
+                                ],
+                            ],
+                        ],
+                        [
+                            'type' => 'modal',
+                            'id' => 'editBodyModal',
+                            'title' => 'Edit this body',
+                            'children' => [
+                                [
+                                    'type' => 'form',
+                                    'submit' => [
+                                        'method' => 'PATCH',
+                                        'endpoint' => $bodiesPath . '/{editBodyModal.id}',
+                                    ],
+                                    'requiredPermission' => CorePermissions::CONVENING_MANAGE,
+                                    'children' => [
+                                        [
+                                            'type' => 'bilingualText',
+                                            'name' => 'name',
+                                            'label' => 'Name',
+                                            'arLabel' => 'Arabic',
+                                            'enLabel' => 'English',
+                                        ],
+                                        [
+                                            'type' => 'textArea',
+                                            'name' => 'description',
+                                            'label' => 'Description',
+                                            'rows' => 2,
+                                            'defaultFrom' => 'editBodyModal.description',
+                                        ],
+                                        ['type' => 'submitButton', 'label' => 'Save changes'],
+                                    ],
+                                ],
+                            ],
                         ],
                     ],
                 ],
@@ -151,7 +248,7 @@ final class ConveningFeatures
     /**
      * @return array<string, mixed>
      */
-    private static function meetingsFeature(string $meetingsPath): array
+    private static function meetingsFeature(string $meetingsPath, string $bodiesPath): array
     {
         return [
             'id' => self::MEETINGS,
@@ -175,6 +272,39 @@ final class ConveningFeatures
                                 . 'an agenda while it is a draft or scheduled; once it is held, the '
                                 . 'decisions taken at it can approve or reject the documents on that '
                                 . 'agenda.',
+                        ],
+                        [
+                            'type' => 'modal',
+                            'id' => 'newMeetingModal',
+                            'title' => 'Convene a meeting',
+                            'trigger' => 'New meeting',
+                            'children' => [
+                                [
+                                    'type' => 'form',
+                                    'submit' => ['method' => 'POST', 'endpoint' => $meetingsPath],
+                                    'requiredPermission' => CorePermissions::CONVENING_MANAGE,
+                                    'children' => [
+                                        [
+                                            'type' => 'referenceSelect',
+                                            'name' => 'body_id',
+                                            'label' => 'Body',
+                                            'source' => $bodiesPath,
+                                            'valueField' => 'id',
+                                            'labelField' => 'display_name',
+                                            'required' => true,
+                                            'placeholder' => 'Which body is meeting',
+                                        ],
+                                        [
+                                            'type' => 'bilingualText',
+                                            'name' => 'title',
+                                            'label' => 'Title',
+                                            'arLabel' => 'Arabic',
+                                            'enLabel' => 'English',
+                                        ],
+                                        ['type' => 'submitButton', 'label' => 'Create meeting'],
+                                    ],
+                                ],
+                            ],
                         ],
                         [
                             'type' => 'dataTable',
@@ -275,6 +405,117 @@ final class ConveningFeatures
                 ],
                 [
                     'type' => 'section',
+                    'title' => 'Running the meeting',
+                    'children' => [
+                        [
+                            'type' => 'text',
+                            'tone' => 'muted',
+                            'value' => 'Set a date, invite the members, then hold it. A decision can only '
+                                . 'be minuted once the meeting has been held.',
+                        ],
+                        [
+                            'type' => 'modal',
+                            'id' => 'scheduleModal',
+                            'title' => 'Set a date',
+                            'trigger' => 'Schedule',
+                            'children' => [
+                                [
+                                    'type' => 'form',
+                                    // A submit endpoint interpolates its tokens
+                                    // from the same context a source does, so the
+                                    // selected meeting fills the path segment.
+                                    'submit' => [
+                                        'method' => 'POST',
+                                        'endpoint' => $meetingsPath . '/{meeting}/schedule',
+                                    ],
+                                    'requiredPermission' => CorePermissions::CONVENING_MANAGE,
+                                    'children' => [
+                                        [
+                                            'type' => 'dateInput',
+                                            'name' => 'scheduled_at',
+                                            'label' => 'Date and time',
+                                            'required' => true,
+                                        ],
+                                        [
+                                            'type' => 'textInput',
+                                            'name' => 'location',
+                                            'label' => 'Location',
+                                        ],
+                                        ['type' => 'submitButton', 'label' => 'Schedule'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            'type' => 'actionButton',
+                            'label' => 'Send invitations',
+                            'requiredPermission' => CorePermissions::CONVENING_MANAGE,
+                            'action' => [
+                                'method' => 'POST',
+                                'endpoint' => $meetingsPath . '/{meeting}/invitations',
+                            ],
+                            'confirm' => 'Invite every current member of this body?',
+                        ],
+                        [
+                            'type' => 'actionButton',
+                            'label' => 'Hold the meeting',
+                            'variant' => 'primary',
+                            'requiredPermission' => CorePermissions::CONVENING_MANAGE,
+                            'action' => [
+                                'method' => 'POST',
+                                'endpoint' => $meetingsPath . '/{meeting}/hold',
+                            ],
+                            'confirm' => 'Mark this meeting as held? Decisions can be minuted afterwards.',
+                        ],
+                        [
+                            'type' => 'modal',
+                            'id' => 'addAgendaModal',
+                            'title' => 'Put something on the agenda',
+                            'trigger' => 'Add agenda item',
+                            'children' => [
+                                [
+                                    'type' => 'form',
+                                    'submit' => [
+                                        'method' => 'POST',
+                                        'endpoint' => $meetingsPath . '/{meeting}/agenda',
+                                    ],
+                                    'requiredPermission' => CorePermissions::CONVENING_MANAGE,
+                                    'children' => [
+                                        [
+                                            'type' => 'bilingualText',
+                                            'name' => 'title',
+                                            'label' => 'Item',
+                                            'required' => true,
+                                            'arLabel' => 'Arabic',
+                                            'enLabel' => 'English',
+                                        ],
+                                        [
+                                            // Carrying a document is what lets the
+                                            // minuted decision drive that
+                                            // document's route.
+                                            'type' => 'referenceSelect',
+                                            'name' => 'document_id',
+                                            'label' => 'Document under consideration',
+                                            'source' => '/api/v1/documents',
+                                            'valueField' => 'id',
+                                            'labelField' => 'title',
+                                            'placeholder' => 'No document',
+                                        ],
+                                        [
+                                            'type' => 'textArea',
+                                            'name' => 'notes',
+                                            'label' => 'Notes',
+                                            'rows' => 2,
+                                        ],
+                                        ['type' => 'submitButton', 'label' => 'Add to agenda'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                [
+                    'type' => 'section',
                     'title' => 'Agenda',
                     'children' => [
                         [
@@ -290,6 +531,50 @@ final class ConveningFeatures
                                 // move.
                                 ['key' => 'document_id', 'label' => 'Document'],
                                 ['key' => 'notes', 'label' => 'Notes'],
+                            ],
+                            'rowActions' => [
+                                ['label' => 'Minute a decision', 'open' => 'decisionModal'],
+                            ],
+                        ],
+                        [
+                            'type' => 'modal',
+                            'id' => 'decisionModal',
+                            'title' => 'Minute a decision',
+                            'children' => [
+                                [
+                                    'type' => 'form',
+                                    // Both path segments come from the row this
+                                    // modal was opened from, so the decision
+                                    // lands on the item somebody actually chose.
+                                    'submit' => [
+                                        'method' => 'POST',
+                                        'endpoint' => $meetingsPath
+                                            . '/{decisionModal.meeting_id}/agenda/{decisionModal.id}/decision',
+                                    ],
+                                    'requiredPermission' => CorePermissions::CONVENING_DECIDE,
+                                    'children' => [
+                                        [
+                                            'type' => 'select',
+                                            'name' => 'verdict',
+                                            'label' => 'Verdict',
+                                            'required' => true,
+                                            'options' => [
+                                                ['value' => 'approved', 'label' => 'Approved'],
+                                                ['value' => 'rejected', 'label' => 'Rejected'],
+                                                // Deferred minutes the discussion
+                                                // without moving the document.
+                                                ['value' => 'deferred', 'label' => 'Deferred'],
+                                            ],
+                                        ],
+                                        [
+                                            'type' => 'textArea',
+                                            'name' => 'rationale',
+                                            'label' => 'Rationale',
+                                            'rows' => 3,
+                                        ],
+                                        ['type' => 'submitButton', 'label' => 'Record decision'],
+                                    ],
+                                ],
                             ],
                         ],
                     ],
