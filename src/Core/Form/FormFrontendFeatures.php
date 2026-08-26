@@ -225,6 +225,162 @@ final class FormFrontendFeatures
                             'labelField' => 'form_key',
                             'placeholder' => 'Pick a form to edit its fields',
                         ],
+                        // WHAT THE BUILDER COULD NOT DO. Creating a form worked
+                        // and removing a field worked, and nothing in between:
+                        // no way to change the form once made, no way to add a
+                        // field to it, nothing that showed the thing being
+                        // built. The API supported all three already, so this is
+                        // the declaration catching up with it rather than new
+                        // capability.
+                        [
+                            'type' => 'dataRecord',
+                            'id' => 'builderFormDetail',
+                            'source' => '/api/v1/forms/{builderForm}',
+                            'emptyText' => 'Pick a form above to see and edit it.',
+                            'fields' => [
+                                ['field' => 'form_key', 'label' => 'Key'],
+                                ['field' => 'status', 'label' => 'Status'],
+                                ['field' => 'version', 'label' => 'Version'],
+                                ['field' => 'description', 'label' => 'Description'],
+                                ['field' => 'accepts_submissions', 'label' => 'Accepting submissions'],
+                            ],
+                        ],
+                        [
+                            'type' => 'modal',
+                            'id' => 'editFormModal',
+                            'title' => 'Edit this form',
+                            'trigger' => 'Edit form',
+                            'variant' => 'secondary',
+                            'children' => [
+                                [
+                                    'type' => 'form',
+                                    // `{builderForm}` resolves from the selector
+                                    // above: a submit endpoint interpolates its
+                                    // tokens from the same master-detail context
+                                    // a source does, so the chosen form fills the
+                                    // PATH segment that `params` cannot reach.
+                                    'submit' => ['method' => 'PATCH', 'endpoint' => '/api/v1/forms/{builderForm}'],
+                                    'requiredPermission' => CorePermissions::FORMS_MANAGE,
+                                    'children' => [
+                                        [
+                                            'type' => 'bilingualText',
+                                            'name' => 'name',
+                                            'label' => 'Name',
+                                            'arLabel' => 'Arabic',
+                                            'enLabel' => 'English',
+                                        ],
+                                        [
+                                            'type' => 'textArea',
+                                            'name' => 'description',
+                                            'label' => 'Description',
+                                            'rows' => 3,
+                                        ],
+                                        [
+                                            'type' => 'referenceSelect',
+                                            'name' => 'route_template_id',
+                                            'label' => 'Route submissions through',
+                                            'source' => '/api/v1/document-route-templates',
+                                            'valueField' => 'id',
+                                            'labelField' => 'name',
+                                            'placeholder' => 'Do not route submissions',
+                                        ],
+                                        ['type' => 'submitButton', 'label' => 'Save changes'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            'type' => 'modal',
+                            'id' => 'addFieldModal',
+                            'title' => 'Add a field',
+                            'trigger' => 'Add field',
+                            'size' => 'lg',
+                            'children' => [
+                                [
+                                    'type' => 'form',
+                                    'submit' => ['method' => 'POST', 'endpoint' => '/api/v1/forms/{builderForm}/fields'],
+                                    'requiredPermission' => CorePermissions::FORMS_MANAGE,
+                                    'children' => [
+                                        [
+                                            'type' => 'textInput',
+                                            'name' => 'field_key',
+                                            'label' => 'Key',
+                                            'placeholder' => 'snake_case, unique within this form',
+                                            'required' => true,
+                                        ],
+                                        [
+                                            'type' => 'select',
+                                            'name' => 'field_type',
+                                            'label' => 'Kind',
+                                            'required' => true,
+                                            // The vocabulary FieldType accepts, not a
+                                            // longer list a person could pick from and
+                                            // then be refused on submit.
+                                            'options' => [
+                                                ['value' => 'text', 'label' => 'Short text'],
+                                                ['value' => 'textarea', 'label' => 'Long text'],
+                                                ['value' => 'number', 'label' => 'Number'],
+                                                ['value' => 'date', 'label' => 'Date'],
+                                                ['value' => 'select', 'label' => 'Choose one'],
+                                                ['value' => 'multiselect', 'label' => 'Choose several'],
+                                                ['value' => 'checkbox', 'label' => 'Yes / no'],
+                                                ['value' => 'file', 'label' => 'File'],
+                                                ['value' => 'profile_ref', 'label' => 'A person'],
+                                                ['value' => 'ou_ref', 'label' => 'An organizational unit'],
+                                            ],
+                                        ],
+                                        [
+                                            'type' => 'bilingualText',
+                                            'name' => 'label',
+                                            'label' => 'Label',
+                                            'required' => true,
+                                            'arLabel' => 'Arabic',
+                                            'enLabel' => 'English',
+                                        ],
+                                        [
+                                            'type' => 'textArea',
+                                            'name' => 'help_text',
+                                            'label' => 'Help text',
+                                            'rows' => 2,
+                                        ],
+                                        [
+                                            'type' => 'checkbox',
+                                            'name' => 'is_required',
+                                            'label' => 'Required',
+                                        ],
+                                        [
+                                            'type' => 'textInput',
+                                            'name' => 'section_key',
+                                            'label' => 'Section',
+                                            'placeholder' => 'Groups fields under one heading',
+                                        ],
+                                        [
+                                            'type' => 'numberInput',
+                                            'name' => 'position',
+                                            'label' => 'Position',
+                                            'min' => 1,
+                                        ],
+                                        [
+                                            'type' => 'select',
+                                            'name' => 'prefill_source',
+                                            'label' => 'Prefill from the submitter',
+                                            // `profile.phone` and `profile.job_title` are
+                                            // declared but have no backing column yet;
+                                            // the render response reports them under
+                                            // `unresolved_prefill` rather than quietly
+                                            // returning an empty string.
+                                            'options' => [
+                                                ['value' => '', 'label' => 'Do not prefill'],
+                                                ['value' => 'profile.display_name', 'label' => 'Their name'],
+                                                ['value' => 'profile.email', 'label' => 'Their email'],
+                                                ['value' => 'profile.ou', 'label' => 'Their unit'],
+                                            ],
+                                        ],
+                                        ['type' => 'submitButton', 'label' => 'Add field'],
+                                    ],
+                                ],
+                            ],
+                        ],
                         [
                             'type' => 'dataTable',
                             // The FLAT read, not the nested one: `params` append
