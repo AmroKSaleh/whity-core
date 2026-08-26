@@ -11,7 +11,10 @@
     "build:harness": "node scripts/build-harness.js",
     "build:info": "node scripts/write-build-info.js",
     "start": "npm run build:harness && npm run build:info && node src/server.js",
-    "test": "jest"
+    "test": "jest",
+    "flow:fixture": "node scripts/generate-flow-fixture.js",
+    "flow:verify": "node scripts/verify-flow-pdf.js",
+    "flow:geometry": "node scripts/check-flow-rtl-geometry.js"
   },
   "dependencies": {
     "bwip-js": "^4.11.2",
@@ -25,6 +28,7 @@
   "devDependencies": {
     "esbuild": "^0.25.0",
     "jest": "^29.7.0",
+    "pdfjs-dist": "^5.7.284",
     "supertest": "^7.1.0"
   }
 }

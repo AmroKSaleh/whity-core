@@ -1131,6 +1131,98 @@ jobs:
           echo "PDF size: ${size} bytes"
           test "${size}" -gt 5000
 
+      # ---------------------------------------------------------------------
+      # The FLOWING render mode (#1072).
+      #
+      # `documents.render_enabled` defaults to false, so nothing in a fresh
+      # install ever calls the render tier and a feature here has no natural
+      # way to be exercised. These steps are that way. They generate a
+      # synthetic document of the size this mode exists for — over a hundred
+      # pages, sixty tables, ninety figures, front matter referencing every
+      # one — render it through the real container, and then check the
+      # RESULTING PDF rather than the exit status of the thing that made it.
+      #
+      # The check that matters is the last one: it opens the PDF, finds the
+      # page each table and figure is actually printed on, reads the page
+      # number printed beside the matching front-matter entry, and compares
+      # them. A contents list of ninety plausible-looking wrong numbers is a
+      # worse outcome than no contents list, and only this check can tell the
+      # two apart.
+      - name: Generate the synthetic flowing-document fixture
+        working-directory: render-service
+        run: |
+          node scripts/generate-flow-fixture.js --direction rtl --out /tmp/flow-rtl.json
+          node scripts/generate-flow-fixture.js --direction ltr --out /tmp/flow-ltr.json
+          ls -l /tmp/flow-rtl.json /tmp/flow-ltr.json
+
+      - name: Flowing render round-trip (Arabic/RTL, 130 pages)
+        run: |
+          # `run:` steps are bash -e, so a failing curl would abort before the
+          # status could be read. Disable the abort just long enough to capture
+          # it, then report the ARTEFACT rather than the status.
+          set +e
+          curl -sS -X POST http://127.0.0.1:18130/render/flow \
+            -H 'Content-Type: application/json' \
+            -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' \
+            --data @/tmp/flow-rtl.json \
+            -D /tmp/flow-rtl.headers \
+            -o /tmp/flow-rtl.pdf
+          curl_status=$?
+          set -e
+          echo "curl exit: ${curl_status}"
+          test "${curl_status}" -eq 0
+
+          # Verify the ARTEFACT, not the status. A Buffer coming back is not
+          # evidence that the document is right.
+          test -s /tmp/flow-rtl.pdf
+          head -c 5 /tmp/flow-rtl.pdf | grep -q '%PDF-'
+          cat /tmp/flow-rtl.headers
+
+          pages=$(tr -d '\r' < /tmp/flow-rtl.headers | awk 'tolower($1)=="x-render-page-count:"{print $2}')
+          front=$(tr -d '\r' < /tmp/flow-rtl.headers | awk 'tolower($1)=="x-render-front-matter-pages:"{print $2}')
+          echo "reported pages: ${pages} (of which ${front} are generated front matter)"
+
+          # The whole point of this mode is a document whose length it decides.
+          # Below a hundred pages the fixture is not exercising pagination at
+          # the size that matters, and a single page means it collapsed.
+          test -n "${pages}"
+          test "${pages}" -ge 120
+          test "${front}" -ge 5
+          echo "FLOW_PAGES=${pages}" >> "$GITHUB_ENV"
+
+      - name: Flowing render round-trip (LTR)
+        run: |
+          curl -fsS -X POST http://127.0.0.1:18130/render/flow \
+            -H 'Content-Type: application/json' \
+            -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' \
+            --data @/tmp/flow-ltr.json \
+            -D /tmp/flow-ltr.headers \
+            -o /tmp/flow-ltr.pdf
+          test -s /tmp/flow-ltr.pdf
+          head -c 5 /tmp/flow-ltr.pdf | grep -q '%PDF-'
+          pages=$(tr -d '\r' < /tmp/flow-ltr.headers | awk 'tolower($1)=="x-render-page-count:"{print $2}')
+          echo "reported pages: ${pages}"
+          test "${pages}" -ge 120
+
+      # THE acceptance test. Reads the finished PDFs and checks that the entry
+      # for a given item names the page that item is actually on — plus that
+      # the running footer on physical page N says N.
+      - name: Cross-reference page numbers are CORRECT, read back from the PDF
+        working-directory: render-service
+        run: |
+          node scripts/verify-flow-pdf.js --pdf /tmp/flow-rtl.pdf --direction rtl --expect-pages "${FLOW_PAGES}"
+          node scripts/verify-flow-pdf.js --pdf /tmp/flow-ltr.pdf --direction ltr
+
+      # Bidi is checked as GEOMETRY, in the real image, because that is the
+      # only place the question can be answered: whether a page number lands at
+      # the correct edge of a right-to-left line is about a browser and a flex
+      # row, not about a string. Runs inside the container because that is
+      # where the Arabic fonts are.
+      - name: Arabic/RTL contents-entry and running-head geometry
+        run: |
+          docker cp render-service/scripts whity_render_ci:/app/scripts
+          docker exec whity_render_ci node scripts/check-flow-rtl-geometry.js
+
       - name: Container logs (always, for debugging)
         if: always()
         run: docker logs whity_render_ci || true

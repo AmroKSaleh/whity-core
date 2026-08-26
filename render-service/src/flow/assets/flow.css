@@ -1,0 +1,336 @@
+/*
+ * Flowing-document stylesheet (#1072, first half).
+ *
+ * Owned entirely by the flowing mode. The fixed-canvas mode's stylesheet
+ * (render-service/harness/styles.css) is a different file for a different
+ * document shape and is not loaded here — the two modes never share a page.
+ *
+ * The geometry is the important part. Chromium is given `@page { margin: 0 }`
+ * exactly as the fixed-canvas mode is, and one `.flow-page` element per
+ * output page at the exact physical size, because the paginator has already
+ * decided what goes on each page. The document's REAL margins are the inset
+ * of `.flow-page-content` inside that box, which is what lets the running
+ * header and footer be drawn in the margin band — the thing `margin: 0` plus
+ * `displayHeaderFooter` cannot do.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--flow-font);
+  font-size: 10.5pt;
+  line-height: 1.55;
+  color: #111111;
+  background: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * The measuring column. Laid out at exactly the content-box width so that a
+ * unit measured here occupies the same height once it is moved into a page —
+ * moving a laid-out element between two containers of identical width does
+ * not re-wrap it. Kept out of sight rather than `display: none`, which would
+ * give every element a zero height and make the whole approach silently
+ * produce one enormous page.
+ */
+#flow-source {
+  position: absolute;
+  top: 0;
+  left: -100000px;
+  width: var(--flow-content-width, 170mm);
+  visibility: hidden;
+}
+
+/* Once pagination has finished, the source column has been emptied into the
+   pages and is removed from the document entirely. */
+#flow-source.flow-consumed {
+  display: none;
+}
+
+.flow-page {
+  position: relative;
+  width: var(--flow-page-width);
+  height: var(--flow-page-height);
+  overflow: hidden;
+  background: #ffffff;
+  break-after: page;
+  page-break-after: always;
+}
+
+.flow-page:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+
+.flow-page-content {
+  position: absolute;
+  top: var(--flow-margin-top);
+  inset-inline-start: var(--flow-margin-inline-start);
+  width: var(--flow-content-width);
+  height: var(--flow-content-height);
+  overflow: hidden;
+}
+
+/*
+ * A unit that carries a top margin because of what precedes it in the SOURCE
+ * (a level-2 heading's 5 mm of air, say) must not push itself down when it is
+ * the first thing on a page: the margin box would eat into the page's top
+ * margin and every page starting with a heading would begin lower than every
+ * page starting with a paragraph. The paginator measures with this rule in
+ * force, so what it measures is what prints.
+ */
+.flow-page-content > :first-child {
+  margin-top: 0;
+}
+
+/*
+ * Running header / footer bands. They sit INSIDE the page margin — above the
+ * content box and below it — which is what a running head is. Both are laid
+ * out as a three-part flex row so the start/centre/end slots land where the
+ * document's own direction puts them, instead of relying on the bidi
+ * algorithm to reorder a single line of mixed text.
+ */
+.flow-running {
+  position: absolute;
+  inset-inline-start: var(--flow-margin-inline-start);
+  width: var(--flow-content-width);
+  display: flex;
+  align-items: center;
+  gap: 4mm;
+  font-size: 8.5pt;
+  line-height: 1.3;
+  color: #444444;
+}
+
+.flow-running-header {
+  bottom: calc(100% - var(--flow-margin-top) + 3mm);
+  border-bottom: 0.3mm solid #cccccc;
+  padding-bottom: 1.5mm;
+}
+
+.flow-running-header.flow-running-empty,
+.flow-running-footer.flow-running-empty {
+  border: 0;
+}
+
+.flow-running-footer {
+  top: calc(var(--flow-margin-top) + var(--flow-content-height) + 4mm);
+  border-top: 0.3mm solid #cccccc;
+  padding-top: 1.5mm;
+}
+
+.flow-running-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.flow-running-slot-center {
+  text-align: center;
+}
+
+.flow-running-slot-end {
+  text-align: end;
+}
+
+/* ---- Body content ------------------------------------------------------ */
+
+.flow-heading {
+  margin: 0 0 2.5mm;
+  font-weight: 700;
+  line-height: 1.35;
+  break-after: avoid;
+}
+
+.flow-heading + .flow-heading {
+  margin-top: 2mm;
+}
+
+.flow-heading-1 {
+  font-size: 16pt;
+  margin-top: 0;
+}
+
+.flow-heading-2 {
+  font-size: 13pt;
+  margin-top: 5mm;
+}
+
+.flow-heading-3 {
+  font-size: 11.5pt;
+  margin-top: 4mm;
+}
+
+.flow-heading-4,
+.flow-heading-5,
+.flow-heading-6 {
+  font-size: 10.5pt;
+  margin-top: 3mm;
+}
+
+.flow-heading-number {
+  margin-inline-end: 2mm;
+}
+
+.flow-paragraph {
+  margin: 0 0 3mm;
+  text-align: justify;
+  text-justify: inter-word;
+}
+
+.flow-align-center {
+  text-align: center;
+}
+
+.flow-align-end {
+  text-align: end;
+}
+
+.flow-spacer {
+  width: 100%;
+}
+
+.flow-page-break {
+  height: 0;
+}
+
+/* ---- Tables ------------------------------------------------------------ */
+
+.flow-table {
+  margin: 0 0 5mm;
+}
+
+.flow-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  line-height: 1.4;
+}
+
+.flow-table th,
+.flow-table td {
+  border: 0.25mm solid #999999;
+  padding: 1.2mm 1.8mm;
+  text-align: start;
+  vertical-align: top;
+}
+
+.flow-table th {
+  background: #eeeeee;
+  font-weight: 700;
+}
+
+/* ---- Figures ----------------------------------------------------------- */
+
+.flow-figure {
+  margin: 0 0 5mm;
+  text-align: center;
+}
+
+.flow-figure-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.flow-figure-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.flow-caption {
+  margin-top: 1.5mm;
+  font-size: 8.5pt;
+  color: #333333;
+  text-align: start;
+}
+
+.flow-table-caption {
+  margin-top: 0;
+  margin-bottom: 1.5mm;
+}
+
+.flow-caption-label {
+  font-weight: 700;
+}
+
+.flow-caption-continued {
+  font-weight: 400;
+  font-style: italic;
+}
+
+/* ---- Generated front matter ------------------------------------------- */
+
+.flow-frontmatter-title {
+  font-size: 16pt;
+  font-weight: 700;
+  margin: 0 0 6mm;
+}
+
+/*
+ * A contents entry is a flex ROW, not a line of mixed text.
+ *
+ * This is deliberate and it is the whole reason these lists come out right in
+ * Arabic. Written as running text — label, leader dots, page number — the
+ * bidi algorithm sees a Latin number at the end of an RTL line with only
+ * neutral characters (the dots and spaces) between it and the Latin digits in
+ * the label, resolves the whole span as one left-to-right run, and prints the
+ * page number where the item number belongs. As a flex row the three parts
+ * are boxes, and `direction: rtl` on the row puts the label at the right edge
+ * and the number at the left edge by layout, with no reordering to get wrong.
+ * The number is additionally wrapped in <bdi> so its own digits are isolated
+ * from whatever precedes them.
+ */
+.flow-toc-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5mm;
+  margin-bottom: 1.6mm;
+  font-size: 10pt;
+  line-height: 1.45;
+}
+
+.flow-toc-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.flow-toc-leader {
+  flex: 1 1 auto;
+  min-width: 4mm;
+  align-self: flex-end;
+  border-bottom: 0.25mm dotted #888888;
+  transform: translateY(-0.7mm);
+}
+
+.flow-toc-page {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-toc-level-1 {
+  font-weight: 700;
+  margin-top: 2.5mm;
+}
+
+.flow-toc-level-2 {
+  padding-inline-start: 6mm;
+}
+
+.flow-toc-level-3 {
+  padding-inline-start: 12mm;
+  font-size: 9.5pt;
+}

@@ -121,6 +121,19 @@ async function renderToPdf(payload, opts) {
   }
 }
 
+/**
+ * The shared, lazily-launched Chromium instance.
+ *
+ * Exported for the FLOWING render mode (src/flow/render.js, #1072), which is a
+ * separate document pipeline but must not launch a second browser: Chromium is
+ * the expensive thing in this service and one instance serving both modes is
+ * the whole reason `launchBrowser` memoises. Nothing about `renderToPdf`'s own
+ * behaviour changes by exporting this.
+ */
+function getBrowser() {
+  return launchBrowser();
+}
+
 async function shutdown() {
   if (browserPromise) {
     const browser = await browserPromise.catch(() => null);
@@ -131,4 +144,4 @@ async function shutdown() {
   }
 }
 
-module.exports = { renderToPdf, shutdown };
+module.exports = { renderToPdf, getBrowser, shutdown };
