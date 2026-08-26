@@ -10100,6 +10100,1613 @@
                 ]
             }
         },
+        "/api/v1/form-fields": {
+            "get": {
+                "operationId": "get_api_v1_form_fields",
+                "summary": "One form's fields, addressed by query param",
+                "tags": [
+                    "forms"
+                ],
+                "description": "The same list as GET /api/v1/forms/{id}/fields, reachable by `?form_id=` so a master-detail picker can drive it \u2014 a data-bound block's params append QUERY params to a fixed source and cannot fill a PATH segment. This flat form exists for READS only; every write stays nested under the form, which is what makes a delete refuse when the field belongs to a different one. An absent or unknown `form_id` returns an empty list, not a 422: the picker renders before anybody has chosen.",
+                "parameters": [
+                    {
+                        "name": "form_id",
+                        "in": "query",
+                        "required": false,
+                        "description": "The form whose fields to return.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The fields, with the builder vocabularies",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormFieldListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/form-submissions": {
+            "get": {
+                "operationId": "get_api_v1_form_submissions",
+                "summary": "List the tenant's submissions",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Newest first, optionally narrowed by `form_id` or `submitted_by`. Each row carries the form key and name so a list renders without a round trip per row. `document_id` is null for a submission to a form with no route template (it collected, it did not circulate) and for one whose document was later deleted \u2014 both ordinary states, not failures.",
+                "parameters": [
+                    {
+                        "name": "form_id",
+                        "in": "query",
+                        "required": false,
+                        "description": "Restrict to one form.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "submitted_by",
+                        "in": "query",
+                        "required": false,
+                        "description": "Restrict to one submitter.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 50, max 200).",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "required": false,
+                        "description": "Rows to skip.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The matching submissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormSubmissionListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A form this tenant does not have",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/form-submissions/{id}": {
+            "get": {
+                "operationId": "get_api_v1_form_submissions_id",
+                "summary": "Get one submission, with the fields it was answering",
+                "tags": [
+                    "forms"
+                ],
+                "description": "The fields travel with the submission because the two are useless apart \u2014 an answer of `41` means nothing without the field that says what was asked. They are TODAY's fields, and `form_version_now` is returned beside the submission's own `form_version` so a reader can SEE when the two do not line up and knows they are looking at drift rather than at a bug.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The submission and its fields",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormSubmissionDetailResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Submission not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms": {
+            "get": {
+                "operationId": "get_api_v1_forms",
+                "summary": "List the tenant's forms",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Newest first. `?status=` narrows to `draft`, `published` or `archived`. Each row carries `available_transitions` and `accepts_submissions`, both DERIVED from the status, so a client rendering the lifecycle controls does not have to hold a second copy of the transition table.",
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "required": false,
+                        "description": "Restrict to one lifecycle state.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 100, max 500).",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "required": false,
+                        "description": "Rows to skip.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The tenant's forms",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "An unrecognised status filter",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_forms",
+                "summary": "Author a new form",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Always created as a `draft`: a form is never born live, because one with no fields yet that accepted submissions would collect empty ones. `route_template_id` is what makes submissions CIRCULATE \u2014 pointed at a design from /api/v1/document-route-templates, every submission becomes a document routed through the existing engine. Omitted, the form collects and stops there.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FormCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created form",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A malformed or duplicate key, a name in no language, or a route template this tenant does not have",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms/{id}": {
+            "get": {
+                "operationId": "get_api_v1_forms_id",
+                "summary": "Get one form, with its fields and its submission count",
+                "tags": [
+                    "forms"
+                ],
+                "description": "The submission count travels with the form because an author about to change a published one needs to know that people have already answered it \u2014 and a count they have to go and fetch is a count they will not fetch.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The form, its fields and its counts",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormDetailResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_forms_id",
+                "summary": "Rename a form, retitle it, or change where its submissions go",
+                "tags": [
+                    "forms"
+                ],
+                "description": "`form_key` is immutable and a body carrying one is REFUSED, not ignored: code and links bind to the key, so editing it in place would silently repoint every reference at a form that no longer exists. `status` is likewise refused \u2014 it moves through /publish and /archive, which are acts rather than attribute assignments.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FormUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The updated form",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "An immutable field, no updatable field, or an unknown route template",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms/{id}/archive": {
+            "post": {
+                "operationId": "post_api_v1_forms_id_archive",
+                "summary": "Stop accepting submissions",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Everything already submitted stays exactly where it is; only the door closes. REVERSIBLE \u2014 republishing is allowed, because retiring a form at the end of a cycle and wanting it back at the start of the next one is the ordinary case. There is no DELETE at all: a form is what somebody's submission was an answer TO, and destroying it leaves every submission as a bag of keys with nothing to say what they meant.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The archived form",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The form moved under this request \u2014 reload and retry",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The transition is not allowed from here",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms/{id}/fields": {
+            "get": {
+                "operationId": "get_api_v1_forms_id_fields",
+                "summary": "A form's fields, in authoring order",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Ordered by `position`, then `id` \u2014 the id tie-break makes the sequence TOTAL, since `position` carries no unique index (a drag-reorderable ordinal must not, or a two-field swap becomes a three-statement dance). `meta` carries the vocabularies a builder renders its pickers from, so a client cannot hold a stale copy of the field kinds or the prefill sources.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The fields, with the builder vocabularies",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormFieldListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_forms_id_fields",
+                "summary": "Add a field to a form",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Appended AFTER the current maximum position unless one is given: a builder that adds a field expects it at the end, where the author is looking. `select` and `multiselect` require a non-empty `options` list; `profile_ref` and `ou_ref` accept none, because their choices are RESOLVED from the tenant's live people and units rather than authored \u2014 a pasted roster is wrong by the end of the month, still renders, and still reports success. `prefill_source` names a rule for reaching the submitter's own details and is resolved at render time, never stored.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FormFieldCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created field",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormFieldResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The form is archived, so its fields cannot be changed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A malformed or duplicate key, an unknown kind or prefill source, a choice-bearing field with no choices, or an invalid validation pattern",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms/{id}/fields/{fieldId}": {
+            "delete": {
+                "operationId": "delete_api_v1_forms_id_fields_fieldid",
+                "summary": "Take a field off a form",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Answers already given to it are NOT deleted \u2014 they stay in the submission and simply stop having a label. That is why an ARCHIVED form refuses this: its fields are the only remaining explanation of what its submissions answered. The field id is scoped to the form in the path, so a delete addressed through the wrong form is a 404 rather than a cross-form deletion.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "fieldId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "deleted": {
+                                                    "type": "boolean"
+                                                }
+                                            },
+                                            "required": [
+                                                "deleted"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "data"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form or field not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The form is archived, so its fields cannot be changed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_forms_id_fields_fieldid",
+                "summary": "Edit a field, or move it in the order",
+                "tags": [
+                    "forms"
+                ],
+                "description": "`field_key` is immutable and a body carrying one is REFUSED: answers already submitted are keyed by it, so renaming a key in place does not rename the answers, it ORPHANS them, silently, while reporting success. `field_type` MAY change \u2014 fixing text to textarea is a real edit \u2014 and options are re-validated against the new kind in the same request, so a select demoted to text cannot keep choices nothing will draw.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "fieldId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FormFieldUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The updated field",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormFieldResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form or field not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The form is archived, so its fields cannot be changed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "An immutable field, no updatable field, or an invalid value",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms/{id}/publish": {
+            "post": {
+                "operationId": "post_api_v1_forms_id_publish",
+                "summary": "Make the form live, and mint a version",
+                "tags": [
+                    "forms"
+                ],
+                "description": "A form with no fields is REFUSED: publishing one would produce a live form that collects nothing, renders as an empty page with a submit button, and reports every submission as successful. Publishing increments `version`, and every submission stamps the version it was answered against \u2014 which lets a reader SEE drift between an old answer set and today's fields, but does not by itself reconstruct the old field list. Idempotent: asking for the state the form is already in returns it rather than erroring.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The published form",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The form moved under this request \u2014 reload and retry",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The transition is not allowed from here, or the form has no fields",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms/{id}/render": {
+            "get": {
+                "operationId": "get_api_v1_forms_id_render",
+                "summary": "The form as it should be DRAWN for the caller, with their prefilled values",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Fields in order, grouped into derived `sections`, plus `prefill` \u2014 values resolved SERVER-SIDE from the CALLER'S own saved details so they do not retype what the organisation already knows. Prefill is a suggestion, never an answer: nothing is recorded until the person submits. `unresolved_prefill` names any field whose declared source nothing in this install stores, so an empty box is distinguishable from a bug. A form that is not accepting submissions still renders \u2014 `accepts_submissions` says which \u2014 so a person following a link to an archived form learns it closed rather than that it never existed.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The form, drawn for this caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormRenderResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms/{id}/submissions": {
+            "post": {
+                "operationId": "post_api_v1_forms_id_submissions",
+                "summary": "Submit a form",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Answers arrive under `data`, keyed by field key; everything else in the body is ignored, because a body that could also set `submitted_by_profile_id` would let a caller sign a declaration in somebody else's name. On success the submission ALSO becomes a core DOCUMENT, so it inherits routing, approvals, the inbox, QR verification, artifacts and row-level visibility \u2014 and when the form names a route template, that document starts circulating in the same transaction. `meta.routed` says whether it did, so a client never tells somebody their request is on its way when nothing is moving. `meta.ignored_keys` names answers that matched no field (a stale client): they are dropped rather than refused, so a race nobody caused does not discard everything the person typed.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FormSubmissionCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The recorded submission",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormSubmissionCreateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The form is not accepting submissions, an answer failed validation, a reference names no record in this tenant, or the form's route template cannot be run as drawn",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/frontend/features": {
             "get": {
                 "operationId": "get_api_v1_frontend_features",
@@ -13077,6 +14684,112 @@
                         }
                     }
                 }
+            }
+        },
+        "/api/v1/me/form-submissions": {
+            "get": {
+                "operationId": "get_api_v1_me_form_submissions",
+                "summary": "The caller's own submissions",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Only ever the caller's rows \u2014 the ROUTE decides whose, not a query param, so nothing a client omits or changes can widen it. Gated on `forms:submit` rather than `forms:read` because the rows already name exactly one person, so a tenant-wide permission has nothing left to decide; requiring the read permission would hide this from precisely the people whose submissions are in it. A caller with no profile (a service principal) gets an empty list, which is true rather than an authorization failure somebody has to investigate.",
+                "parameters": [
+                    {
+                        "name": "form_id",
+                        "in": "query",
+                        "required": false,
+                        "description": "Restrict to one form.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 50, max 200).",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "required": false,
+                        "description": "Rows to skip.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The caller's submissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormSubmissionListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/me/identities": {
@@ -30865,6 +32578,768 @@
                 "required": [
                     "data"
                 ]
+            },
+            "Form": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "form_key": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "draft",
+                            "published",
+                            "archived"
+                        ]
+                    },
+                    "version": {
+                        "type": "integer"
+                    },
+                    "route_template_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_by_profile_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    },
+                    "available_transitions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "accepts_submissions": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "form_key",
+                    "name",
+                    "status",
+                    "version",
+                    "available_transitions",
+                    "accepts_submissions"
+                ]
+            },
+            "FormBuilderVocabularies": {
+                "type": "object",
+                "properties": {
+                    "field_types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "option_bearing_field_types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "prefill_sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source": {
+                                    "type": "string"
+                                },
+                                "backed": {
+                                    "type": "boolean"
+                                },
+                                "reason": {
+                                    "type": "string",
+                                    "nullable": true
+                                }
+                            },
+                            "required": [
+                                "source",
+                                "backed"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "field_types",
+                    "prefill_sources"
+                ]
+            },
+            "FormCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "form_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9_-]*$"
+                    },
+                    "name": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "description": {
+                        "type": "string",
+                        "maxLength": 10000
+                    },
+                    "route_template_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "form_key",
+                    "name"
+                ]
+            },
+            "FormDetailResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/Form"
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "fields": {
+                                        "type": "array",
+                                        "items": {
+                                            "$ref": "#/components/schemas/FormField"
+                                        }
+                                    },
+                                    "sections": {
+                                        "type": "array",
+                                        "items": {
+                                            "$ref": "#/components/schemas/FormSection"
+                                        }
+                                    },
+                                    "submission_count": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormField": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "form_id": {
+                        "type": "integer"
+                    },
+                    "field_key": {
+                        "type": "string"
+                    },
+                    "field_type": {
+                        "type": "string",
+                        "enum": [
+                            "text",
+                            "textarea",
+                            "number",
+                            "date",
+                            "select",
+                            "multiselect",
+                            "checkbox",
+                            "file",
+                            "profile_ref",
+                            "ou_ref"
+                        ]
+                    },
+                    "label": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "help_text": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "is_required": {
+                        "type": "boolean"
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FormFieldOption"
+                        }
+                    },
+                    "validation": {
+                        "$ref": "#/components/schemas/FormFieldValidation"
+                    },
+                    "prefill_source": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "prefill_backed": {
+                        "type": "boolean"
+                    },
+                    "section_key": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "position": {
+                        "type": "integer"
+                    },
+                    "multi_valued": {
+                        "type": "boolean"
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "form_id",
+                    "field_key",
+                    "field_type",
+                    "label",
+                    "is_required",
+                    "position"
+                ]
+            },
+            "FormFieldCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "field_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z][a-z0-9_]*$"
+                    },
+                    "field_type": {
+                        "type": "string",
+                        "enum": [
+                            "text",
+                            "textarea",
+                            "number",
+                            "date",
+                            "select",
+                            "multiselect",
+                            "checkbox",
+                            "file",
+                            "profile_ref",
+                            "ou_ref"
+                        ]
+                    },
+                    "label": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "help_text": {
+                        "type": "string",
+                        "maxLength": 10000
+                    },
+                    "is_required": {
+                        "type": "boolean"
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FormFieldOption"
+                        }
+                    },
+                    "validation": {
+                        "$ref": "#/components/schemas/FormFieldValidation"
+                    },
+                    "prefill_source": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "section_key": {
+                        "type": "string",
+                        "maxLength": 255
+                    },
+                    "position": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "field_key",
+                    "field_type",
+                    "label"
+                ]
+            },
+            "FormFieldListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FormField"
+                        }
+                    },
+                    "meta": {
+                        "$ref": "#/components/schemas/FormBuilderVocabularies"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormFieldOption": {
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1
+                    },
+                    "label": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "required": [
+                    "value",
+                    "label"
+                ]
+            },
+            "FormFieldResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/FormField"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormFieldUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "field_type": {
+                        "type": "string",
+                        "enum": [
+                            "text",
+                            "textarea",
+                            "number",
+                            "date",
+                            "select",
+                            "multiselect",
+                            "checkbox",
+                            "file",
+                            "profile_ref",
+                            "ou_ref"
+                        ]
+                    },
+                    "label": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "help_text": {
+                        "type": "string",
+                        "maxLength": 10000
+                    },
+                    "is_required": {
+                        "type": "boolean"
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FormFieldOption"
+                        }
+                    },
+                    "validation": {
+                        "$ref": "#/components/schemas/FormFieldValidation"
+                    },
+                    "prefill_source": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "section_key": {
+                        "type": "string",
+                        "maxLength": 255
+                    },
+                    "position": {
+                        "type": "integer"
+                    }
+                },
+                "minProperties": 1
+            },
+            "FormFieldValidation": {
+                "type": "object",
+                "properties": {
+                    "min": {
+                        "type": "number"
+                    },
+                    "max": {
+                        "type": "number"
+                    },
+                    "maxLength": {
+                        "type": "integer"
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "maxLength": 512
+                    }
+                }
+            },
+            "FormListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Form"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormRenderResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "form": {
+                                "$ref": "#/components/schemas/Form"
+                            },
+                            "fields": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/FormField"
+                                }
+                            },
+                            "sections": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/FormSection"
+                                }
+                            },
+                            "prefill": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                }
+                            },
+                            "unresolved_prefill": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "field_key": {
+                                            "type": "string"
+                                        },
+                                        "source": {
+                                            "type": "string"
+                                        },
+                                        "reason": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "field_key",
+                                        "source",
+                                        "reason"
+                                    ]
+                                }
+                            },
+                            "accepts_submissions": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "form",
+                            "fields",
+                            "sections",
+                            "prefill",
+                            "accepts_submissions"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/Form"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormSection": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "field_keys": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "key",
+                    "field_keys"
+                ]
+            },
+            "FormSubmission": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "form_id": {
+                        "type": "integer"
+                    },
+                    "form_version": {
+                        "type": "integer"
+                    },
+                    "submitted_by_profile_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "document_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "data": {
+                        "type": "object",
+                        "additionalProperties": true
+                    },
+                    "submitted_at": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "form_key": {
+                        "type": "string"
+                    },
+                    "form_name": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "form_id",
+                    "form_version",
+                    "data",
+                    "submitted_at"
+                ]
+            },
+            "FormSubmissionCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormSubmissionCreateResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/FormSubmission"
+                    },
+                    "meta": {
+                        "type": "object",
+                        "properties": {
+                            "routed": {
+                                "type": "boolean"
+                            },
+                            "ignored_keys": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": [
+                            "routed",
+                            "ignored_keys"
+                        ]
+                    }
+                },
+                "required": [
+                    "data",
+                    "meta"
+                ]
+            },
+            "FormSubmissionDetailResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/FormSubmission"
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "fields": {
+                                        "type": "array",
+                                        "items": {
+                                            "$ref": "#/components/schemas/FormField"
+                                        }
+                                    },
+                                    "form_version_now": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormSubmissionListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FormSubmission"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "FormUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "description": {
+                        "type": "string",
+                        "maxLength": 10000
+                    },
+                    "route_template_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "minProperties": 1
             },
             "FrontendFeature": {
                 "type": "object",

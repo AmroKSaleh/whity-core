@@ -93,6 +93,7 @@ final class CoreApiSchemas
             self::ouRoutes(),
             self::ouTypeRoutes(),
             self::timeWindowRoutes(),
+            self::formRoutes(),
             self::delegationRoutes(),
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
@@ -1057,6 +1058,306 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('The reopened period and its trail', 'TimeWindowDetailResponse'),
                     404 => self::errorResponse('Time window not found'),
                     422 => self::errorResponse('No reason given, or the period containing this one is closed'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * FORMS (migrations 127/128) — tenant-authored forms, their fields, and the
+     * submissions made against them.
+     *
+     * THREE gates rather than the usual read/write pair, because there are three
+     * audiences and two of them barely overlap: `forms:manage` AUTHORS (an act of
+     * organisational policy), `forms:submit` FILLS IN (the everyday act of the
+     * largest audience in the tenant), `forms:read` READS WHAT CAME BACK (the
+     * approver's job). Folding `:submit` into `:read` is the tempting fold and the
+     * wrong one — it would mean letting somebody file a request also lets them
+     * read everybody else's.
+     *
+     * `/render` is gated on `forms:submit`, NOT `forms:read`, and that is the one
+     * assignment worth checking twice: its response carries the CALLER'S OWN
+     * prefilled details, so it is personalised, and gating it on the
+     * catalogue-reading permission would hand that payload to the wrong audience
+     * while denying it to the right one.
+     *
+     * There is deliberately no DELETE for a form (archive instead — a form is what
+     * a submission was an answer TO) and none for a submission (submit again — it
+     * is what somebody declared while other people acted on it).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function formRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/forms', 'forms:read', [
+                'summary' => "List the tenant's forms",
+                'description' => 'Newest first. `?status=` narrows to `draft`, `published` or '
+                    . '`archived`. Each row carries `available_transitions` and `accepts_submissions`, '
+                    . 'both DERIVED from the status, so a client rendering the lifecycle controls does '
+                    . 'not have to hold a second copy of the transition table.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('status', 'string', 'Restrict to one lifecycle state.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 100, max 500).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's forms", 'FormListResponse'),
+                    422 => self::errorResponse('An unrecognised status filter'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms', 'forms:manage', [
+                'summary' => 'Author a new form',
+                'description' => 'Always created as a `draft`: a form is never born live, because one '
+                    . 'with no fields yet that accepted submissions would collect empty ones. '
+                    . '`route_template_id` is what makes submissions CIRCULATE — pointed at a design '
+                    . 'from /api/v1/document-route-templates, every submission becomes a document routed '
+                    . 'through the existing engine. Omitted, the form collects and stops there.',
+                'tags' => ['forms'],
+                'request' => 'FormCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created form', 'FormResponse'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicate key, a name in no language, or a route template '
+                        . 'this tenant does not have'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}', 'forms:read', [
+                'summary' => 'Get one form, with its fields and its submission count',
+                'description' => 'The submission count travels with the form because an author about '
+                    . 'to change a published one needs to know that people have already answered it — '
+                    . 'and a count they have to go and fetch is a count they will not fetch.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, its fields and its counts', 'FormDetailResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/forms/{id:\d+}', 'forms:manage', [
+                'summary' => 'Rename a form, retitle it, or change where its submissions go',
+                'description' => '`form_key` is immutable and a body carrying one is REFUSED, not '
+                    . 'ignored: code and links bind to the key, so editing it in place would silently '
+                    . 'repoint every reference at a form that no longer exists. `status` is likewise '
+                    . 'refused — it moves through /publish and /archive, which are acts rather than '
+                    . 'attribute assignments.',
+                'tags' => ['forms'],
+                'request' => 'FormUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse('An immutable field, no updatable field, or an unknown route template'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/publish', 'forms:manage', [
+                'summary' => 'Make the form live, and mint a version',
+                'description' => 'A form with no fields is REFUSED: publishing one would produce a live '
+                    . 'form that collects nothing, renders as an empty page with a submit button, and '
+                    . 'reports every submission as successful. Publishing increments `version`, and '
+                    . 'every submission stamps the version it was answered against — which lets a '
+                    . 'reader SEE drift between an old answer set and today\'s fields, but does not by '
+                    . 'itself reconstruct the old field list. Idempotent: asking for the state the form '
+                    . 'is already in returns it rather than erroring.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The published form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form moved under this request — reload and retry'),
+                    422 => self::errorResponse('The transition is not allowed from here, or the form has no fields'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/archive', 'forms:manage', [
+                'summary' => 'Stop accepting submissions',
+                'description' => 'Everything already submitted stays exactly where it is; only the door '
+                    . 'closes. REVERSIBLE — republishing is allowed, because retiring a form at the end '
+                    . 'of a cycle and wanting it back at the start of the next one is the ordinary case. '
+                    . 'There is no DELETE at all: a form is what somebody\'s submission was an answer '
+                    . 'TO, and destroying it leaves every submission as a bag of keys with nothing to '
+                    . 'say what they meant.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The archived form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form moved under this request — reload and retry'),
+                    422 => self::errorResponse('The transition is not allowed from here'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}/render', 'forms:submit', [
+                'summary' => 'The form as it should be DRAWN for the caller, with their prefilled values',
+                'description' => 'Fields in order, grouped into derived `sections`, plus `prefill` — '
+                    . 'values resolved SERVER-SIDE from the CALLER\'S own saved details so they do not '
+                    . 'retype what the organisation already knows. Prefill is a suggestion, never an '
+                    . 'answer: nothing is recorded until the person submits. `unresolved_prefill` names '
+                    . 'any field whose declared source nothing in this install stores, so an empty box '
+                    . 'is distinguishable from a bug. A form that is not accepting submissions still '
+                    . 'renders — `accepts_submissions` says which — so a person following a link to an '
+                    . 'archived form learns it closed rather than that it never existed.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, drawn for this caller', 'FormRenderResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/form-fields', 'forms:read', [
+                'summary' => "One form's fields, addressed by query param",
+                'description' => 'The same list as GET /api/v1/forms/{id}/fields, reachable by '
+                    . '`?form_id=` so a master-detail picker can drive it — a data-bound block\'s '
+                    . 'params append QUERY params to a fixed source and cannot fill a PATH segment. '
+                    . 'This flat form exists for READS only; every write stays nested under the form, '
+                    . 'which is what makes a delete refuse when the field belongs to a different one. '
+                    . 'An absent or unknown `form_id` returns an empty list, not a 422: the picker '
+                    . 'renders before anybody has chosen.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'The form whose fields to return.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The fields, with the builder vocabularies', 'FormFieldListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}/fields', 'forms:read', [
+                'summary' => "A form's fields, in authoring order",
+                'description' => 'Ordered by `position`, then `id` — the id tie-break makes the sequence '
+                    . 'TOTAL, since `position` carries no unique index (a drag-reorderable ordinal must '
+                    . 'not, or a two-field swap becomes a three-statement dance). `meta` carries the '
+                    . 'vocabularies a builder renders its pickers from, so a client cannot hold a stale '
+                    . 'copy of the field kinds or the prefill sources.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The fields, with the builder vocabularies', 'FormFieldListResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/fields', 'forms:manage', [
+                'summary' => 'Add a field to a form',
+                'description' => 'Appended AFTER the current maximum position unless one is given: a '
+                    . 'builder that adds a field expects it at the end, where the author is looking. '
+                    . '`select` and `multiselect` require a non-empty `options` list; `profile_ref` and '
+                    . '`ou_ref` accept none, because their choices are RESOLVED from the tenant\'s live '
+                    . 'people and units rather than authored — a pasted roster is wrong by the end of '
+                    . 'the month, still renders, and still reports success. `prefill_source` names a '
+                    . 'rule for reaching the submitter\'s own details and is resolved at render time, '
+                    . 'never stored.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created field', 'FormFieldResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicate key, an unknown kind or prefill source, a '
+                        . 'choice-bearing field with no choices, or an invalid validation pattern'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', 'forms:manage', [
+                'summary' => 'Edit a field, or move it in the order',
+                'description' => '`field_key` is immutable and a body carrying one is REFUSED: answers '
+                    . 'already submitted are keyed by it, so renaming a key in place does not rename '
+                    . 'the answers, it ORPHANS them, silently, while reporting success. `field_type` '
+                    . 'MAY change — fixing text to textarea is a real edit — and options are '
+                    . 're-validated against the new kind in the same request, so a select demoted to '
+                    . 'text cannot keep choices nothing will draw.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated field', 'FormFieldResponse'),
+                    404 => self::errorResponse('Form or field not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse('An immutable field, no updatable field, or an invalid value'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', 'forms:manage', [
+                'summary' => 'Take a field off a form',
+                'description' => 'Answers already given to it are NOT deleted — they stay in the '
+                    . 'submission and simply stop having a label. That is why an ARCHIVED form refuses '
+                    . 'this: its fields are the only remaining explanation of what its submissions '
+                    . 'answered. The field id is scoped to the form in the path, so a delete addressed '
+                    . 'through the wrong form is a 404 rather than a cross-form deletion.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                        ['deleted' => ['type' => 'boolean']],
+                        ['deleted']
+                    ))),
+                    404 => self::errorResponse('Form or field not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/submissions', 'forms:submit', [
+                'summary' => 'Submit a form',
+                'description' => 'Answers arrive under `data`, keyed by field key; everything else in '
+                    . 'the body is ignored, because a body that could also set `submitted_by_profile_id` '
+                    . 'would let a caller sign a declaration in somebody else\'s name. On success the '
+                    . 'submission ALSO becomes a core DOCUMENT, so it inherits routing, approvals, the '
+                    . 'inbox, QR verification, artifacts and row-level visibility — and when the form '
+                    . 'names a route template, that document starts circulating in the same '
+                    . 'transaction. `meta.routed` says whether it did, so a client never tells somebody '
+                    . 'their request is on its way when nothing is moving. `meta.ignored_keys` names '
+                    . 'answers that matched no field (a stale client): they are dropped rather than '
+                    . 'refused, so a race nobody caused does not discard everything the person typed.',
+                'tags' => ['forms'],
+                'request' => 'FormSubmissionCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The recorded submission', 'FormSubmissionCreateResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse(
+                        'The form is not accepting submissions, an answer failed validation, a '
+                        . 'reference names no record in this tenant, or the form\'s route template '
+                        . 'cannot be run as drawn'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/form-submissions', 'forms:read', [
+                'summary' => "List the tenant's submissions",
+                'description' => 'Newest first, optionally narrowed by `form_id` or `submitted_by`. '
+                    . 'Each row carries the form key and name so a list renders without a round trip '
+                    . 'per row. `document_id` is null for a submission to a form with no route template '
+                    . '(it collected, it did not circulate) and for one whose document was later '
+                    . 'deleted — both ordinary states, not failures.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'Restrict to one form.'),
+                    self::queryParam('submitted_by', 'integer', 'Restrict to one submitter.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 50, max 200).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The matching submissions', 'FormSubmissionListResponse'),
+                    422 => self::errorResponse('A form this tenant does not have'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/form-submissions/{id:\d+}', 'forms:read', [
+                'summary' => 'Get one submission, with the fields it was answering',
+                'description' => 'The fields travel with the submission because the two are useless '
+                    . 'apart — an answer of `41` means nothing without the field that says what was '
+                    . 'asked. They are TODAY\'s fields, and `form_version_now` is returned beside the '
+                    . 'submission\'s own `form_version` so a reader can SEE when the two do not line up '
+                    . 'and knows they are looking at drift rather than at a bug.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The submission and its fields', 'FormSubmissionDetailResponse'),
+                    404 => self::errorResponse('Submission not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/me/form-submissions', 'forms:submit', [
+                'summary' => 'The caller\'s own submissions',
+                'description' => 'Only ever the caller\'s rows — the ROUTE decides whose, not a query '
+                    . 'param, so nothing a client omits or changes can widen it. Gated on '
+                    . '`forms:submit` rather than `forms:read` because the rows already name exactly '
+                    . 'one person, so a tenant-wide permission has nothing left to decide; requiring '
+                    . 'the read permission would hide this from precisely the people whose submissions '
+                    . 'are in it. A caller with no profile (a service principal) gets an empty list, '
+                    . 'which is true rather than an authorization failure somebody has to investigate.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'Restrict to one form.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 50, max 200).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The caller\'s submissions', 'FormSubmissionListResponse'),
                 ] + self::authErrors(),
             ]),
         ];
@@ -4572,6 +4873,242 @@ final class CoreApiSchemas
             // this kind sits inside. There is deliberately no rank column —
             // a kind's place is expressed by what contains it, which is a
             // structural fact, rather than by a sort order, which is an opinion.
+            // FORMS (migrations 127/128). `name` and `label` are the bilingual
+            // `{ar?, en?}` object, so Arabic and English are both first-class
+            // rather than one being the "real" value and the other a translation.
+            //
+            // `available_transitions` and `accepts_submissions` are DERIVED from
+            // `status` and are emitted so a client rendering the lifecycle
+            // controls does not carry a second copy of the transition table —
+            // which is how a client ends up offering a control the server refuses.
+            'Form' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_key' => self::str(),
+                'name' => self::localizedText(),
+                'description' => self::str(true),
+                'status' => ['type' => 'string', 'enum' => ['draft', 'published', 'archived']],
+                'version' => self::int(),
+                // Null means "collect only, do not circulate" — a legitimate
+                // configuration, not an unset field.
+                'route_template_id' => self::int(true),
+                'created_by_profile_id' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+                'available_transitions' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'accepts_submissions' => self::bool(),
+            ], [
+                'id', 'tenant_id', 'form_key', 'name', 'status', 'version',
+                'available_transitions', 'accepts_submissions',
+            ]),
+            'FormResponse' => self::dataEnvelope(SchemaBuilder::ref('Form')),
+            'FormListResponse' => self::listEnvelope('Form'),
+            'FormDetailResponse' => self::dataEnvelope([
+                'allOf' => [
+                    SchemaBuilder::ref('Form'),
+                    self::object([
+                        'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                        'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                        'submission_count' => self::int(),
+                    ], []),
+                ],
+            ]),
+            // `field_type` mirrors the CHECK constraint on `form_fields` and
+            // FieldType's whitelist; a unit test reads the migration and fails
+            // the moment the three disagree.
+            //
+            // `prefill_backed` is emitted BESIDE `prefill_source` rather than
+            // left for a client to derive: two of the declared sources have no
+            // column in this schema to read, and an author choosing one must see
+            // in the field editor that it will never produce a value — not
+            // discover it as an empty box after publishing.
+            'FormField' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_id' => self::int(),
+                'field_key' => self::str(),
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::str(true),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'prefill_backed' => self::bool(),
+                'section_key' => self::str(true),
+                'position' => self::int(),
+                'multi_valued' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'form_id', 'field_key', 'field_type', 'label', 'is_required', 'position']),
+            'FormFieldOption' => self::object([
+                'value' => self::name(nonEmpty: true),
+                'label' => self::localizedText(),
+            ], ['value', 'label']),
+            // Every rule is optional and unknown keys are DROPPED on write rather
+            // than stored: a rule nothing enforces is a promise on the row that no
+            // code keeps. `maxLength` may only TIGHTEN the platform ceiling.
+            'FormFieldValidation' => self::object([
+                'min' => ['type' => 'number'],
+                'max' => ['type' => 'number'],
+                'maxLength' => self::int(),
+                'pattern' => ['type' => 'string', 'maxLength' => 512],
+            ], []),
+            // DERIVED from the fields' `section_key`, never stored. There is no
+            // `form_sections` table, so a section cannot exist with no fields and
+            // a field cannot point at a section that was deleted.
+            'FormSection' => self::object([
+                'key' => self::str(true),
+                'field_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+            ], ['key', 'field_keys']),
+            'FormFieldResponse' => self::dataEnvelope(SchemaBuilder::ref('FormField')),
+            'FormFieldListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                'meta' => SchemaBuilder::ref('FormBuilderVocabularies'),
+            ], ['data']),
+            // Served by the server so a builder cannot hold a stale copy of the
+            // field kinds or of which prefill sources actually resolve here.
+            'FormBuilderVocabularies' => self::object([
+                'field_types' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'option_bearing_field_types' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'prefill_sources' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'source' => self::str(),
+                        // False means nothing in this install stores that detail,
+                        // so the field starts empty. Declared anyway — omitting it
+                        // would push authors into adding a plain text box and
+                        // making every submitter retype it.
+                        'backed' => self::bool(),
+                        'reason' => self::str(true),
+                    ], ['source', 'backed']),
+                ],
+            ], ['field_types', 'prefill_sources']),
+            'FormCreateRequest' => self::object([
+                'form_key' => [
+                    'type' => 'string',
+                    'minLength' => 1,
+                    'maxLength' => 128,
+                    'pattern' => '^[a-z][a-z0-9_-]*$',
+                ],
+                // A bare string is accepted and read as English: a form named in
+                // one language only is the ordinary case, and demanding the object
+                // shape would 422 a request that meant something perfectly clear.
+                'name' => self::localizedText(),
+                'description' => self::text(),
+                'route_template_id' => self::int(true),
+            ], ['form_key', 'name']),
+            // `form_key` and `status` are absent because both are REFUSED with a
+            // 422 rather than ignored — a caller who sent one meant something, and
+            // dropping it silently would leave them believing a change happened.
+            'FormUpdateRequest' => self::object([
+                'name' => self::localizedText(),
+                'description' => self::text(),
+                'route_template_id' => self::int(true),
+            ], []) + ['minProperties' => 1],
+            'FormFieldCreateRequest' => self::object([
+                'field_key' => [
+                    'type' => 'string',
+                    'minLength' => 1,
+                    'maxLength' => 128,
+                    'pattern' => '^[a-z][a-z0-9_]*$',
+                ],
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::text(),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'section_key' => self::name(),
+                // Absent means the server appends it after the current maximum.
+                'position' => self::int(),
+            ], ['field_key', 'field_type', 'label']),
+            'FormFieldUpdateRequest' => self::object([
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::text(),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'section_key' => self::name(),
+                'position' => self::int(),
+            ], []) + ['minProperties' => 1],
+            // `prefill` is keyed by FIELD KEY, not by source: two fields may name
+            // the same source and each wants its own entry. It is kept OUT of the
+            // field objects on purpose — a field is the same for everybody and a
+            // prefill value is not, and merging them would produce a payload that
+            // looks cacheable and is not.
+            'FormRenderResponse' => self::dataEnvelope(self::object([
+                'form' => SchemaBuilder::ref('Form'),
+                'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                'prefill' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                'unresolved_prefill' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'field_key' => self::str(),
+                        'source' => self::str(),
+                        'reason' => self::str(),
+                    ], ['field_key', 'source', 'reason']),
+                ],
+                'accepts_submissions' => self::bool(),
+            ], ['form', 'fields', 'sections', 'prefill', 'accepts_submissions'])),
+            'FormSubmissionCreateRequest' => self::object([
+                // Answers keyed by field key. Values are typed per the field's
+                // kind — a string, a number, a boolean, or a list of choices —
+                // which is why this is `additionalProperties: true` rather than a
+                // narrower map: one schema cannot express "shaped by another row".
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['data']),
+            'FormSubmission' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_id' => self::int(),
+                // The version the answers were given against. See the publish
+                // route for exactly what this stamp does and does not promise.
+                'form_version' => self::int(),
+                'submitted_by_profile_id' => self::int(true),
+                // Null is ORDINARY: a form with no route template records the
+                // answers and mints no document, and a document deleted later
+                // leaves the answers untouched.
+                'document_id' => self::int(true),
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'submitted_at' => self::str(),
+                'created_at' => self::str(),
+                // Present only on the reads that join `forms`. Absent means "not
+                // fetched by this read", never "empty".
+                'form_key' => self::str(),
+                'form_name' => self::localizedText(),
+            ], ['id', 'tenant_id', 'form_id', 'form_version', 'data', 'submitted_at']),
+            'FormSubmissionListResponse' => self::listEnvelope('FormSubmission'),
+            'FormSubmissionDetailResponse' => self::dataEnvelope([
+                'allOf' => [
+                    SchemaBuilder::ref('FormSubmission'),
+                    self::object([
+                        'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                        'form_version_now' => self::int(true),
+                    ], []),
+                ],
+            ]),
+            'FormSubmissionCreateResponse' => self::object([
+                'data' => SchemaBuilder::ref('FormSubmission'),
+                'meta' => self::object([
+                    'routed' => self::bool(),
+                    'ignored_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ], ['routed', 'ignored_keys']),
+            ], ['data', 'meta']),
+
             'TimeWindowType' => self::object([
                 'id' => self::int(),
                 'tenant_id' => self::int(),

@@ -347,6 +347,24 @@ final class TenantOwnedTables
         'time_window_types' => '126_create_time_windows.php',
         'time_windows' => '126_create_time_windows.php',
         'time_window_state_events' => '126_create_time_windows.php',
+
+        // Tenant-authored FORMS, their fields, and the submissions made against
+        // them (migration 127). All three carry `tenant_id` NOT NULL and
+        // denormalise it onto the children rather than reaching it through
+        // `form_id`, so the predicate guard polices a field read and a submission
+        // read DIRECTLY instead of trusting a join it cannot see — the same
+        // choice migration 120's three tables make.
+        //
+        // A submission is the sharpest case in the set. Its `data` column holds
+        // whatever a person typed into a form their employer wrote, which is as
+        // tenant-private as anything in this schema gets, and the row also points
+        // at a `documents` row that carries its own tenant scoping. Two scoping
+        // mechanisms that could disagree is exactly one too many, so the
+        // submission binds its own `tenant_id` on every read and never infers one
+        // from the document it names.
+        'forms' => '127_create_forms.php',
+        'form_fields' => '127_create_forms.php',
+        'form_submissions' => '127_create_forms.php',
     ];
 
     /**
