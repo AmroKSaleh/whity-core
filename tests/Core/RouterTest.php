@@ -485,4 +485,181 @@ class RouterTest extends TestCase
         $this->assertNotNull($matchVersioned);
         $this->assertSame($versioned, $matchVersioned['handler']);
     }
+
+    // ==================== path-parameter decoding (#1078) ====================
+
+    /**
+     * A percent-encoded path parameter reaches the handler DECODED.
+     *
+     * A path segment is percent-encoded on the wire by definition — that is how
+     * a space, a slash or any non-ASCII character survives a URL at all — and
+     * `Request::fromGlobals()` takes the path straight out of `REQUEST_URI` via
+     * `parse_url()`, which does not decode. Nothing downstream decoded either,
+     * so a handler was handed the raw `%D8%B7%D8%A7%D9%84%D8%A8` and looked a
+     * record up by a string no record has ever been called.
+     *
+     * The failure is silent in the worst way: the lookup MISSES, and a handler
+     * that falls back to a default (or to the first row, or to "the record this
+     * page is about") answers 200 with the WRONG RECORD. #1076 makes writes
+     * expressible against these same templated paths, at which point the same
+     * miss becomes a successful PUT against a row the caller never named.
+     */
+    public function testPercentEncodedPathParameterIsDecodedForTheHandler(): void
+    {
+        $this->router->register('GET', '/api/records/{name}', static fn () => 'response');
+
+        $match = $this->router->match(new Request('GET', '/api/records/Ada%20Lovelace'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('Ada Lovelace', $match['params']['name']);
+    }
+
+    /**
+     * AN ARABIC IDENTIFIER PERCENT-ENCODES ENTIRELY, and this is the case that
+     * makes the bug a default rather than an edge.
+     *
+     * Every byte of a non-ASCII identifier is escaped, so there is no
+     * "identifiers that happen to contain a space" subset to reason about: on a
+     * platform with fully bilingual domains, serving institutions whose records
+     * are named in Arabic, EVERY such lookup arrives encoded and EVERY one of
+     * them missed.
+     *
+     * @param string $decoded The identifier as a person would type it.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('nonAsciiIdentifiers')]
+    public function testNonAsciiPathParameterIsDecodedForTheHandler(string $decoded): void
+    {
+        $this->router->register('GET', '/api/records/{name}', static fn () => 'response');
+
+        $encoded = rawurlencode($decoded);
+        $this->assertNotSame(
+            $decoded,
+            $encoded,
+            'the fixture must actually percent-encode, or this test proves nothing'
+        );
+
+        $match = $this->router->match(new Request('GET', "/api/records/{$encoded}"));
+
+        $this->assertNotNull($match, 'an encoded segment must still MATCH the route');
+        $this->assertSame($decoded, $match['params']['name']);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function nonAsciiIdentifiers(): array
+    {
+        return [
+            'arabic word'         => ["\u{0637}\u{0627}\u{0644}\u{0628}"],
+            'arabic phrase'       => ["\u{0642}\u{0633}\u{0645} \u{0627}\u{0644}\u{0644}\u{063A}\u{0629}"],
+            'arabic-indic digits' => ["\u{0661}\u{0662}\u{0663}"],
+            'latin with space'    => ['Ada Lovelace'],
+            'latin accented'      => ["Ren\u{00E9} Char"],
+        ];
+    }
+
+    /**
+     * `rawurldecode`, NOT `urldecode` — `+` is a literal plus in a path segment
+     * and only means "space" in a query string.
+     *
+     * Choosing wrong silently corrupts every identifier containing a plus, and
+     * corrupts it in a direction nothing downstream can detect: the handler gets
+     * a plausible string that is not the one requested. Pinned here rather than
+     * left to a reviewer's memory of which of the two functions does what.
+     */
+    public function testPlusInAPathSegmentStaysAPlus(): void
+    {
+        $this->router->register('GET', '/api/records/{code}', static fn () => 'response');
+
+        $match = $this->router->match(new Request('GET', '/api/records/C%2B%2B'));
+        $this->assertNotNull($match);
+        $this->assertSame('C++', $match['params']['code']);
+
+        // And an unescaped '+' — legal in a path segment — is untouched.
+        $bare = $this->router->match(new Request('GET', '/api/records/a+b'));
+        $this->assertNotNull($bare);
+        $this->assertSame('a+b', $bare['params']['code'], "urldecode() would have made this 'a b'");
+    }
+
+    /**
+     * DECODE EXACTLY ONCE.
+     *
+     * An identifier that legitimately CONTAINS the text `%20` is transmitted as
+     * `%2520`. One decode yields `%20`, which is the right answer; a second
+     * would yield a space and hand the handler a different identifier. Double
+     * decoding is also the classic way a traversal filter is bypassed — `%252E`
+     * survives one pass and becomes `.` on the next — so "once" is a security
+     * property and not only a correctness one.
+     */
+    public function testDecodingHappensExactlyOnce(): void
+    {
+        $this->router->register('GET', '/api/records/{name}', static fn () => 'response');
+
+        $match = $this->router->match(new Request('GET', '/api/records/literal%2520percent'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('literal%20percent', $match['params']['name']);
+    }
+
+    /**
+     * Decoding changes the VALUE a handler receives, never which route MATCHED.
+     *
+     * Matching stays on the raw path, so `%2F` cannot smuggle a segment boundary
+     * past a `[^/]+` placeholder and turn a one-segment route into a two-segment
+     * one. The captured value then decodes to a string containing a slash, which
+     * is what an encoded slash means — and is why a handler that builds a
+     * filesystem path out of a route parameter must treat it as untrusted input,
+     * exactly as it must a query parameter or a body field.
+     */
+    public function testAnEncodedSlashDoesNotChangeWhichRouteMatched(): void
+    {
+        $this->router->register('GET', '/api/records/{name}', static fn () => 'one');
+        $this->router->register('GET', '/api/records/{a}/{b}', static fn () => 'two');
+
+        $match = $this->router->match(new Request('GET', '/api/records/left%2Fright'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('one', ($match['handler'])(), 'the single-segment route must win');
+        $this->assertArrayNotHasKey('b', $match['params']);
+        $this->assertSame('left/right', $match['params']['name']);
+    }
+
+    /**
+     * A constrained parameter is constrained on the RAW segment, and decoding
+     * does not loosen it.
+     *
+     * `{id:\d+}` must keep refusing `%2E%2E` and every other encoded escape: if
+     * the constraint were applied after decoding, a route that declared "digits
+     * only" would start accepting whatever happened to decode to digits, which
+     * is a different route than the one its author registered.
+     */
+    public function testDecodingDoesNotLoosenARegexConstraint(): void
+    {
+        $this->router->register('GET', '/api/records/{id:\d+}', static fn () => 'response');
+
+        $this->assertNull($this->router->match(new Request('GET', '/api/records/%2E%2E')));
+        $this->assertNull($this->router->match(new Request('GET', '/api/records/%31%32')));
+
+        $ok = $this->router->match(new Request('GET', '/api/records/12'));
+        $this->assertNotNull($ok);
+        $this->assertSame('12', $ok['params']['id']);
+    }
+
+    /**
+     * A parameter with nothing to decode is returned byte-identical.
+     *
+     * The overwhelming majority of requests carry a plain numeric id, and this
+     * pins that they are unaffected — a decode that quietly rewrote ordinary
+     * values would be a far larger change than the one intended.
+     */
+    public function testAnOrdinaryParameterIsUnchanged(): void
+    {
+        $this->router->register('GET', '/api/tenants/{tenant:\d+}/records/{name}', static fn () => 'r');
+
+        $match = $this->router->match(new Request('GET', '/api/tenants/7/records/jane'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('7', $match['params']['tenant']);
+        $this->assertSame('jane', $match['params']['name']);
+    }
 }
