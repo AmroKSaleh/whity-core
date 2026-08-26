@@ -662,4 +662,78 @@ class RouterTest extends TestCase
         $this->assertSame('7', $match['params']['tenant']);
         $this->assertSame('jane', $match['params']['name']);
     }
+
+    /**
+     * A segment that would decode to something that is NOT valid UTF-8 is handed
+     * back exactly as it arrived.
+     *
+     * `rawurldecode('%FF')` is the byte 0xFF, which is valid UTF-8 in no
+     * sequence, and that is not merely a different string: a handler echoing it
+     * through `Response::json()` raises
+     * `RuntimeException: JSON encoding failed: Malformed UTF-8 characters`,
+     * where the same request previously returned 200 with the literal text
+     * `%FF`. Measured, before this guard existed.
+     *
+     * Fixing "wrong record" by introducing "500 on a malformed request" would
+     * trade a silent failure for a louder one nobody asked for, so the decode is
+     * conditional. Every real identifier is UTF-8 by construction — which is the
+     * entire point, since an Arabic identifier percent-encodes entirely — so
+     * nothing this change was written for is affected, and the inputs that were
+     * already broken behave exactly as they did.
+     *
+     * @param string $segment A percent-encoded segment that decodes to non-UTF-8.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('nonUtf8Segments')]
+    public function testASegmentThatWouldDecodeToNonUtf8IsLeftAlone(string $segment): void
+    {
+        $this->router->register('GET', '/api/records/{name}', static fn () => 'response');
+
+        $match = $this->router->match(new Request('GET', "/api/records/{$segment}"));
+
+        $this->assertNotNull($match, 'the route still matches — routing is unchanged');
+        $this->assertSame(
+            $segment,
+            $match['params']['name'],
+            'a segment that cannot decode to text is passed through raw, exactly as before the fix'
+        );
+        $this->assertSame(
+            1,
+            preg_match('//u', $match['params']['name']),
+            'and whatever a handler receives is always valid UTF-8, so it can always be serialised'
+        );
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function nonUtf8Segments(): array
+    {
+        return [
+            'lone high byte'        => ['%FF'],
+            'truncated 2-byte pair' => ['%C3%28'],
+            'bare continuation'     => ['%80'],
+            'valid prefix, bad tail' => ['ok%FF'],
+        ];
+    }
+
+    /**
+     * The guard is narrow: a segment that decodes to valid UTF-8 is still
+     * decoded, including one whose bytes only make sense as a multi-byte
+     * sequence.
+     *
+     * Stated separately so the guard cannot be "fixed" into never decoding
+     * anything non-ASCII, which would silently restore the original bug for
+     * exactly the identifiers it was written for.
+     */
+    public function testTheNonUtf8GuardDoesNotBlockValidMultiByteSequences(): void
+    {
+        $this->router->register('GET', '/api/records/{name}', static fn () => 'response');
+
+        // The same Arabic word as above, transmitted as its UTF-8 bytes.
+        $arabic = "\u{0637}\u{0627}\u{0644}\u{0628}";
+        $match = $this->router->match(new Request('GET', '/api/records/' . rawurlencode($arabic)));
+
+        $this->assertNotNull($match);
+        $this->assertSame($arabic, $match['params']['name']);
+    }
 }
