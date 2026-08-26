@@ -10,6 +10,8 @@ use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Core\TimeWindow\WindowState;
+use Whity\Core\TimeWindow\WindowTypeRegistry;
 use Whity\Http\InputLimits;
 
 /**
@@ -90,6 +92,7 @@ final class CoreApiSchemas
             self::tenantRoutes(),
             self::ouRoutes(),
             self::ouTypeRoutes(),
+            self::timeWindowRoutes(),
             self::delegationRoutes(),
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
@@ -861,6 +864,199 @@ final class CoreApiSchemas
                 'responses' => [
                     204 => ['description' => 'Assignment removed'],
                     404 => self::errorResponse('Assignment not found'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * TIME WINDOWS (#1070) — named, non-overlapping periods a tenant's data can
+     * be scoped to and rolled up by, and which can be closed like a set of books.
+     *
+     * Four permissions rather than the usual pair: reading, writing, CLOSING and
+     * REOPENING are four authorities, and an institution will want the last held
+     * by fewer people than the third.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function timeWindowRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/time-window-types', 'time_windows:read', [
+                'summary' => "List the tenant's period kinds",
+                'description' => 'The tenant\'s own vocabulary of period kinds, ordered by key. '
+                    . '`parent_type_id` is how a kind says which kind it nests inside — a sub-period '
+                    . 'inside a period — and depth is derived from it rather than stored.',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's period vocabulary", 'TimeWindowTypeListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/time-window-types/catalog', 'time_windows:read', [
+                'summary' => "List the period kinds declared in code, with this tenant's adoption state",
+                'description' => 'Core and plugin declarations. A plugin\'s keys are namespaced under '
+                    . 'the plugin (`acme:growing_season`); adopting one with POST '
+                    . '/api/v1/time-window-types copies its declared label and nesting in as the '
+                    . "tenant's starting values. A declaration says nothing about WHEN a period runs — "
+                    . 'boundaries are authored per period, never derived from a calendar.',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse('The declared catalogue', 'TimeWindowTypeCatalogResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/time-window-types', 'time_windows:write', [
+                'summary' => 'Author a new period kind, or adopt a declared one',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowTypeCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created kind', 'TimeWindowTypeResponse'),
+                    409 => self::errorResponse('The tenant already holds this key'),
+                    422 => self::errorResponse(
+                        'Malformed key, a namespaced key no plugin declares, the reserved key `none`, '
+                        . 'or a parent that is not a kind in this tenant'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/time-window-types/{id:\d+}', 'time_windows:write', [
+                'summary' => 'Relabel a period kind, or change what it nests inside',
+                'description' => 'The `key` is immutable — code binds to it, so editing it in place '
+                    . 'would silently repoint every reference at a kind that no longer exists. A '
+                    . 'nesting change that would close a loop is refused.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowTypeUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated kind', 'TimeWindowTypeResponse'),
+                    404 => self::errorResponse('Time window type not found'),
+                    422 => self::errorResponse('No updatable field supplied, or a nesting loop'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/time-window-types/{id:\d+}', 'time_windows:write', [
+                'summary' => 'Delete a period kind',
+                'description' => 'Refused, never forced, while any period is of this kind or any kind '
+                    . 'nests inside it. A period is what records were scoped to and rolled up by, and '
+                    . 'a vocabulary edit does not get to destroy one.',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                        ['deleted' => ['type' => 'boolean']],
+                        ['deleted']
+                    ))),
+                    404 => self::errorResponse('Time window type not found'),
+                    409 => self::errorResponse('Periods are of this kind, or kinds nest inside it'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/time-windows', 'time_windows:read', [
+                'summary' => 'List periods, and resolve which one contains a date',
+                'description' => '`?type_id=` with `?on=` IS the resolution question — "which period of '
+                    . 'this kind contains this date" — and answers with zero or one period. Zero is a '
+                    . 'real answer: no period covers that date, and no nearest match is invented, '
+                    . 'because attributing a record to a period it does not belong to is worse than '
+                    . 'leaving it unattributed. Ordered by `starts_on`, never by id: a period entered '
+                    . 'out of order has a higher id than periods preceding it.',
+                'tags' => ['time-windows'],
+                'parameters' => [
+                    self::queryParam('type_id', 'integer', 'Restrict to one period kind.'),
+                    self::queryParam('state', 'string', 'Restrict to `open` or `closed`.'),
+                    self::queryParam('on', 'string', 'Keep only periods containing this `YYYY-MM-DD` date.'),
+                    self::queryParam('parent_id', 'integer', 'Restrict to periods nesting inside this one.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The matching periods', 'TimeWindowListResponse'),
+                    422 => self::errorResponse('A malformed filter, or a kind this tenant does not have'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/time-windows', 'time_windows:write', [
+                'summary' => 'Define a period, with explicit boundaries',
+                'description' => 'Boundaries are AUTHORED and inclusive at both ends; nothing derives '
+                    . 'them from a month, a quarter or a parent\'s length. Two periods of one kind may '
+                    . 'not overlap, because a date has to belong to exactly one of them, and a nested '
+                    . "period must sit inside its parent's range and be of the kind its own kind nests "
+                    . 'inside.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created period', 'TimeWindowResponse'),
+                    422 => self::errorResponse(
+                        'Malformed dates, an overlap with another period of the same kind, or a parent '
+                        . 'that is the wrong kind, closed, or does not contain these dates'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/time-windows/{id:\d+}', 'time_windows:read', [
+                'summary' => 'Get one period, with its seal trail',
+                'description' => 'The trail travels with the period because the two facts are never '
+                    . 'wanted apart: "is this closed" is half an answer without "and has it ever been '
+                    . 'reopened, by whom, and why".',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse('The period and its trail', 'TimeWindowDetailResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/time-windows/{id:\d+}', 'time_windows:write', [
+                'summary' => 'Relabel a period, or move its boundaries',
+                'description' => 'A CLOSED period is refused: moving the boundaries of a sealed period '
+                    . 'is the most effective way there is to unseal it without leaving a trace, since '
+                    . 'the state still reads closed while records that were inside it no longer are. '
+                    . 'Reopen it first, on the record.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated period', 'TimeWindowResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                    422 => self::errorResponse(
+                        'The period is closed, the dates overlap another of the same kind, or the '
+                        . 'change would leave a nested period outside it'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/time-windows/{id:\d+}/close-report', 'time_windows:read', [
+                'summary' => 'What closing this period would seal',
+                'description' => 'The difference between a control and a trap. `open_children` is '
+                    . 'structural and BLOCKS the close; `unfinished` is contributed by whatever holds '
+                    . 'records in the period (through the `time_window.close_report` filter hook) and '
+                    . 'does NOT block — it is told to the person, who decides. `unfinished_reported` '
+                    . 'distinguishes "nothing is unfinished" from "nothing is tracking it", which are '
+                    . 'both an empty list and only one of which is an all-clear. Gated on read rather '
+                    . 'than close: looking changes nothing.',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse('The report', 'TimeWindowCloseReportResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/time-windows/{id:\d+}/close', 'time_windows:close', [
+                'summary' => 'Close a period — seal it',
+                'description' => 'Refused while any period nested inside it is still open, naming them, '
+                    . 'because a sealed period containing an accruing one is not a seal. Repeat with '
+                    . '`cascade: true` to close them in the same act; each gets its own trail row '
+                    . 'marked as having come from this one, so the trail distinguishes an act somebody '
+                    . 'performed from a consequence of one they performed elsewhere. Closing an '
+                    . 'already-closed period is a no-op rather than an error. The response carries the '
+                    . 'report the close was made against — what was still unfinished at the moment of '
+                    . 'sealing is unrecoverable once the work moves on.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowCloseRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The sealed period and what it sealed', 'TimeWindowCloseResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                    422 => self::errorResponse('Periods nested inside this one are still open'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/time-windows/{id:\d+}/reopen', 'time_windows:reopen', [
+                'summary' => 'Reopen a closed period, on the record',
+                'description' => 'A REASON IS REQUIRED and is recorded permanently. Refusing reopening '
+                    . 'outright sounds safer and is not: an institution that must correct a sealed '
+                    . 'period will do it anyway, somewhere this platform cannot see, and a reopen that '
+                    . 'names who, when and why is strictly better than one that leaves no record. '
+                    . 'Does not reopen nested periods, and is refused while the period containing this '
+                    . 'one is closed — reopen that first.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowReopenRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The reopened period and its trail', 'TimeWindowDetailResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                    422 => self::errorResponse('No reason given, or the period containing this one is closed'),
                 ] + self::authErrors(),
             ]),
         ];
@@ -4369,6 +4565,175 @@ final class CoreApiSchemas
                 'label' => self::name(nonEmpty: true),
                 'sort_order' => self::int(),
             ], []) + ['minProperties' => 1],
+
+            // #1070. A period KIND. `key` is the stable identifier code binds
+            // to — bare for a tenant's own vocabulary, `plugin:slug` for one a
+            // plugin contributed. `parent_type_id` is the nesting: which kind
+            // this kind sits inside. There is deliberately no rank column —
+            // a kind's place is expressed by what contains it, which is a
+            // structural fact, rather than by a sort order, which is an opinion.
+            'TimeWindowType' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'key' => self::str(),
+                'label' => self::str(),
+                'parent_type_id' => self::int(true),
+                'source' => self::str(),
+                'created_at' => self::str(true),
+                'updated_at' => self::str(true),
+            ], ['id', 'tenant_id', 'key', 'label', 'parent_type_id', 'source', 'created_at', 'updated_at']),
+            'TimeWindowTypeResponse' => self::dataEnvelope(SchemaBuilder::ref('TimeWindowType')),
+            'TimeWindowTypeListResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('TimeWindowType'),
+            ]),
+            // `parent_key` is already namespaced, because a plugin may only nest
+            // inside its own vocabulary and the prefix is the host's to apply.
+            'TimeWindowTypeCatalogEntry' => self::object([
+                'key' => self::str(),
+                'source' => self::str(),
+                'label' => self::str(),
+                'parent_key' => self::str(true),
+                'adopted' => ['type' => 'boolean'],
+                'adopted_id' => self::int(true),
+            ], ['key', 'source', 'label', 'parent_key', 'adopted', 'adopted_id']),
+            'TimeWindowTypeCatalogResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('TimeWindowTypeCatalogEntry'),
+            ]),
+            'TimeWindowTypeCreateRequest' => self::object([
+                // Trimmed before validation. A NAMESPACED key must already be
+                // declared by a plugin, and the reserved key `none` is always a
+                // 422 — neither is expressible as a pattern.
+                'key' => self::windowTypeKey() + ['minLength' => 1],
+                // Empty, whitespace-only and absent all mean the same: the label
+                // falls back to the declared one, then to the key itself.
+                'label' => self::name(),
+                // Absent inherits the declared nesting when the tenant has
+                // already adopted the parent kind, and otherwise adopts the kind
+                // un-nested — a declaration is a default, not a precondition.
+                'parent_type_id' => self::int(true),
+            ], ['key']),
+            // The key is immutable: it is what code binds to, so editing it in
+            // place would repoint every reference at a kind that no longer
+            // exists. It is absent here rather than declared-and-ignored.
+            'TimeWindowTypeUpdateRequest' => self::object([
+                'label' => self::name(nonEmpty: true),
+                'parent_type_id' => self::int(true),
+            ], []) + ['minProperties' => 1],
+
+            // #1070. One PERIOD. `starts_on` and `ends_on` are DATES, inclusive
+            // at both ends, and they are authored rather than derived: a period
+            // may begin on any day, run for any span, and differ in length from
+            // its siblings. Nothing in the platform computes them from a
+            // calendar, which is the whole point of the concept.
+            'TimeWindow' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'window_type_id' => self::int(),
+                'parent_window_id' => self::int(true),
+                'key' => self::str(),
+                'label' => self::str(),
+                'starts_on' => self::date(),
+                'ends_on' => self::date(),
+                'state' => ['type' => 'string', 'enum' => WindowState::states()],
+                'created_at' => self::str(true),
+                'updated_at' => self::str(true),
+            ], [
+                'id', 'tenant_id', 'window_type_id', 'parent_window_id', 'key', 'label',
+                'starts_on', 'ends_on', 'state', 'created_at', 'updated_at',
+            ]),
+            'TimeWindowResponse' => self::dataEnvelope(SchemaBuilder::ref('TimeWindow')),
+            'TimeWindowListResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('TimeWindow'),
+            ]),
+            // The append-only seal trail. A reopen never amends the close it
+            // undoes; it is a new row that supersedes it, and both remain
+            // readable. `cascaded_from_window_id` says this seal was a
+            // consequence of closing the period named, rather than an act
+            // performed on this one.
+            'TimeWindowStateEvent' => self::object([
+                'id' => self::int(),
+                'window_id' => self::int(),
+                'action' => ['type' => 'string', 'enum' => WindowState::acts()],
+                'actor_profile_id' => self::int(true),
+                'reason' => self::str(true),
+                'cascaded_from_window_id' => self::int(true),
+                'occurred_at' => self::str(),
+            ], [
+                'id', 'window_id', 'action', 'actor_profile_id', 'reason',
+                'cascaded_from_window_id', 'occurred_at',
+            ]),
+            'TimeWindowDetailResponse' => self::dataEnvelope(
+                ['allOf' => [
+                    SchemaBuilder::ref('TimeWindow'),
+                    self::object(
+                        ['trail' => ['type' => 'array', 'items' => SchemaBuilder::ref('TimeWindowStateEvent')]],
+                        ['trail']
+                    ),
+                ]]
+            ),
+            'TimeWindowCreateRequest' => self::object([
+                'window_type_id' => self::int(),
+                'key' => self::name(nonEmpty: true),
+                'label' => self::name(),
+                'starts_on' => self::date(),
+                'ends_on' => self::date(),
+                // Required when the kind nests inside another kind, and refused
+                // when it does not — the kind decides, not the caller.
+                'parent_window_id' => self::int(true),
+            ], ['window_type_id', 'key', 'starts_on', 'ends_on']),
+            'TimeWindowUpdateRequest' => self::object([
+                'label' => self::name(nonEmpty: true),
+                'starts_on' => self::date(),
+                'ends_on' => self::date(),
+                'parent_window_id' => self::int(true),
+            ], []) + ['minProperties' => 1],
+            // Contributed by whatever holds records in the period; core ships no
+            // contributor, so an empty list with `unfinished_reported: false`
+            // means nothing volunteered a count rather than nothing being
+            // unfinished.
+            'TimeWindowUnfinishedGroup' => self::object([
+                'label' => self::str(),
+                'count' => self::int(),
+                'source' => self::str(),
+            ], ['label', 'count', 'source']),
+            'TimeWindowCloseReport' => self::object([
+                'window' => SchemaBuilder::ref('TimeWindow'),
+                'blocked' => ['type' => 'boolean'],
+                'open_children' => ['type' => 'array', 'items' => SchemaBuilder::ref('TimeWindow')],
+                'unfinished' => [
+                    'type' => 'array',
+                    'items' => SchemaBuilder::ref('TimeWindowUnfinishedGroup'),
+                ],
+                'unfinished_total' => self::int(),
+                'unfinished_reported' => ['type' => 'boolean'],
+            ], [
+                'window', 'blocked', 'open_children', 'unfinished',
+                'unfinished_total', 'unfinished_reported',
+            ]),
+            'TimeWindowCloseReportResponse' => self::dataEnvelope(
+                SchemaBuilder::ref('TimeWindowCloseReport')
+            ),
+            'TimeWindowCloseRequest' => self::object([
+                // Optional: sealing a period on schedule is the ordinary case,
+                // and demanding a justification for the ordinary case trains
+                // people to type nothing meaningful.
+                'reason' => self::text(),
+                'cascade' => ['type' => 'boolean'],
+            ], []),
+            'TimeWindowCloseResponse' => self::dataEnvelope(self::object([
+                'window' => SchemaBuilder::ref('TimeWindow'),
+                'closed_ids' => ['type' => 'array', 'items' => self::int()],
+                'report' => SchemaBuilder::ref('TimeWindowCloseReport'),
+            ], ['window', 'closed_ids', 'report'])),
+            'TimeWindowReopenRequest' => self::object([
+                // REQUIRED, unlike a close's. This is the one act that undoes
+                // something other people relied on, and the question afterwards
+                // is never whether it happened but why.
+                'reason' => self::text() + ['minLength' => 1],
+            ], ['reason']),
 
             'Delegation' => $delegation,
             'DelegationListResponse' => self::paginatedListEnvelope('Delegation'),
@@ -7956,6 +8321,42 @@ final class CoreApiSchemas
     private static function text(): array
     {
         return ['type' => 'string', 'maxLength' => InputLimits::TEXT_MAX];
+    }
+
+    /**
+     * A TIME-WINDOW TYPE KEY, as {@see WindowTypeRegistry::isValidKey()} accepts
+     * it: a lowercase slug, optionally namespaced with one colon.
+     *
+     * Not nullable, and no nullable variant exists: unlike an OU type, which a
+     * unit may legitimately not have, a period always has a kind — the key IS
+     * the identity of the row being created.
+     *
+     * @return array<string, mixed>
+     */
+    private static function windowTypeKey(): array
+    {
+        return [
+            'type' => 'string',
+            'maxLength' => WindowTypeRegistry::KEY_MAX_LENGTH,
+            'pattern' => '^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$',
+        ];
+    }
+
+    /**
+     * A calendar DATE, `YYYY-MM-DD`, with no time and no zone.
+     *
+     * A period boundary is a DAY. Rendering it as an instant invites a timezone
+     * to move it, which moves which period a record falls into — the one thing
+     * this subsystem cannot allow to happen quietly. The pattern is enforced as
+     * well as the format because `format` is advisory to most generators, and
+     * the handler additionally refuses a date that merely LOOKS valid
+     * (`2026-02-30` parses in a lenient reader and rolls into March).
+     *
+     * @return array<string, mixed>
+     */
+    private static function date(): array
+    {
+        return ['type' => 'string', 'format' => 'date', 'pattern' => '^\\d{4}-\\d{2}-\\d{2}$'];
     }
 
     /**

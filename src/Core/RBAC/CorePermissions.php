@@ -303,6 +303,25 @@ final class CorePermissions
     public const LANGUAGES_MANAGE = 'languages:manage';
     public const TRANSLATIONS_MANAGE = 'translations:manage';
 
+    // TIME WINDOWS (#1070, migration 126). A named, non-overlapping period a
+    // tenant's records are scoped to and rolled up by, which can be CLOSED the
+    // way a set of books is closed.
+    //
+    // FOUR slugs rather than the usual read/write pair, because sealing and
+    // unsealing are not writes. Defining the vocabulary and adjusting a
+    // period's dates is configuration; CLOSING is a control an operator
+    // exercises routinely and which other people then rely on; REOPENING undoes
+    // a seal they relied on. An institution will want the last of those held by
+    // fewer people than the others, and folding it into `:close` would make
+    // "may seal the books" and "may unseal them" one grant, which nothing means
+    // to say. Each of the four is a permission somebody would revoke separately
+    // — the #987 test for whether a slug is a real capability or a second name
+    // for an existing one.
+    public const TIME_WINDOWS_READ = 'time_windows:read';
+    public const TIME_WINDOWS_WRITE = 'time_windows:write';
+    public const TIME_WINDOWS_CLOSE = 'time_windows:close';
+    public const TIME_WINDOWS_REOPEN = 'time_windows:reopen';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -369,6 +388,10 @@ final class CorePermissions
             self::TWO_FACTOR_RECOVERY_APPROVE,
             self::LANGUAGES_MANAGE,
             self::TRANSLATIONS_MANAGE,
+            self::TIME_WINDOWS_READ,
+            self::TIME_WINDOWS_WRITE,
+            self::TIME_WINDOWS_CLOSE,
+            self::TIME_WINDOWS_REOPEN,
         ];
     }
 }

@@ -378,6 +378,22 @@ $ouTypeRegistry = new \Whity\Core\Ou\OuTypeRegistry($hookManager);
 $ouTypeRegistry->registerCoreOuTypes();
 \Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry); // @phpstan-ignore-line
 
+// 4c-ante-quater. TIME-WINDOW TYPE catalogue (#1070): which KINDS of named
+// period a plugin may contribute to a tenant's vocabulary, and how those kinds
+// nest. Exactly the shape of the OU-type catalogue above and for exactly the
+// same reason: a period vocabulary is tenant data (one deployment reasons in a
+// crop year and its growing seasons, another in a kiln campaign and its firing
+// runs) and a core enumeration would have to contain both.
+//
+// This catalogue is NOT the vocabulary — that is per-tenant data in
+// `time_window_types` (migration 126). This governs only which keys CODE may
+// contribute, and registering it as a service is what keeps
+// `GET /api/v1/time-window-types/catalog` from telling an administrator that
+// the type their plugin ships does not exist.
+$windowTypeRegistry = new \Whity\Core\TimeWindow\WindowTypeRegistry($hookManager);
+$windowTypeRegistry->registerCoreWindowTypes();
+\Whity\register_service(\Whity\Core\TimeWindow\WindowTypeRegistry::class, $windowTypeRegistry); // @phpstan-ignore-line
+
 // 4c-ante-bis. Document ROUTING RULE catalogue (#947 item 3): WHICH rule kinds a
 // route step may name. Core owns two, `role` and `role_below_actor`, and both are
 // generic in the strong sense — every deployment has roles and every deployment
@@ -1083,7 +1099,11 @@ $pluginLoader = new PluginLoader(
     // Plugin-contributed document routing rules (#947 item 3, SDK 1.36): built at
     // step 4c-ante-bis above. Same stamping rule — a plugin declares WHICH kinds,
     // never WHO said so, which is what stops it shadowing `role`.
-    $routingRuleRegistry
+    $routingRuleRegistry,
+    // Plugin-contributed time-window types (#1070): built at step
+    // 4c-ante-quater above. Same stamping rule again — a plugin declares WHICH
+    // kinds of period it brings, never that a tenant uses them.
+    $windowTypeRegistry
 );
 
 // 9b. Initialize deployment manager
@@ -1777,6 +1797,50 @@ $router->register('POST', '/api/ou-types', [$ouTypesHandler, 'create'], null, nu
 $router->register('GET', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'get'], null, null, CorePermissions::OUS_READ);
 $router->register('PATCH', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'update'], null, null, CorePermissions::OUS_WRITE);
 $router->register('DELETE', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'delete'], null, null, CorePermissions::OUS_WRITE);
+
+// 12a-bis. TIME WINDOWS (#1070) — named, non-overlapping periods a tenant's data
+// can be scoped to and rolled up by, and which can be closed like a set of
+// books.
+//
+// FOUR gates, not the usual read/write pair, because these are four
+// authorities. `:close` is a control an operator exercises routinely and other
+// people then rely on; `:reopen` undoes a seal they relied on, and an
+// institution will want it held by fewer people. Migration 126 grants all four
+// by CAPABILITY — to whoever already holds the corresponding settings
+// capability — rather than to the role literally named `admin`, which is the
+// #834 hazard (a deployment on a custom administrative role silently losing a
+// capability on upgrade).
+//
+// The close REPORT is gated on read rather than close: seeing what a period
+// still holds is the information somebody needs in order to ask for the close,
+// and looking changes nothing.
+//
+// There is deliberately no DELETE. A period is what records were scoped to;
+// removing one makes every roll-up that named it unreproducible.
+$timeWindowTypesHandler = new \Whity\Api\TimeWindowTypesApiHandler(
+    new \Whity\Core\TimeWindow\WindowTypeRepository($db->getPdo()),
+    $windowTypeRegistry
+);
+$router->register('GET', '/api/time-window-types', [$timeWindowTypesHandler, 'list'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('GET', '/api/time-window-types/catalog', [$timeWindowTypesHandler, 'catalog'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('POST', '/api/time-window-types', [$timeWindowTypesHandler, 'create'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+$router->register('PATCH', '/api/time-window-types/{id:\d+}', [$timeWindowTypesHandler, 'update'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+$router->register('DELETE', '/api/time-window-types/{id:\d+}', [$timeWindowTypesHandler, 'delete'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+
+$timeWindowTypeRepository = new \Whity\Core\TimeWindow\WindowTypeRepository($db->getPdo());
+$timeWindowRepository = new \Whity\Core\TimeWindow\TimeWindowRepository($db->getPdo(), $timeWindowTypeRepository);
+$timeWindowsHandler = new \Whity\Api\TimeWindowsApiHandler(
+    $timeWindowRepository,
+    $timeWindowTypeRepository,
+    new \Whity\Core\TimeWindow\WindowCloseReporter($timeWindowRepository, $hookManager)
+);
+$router->register('GET', '/api/time-windows', [$timeWindowsHandler, 'list'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('POST', '/api/time-windows', [$timeWindowsHandler, 'create'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+$router->register('GET', '/api/time-windows/{id:\d+}', [$timeWindowsHandler, 'show'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('PATCH', '/api/time-windows/{id:\d+}', [$timeWindowsHandler, 'update'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+$router->register('GET', '/api/time-windows/{id:\d+}/close-report', [$timeWindowsHandler, 'closeReport'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('POST', '/api/time-windows/{id:\d+}/close', [$timeWindowsHandler, 'close'], null, null, CorePermissions::TIME_WINDOWS_CLOSE);
+$router->register('POST', '/api/time-windows/{id:\d+}/reopen', [$timeWindowsHandler, 'reopen'], null, null, CorePermissions::TIME_WINDOWS_REOPEN);
 
 // 12b. Register permission delegations API handler (WC-34). Gated on the
 // delegation:manage permission (6th positional arg; requiredRole stays null so

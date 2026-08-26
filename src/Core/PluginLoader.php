@@ -20,6 +20,8 @@ use Whity\Core\Ou\InvalidOuTypeException;
 use Whity\Core\Document\Routing\InvalidRoutingRuleException;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
 use Whity\Core\Ou\OuTypeRegistry;
+use Whity\Core\TimeWindow\InvalidWindowTypeException;
+use Whity\Core\TimeWindow\WindowTypeRegistry;
 use Whity\Sdk\Health\PluginHealthProbesInterface;
 use Whity\Core\DataType\DataTypeRegistry;
 use Whity\Core\DataType\InvalidDataTypeException;
@@ -33,6 +35,7 @@ use Whity\Sdk\Settings\PluginSettingsInterface;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Ou\PluginOuTypesInterface;
 use Whity\Sdk\Routing\PluginRoutingRulesInterface;
+use Whity\Sdk\TimeWindow\PluginWindowTypesInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 use Whity\Sdk\Tenant\PluginTablesInterface;
 use Whity\Core\Hooks\HookManager;
@@ -122,6 +125,15 @@ class PluginLoader
     private ?OuTypeRegistry $ouTypeRegistry = null;
 
     private ?RoutingRuleRegistry $routingRuleRegistry = null;
+
+    /**
+     * Catalogue of plugin-contributed TIME-WINDOW types (#1070).
+     *
+     * Null when the host wires none, in which case declarations are skipped
+     * rather than failing — the same optionality every other contribution point
+     * here has.
+     */
+    private ?WindowTypeRegistry $windowTypeRegistry = null;
 
     /**
      * Optional catalogue of plugin-contributed status-page probes.
@@ -392,6 +404,7 @@ class PluginLoader
      * @param AuditLogger|null $auditLogger Optional audit writer for plugin-declared events
      * @param OuTypeRegistry|null $ouTypeRegistry Optional catalogue of plugin-contributed OU types
      * @param RoutingRuleRegistry|null $routingRuleRegistry Optional catalogue of plugin-contributed document routing rules
+     * @param WindowTypeRegistry|null $windowTypeRegistry Optional catalogue of plugin-contributed time-window types
      */
     public function __construct(
         string $pluginDir,
@@ -407,7 +420,8 @@ class PluginLoader
         ?PluginSettingsRegistry $pluginSettingsRegistry = null,
         ?AuditLogger $auditLogger = null,
         ?OuTypeRegistry $ouTypeRegistry = null,
-        ?RoutingRuleRegistry $routingRuleRegistry = null
+        ?RoutingRuleRegistry $routingRuleRegistry = null,
+        ?WindowTypeRegistry $windowTypeRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
@@ -415,6 +429,7 @@ class PluginLoader
         $this->resourceTypeRegistry = $resourceTypeRegistry;
         $this->ouTypeRegistry = $ouTypeRegistry;
         $this->routingRuleRegistry = $routingRuleRegistry;
+        $this->windowTypeRegistry = $windowTypeRegistry;
         $this->healthProbeRegistry = $healthProbeRegistry;
         $this->tableOwnershipRegistry = $tableOwnershipRegistry;
         $this->dataTypeRegistry = $dataTypeRegistry;
@@ -2968,6 +2983,37 @@ class PluginLoader
                 $this->logWarning("Plugin {$pluginKey} declares an invalid OU type: " . $e->getMessage());
             } catch (Throwable $e) {
                 $this->handlePluginThrowable($pluginKey, $e, 'getOuTypes');
+            }
+        }
+
+        // 2a-pre-ter. Register declared TIME-WINDOW TYPES (#1070). The same shape
+        //     as (2a-pre) and for the same reasons: an OPTIONAL interface, so a
+        //     plugin bringing no period vocabulary implements nothing and is
+        //     skipped, and the source is $plugin->getName() — supplied here,
+        //     never taken from the plugin's own return value — so a key is
+        //     namespaced under its real owner and no plugin can mint a BARE key
+        //     that shadows a tenant's own vocabulary.
+        //
+        //     A declaration makes a key ADOPTABLE and supplies the label and the
+        //     nesting a tenant starts from. It creates no period and writes into
+        //     no tenant: force-seeding one deployment's period vocabulary into
+        //     another's picker would be a cross-tenant write driven by an
+        //     install-wide plugin.
+        //
+        //     Two boundaries, because two different things can go wrong: a
+        //     malformed DECLARATION is a logged warning (the plugin keeps
+        //     serving, it simply contributes no types), while a getWindowTypes()
+        //     that THROWS is plugin code misbehaving and goes through the
+        //     lifecycle error boundary that can eventually fail the plugin.
+        if ($this->windowTypeRegistry !== null && $plugin instanceof PluginWindowTypesInterface) {
+            try {
+                $this->windowTypeRegistry->register($plugin->getName(), $plugin->getWindowTypes());
+            } catch (InvalidWindowTypeException $e) {
+                $this->logWarning(
+                    "Plugin {$pluginKey} declares an invalid time-window type: " . $e->getMessage()
+                );
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getWindowTypes');
             }
         }
 

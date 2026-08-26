@@ -335,6 +335,18 @@ final class TenantOwnedTables
         // that lookup returned.
         'document_qr_tokens' => '122_create_document_qr_tracking.php',
         'document_qr_scans' => '122_create_document_qr_tracking.php',
+
+        // #1070 — the tenant's own period vocabulary, the periods themselves,
+        // and the append-only record of each being sealed or unsealed
+        // (migration 126). All three are tenant-owned without exception: a
+        // period vocabulary is the clearest case of tenant data there is (two
+        // tenants in one install slice time into words with nothing in common),
+        // and there is no public or cross-tenant read anywhere in the subsystem
+        // — nothing here is reachable without a bound tenant, so no statement
+        // carries a guard annotation.
+        'time_window_types' => '126_create_time_windows.php',
+        'time_windows' => '126_create_time_windows.php',
+        'time_window_state_events' => '126_create_time_windows.php',
     ];
 
     /**
