@@ -1205,15 +1205,25 @@ final class UiKitShowcasePluginTest extends TestCase
         // either side chose to call it: the block wrote `{demo-record-pick}` and
         // the route declares `{name}`.
         //
-        // Captured still PERCENT-ENCODED, and asserted that way because that is
-        // what happens rather than what should: nothing between Router::match()
-        // and a plugin handler decodes a path parameter, so a handler receives
-        // `Anika%20Patel`. That is a separate, pre-existing gap in the dispatch
-        // path — it predates this change, it is not specific to write routes, and
-        // it is filed rather than quietly papered over here. Asserting the
-        // decoded value would have made this test fail for a reason that has
-        // nothing to do with ownership; asserting the encoded one without saying
-        // why would read as an endorsement.
+        // Captured still PERCENT-ENCODED, and asserted that way because it is
+        // what happens rather than what should. Nothing anywhere between the
+        // wire and a plugin handler decodes a path parameter — there is no
+        // `urldecode` in `src/`, `sdk/src/` or `public/index.php` — so a handler
+        // is handed `Anika%20Patel`.
+        //
+        // THIS IS A REAL DEFECT AND IT IS NOT THIS CHANGE'S. It is older, and it
+        // is on the READ path too: `resolveContextPath` encodes a token's value
+        // for `dataRecord.source` exactly as `FormProvider` encodes it for a
+        // submit endpoint, so the showcase's own Record tab already fetches
+        // `/rows/Anika%20Patel`, misses the fixture's `'Anika Patel'` key, and
+        // falls through to its default record — for every one of the three
+        // names, all of which contain a space. Filed, not fixed here: decoding
+        // in `Router::match()` is the right general answer and it changes what
+        // every route in the platform hands its handler, which is its own change
+        // with its own blast radius, not a rider on an ownership normalisation.
+        //
+        // When that lands, this assertion goes red. That is the fix arriving,
+        // not a regression — change it to the decoded value and delete this note.
         $this->assertArrayHasKey('name', $matched['params']);
         $this->assertSame(rawurlencode('Anika Patel'), $matched['params']['name']);
     }
