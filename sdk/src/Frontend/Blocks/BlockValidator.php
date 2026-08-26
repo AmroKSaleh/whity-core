@@ -38,6 +38,46 @@ final class BlockValidator
     public const OU_SCOPES = ['unit', 'subtree', 'children'];
 
     /**
+     * The three answers a `weightedRelation` may give to "do these weights have
+     * to sum to something?", and the only values `weights.rule` may take.
+     *
+     * Public because it is the vocabulary, not an implementation detail: a
+     * renderer switches on exactly these three strings to decide which control
+     * it is drawing, and a plugin author types one of them.
+     *
+     *  - `free`    independent weights. No total, no remainder, no error state
+     *              from the sum.
+     *  - `sumTo`   the set must total `weights.total` exactly. Short and over
+     *              are both errors.
+     *  - `atMost`  the set must not exceed `weights.total`. Short is headroom,
+     *              not an error — which is the whole difference from `sumTo`,
+     *              and it falls exactly where a reader would otherwise guess.
+     *
+     * There is deliberately no fourth entry for "at least". A floor with no
+     * ceiling has no remainder to name and no state a renderer can draw
+     * differently from `free`, so it would be a rule that changed nothing on
+     * screen while looking like it changed something.
+     *
+     * @var list<string>
+     */
+    public const WEIGHT_RULES = ['free', 'sumTo', 'atMost'];
+
+    /**
+     * The `weights` keys a `weightedRelation` may declare.
+     *
+     * This list exists so {@see validateWeightSpec()} can refuse a key nobody
+     * declared, and that is the ONE place in this validator where a typo is
+     * catchable. {@see validateProps()} iterates the CONTRACT'S prop rules and
+     * never the node's own keys, so a misspelled optional prop anywhere else is
+     * indistinguishable from an absent one. Inside a composite value the author's
+     * keys are right there, so `['rule' => 'sumTo', 'totl' => 100]` is an error
+     * rather than a `sumTo` block with no total.
+     *
+     * @var list<string>
+     */
+    private const WEIGHT_SPEC_KEYS = ['rule', 'total'];
+
+    /**
      * The reserved master-detail binding a host seeds with the record its ROUTE
      * is about (#883 gap 2).
      *
@@ -150,6 +190,7 @@ final class BlockValidator
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
         'bilingualText', 'referenceSelect', 'richTextInput', 'ouScopePicker',
+        'weightedRelation',
     ];
 
     /**
@@ -160,7 +201,7 @@ final class BlockValidator
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
         'bilingualText', 'referenceSelect', 'richTextInput', 'ouScopePicker',
-        'submitButton', 'fieldArray',
+        'weightedRelation', 'submitButton', 'fieldArray',
     ];
 
     /**
@@ -327,6 +368,12 @@ final class BlockValidator
             self::validateFlow($node, $path, $errors);
         }
 
+        // The weighted relation's pairing-count bounds have to be read against
+        // each other, so they cannot live in the per-prop rules.
+        if ($type === 'weightedRelation') {
+            self::validateWeightedRelation($node, $path, $errors);
+        }
+
         // #883: `record` is the host's binding for the record a ROUTE is about
         // (see self::PAGE_RECORD_BINDING). A selector publishing under that name
         // would shadow it for every block on the screen, and the symptom — a
@@ -421,7 +468,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'weightSpec', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -450,7 +497,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'weightSpec', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -681,6 +728,13 @@ final class BlockValidator
                 self::validateAccessCheck($value, $type, $prop, $path, $errors);
 
                 break;
+
+            case 'weightSpec':
+                // `weightedRelation.weights` — whether the weights have to sum
+                // to something, and to what.
+                self::validateWeightSpec($value, $type, $prop, $path, $errors);
+
+                break;
         }
     }
 
@@ -741,6 +795,131 @@ final class BlockValidator
         // Same predicate as `dataRecord.source`: an owned API path that may
         // carry balanced `{token}` segments in the master-detail addressing.
         self::validateRecordPath($value['endpoint'], $type, "{$prop}.endpoint", "{$path}.endpoint", $errors);
+    }
+
+    /**
+     * `weightedRelation.weights`: the SUM CONSTRAINT, stated.
+     *
+     *     ['rule' => 'free']
+     *     ['rule' => 'sumTo',  'total' => 100]
+     *     ['rule' => 'atMost', 'total' => 100]
+     *
+     * FOUR RULES, and each of them refuses a declaration that would otherwise
+     * run with a constraint nobody could see:
+     *
+     *  1. `rule` is REQUIRED and is one of {@see self::WEIGHT_RULES}. Never
+     *     inferred — see the type's note in {@see BlockContract} for why both
+     *     candidate defaults are wrong.
+     *  2. `sumTo` and `atMost` REQUIRE `total`, an integer of at least 1. A
+     *     total of 0 makes every non-empty set wrong under `sumTo` and forbids
+     *     every weight under `atMost`; a negative one is not a quantity.
+     *  3. `free` REFUSES `total`. An author who wrote a number there meant it to
+     *     mean something, and under `free` it means nothing — so the number is
+     *     the evidence that the rule is not the one they wanted.
+     *  4. An UNKNOWN KEY is refused. This is the reason the constraint is one
+     *     composite prop instead of two flat ones ({@see self::WEIGHT_SPEC_KEYS}
+     *     carries the argument): flat props cannot catch a typo, because
+     *     {@see validateProps()} walks the contract's rules and not the node's
+     *     keys, so a misspelled optional prop is silently absent. Here the keys
+     *     are in hand.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateWeightSpec(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || array_is_list($value) || $value === []) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a {rule, total?} object stating whether the "
+                . 'weights have to sum to something, got ' . get_debug_type($value);
+
+            return;
+        }
+
+        foreach (array_keys($value) as $key) {
+            if (!\in_array($key, self::WEIGHT_SPEC_KEYS, true)) {
+                $errors[] = "{$path}." . (\is_string($key) ? $key : (string) $key)
+                    . ": '{$type}.{$prop}' has no '" . (\is_string($key) ? $key : (string) $key)
+                    . "' key — it takes '" . implode("' and '", self::WEIGHT_SPEC_KEYS)
+                    . "'. A misspelled key here would leave the block running with no sum constraint "
+                    . 'and nothing on screen saying so';
+            }
+        }
+
+        $rule = $value['rule'] ?? null;
+        if (!\is_string($rule) || !\in_array($rule, self::WEIGHT_RULES, true)) {
+            $errors[] = "{$path}.rule: '{$type}.{$prop}.rule' must be one of ["
+                . implode(', ', self::WEIGHT_RULES) . '] — whether the weights must sum to something is '
+                . 'never inferred, because a block that had to total a number and quietly did not is '
+                . 'indistinguishable on screen from one that never had to, got ' . self::describeScalar($rule);
+
+            return;
+        }
+
+        $hasTotal = \array_key_exists('total', $value);
+
+        if ($rule === 'free') {
+            if ($hasTotal) {
+                $errors[] = "{$path}.total: '{$type}.{$prop}' may not carry 'total' when 'rule' is 'free' "
+                    . '— free weights are independent, so there is no total for them to be measured '
+                    . "against. A declaration with a total wants 'sumTo' (exactly that much) or "
+                    . "'atMost' (no more than that much)";
+            }
+
+            return;
+        }
+
+        if (!$hasTotal) {
+            $errors[] = "{$path}: '{$type}.{$prop}' with 'rule' => '{$rule}' must state a 'total' — "
+                . 'the rule is the whole affordance ("60 still to allocate", "40 too many") and there '
+                . 'is nothing to say without the number it is measured against';
+
+            return;
+        }
+
+        if (!\is_int($value['total']) || $value['total'] < 1) {
+            $errors[] = "{$path}.total: '{$type}.{$prop}.total' must be an integer of at least 1, got "
+                . self::describeScalar($value['total']);
+        }
+    }
+
+    /**
+     * `weightedRelation`: the cross-prop rule — `min` and `max` bound the number
+     * of PAIRINGS, and a `min` above a `max` is a set that cannot be satisfied.
+     *
+     * Cross-prop, so it cannot live in the per-prop rules. Refused rather than
+     * clamped: an author who wrote both numbers meant both, and a control that
+     * can never be valid is not a state to render, it is a declaration to fix.
+     *
+     * `fieldArray` carries the same pair and does NOT check it — a known gap,
+     * left alone here rather than widened by copying it.
+     *
+     * @param array<mixed> $node
+     * @param list<string> $errors by reference
+     */
+    private static function validateWeightedRelation(array $node, string $path, array &$errors): void
+    {
+        $min = $node['min'] ?? null;
+        $max = $node['max'] ?? null;
+
+        if (\is_int($min) && $min < 0) {
+            $errors[] = "{$path}.min: 'weightedRelation.min' must be 0 or more — it bounds how many "
+                . 'pairings the set must hold, got ' . self::describeScalar($min);
+        }
+
+        if (\is_int($max) && $max < 1) {
+            $errors[] = "{$path}.max: 'weightedRelation.max' must be 1 or more — a maximum of 0 pairings "
+                . 'is a control with nothing it can ever be used for, got ' . self::describeScalar($max);
+        }
+
+        if (\is_int($min) && \is_int($max) && $min > $max) {
+            $errors[] = "{$path}: 'weightedRelation.min' ({$min}) is above 'weightedRelation.max' ({$max}) "
+                . '— no number of pairings satisfies both, so the control could never be submitted';
+        }
     }
 
     /**

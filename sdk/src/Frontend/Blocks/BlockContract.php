@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry child blocks (see childSlots())
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'weightSpec',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'weightSpec',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -931,6 +931,154 @@ final class BlockContract
                 'placeholder' => ['type' => 'string',     'required' => false],
                 'default'     => ['type' => 'string',     'required' => false],
                 'defaultFrom' => ['type' => 'contextPath', 'required' => false],
+            ]],
+            // ---- weighted many-to-many relation editor ----
+            // A SET OF PAIRINGS, EACH CARRYING A WEIGHT. The shape nothing else
+            // in this contract expresses: pick a related record, attach a number
+            // to that pairing, remove one, see the whole set and what it adds up
+            // to.
+            //
+            // WHY `fieldArray` IS NOT THIS, since it is the nearest thing.
+            // `fieldArray` models a repeatable group of SUB-RECORDS — rows that
+            // belong to the record being edited and exist only inside it. A
+            // relation's other end is a record that already exists, is chosen
+            // rather than typed, and may be chosen only once. Spelled as a
+            // `fieldArray` of `referenceSelect` + `numberInput`, three things the
+            // relation guarantees are simply absent: nothing stops the same
+            // related record appearing twice (two rows for one join key, which
+            // is not a state the join table can even hold), nothing removes an
+            // already-chosen record from the next row's dropdown, and nothing
+            // knows the rows are a SET whose weights relate to each other. The
+            // third is the one this type exists for.
+            //
+            // WHY IT IS A FORM INPUT AND NOT A DATA-BOUND READ BLOCK. It carries
+            // ONE `source`, and that source is the CANDIDATES — the collection a
+            // `referenceSelect` would populate its dropdown from, ownership-
+            // checked and version-rewritten by the loader in exactly the same
+            // way, because it is the same `apiPath` prop resolved by the same
+            // code. The CURRENT pairings are not fetched here at all: they are
+            // the input's own value, and they arrive the way every other form
+            // value arrives — the enclosing `form`'s `dataSource`, or a
+            // `defaultFrom` binding. That is what keeps this to one source, one
+            // ownership check and one loading state. `flow` refused a second
+            // source for the same reason (see its note) and could get away with
+            // deriving its edges from its nodes; a relation editor cannot derive
+            // the candidates from the current set, since the whole act is adding
+            // something that is not in it yet — so the second collection is
+            // avoided by putting the current set in the VALUE rather than behind
+            // a second fetch.
+            //
+            // THE VALUE. A list, submitted under `name`:
+            //
+            //     [ ['value' => 'alpha', 'weight' => 40],
+            //       ['value' => 'beta',  'weight' => 60] ]
+            //
+            //  - `value`  the related record's id, read from the candidate row's
+            //             `valueField` — the same word, and the same semantics,
+            //             `referenceSelect` submits for one of these.
+            //  - `weight` a NON-NEGATIVE INTEGER, and the contract fixes both
+            //             halves of that rather than offering props for them.
+            //             Integer: nothing else in this contract has a float
+            //             prop, JSON floats do not round-trip through PHP
+            //             predictably, and a declaration that needs finer grain
+            //             says so by choosing a bigger `weights.total` — whole
+            //             percentage points at 100, tenths at 1000. Non-negative:
+            //             a signed weight makes every "you have N left"
+            //             affordance meaningless, because the remainder becomes
+            //             reachable by cancellation from any distance. A relation
+            //             that genuinely needs signed weights is a different
+            //             control and should be asked for as one, not arrived at
+            //             by this one failing to forbid it.
+            //
+            // A pairing may not appear twice. That is the join key, not a
+            // preference: the renderer takes a chosen candidate out of the
+            // picker, and the server refuses a duplicate regardless.
+            //
+            // ---- DO THE WEIGHTS HAVE TO SUM TO SOMETHING? `weights` SAYS. ----
+            //
+            // Both answers are real and they are DIFFERENT CONTROLS, not one
+            // control with a flag. A mapping whose contributions must total 100%
+            // has an error state below the total, calls the remainder "still to
+            // allocate", and treats reaching the total as the goal. A mapping of
+            // independent weights has no error state from the sum at all and no
+            // remainder to speak of. So the answer cannot be global — it is
+            // declared, per block, and it is declared in ONE REQUIRED prop:
+            //
+            //     'weights' => ['rule' => 'sumTo', 'total' => 100]
+            //
+            // THE THREE RULES:
+            //  - `free`    the weights are independent. No total, no remainder,
+            //              no error state from the sum. The running total is
+            //              still shown, as information.
+            //  - `sumTo`   the set must total `total` EXACTLY. Below it is a
+            //              shortfall and above it an excess, and both are error
+            //              states.
+            //  - `atMost`  the set must not EXCEED `total`. Below it is headroom
+            //              — a perfectly good state — and only above it is an
+            //              error. This is the rule that differs from `sumTo`
+            //              precisely where it matters: at the total, `sumTo` is
+            //              satisfied and `atMost` is merely full, and one step
+            //              below, `sumTo` is broken and `atMost` is fine.
+            //
+            // WHY ONE COMPOSITE PROP RATHER THAN `weightRule` + `weightTotal`.
+            // Because {@see BlockValidator::validate()} iterates the DECLARED
+            // prop rules and never looks at the keys a node actually carries, so
+            // a misspelled OPTIONAL prop is not an error — it is silently
+            // absent. `weightRul => 'sumTo'` beside a `weightTotal` would leave
+            // a block that had to total 100 running with no constraint and no
+            // affordance saying so, which is the one direction this facet must
+            // not fail in. A REQUIRED prop's absence is caught, and a composite
+            // value is the only place in this contract where a validator sees
+            // the author's own keys and can therefore refuse a typo INSIDE it —
+            // which {@see BlockValidator::validateWeightSpec()} does.
+            //
+            // `rule` IS NEVER INFERRED, for the same reason `ouScopePicker`
+            // always writes `scope` and `visibleWhen.access` always writes
+            // `equals`: the two candidate defaults are both wrong. Defaulting to
+            // `free` makes a forgotten declaration silently unconstrained — the
+            // permissive failure, and the one that ships. Defaulting to a total
+            // needs a number nobody supplied.
+            //
+            // WHAT THE BLOCK DOES WITH THE RULE: IT EXPLAINS IT. IT DOES NOT
+            // ENFORCE IT. The renderer computes the running total, names the
+            // remainder or the excess, and — like every `required` in this
+            // contract — declines to submit a set it can already see is wrong,
+            // which saves a round trip and is presentational. The AUTHORITY is
+            // the plugin's own endpoint: it re-checks the set it is handed, and
+            // when it refuses, its message is rendered verbatim through the
+            // ordinary issues report rather than restated by the client. A
+            // client that re-derived the refusal would be a second answer to a
+            // question the server already answers, and the two would disagree
+            // the day the server's rule changes — the same trade `inbox` and
+            // `accessGate` refuse for permissions.
+            //
+            // NOTHING IS EVER REBALANCED. Adding a pairing to a `sumTo` set that
+            // already totals `total` enters it at weight 0 and SAYS the set is
+            // fully allocated; it does not take the difference from the other
+            // rows. There is no correct redistribution — proportional, equal,
+            // and take-from-the-largest are three different answers and the
+            // control cannot know which was meant — and silently rewriting
+            // weights an author set deliberately is worse than showing them a
+            // zero and letting them decide.
+            //
+            // `min`/`max` bound the number of PAIRINGS, as they do on
+            // `fieldArray`; the weights' own bound is `weights.total`. Unlike
+            // `fieldArray` these are checked against each other, because a
+            // `min` above a `max` is a set the author has made unsatisfiable and
+            // nothing else would say so.
+            'weightedRelation' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName',  'required' => true],
+                'label'       => ['type' => 'string',     'required' => true],
+                'source'      => ['type' => 'apiPath',    'required' => true],
+                'valueField'  => ['type' => 'string',     'required' => true],
+                'labelField'  => ['type' => 'string',     'required' => true],
+                'weights'     => ['type' => 'weightSpec', 'required' => true],
+                'weightLabel' => ['type' => 'string',     'required' => false],
+                'itemLabel'   => ['type' => 'string',     'required' => false],
+                'placeholder' => ['type' => 'string',     'required' => false],
+                'min'         => ['type' => 'int',        'required' => false],
+                'max'         => ['type' => 'int',        'required' => false],
+                'emptyText'   => ['type' => 'string',     'required' => false],
             ]],
             // ---- organizational-unit SCOPE picker (#868) ----
             // A form input whose value is a RULE over the organizational-unit
