@@ -1030,28 +1030,204 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertTrue($foundAction, 'The tree must contain an actionButton block with a plugin-owned action endpoint');
     }
 
-    public function testFormAndActionButtonDeclareMatchingRequiredPermission(): void
+    /**
+     * Every `form`/`actionButton` declares the permission of the route it
+     * SUBMITS TO — which is the invariant the loader's permission pin enforces,
+     * and it is asserted here by DERIVING the expected value rather than by
+     * naming one.
+     *
+     * It used to assert the literal `uikit:view` for every block, and that held
+     * only while every interactive block in the tree submitted to the same echo
+     * route. The moment the record page's editable form started submitting the
+     * PUT its own gate asks about — `uikit:manage`, read off that route — a
+     * literal became a statement about which demo endpoints happen to exist,
+     * not about the rule. A derived assertion covers the next endpoint too.
+     */
+    public function testEveryInteractiveBlockDeclaresThePermissionOfTheRouteItSubmitsTo(): void
     {
-        $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
+        $plugin = new UiKitShowcasePlugin();
+        $feature = $plugin->getFrontendFeatures()[0];
 
         /** @var array<mixed> $blocks */
         $blocks = $feature['blocks'];
 
-        // Walk tree and collect form and actionButton blocks.
-        $formPerms = [];
-        $actionPerms = [];
-        $this->collectInteractivePerms($blocks, $formPerms, $actionPerms);
-
-        $this->assertNotEmpty($formPerms, 'Must find at least one form block');
-        $this->assertNotEmpty($actionPerms, 'Must find at least one actionButton block');
-
-        // Each must declare requiredPermission = 'uikit:view' (matching the echo route).
-        foreach ($formPerms as $perm) {
-            $this->assertSame('uikit:view', $perm, "form.requiredPermission must be 'uikit:view'");
+        // The plugin's own write routes, keyed exactly as the loader keys them:
+        // METHOD + path with every `{param}` collapsed, so a declaration naming
+        // `{demo-record-pick}` finds the route registered as `{name}`.
+        $writeRoutes = [];
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            $method = strtoupper((string) ($r['method'] ?? ''));
+            if (!in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true) || !is_string($r['path'] ?? null)) {
+                continue;
+            }
+            $writeRoutes[$method . ' ' . self::normalizePath((string) $r['path'])]
+                = $r['requiredPermission'] ?? null;
         }
-        foreach ($actionPerms as $perm) {
-            $this->assertSame('uikit:view', $perm, "actionButton.requiredPermission must be 'uikit:view'");
+
+        $specs = $this->collectInteractiveSpecs($blocks);
+        $this->assertNotEmpty($specs, 'Must find at least one form or actionButton block');
+
+        $verbsSeen = [];
+        foreach ($specs as $spec) {
+            $key = $spec['method'] . ' ' . self::normalizePath($spec['endpoint']);
+            $verbsSeen[$spec['method']] = true;
+
+            $this->assertArrayHasKey(
+                $key,
+                $writeRoutes,
+                "'{$spec['type']}' submits {$spec['method']} {$spec['endpoint']}, which is not a write route "
+                . 'this plugin registers — the loader would drop the whole feature'
+            );
+            $this->assertSame(
+                $writeRoutes[$key],
+                $spec['perm'],
+                "'{$spec['type']}' submitting {$spec['method']} {$spec['endpoint']} must declare the "
+                . 'requiredPermission of that route, or the loader\'s permission pin drops the feature'
+            );
         }
+
+        // The tree must exercise the TEMPLATED write path, not only the static
+        // one. This is the coverage whose absence let the loader compare submit
+        // endpoints literally for as long as it did: every interactive block in
+        // the showcase pointed at a parameterless collection route, so the walk
+        // was never asked the question a record page asks.
+        $this->assertArrayHasKey(
+            'PUT',
+            $verbsSeen,
+            'At least one interactive block must submit a PUT to a templated record path — a showcase '
+            . 'whose every form posts to a static endpoint cannot demonstrate a record page that saves, '
+            . 'and cannot catch a write gate that refuses templated endpoints'
+        );
+    }
+
+    /**
+     * The record page's editable form survives the loader's OWNERSHIP WALK and
+     * comes out addressing the versioned route.
+     *
+     * This is the gate the whole change exists for, and it is a POSITIVE
+     * assertion on the served descriptor rather than on the declaration: the
+     * tree passing `BlockValidator` proves the shape, and proves nothing at all
+     * about ownership — a feature refused by the walk is simply absent, silently,
+     * and a suite that only validates the contract cannot tell the difference.
+     *
+     * Reintroduce a literal comparison in `PluginLoader`'s interactive-endpoint
+     * check, or drop PATCH/PUT from the write-route map, and this test goes red
+     * with the feature missing entirely.
+     */
+    public function testTheServedDescriptorCarriesTheRecordPagesTemplatedSaveEndpoint(): void
+    {
+        $pluginDir = dirname(__DIR__, 2) . '/plugins';
+
+        $loader = new PluginLoader(
+            $pluginDir,
+            new Router('/v1'),
+            new PermissionRegistry(),
+            new HookManager()
+        );
+        $loader->load();
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey(
+            'ui-kit-reference',
+            $byId,
+            'The showcase feature must SURVIVE the ownership walk. Absent here means the walk refused '
+            . 'one of its endpoints and dropped the whole feature — fail-closed, and silent'
+        );
+
+        /** @var array<mixed> $blocks */
+        $blocks = $byId['ui-kit-reference']['blocks'];
+        $endpoints = $this->collectInteractiveEndpoints($blocks);
+
+        $this->assertContains(
+            '/api/v1/uikit/demo/rows/{demo-record-pick}',
+            $endpoints,
+            'The record page\'s editable form must submit the versioned, templated PUT — the same '
+            . 'request its accessGate asks about. The token stays intact for the renderer to '
+            . 'substitute; the prefix is the loader\'s'
+        );
+    }
+
+    /**
+     * The endpoint the served descriptor hands the renderer, with its token
+     * substituted, DISPATCHES — through the very Router the loader registered
+     * the plugin's routes on.
+     *
+     * "The feature survived the ownership walk" and "the browser's request will
+     * reach a handler" are two different claims, and the second is the one that
+     * matters to a user pressing Save. They came apart in exactly this
+     * subsystem before: #868 records that an UNVERSIONED endpoint passes
+     * ownership and then matches no route, so every action resolves to "not
+     * permitted" — fail-closed, silently. So this asserts the whole path:
+     * take the string out of the descriptor, put a concrete value where the
+     * renderer will put one, and require a real route to answer it, with the
+     * gate the plugin declared.
+     */
+    public function testTheServedSaveEndpointDispatchesToTheRouteThatGatesIt(): void
+    {
+        $pluginDir = dirname(__DIR__, 2) . '/plugins';
+        $router = new Router('/v1');
+
+        $loader = new PluginLoader($pluginDir, $router, new PermissionRegistry(), new HookManager());
+        $loader->load();
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('ui-kit-reference', $byId);
+
+        /** @var array<mixed> $blocks */
+        $blocks = $byId['ui-kit-reference']['blocks'];
+        $endpoint = '/api/v1/uikit/demo/rows/{demo-record-pick}';
+        $this->assertContains($endpoint, $this->collectInteractiveEndpoints($blocks));
+
+        // What the renderer builds: the token replaced with the selector's
+        // current value, URL-encoded exactly as FormProvider encodes it.
+        $concrete = str_replace(
+            '{demo-record-pick}',
+            rawurlencode('Anika Patel'),
+            $endpoint
+        );
+
+        $matched = $router->match(new Request('PUT', $concrete));
+
+        $this->assertNotNull(
+            $matched,
+            "The served save endpoint '{$concrete}' must match a registered route. A descriptor whose "
+            . 'endpoint dispatches nowhere is a Save button that reports nothing'
+        );
+        $this->assertSame(
+            'uikit:manage',
+            $matched['requiredPermission'],
+            'and it must be the route whose own gate the accessGate asked about — the same single '
+            . 'permission, never a slug the block restated'
+        );
+        // The route's OWN parameter captures the substituted segment, whatever
+        // either side chose to call it: the block wrote `{demo-record-pick}` and
+        // the route declares `{name}`.
+        //
+        // Captured still PERCENT-ENCODED, and asserted that way because that is
+        // what happens rather than what should: nothing between Router::match()
+        // and a plugin handler decodes a path parameter, so a handler receives
+        // `Anika%20Patel`. That is a separate, pre-existing gap in the dispatch
+        // path — it predates this change, it is not specific to write routes, and
+        // it is filed rather than quietly papered over here. Asserting the
+        // decoded value would have made this test fail for a reason that has
+        // nothing to do with ownership; asserting the encoded one without saying
+        // why would read as an endorsement.
+        $this->assertArrayHasKey('name', $matched['params']);
+        $this->assertSame(rawurlencode('Anika Patel'), $matched['params']['name']);
+    }
+
+    /**
+     * The path half of the loader's route key: every `{param}` collapsed to `{}`.
+     *
+     * Restated here rather than reached for through reflection — the loader's
+     * copy is private, and a test that reached into it would pass by sharing the
+     * bug rather than by agreeing with the behaviour.
+     */
+    private static function normalizePath(string $path): string
+    {
+        return (string) preg_replace('/\{[^}]*\}/', '{}', $path);
     }
 
     public function testLoaderVersionsInteractiveEndpointsInTheServedDescriptor(): void
@@ -1139,32 +1315,54 @@ final class UiKitShowcasePluginTest extends TestCase
     }
 
     /**
-     * Walk the tree and collect requiredPermission values for form and actionButton blocks.
+     * Walk the tree and collect, for every `form`/`actionButton`, the three
+     * things the loader's interactive-endpoint check reads together: the METHOD,
+     * the ENDPOINT, and the block's own requiredPermission.
      *
-     * @param array<mixed>    $nodes
-     * @param list<string|null> $formPerms
-     * @param list<string|null> $actionPerms
+     * Collected as one record per block rather than as three parallel lists —
+     * the check is a relation between them, and separate lists can only assert
+     * facts about each column.
+     *
+     * @param array<mixed> $nodes
+     * @return list<array{type: string, method: string, endpoint: string, perm: string|null}>
      */
-    private function collectInteractivePerms(array $nodes, array &$formPerms, array &$actionPerms): void
+    private function collectInteractiveSpecs(array $nodes): array
     {
+        $specs = [];
         foreach ($nodes as $node) {
             if (!is_array($node) || !isset($node['type']) || !is_string($node['type'])) {
                 continue;
             }
-            if ($node['type'] === 'form') {
-                $formPerms[] = isset($node['requiredPermission']) && is_string($node['requiredPermission'])
-                    ? $node['requiredPermission']
-                    : null;
+
+            $specKey = match ($node['type']) {
+                'form' => 'submit',
+                'actionButton' => 'action',
+                default => null,
+            };
+
+            if ($specKey !== null && is_array($node[$specKey] ?? null)) {
+                /** @var array<string, mixed> $spec */
+                $spec = $node[$specKey];
+                if (is_string($spec['method'] ?? null) && is_string($spec['endpoint'] ?? null)) {
+                    $specs[] = [
+                        'type' => $node['type'],
+                        'method' => strtoupper($spec['method']),
+                        'endpoint' => $spec['endpoint'],
+                        'perm' => isset($node['requiredPermission']) && is_string($node['requiredPermission'])
+                            ? $node['requiredPermission']
+                            : null,
+                    ];
+                }
             }
-            if ($node['type'] === 'actionButton') {
-                $actionPerms[] = isset($node['requiredPermission']) && is_string($node['requiredPermission'])
-                    ? $node['requiredPermission']
-                    : null;
-            }
+
             foreach ($this->childListsOf($node) as $childList) {
-                $this->collectInteractivePerms($childList, $formPerms, $actionPerms);
+                foreach ($this->collectInteractiveSpecs($childList) as $nested) {
+                    $specs[] = $nested;
+                }
             }
         }
+
+        return $specs;
     }
 
     /**
