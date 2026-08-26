@@ -286,7 +286,7 @@ class Router
                 $params = [];
                 foreach ($matches as $key => $value) {
                     if (!is_numeric($key)) {
-                        $params[$key] = rawurldecode($value);
+                        $params[$key] = self::decodeSegment($value);
                     }
                 }
 
@@ -377,6 +377,44 @@ class Router
     public function getMiddleware(): array
     {
         return $this->middleware;
+    }
+
+    /**
+     * Percent-decode ONE captured path segment, and never hand back bytes that
+     * are not text.
+     *
+     * `rawurldecode` will happily turn `%FF` into the byte 0xFF, which is not
+     * valid UTF-8 in any sequence. That is a difference from the un-decoded
+     * behaviour that MATTERS, because it is not merely a different string: a
+     * handler echoing it back through `Response::json()` gets
+     * `RuntimeException: JSON encoding failed: Malformed UTF-8 characters`,
+     * where before this change the same request returned 200 with the literal
+     * text `%FF`. Fixing "wrong record" by introducing "500 on a malformed
+     * request" would be trading one silent failure for a louder one that nobody
+     * asked for.
+     *
+     * So the decode is CONDITIONAL on the result being text. A real identifier
+     * on this platform is UTF-8 by construction — that is the whole point of the
+     * change, since an Arabic identifier percent-encodes entirely — so every
+     * value this was written for round-trips. A segment that decodes to
+     * something that is not UTF-8 names no record, and is handed back exactly as
+     * it arrived: no new failure mode, no routing change, and precisely the
+     * behaviour it had before, for precisely the inputs that were already
+     * broken. This change makes some inputs better and none worse.
+     *
+     * `preg_match('//u', …)` rather than `mb_check_encoding()`: `ext-mbstring`
+     * is not in this package's `require`, and PCRE's UTF-8 mode answers the same
+     * question with no extension at all. An empty pattern in `u` mode matches
+     * any valid UTF-8 subject and fails on an invalid one.
+     *
+     * @param string $value The raw captured segment, still percent-encoded.
+     * @return string The decoded segment, or the raw one when decoding would not yield UTF-8.
+     */
+    private static function decodeSegment(string $value): string
+    {
+        $decoded = rawurldecode($value);
+
+        return preg_match('//u', $decoded) === 1 ? $decoded : $value;
     }
 
     /**
