@@ -2,7 +2,9 @@
 
 The server-side PDF tier for the document/label designer: a Node + headless
 Chromium container that loads **the designer's own React renderer** and returns
-PDF bytes at exact millimetre size. It exists so an exported document is the
+PDF bytes at exact millimetre size, **and** a flowing mode that paginates a
+content tree into as many pages as it takes (see [Two render modes](#two-render-modes)).
+The first exists so an exported design is the
 same artefact the author saw on screen, rather than the output of a second,
 hand-rolled renderer that drifts from the canvas — see
 [ADR 0012](../adr/0012-document-render-microservice.md).
@@ -255,11 +257,173 @@ The release pipeline runs the same shape of check against the published image
 
 ---
 
+## Two render modes
+
+The service has two endpoints, and they take genuinely different documents.
+
+| | `POST /render` — **fixed canvas** | `POST /render/flow` — **flowing** |
+|---|---|---|
+| Input | a designer **template**: pages of absolutely-placed, millimetre-positioned elements | a **content tree**: headings, paragraphs, tables, figures, no positions at all |
+| Page count | known before rendering — one per template page, times the data rows | **not knowable** before rendering; the renderer decides |
+| Margins | none (`margin: 0`); the design owns the whole sheet | configurable, real, and the running header/footer are drawn in them |
+| Renderer | the designer's own React bundle (`dist/harness/`), for pixel parity with the on-screen preview | plain server-generated HTML plus a paginator that runs in the page |
+| Who uses it | the document designer, and verification-code stamping composing into it | anything that assembles content and needs a document out of it |
+
+They share exactly one thing: the Chromium instance. Not the harness, not the
+stylesheet, not the readiness signal, not the page geometry. That separation is
+deliberate — the fixed-canvas mode's output is expected to be unchanged
+forever, and the cheapest way to guarantee that is for the flowing mode to have
+no way to reach it. `test/fixed-canvas-geometry.test.js` pins the fixed mode's
+`@page` rule and `page.pdf()` options so a future change to either is a test
+failure rather than a surprise in someone's certificate.
+
+### Why the flowing mode paginates itself
+
+Chrome paginates flowing content perfectly well. What it will not do is say
+where it put anything: it implements no CSS `target-counter()`, and no DOM API
+reports which printed page an element landed on. So `"Table 34 …… 78"` cannot
+be produced from a document Chrome has paginated, because the 78 does not exist
+anywhere the document can read.
+
+Three ways out were measured on the same generated 130-page document (60
+tables, 90 figures, three generated front-matter lists — `npm run flow:fixture`
+produces it). Times are the median of three warm runs in the real image;
+correctness is the count of front-matter entries whose printed page number
+matches the page the item is actually printed on, read back out of the finished
+PDF by `scripts/verify-flow-pdf.js`.
+
+| Approach | Render time | Entries correct |
+|---|---|---|
+| **Own paginator in the page** (what ships) | **3.7 s** | **294 / 294** |
+| Two-pass, page estimated in the DOM from `offsetTop / pageHeight` | 4.2 s | **0 / 294** |
+| Two-pass, page recovered from the first-pass PDF | 11.8 s | 294 / 294 |
+| Paged.js polyfill | 18.8 s, and it truncated the document | n/a |
+
+The in-page estimate is the cheap and obvious option and it is **wrong on every
+single line**. `offsetTop / pageHeight` describes a continuous column;
+fragmentation is exactly what departs from one, and every push a `break-inside`
+or an unbreakable row causes accumulates, so the error grows down the document.
+It is the dangerous kind of wrong, because the output looks typeset.
+
+Recovering the numbers from the first-pass PDF is correct, but it costs two
+full `page.pdf()` calls plus a text-extraction pass — three times the render
+time — and it needs a PDF parser as a production dependency of the render tier
+plus a machine-readable marker printed beside every anchor so the extractor can
+find it. Paginating in the page instead makes the answer known before any PDF
+exists, and makes `page.pdf()` **faster**, because Chromium is handed page boxes
+it does not have to fragment.
+
+Paged.js paginated a 14-page document correctly in 1.3 s, and silently
+truncated anything larger in this harness — a 45-page document came back as
+four pages, with no error. Even at the size where it worked its pagination rate
+was ~93 ms/page against the shipped paginator's ~11 ms/page. It is not a
+dependency of this service and never became one.
+
+### The trap in generated front matter
+
+A contents list changes the page numbers it prints, because the list itself
+occupies pages. Get this wrong and every number is off by the length of the
+list — which is what happens if the first pass is laid out without the list and
+the numbers are injected afterwards (measured: 294/294 entries wrong, each
+exactly 10 pages early, the length of the front matter).
+
+The paginator handles it by fragmenting the body once — the body's own
+pagination cannot depend on the front matter — then iterating the front matter
+to a fixed point, and only then shifting the recorded anchor pages by the
+front matter's final length. Because a contents entry is a fixed-height,
+non-wrapping row, the list's length in pages does not depend on the numbers it
+prints, so the loop converges on the second pass; a guard rebuilds at the final
+length if it ever did not.
+
+### Exercising it
+
+`documents.render_enabled` defaults to `false`, so a fresh install renders
+nothing and a change here has no natural way to be tested. Everything below
+needs no database, tenant, template or setting:
+
+```bash
+cd render-service && npm ci
+
+# A synthetic ~130-page document: 60 tables, 90 figures, three front-matter
+# lists, Arabic with Latin identifiers throughout. Generated from a seed, so
+# two runs are comparable. No real content of any kind.
+npm run flow:fixture -- --direction rtl --out /tmp/flow.json
+
+curl -sS -X POST http://127.0.0.1:8130/render/flow \
+  -H 'Content-Type: application/json' -H "X-Render-Secret: ${RENDER_SHARED_SECRET}" \
+  --data @/tmp/flow.json -D /tmp/h -o /tmp/flow.pdf
+grep -i x-render-page-count /tmp/h        # the renderer's own count
+
+# The check that matters: open the PDF, find the page each table and figure is
+# actually printed on, read the number printed beside the matching entry, and
+# compare. Also checks the running footer on physical page N says N.
+npm run flow:verify -- --pdf /tmp/flow.pdf --direction rtl
+
+# Bidi as geometry, in a real browser: the page number must land at the LEFT
+# edge of a right-to-left entry and the label at the right, and a Latin
+# identifier inside an Arabic label must keep its own order.
+npm run flow:geometry
+```
+
+All four run in CI, in the `Render microservice` job, against the real image.
+
+### Arabic and RTL
+
+A contents entry is a **flex row**, not a line of mixed text, and every run
+whose script disagrees with the document's direction is wrapped in `<bdi>`
+(`src/flow/bidi.js`, used both in Node and in the page). Both are load-bearing.
+
+Written as running text, a right-to-left entry ending in a Latin page number
+has only bidi-neutral characters — spaces, dots, an em dash — between that
+number and the previous Latin run in the label. The Unicode algorithm resolves a
+neutral run between two left-to-right runs as itself left-to-right, so
+identifier, leader and page number merge into one run and print backwards.
+Measured in Chromium on the string `وصف العنصر — TBL-034 … 78`: as running
+text the page number lands at x 677, to the **right** of the identifier at
+x 566–627, i.e. the line reads "78 … TBL-034". Isolating the number fixes the
+order; as a flex row the number is pinned at the content box's left edge
+regardless. `scripts/check-flow-rtl-geometry.js` asserts this in both
+directions, including the worst case of a caption that *ends* in a Latin run.
+
+### Why `displayHeaderFooter` is not used
+
+Puppeteer's own running header/footer is left switched off in both modes, and
+the flowing mode draws its bands in the document instead. Chromium renders
+those templates in a separate document with its own default stylesheet and no
+access to the page's CSS; it can pass them only `pageNumber`, `totalPages`,
+`title`, `url` and `date`, so a running head cannot name the **section** a page
+belongs to, which is the main reason to have one; and it reserves the bands out
+of the PDF margin, which fights a mode that prints at `margin: 0` with the page
+box drawn in CSS. Drawing them in the document costs nothing, and gives them the
+document's own font, direction and bidi isolation. The requirement — real
+margins, and a running header and footer on every page — is met; the mechanism
+the issue guessed at is not the one that meets it.
+
+### Flowing-mode configuration
+
+| Variable | Default | Notes |
+|---|---|---|
+| `RENDER_FLOW_READY_TIMEOUT_MS` | `180000` | How long pagination may take. It scales with the document, not the request; the fixed mode's 20 s was sized for one designed page. |
+| `RENDER_FLOW_PDF_TIMEOUT_MS` | `180000` | How long `page.pdf()` may take for a flowing document. |
+| `RENDER_FLOW_NAV_TIMEOUT_MS` | `30000` | Loading the generated page. |
+| `RENDER_FLOW_MAX_BLOCKS` | `20000` | Hard ceiling on content blocks. |
+| `RENDER_FLOW_MAX_TABLE_ROWS` | `5000` | Hard ceiling on rows in one table. |
+| `RENDER_FLOW_MAX_BYTES` | 40 MiB | Hard ceiling on the whole payload. |
+
+A render whose pagination overran a page box is **refused**, not returned: an
+overrun means a unit was placed where it does not fit, so at least one recorded
+page number describes a layout that did not happen, and every cross-reference
+after it is suspect.
+
+---
+
 ## References
 
 - [ADR 0012 — Document render as a dedicated microservice](../adr/0012-document-render-microservice.md)
 - `render-service/Dockerfile`, `render-service/Dockerfile.dockerignore`
 - `render-service/scripts/build-harness.js` (what gets bundled and why)
+- `render-service/src/flow/` (the flowing mode: payload, HTML, bidi, paginator)
+- `render-service/scripts/generate-flow-fixture.js`, `verify-flow-pdf.js`, `check-flow-rtl-geometry.js`
 - `render-service/scripts/write-build-info.js` (how the image identifies itself)
 - `src/Api/DocumentRenderApiHandler.php`, `src/Core/Document/Render/RenderServiceClient.php`
 - `src/Core/Settings/SettingsRegistry.php` (`documents.render_*`)
