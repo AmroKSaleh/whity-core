@@ -39,7 +39,7 @@ use Whity\Database\Database;
  * authored, not computed: a period of a given kind need not begin on the first
  * of a month, need not be a fixed fraction of the period containing it, and need
  * not be the same length as its siblings. Nothing in this subsystem derives a
- * boundary from a month, a quarter or a year, and there is deliberately no
+ * boundary from a month or a calendar year, and there is deliberately no
  * column from which one could be derived.
  *
  * `time_window_state_events` — the append-only record of every seal and every

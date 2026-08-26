@@ -21,7 +21,7 @@ use PDOException;
  * THE FOUR INVARIANTS THIS CLASS OWNS
  * -----------------------------------
  * 1. BOUNDARIES ARE AUTHORED, NEVER DERIVED. Nothing here computes a start or an
- *    end from a month, a quarter, a year, or a parent's length. A period of a
+ *    end from a month, a calendar year, or a parent's length. A period of a
  *    given kind may begin on any day, run for any span, and be a different
  *    length from its siblings, because that is what real periods do — the
  *    assumption that they are calendar-aligned fractions is the specific mistake
