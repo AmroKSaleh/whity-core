@@ -294,10 +294,14 @@ PDF by `scripts/verify-flow-pdf.js`.
 
 | Approach | Render time | Entries correct |
 |---|---|---|
-| **Own paginator in the page** (what ships) | **3.7 s** | **294 / 294** |
-| Two-pass, page estimated in the DOM from `offsetTop / pageHeight` | 4.2 s | **0 / 294** |
-| Two-pass, page recovered from the first-pass PDF | 11.8 s | 294 / 294 |
+| **Own paginator in the page** (what ships) | **3.7 s** (repeat sessions 3.6–4.3 s) | **294 / 294** |
+| Two-pass, page estimated in the DOM from `offsetTop / pageHeight` | 4.2 s (4.0–4.3 s) | **0 / 294** |
+| Two-pass, page recovered from the first-pass PDF | 11.8 s (11.6–11.8 s) | 294 / 294 |
+| Two-pass, first pass laid out *without* the generated list | 37.5 s | **0 / 294** |
 | Paged.js polyfill | 18.8 s, and it truncated the document | n/a |
+
+Run-to-run spread on one host is a few hundred milliseconds; the gaps in that
+table are larger than the noise, which is the only reason it decides anything.
 
 The in-page estimate is the cheap and obvious option and it is **wrong on every
 single line**. `offsetTop / pageHeight` describes a continuous column;
