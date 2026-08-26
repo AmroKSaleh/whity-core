@@ -29,6 +29,8 @@ const rateLimit = require('express-rate-limit');
 
 const { renderToPdf, shutdown } = require('./renderer');
 const { validatePayload } = require('./limits');
+const { renderFlowToPdf } = require('./flow/render');
+const { validateFlowPayload } = require('./flow/document');
 
 const PORT = Number(process.env.PORT || 8130);
 const SHARED_SECRET = process.env.RENDER_SHARED_SECRET || '';
@@ -132,6 +134,52 @@ app.post('/render', renderRateLimiter, async (req, res) => {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[whity_render] render failed:', err && err.stack ? err.stack : err);
+    res.status(500).json({ error: 'Render failed' });
+  }
+});
+
+/**
+ * The FLOWING render mode (#1072, first half).
+ *
+ * A separate route, not a flag on `/render`, because the two take genuinely
+ * different bodies: `/render` takes a designer TEMPLATE of positioned
+ * elements and prints one page per template page; this takes a CONTENT TREE
+ * with no positions and decides for itself how many pages it becomes. A mode
+ * flag on one endpoint would mean one validator answering for two payload
+ * shapes and one handler branching on it — and the branch that mattered would
+ * be the one nobody exercised, because `documents.render_enabled` defaults to
+ * false. Separate routes keep `/render`'s request path byte-for-byte what it
+ * was.
+ *
+ * Answers the PDF bytes, plus the pagination facts in response headers: how
+ * many pages the document turned out to be, and how many of those are
+ * generated front matter. A caller cannot know either in advance — that is
+ * the definition of a flowing document — and both are needed to check that
+ * what came back is what was asked for.
+ */
+app.post('/render/flow', renderRateLimiter, async (req, res) => {
+  if (!isAuthorized(req)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const validationError = validateFlowPayload(req.body);
+  if (validationError) {
+    res.status(422).json({ error: validationError });
+    return;
+  }
+
+  try {
+    const { pdf, pagination } = await renderFlowToPdf(req.body);
+    res.status(200);
+    res.set('Content-Type', 'application/pdf');
+    res.set('X-Render-Page-Count', String(pagination.pageCount));
+    res.set('X-Render-Front-Matter-Pages', String(pagination.frontMatterPages));
+    res.set('X-Render-Paginate-Ms', String(pagination.paginateMs));
+    res.send(pdf);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[whity_render] flow render failed:', err && err.stack ? err.stack : err);
     res.status(500).json({ error: 'Render failed' });
   }
 });
