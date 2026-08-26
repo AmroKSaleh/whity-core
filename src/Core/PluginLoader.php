@@ -2829,17 +2829,39 @@ class PluginLoader
         // judged against this — what registered, not what was declared — so a
         // route refused for colliding with core can never back a screen.
         $registeredGetRoutes = [];
-        // POST/PUT routes the router ACTUALLY accepted, mapped to their
-        // requiredPermission — the ownership basis for an 'action' frontend
-        // screen, exactly as $registeredGetRoutes backs a 'crud' screen.
-        $registeredActionRoutes = [];
-        // #868: EVERY write route the router accepted (POST/PUT/PATCH/DELETE),
-        // keyed "METHOD /normalized/path" with each `{param}` collapsed to `{}`.
-        // This is the ownership basis for an `inbox` action's endpoint, which —
-        // unlike a form's `submit` — is a TEMPLATE the renderer substitutes a row
-        // value into, so a declared `{taskId}` and a registered `{id}` name the
-        // same segment and must compare equal. Values only, no permission: an
-        // inbox action declares no permission to pin (see the walk below).
+        // EVERY write route the router ACTUALLY accepted (POST/PUT/PATCH/DELETE),
+        // keyed "METHOD /normalized/path" — each `{param}` collapsed to `{}` by
+        // {@see normalizeRouteKey()} — and mapped to its requiredPermission.
+        // This is the ownership basis for an 'action' frontend screen, for an
+        // `inbox` action's endpoint, for an `accessGate`'s write `check`, and for
+        // a `form`/`actionButton` endpoint, exactly as $registeredGetRoutes backs
+        // a 'crud' screen and every read-side block prop.
+        //
+        // ONE MAP, and it used to be two. There was a raw-keyed POST/PUT map for
+        // the 'action' screen and the interactive block endpoints, and a
+        // normalized POST/PUT/PATCH/DELETE map for inbox actions and access
+        // gates — two answers to "is this a write route this plugin owns?", and
+        // the interactive block endpoints were reading the wrong one. Every prop
+        // a record page uses to READ compared with parameters normalized; the two
+        // props that WRITE compared literally, against a map that had never heard
+        // of PATCH. So the pattern the SDK documents — a form submitting to
+        // `/api/x/things/{record}` — matched nothing and dropped the entire
+        // feature at load, fail-closed and silently, and a described record page
+        // could display a record, gate an editor on the caller's write
+        // permission, and never save.
+        //
+        // A parameter's NAME is not part of a route: the renderer substitutes a
+        // concrete value there and the dispatcher matches the route's own
+        // compiled pattern, so a declared `{record}` and a registered `{id}` — or
+        // `{id:\d+}`, whose inline constraint (WC-160) no declaration can
+        // restate — name the same segment. Normalizing is what the read side has
+        // always done, for that reason.
+        //
+        // The gate is NOT widened. The path SHAPE must still be one this plugin
+        // actually registered, the METHOD must still be one it registered a
+        // handler for, and the permission pin below still compares the route's
+        // requiredPermission with the block's. Merging the two maps removes a
+        // duplicated fact rather than adding a permission.
         $registeredWriteRoutes = [];
         // GET path => the SAME wrapped handler passed to Router::register(),
         // so a theme-override route (WC-242) can be invoked in-process
@@ -2905,12 +2927,13 @@ class PluginLoader
                 if ($upperMethod === 'GET') {
                     $registeredGetRoutes[$path] = $requiredPermission;
                     $registeredGetHandlers[$path] = $wrappedHandler;
-                } elseif ($upperMethod === 'POST' || $upperMethod === 'PUT') {
-                    $registeredActionRoutes["{$upperMethod} {$path}"] = $requiredPermission;
                 }
 
                 if (in_array($upperMethod, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
-                    $registeredWriteRoutes[self::normalizeRouteKey($upperMethod, $path)] = true;
+                    // The permission is the VALUE, not a second map: every
+                    // consumer that needs the pin reads it here, and every
+                    // consumer that only needs ownership uses array_key_exists.
+                    $registeredWriteRoutes[self::normalizeRouteKey($upperMethod, $path)] = $requiredPermission;
                 }
             }
         }
@@ -3225,7 +3248,6 @@ class PluginLoader
             $plugin,
             $pluginKey,
             $registeredGetRoutes,
-            $registeredActionRoutes,
             $registeredWriteRoutes
         );
 
@@ -3343,8 +3365,7 @@ class PluginLoader
      * @param PluginInterface $plugin The plugin being registered.
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
-     * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
-     * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
+     * @param array<string, string|null> $registeredWriteRoutes "METHOD /normalized/path" => requiredPermission, every POST/PUT/PATCH/DELETE route ACTUALLY registered for this plugin.
      * @return array{
      *     features: list<array<string, mixed>>,
      *     dropped: list<array{plugin: string, featureId: string|null, reason: string}>
@@ -3354,7 +3375,6 @@ class PluginLoader
         PluginInterface $plugin,
         string $pluginKey,
         array $registeredGetRoutes,
-        array $registeredActionRoutes = [],
         array $registeredWriteRoutes = []
     ): array {
         if (!$plugin instanceof PluginFrontendInterface) {
@@ -3382,7 +3402,6 @@ class PluginLoader
                 $pluginKey,
                 $ownPermissions,
                 $registeredGetRoutes,
-                $registeredActionRoutes,
                 $registeredWriteRoutes,
                 $dropped
             );
@@ -3467,8 +3486,7 @@ class PluginLoader
      * @param string $pluginKey Stable identity (original FQCN) for log messages.
      * @param array<int|string, mixed> $ownPermissions The plugin's own declared permissions.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
-     * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
-     * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
+     * @param array<string, string|null> $registeredWriteRoutes "METHOD /normalized/path" => requiredPermission, every POST/PUT/PATCH/DELETE route ACTUALLY registered for this plugin.
      * @param list<array{plugin: string, featureId: string|null, reason: string}> $dropped
      *        Collects every refusal, by reference (#953). Every rule in this
      *        method reports through the one `$drop` closure, so recording there
@@ -3482,7 +3500,6 @@ class PluginLoader
         string $pluginKey,
         array $ownPermissions,
         array $registeredGetRoutes,
-        array $registeredActionRoutes = [],
         array $registeredWriteRoutes = [],
         array &$dropped = []
     ): ?array {
@@ -3668,14 +3685,21 @@ class PluginLoader
             if (!is_string($path) || !str_starts_with($path, '/api/')) {
                 return $drop("action.path must be a string starting with '/api/'", $id);
             }
-            $routeKey = "{$method} {$path}";
-            if (!array_key_exists($routeKey, $registeredActionRoutes)) {
+            // Keyed the same way every other write-route lookup in this file is
+            // keyed. For a token-free `action.path` — which is what an action
+            // screen normally declares, since its generic form submits to one
+            // fixed route — this is byte-for-byte the comparison it replaces.
+            // The METHOD is still restricted to POST/PUT above, before this
+            // lookup, so widening the MAP to PATCH/DELETE cannot let an action
+            // screen point at one.
+            $routeKey = self::normalizeRouteKey($method, $path);
+            if (!array_key_exists($routeKey, $registeredWriteRoutes)) {
                 return $drop("action.path '{$path}' is not a {$method} route this plugin registered", $id);
             }
-            if ($registeredActionRoutes[$routeKey] !== $permission) {
+            if ($registeredWriteRoutes[$routeKey] !== $permission) {
                 return $drop(
                     "action.path '{$path}' route requiredPermission '"
-                    . ($registeredActionRoutes[$routeKey] ?? 'none')
+                    . ($registeredWriteRoutes[$routeKey] ?? 'none')
                     . "' does not match the descriptor's '{$permission}'",
                     $id
                 );
@@ -3798,7 +3822,6 @@ class PluginLoader
             $walkNode = null;
             $walkNode = static function (array $node) use (
                 $registeredGetRoutes,
-                $registeredActionRoutes,
                 $registeredWriteRoutes,
                 $vp,
                 &$walkNode,
@@ -3845,11 +3868,15 @@ class PluginLoader
 
                     // (c3-c) Interactive endpoint ownership + versioning (WC-234).
                     // A `form` node's `submit` spec and an `actionButton` node's
-                    // `action` spec declare a POST/PUT endpoint the block submits
-                    // to. The endpoint must be a route THIS plugin actually
-                    // registered and the route's requiredPermission must EQUAL the
-                    // block's declared requiredPermission (fail-closed). Mirrors
-                    // the screen:'action' pattern exactly (PluginLoader.php ~2515).
+                    // `action` spec declare a POST/PUT/PATCH endpoint the block
+                    // submits to (the verb set `BlockValidator::validateSubmitSpec()`
+                    // accepts). The endpoint must be a route THIS plugin actually
+                    // registered — compared with route parameters normalized, so a
+                    // record page's `/api/x/things/{record}` matches the plugin's
+                    // own `PUT /api/x/things/{id}` — and the route's
+                    // requiredPermission must EQUAL the block's declared
+                    // requiredPermission (fail-closed). Mirrors the
+                    // screen:'action' pattern exactly, and now shares its map.
                     $endpointSpec = null;
                     if ($type === 'form' && isset($node['submit']) && is_array($node['submit'])) {
                         $endpointSpec = [
@@ -3968,13 +3995,32 @@ class PluginLoader
                     }
 
                     if ($endpointSpec !== null) {
-                        $key = strtoupper((string) $endpointSpec['method']) . ' ' . (string) $endpointSpec['endpoint'];
-                        if (!array_key_exists($key, $registeredActionRoutes)) {
-                            $dropReason = "interactive block endpoint '{$key}' is not a POST/PUT route this plugin registered";
+                        $method   = strtoupper((string) $endpointSpec['method']);
+                        $endpoint = (string) $endpointSpec['endpoint'];
+                        // The declaration as written, for the log message: a
+                        // reason quoting a normalized key would name a path the
+                        // author never typed.
+                        $declared = "{$method} {$endpoint}";
+
+                        // Keyed by {@see normalizeRouteKey()} — the SAME key an
+                        // inbox action and an `accessGate` write check already
+                        // use, and the same normalization
+                        // {@see matchesRegisteredGetRoute()} applies on the read
+                        // side. A `submit`/`action` endpoint is a TEMPLATE the
+                        // renderer substitutes context values into, exactly as
+                        // those are, so a declared `{record}` and a registered
+                        // `{id}` (or `{id:\d+}`) name the same segment. Comparing
+                        // the literals refused the pattern the SDK documents and
+                        // dropped the whole feature for a naming difference the
+                        // dispatcher does not read.
+                        $key = self::normalizeRouteKey($method, $endpoint);
+                        if (!array_key_exists($key, $registeredWriteRoutes)) {
+                            $dropReason = "interactive block endpoint '{$declared}' is not a write route "
+                                . 'this plugin registered';
                             return null;
                         }
-                        if ($registeredActionRoutes[$key] !== $endpointSpec['perm']) {
-                            $dropReason = "interactive block endpoint '{$key}' route requiredPermission does not match the block's requiredPermission";
+                        if ($registeredWriteRoutes[$key] !== $endpointSpec['perm']) {
+                            $dropReason = "interactive block endpoint '{$declared}' route requiredPermission does not match the block's requiredPermission";
                             return null;
                         }
                         // Version-rewrite the endpoint in place — same insertion
