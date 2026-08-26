@@ -538,6 +538,16 @@ seeded accounts and shared-database discipline.
        `t()` calls in the source and fails if it differs from
        `database/i18n/`. Runs on frontend changes too, because that is where
        the drift comes from.
+     - **Date-display guard** — fails when a date is formatted, or rendered
+       raw, anywhere but `useDateDisplay()`
+       (`scripts/ci-date-display-guard.php`). A tenant may set
+       `ui.hide_dates` and be told no date appears anywhere in the interface;
+       that promise is falsifiable by a single screen, and the screen that
+       leaks is the one nobody checked. A value that genuinely is not a record
+       timestamp — a time zone name, a duration, a date the server already
+       reduced for the public verification page — carries a reasoned
+       `// @date-display-ignore:` annotation. Runs on frontend changes, like
+       the i18n guard above and for the same reason.
      - **Migrations + seed on real PostgreSQL** — migrate / seed / idempotent
        re-migrate against a real Postgres service, plus the Security suite.
      - **Integration + dialect suites on real PostgreSQL** — `tests/Integration`
