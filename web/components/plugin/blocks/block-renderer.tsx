@@ -1486,11 +1486,15 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
   }
 
   // ready
-  const rows: Record<string, string>[] = state.data.map((row) =>
-    Object.fromEntries(
-      block.columns.map((col) => [col.key, String(row[col.key] ?? '')])
-    )
-  );
+  // EVERY key, not just the displayed ones. Row actions template `{field}`
+  // against this row, and the fields they need — `id` above all — are almost
+  // never columns somebody chose to SHOW. Keeping only `block.columns` meant
+  // `{id}` resolved to '' and `/forms/{id}/publish` was requested as
+  // `/forms/publish`, a 404 that looked like a missing route rather than a
+  // dropped value. The table still renders `columns` and nothing else, so the
+  // extra keys are invisible; they exist only for templating, which is exactly
+  // what `templateRowOf` is for and what the inbox path already does.
+  const rows: Record<string, string>[] = state.data.map((row) => templateRowOf(row));
 
   return (
     <div className="space-y-1" data-slot="block-data-refresh">
