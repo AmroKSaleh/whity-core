@@ -26,6 +26,14 @@
  *   4. The running header and footer are inside the page's margin bands and
  *      never overlap the content box — which is what "real margins" has to
  *      mean if a running head is to be drawn at all.
+ *   5. An RTL table reads right to left: its FIRST column is the RIGHTMOST one.
+ *      This is a layout property of the table, not of any cell, so it is
+ *      exactly the kind of thing that comes out backwards and looks entirely
+ *      plausible to anyone not reading Arabic.
+ *   6. A table long enough to straddle a page boundary is split BETWEEN ROWS
+ *      and its header row is repeated on the continuation — in the same column
+ *      order. A header that appears once is unreadable after the break, and a
+ *      continuation whose columns flipped is worse than unreadable.
  *
  * All measurements come from `getBoundingClientRect` on the finished page
  * boxes, so they describe the geometry that is about to be printed.
@@ -89,6 +97,25 @@ function fixture(direction) {
       caption: (s % 2 === 0 ? trailingIdentifierCaption : caption)(`FIG-${String(s).padStart(4, '0')}`),
     });
   }
+
+  // A table long enough to straddle at least one page boundary, so the
+  // row-splitting and header-repeating path is actually exercised rather than
+  // merely present.
+  const longRows = [];
+  for (let r = 1; r <= 70; r += 1) {
+    longRows.push([`R-${String(r).padStart(2, '0')}`, String(100 + r * 7), String(900 - r * 3)]);
+  }
+  content.push({
+    type: 'heading',
+    level: 1,
+    text: rtl ? 'جدول طويل SEC-900' : 'Long table SEC-900',
+  });
+  content.push({
+    type: 'table',
+    caption: caption('TBL-900'),
+    columns: rtl ? ['العمود الأول', 'العمود الثاني', 'العمود الثالث'] : ['First column', 'Second column', 'Third column'],
+    rows: longRows,
+  });
 
   return {
     title: rtl ? 'مستند فحص' : 'Check document',
@@ -167,6 +194,25 @@ function measure(direction) {
     }
   }
   out.identifier = identifier;
+
+  // Column order, and the header repeated on a split table's continuation.
+  out.tables = [];
+  for (const table of Array.from(document.querySelectorAll('.flow-table'))) {
+    const headerCells = Array.from(table.querySelectorAll('thead th'));
+    const firstBodyRow = table.querySelector('tbody tr');
+    const bodyCells = firstBodyRow ? Array.from(firstBodyRow.children) : [];
+    out.tables.push({
+      anchor: table.getAttribute('data-anchor'),
+      split: table.getAttribute('data-flow-split'),
+      headerTexts: headerCells.map((c) => c.textContent.trim()),
+      headerXs: headerCells.map((c) => c.getBoundingClientRect().left),
+      bodyXs: bodyCells.map((c) => c.getBoundingClientRect().left),
+      pageIndex: (() => {
+        const page = table.closest('.flow-page');
+        return page ? Array.from(document.querySelectorAll('.flow-page')).indexOf(page) + 1 : 0;
+      })(),
+    });
+  }
 
   // Running furniture against the content box, page by page.
   for (let i = 0; i < pages.length; i += 1) {
@@ -250,6 +296,54 @@ function assertDirection(result, direction, failures) {
     failures.push(`${tag} not one contents entry passed the edge check`);
   }
 
+  // An RTL table reads right to left: column 1 is the rightmost.
+  const tables = result.tables || [];
+  if (tables.length === 0) {
+    failures.push(`${tag} no tables were produced, so column order was not checked`);
+  }
+  for (const table of tables) {
+    if (table.headerXs.length < 2) {
+      failures.push(`${tag} a table fragment has no repeated header row (anchor ${table.anchor}, split ${table.split})`);
+      continue;
+    }
+    const ordered = table.headerXs.every((x, i) => (i === 0 ? true : (direction === 'rtl' ? x < table.headerXs[i - 1] : x > table.headerXs[i - 1])));
+    if (!ordered) {
+      failures.push(
+        `${tag} table ${table.anchor || table.split} column order is wrong for ${direction} ` +
+          `(header x: ${table.headerXs.map((x) => x.toFixed(0)).join(', ')})`
+      );
+    }
+    // The body must use the same column order as the header, or the values sit
+    // under the wrong headings.
+    const bodyOrdered = table.bodyXs.every((x, i) => (i === 0 ? true : (direction === 'rtl' ? x < table.bodyXs[i - 1] : x > table.bodyXs[i - 1])));
+    if (!bodyOrdered) {
+      failures.push(`${tag} table ${table.anchor || table.split} body cells do not follow the header's column order`);
+    }
+  }
+
+  // A split table's continuation must repeat the header, in the same order.
+  const continuations = tables.filter((t) => t.split === 'tail');
+  if (continuations.length === 0) {
+    failures.push(`${tag} no table was split across a page boundary, so the header-repeat path was not exercised`);
+  }
+  const heads = tables.filter((t) => t.split !== 'tail');
+  for (const cont of continuations) {
+    if (cont.headerTexts.length === 0) {
+      failures.push(`${tag} a table continuation carries no header row`);
+      continue;
+    }
+    const matchingHead = heads.find((h) => h.headerTexts.join('|') === cont.headerTexts.join('|'));
+    if (!matchingHead) {
+      failures.push(
+        `${tag} a table continuation's header does not match any table's header ` +
+          `(continuation: ${cont.headerTexts.join(' | ')})`
+      );
+    }
+    if (cont.pageIndex <= 1) {
+      failures.push(`${tag} a table continuation is not on a later page than a first fragment`);
+    }
+  }
+
   // A Latin identifier inside the label.
   if (result.identifier.length === 0) {
     failures.push(`${tag} the identifier "A-7" was not found in any caption, so nothing was checked`);
@@ -328,6 +422,9 @@ async function main() {
         pages: result.furniture.length,
         entries: result.entries.length,
         identifiersChecked: result.identifier.length,
+        tables: (result.tables || []).length,
+        tableContinuations: (result.tables || []).filter((t) => t.split === 'tail').length,
+        firstTableHeaderXs: (result.tables || [])[0] ? (result.tables || [])[0].headerXs.map((x) => Math.round(x)) : null,
         sampleEntry: result.entries[0]
           ? { token: result.entries[0].token, printed: result.entries[0].printed }
           : null,
