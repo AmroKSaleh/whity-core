@@ -57,6 +57,43 @@ final class RenderServiceClient implements RenderServiceClientInterface
      */
     public function render(array $payload): string
     {
+        return $this->postForPdf('/render', $payload)[0];
+    }
+
+    /**
+     * The flowing mode: POST to `/render/flow` and return the bytes together
+     * with the page counts the service reports in its response headers.
+     *
+     * @param array<string, mixed> $payload {page, direction, content, ...}
+     * @throws RenderServiceUnavailableException On any transport failure, a
+     *         non-200 response, or a 200 body that is not a PDF.
+     */
+    public function renderFlow(array $payload): RenderedDocument
+    {
+        [$pdf, $lines] = $this->postForPdf('/render/flow', $payload);
+
+        return new RenderedDocument(
+            $pdf,
+            self::headerInt($lines, 'x-render-page-count'),
+            self::headerInt($lines, 'x-render-front-matter-pages'),
+        );
+    }
+
+    /**
+     * The transport both modes share: encode, POST, and refuse anything that
+     * is not a 200 carrying a PDF.
+     *
+     * Returns the bytes AND the raw response header lines, because the flowing
+     * mode's page counts arrive as headers and the fixed-canvas mode's do not
+     * exist — reading them here, once, keeps a single place that knows how the
+     * service answers.
+     *
+     * @param array<string, mixed> $payload
+     * @return array{0: string, 1: list<string>}
+     * @throws RenderServiceUnavailableException
+     */
+    private function postForPdf(string $path, array $payload): array
+    {
         if (!$this->isConfigured()) {
             throw new RenderServiceUnavailableException(
                 'RenderServiceClient is not configured (missing RENDER_SERVICE_URL / RENDER_SHARED_SECRET, or the secret is under 32 chars)'
@@ -68,7 +105,7 @@ final class RenderServiceClient implements RenderServiceClientInterface
             throw new RenderServiceUnavailableException('Failed to encode the render payload as JSON: ' . json_last_error_msg());
         }
 
-        $url = rtrim($this->baseUrl, '/') . '/render';
+        $url = rtrim($this->baseUrl, '/') . $path;
         $headerLines = "Content-Type: application/json\r\n"
             . "Accept: application/pdf\r\n"
             . 'X-Render-Secret: ' . $this->sharedSecret . "\r\n";
@@ -108,7 +145,33 @@ final class RenderServiceClient implements RenderServiceClientInterface
             throw new RenderServiceUnavailableException('Render service response does not look like a PDF');
         }
 
-        return $raw;
+        return [$raw, $lines];
+    }
+
+    /**
+     * A non-negative integer response header, or 0 when it is absent or not a
+     * number.
+     *
+     * Zero rather than null on purpose: every caller of this wants a count to
+     * store, and "the service did not say" and "the service said nothing was
+     * produced" are the same non-answer as far as a stored page count goes.
+     *
+     * @param list<string> $lines Raw response header lines.
+     */
+    private static function headerInt(array $lines, string $name): int
+    {
+        $needle = strtolower($name) . ':';
+        foreach ($lines as $line) {
+            if (!str_starts_with(strtolower($line), $needle)) {
+                continue;
+            }
+            $value = trim(substr($line, strlen($needle)));
+            if (preg_match('/^\d+$/', $value) === 1) {
+                return (int) $value;
+            }
+        }
+
+        return 0;
     }
 
     /**
