@@ -15,6 +15,7 @@ import { Badge } from '@amroksaleh/ui/badge';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { IconEdit, IconPlus, IconTrash, IconUser, IconUserOff, IconX } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import type { Person, RelationView } from './types';
 import type { PersonAction } from './relations-view';
 
@@ -55,6 +56,7 @@ export function PersonDetailDrawer({
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
 
   const [relations, setRelations] = useState<RelationView[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -130,11 +132,23 @@ export function PersonDetailDrawer({
                   : t('relations.detail.noAccount', 'A relative without a platform account.')}
               </SheetDescription>
               <div className="mt-1 flex flex-wrap gap-2 text-[0.625rem] text-muted-foreground">
-                {person.birthDate && (
-                  <span>
-                    {t('relations.detail.born', 'Born {date}', { date: person.birthDate })}
-                  </span>
-                )}
+                {/*
+                  #1068. A date of birth is a date on a screen, so it is
+                  covered — a tenant that turned this on and then read "Born
+                  1994-03-02" here would rightly call the promise broken. It is
+                  also, until now, the raw wire value printed into a translated
+                  sentence, which is what going through the one path fixes for
+                  everybody else too.
+
+                  The EDIT form is untouched: a date INPUT is a control a person
+                  types into, not the platform's account of when work happened.
+                */}
+                {(() => {
+                  const born = dates.date(person.birthDate);
+                  if (born === null) return null;
+
+                  return <span>{t('relations.detail.born', 'Born {date}', { date: born })}</span>;
+                })()}
                 {person.deceased && (
                   <Badge variant="outline">{t('relations.detail.deceased', 'Deceased')}</Badge>
                 )}

@@ -48,7 +48,6 @@ import {
   RecordPageError,
   RecordPageShell,
   RecordPageSkeleton,
-  formatRecordDate,
   resolveAccess,
   useRecordResource,
   type RecordBadge,
@@ -120,7 +119,7 @@ interface LanguageRecordFields {
 }
 
 /** A pure projection of the record and the dictionary, at module scope (#895). */
-const languageFacts: RecordFactsFn<LanguageRecordFields> = (language, t) => {
+const languageFacts: RecordFactsFn<LanguageRecordFields> = (language, t, dates) => {
   const badges: RecordBadge[] = [];
   if (!language.enabled) {
     badges.push({
@@ -171,11 +170,17 @@ const languageFacts: RecordFactsFn<LanguageRecordFields> = (language, t) => {
                 total: language.total,
               }),
       },
-      {
-        key: 'created',
-        label: t('languages.record.stat.created', 'Added'),
-        value: formatRecordDate(language.createdAt),
-      },
+      // #1068: the stat GOES when this tenant hides dates, rather than
+      // surviving as "Added —" — a label refusing to answer its own question.
+      ...(dates.hidden
+        ? []
+        : [
+            {
+              key: 'created',
+              label: t('languages.record.stat.created', 'Added'),
+              value: dates.date(language.createdAt),
+            },
+          ]),
     ],
   };
 };

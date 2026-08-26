@@ -18,6 +18,7 @@ import {
   SETTINGS_WRITE,
   SETTINGS_MANAGE,
   SYSTEM_TENANT_ID,
+  DISPLAY_SETTING_KEYS,
   GENERAL_SETTING_KEYS,
   generalFieldLabels,
   RegistrySettingControl,
@@ -124,6 +125,21 @@ function TenantSettingsSection({
 
   const valueOf = (key: SettingKey): string => draft[key as keyof typeof draft] ?? effective?.[key] ?? '';
 
+  /**
+   * The display preferences that live on this card alongside the four general
+   * fields (#1068).
+   *
+   * Read from the SERVER's registry rather than hard-coded, so the control gets
+   * its type (a toggle, because the key is a bool) and its default from the one
+   * place that defines them. `GENERAL_SETTING_KEYS` above stays a fixed list
+   * because those four have bespoke controls — a timezone picker, a locale
+   * picker — that a registry descriptor cannot describe.
+   */
+  const displayEntries = useMemo(
+    () => (data?.registry ?? []).filter((entry) => DISPLAY_SETTING_KEYS.includes(entry.key)),
+    [data]
+  );
+
   const setField = (key: SettingKey, value: string) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
   };
@@ -148,6 +164,17 @@ function TenantSettingsSection({
     for (const key of GENERAL_SETTING_KEYS) {
       const value = current[key].trim();
       settings[key] = value === '' ? '' : value;
+    }
+
+    // #1068: only keys the reader actually TOUCHED. Sending the effective value
+    // of an untouched toggle would write a per-tenant override for something
+    // nobody chose, and the difference between "inherited" and "overridden" is
+    // the whole of what the badge beside it reports.
+    for (const entry of displayEntries) {
+      const edited = draft[entry.key as keyof typeof draft];
+      if (edited !== undefined) {
+        settings[entry.key] = edited;
+      }
     }
 
     setSaving(true);
@@ -225,6 +252,23 @@ function TenantSettingsSection({
                 disabled={!canWrite}
                 onChange={(value) => setField(key, value)}
                 status={overridden.has(key) ? 'overridden' : 'inherited'}
+              />
+            ))}
+            {/*
+              #1068. On THIS card and not a tab of its own: it is a per-tenant
+              preference about how this tenant's own screens read, which is what
+              the tenant settings card is for, and a whole tab for one toggle
+              would be a worse answer than a row.
+            */}
+            {displayEntries.map((entry) => (
+              <RegistrySettingControl
+                key={entry.key}
+                entry={entry}
+                idPrefix="tenant"
+                value={valueOf(entry.key as SettingKey)}
+                disabled={!canWrite}
+                onChange={(value) => setField(entry.key as SettingKey, value)}
+                status={overridden.has(entry.key) ? 'overridden' : 'inherited'}
               />
             ))}
             {canWrite && (

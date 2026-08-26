@@ -213,6 +213,60 @@ final class DocumentVerificationApiRealEngineTest extends TestCase
     // ── the tenant's own choice ──────────────────────────────────────────────
 
     /**
+     * At `undated`, the page still verifies and still names the organisation —
+     * it just does not say when (#1068).
+     *
+     * The key is ABSENT rather than null, and the assertion is on the key SET
+     * for the reason the `minimal` one above is: a null would be a statement
+     * about the DOCUMENT ("this one has no issue date"), and the tenant's
+     * choice is a statement about the PAGE.
+     */
+    public function testTheUndatedLevelWithholdsTheIssueDateAndNothingElse(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_QR_PUBLIC_DETAIL, 'undated');
+        $token = $this->mintFor($this->raise('Graduation certificate for Layla Haddad'));
+
+        $data = self::data($this->verify($token));
+
+        self::assertSame(['verified', 'reference', 'issuer'], array_keys($data));
+        self::assertTrue($data['verified'], 'a code still verifies at the quietest level');
+        self::assertSame('Ministry of Records', $data['issuer']);
+    }
+
+    /**
+     * `undated` is BELOW `minimal`, not beside it: it discloses no stage and no
+     * `revoked_on` either, so a withdrawn code collapses to the one answer every
+     * failure collapses to. A tenant choosing the quietest level has not
+     * accidentally opted into the loudest one's disclosures.
+     */
+    public function testTheUndatedLevelStillRefusesToTellAWithdrawnCodeFromAnUnknownOne(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_QR_PUBLIC_DETAIL, 'undated');
+        $token = $this->mintFor($this->raise('Minutes'));
+        $this->qr->revoke(self::TENANT, $this->documentOf($token), self::AUTHOR);
+
+        $withdrawn = self::data($this->verify($token));
+        $unknown = self::data($this->verify(str_repeat('a', 64)));
+
+        self::assertSame($unknown, $withdrawn);
+        self::assertArrayNotHasKey('revoked_on', $withdrawn);
+    }
+
+    /**
+     * The DEFAULT did not move when a quieter level was added. This is the
+     * assertion #1068 turns on: adding `undated` must not change what a tenant
+     * that has chosen nothing discloses.
+     */
+    public function testAddingAQuieterLevelDidNotChangeTheDefault(): void
+    {
+        $token = $this->mintFor($this->raise('Minutes'));
+
+        $data = self::data($this->verify($token));
+
+        self::assertArrayHasKey('issued_on', $data, 'the default still discloses the date');
+    }
+
+    /**
      * At `stage`, a withdrawn code says so — because a tenant that chose to tell
      * holders where a document sits has already accepted that a holder learns it
      * exists, and "this printing has been replaced" is far more useful to them

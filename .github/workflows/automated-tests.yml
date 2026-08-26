@@ -80,6 +80,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       render_service: ${{ steps.filter.outputs.render_service }}
       i18n: ${{ steps.filter.outputs.i18n }}
+      date_display: ${{ steps.filter.outputs.date_display }}
       desktop_host: ${{ steps.filter.outputs.desktop_host }}
     steps:
       - name: Checkout code
@@ -153,6 +154,20 @@ jobs:
               - 'src/Core/i18n/**'
               - 'src/Cli/Commands/I18nCommand.php'
               - 'scripts/ci-i18n-catalog-drift.php'
+              - '.github/workflows/automated-tests.yml'
+            # #1068. Same shape as `i18n` directly above and for the same
+            # reason: the input is the FRONTEND and the guard is PHP, so
+            # `backend` would skip it on exactly the frontend-only PRs that can
+            # introduce a leak, and `frontend` runs a Node job with no PHP.
+            #
+            # `ui.hide_dates` promises a tenant that no date appears anywhere in
+            # the interface, and that promise is falsifiable by a single screen.
+            # A guard that skips on the PR adding that screen is not a guard.
+            date_display:
+              - 'web/**'
+              - 'packages/**'
+              - 'src/Core/Ui/**'
+              - 'scripts/ci-date-display-guard.php'
               - '.github/workflows/automated-tests.yml'
 
   # The whole PHPUnit suite (the `default` testsuite = every *Test.php under
@@ -560,6 +575,50 @@ jobs:
 
       - name: i18n catalogue drift guard
         run: php scripts/ci-i18n-catalog-drift.php
+
+  # Date-display guard (#1068): fail CI when a date is formatted, or rendered
+  # raw, outside `useDateDisplay()`.
+  #
+  # A tenant may set `ui.hide_dates` and be told that no date or time appears
+  # anywhere in the interface. Unlike most settings that promise is falsifiable
+  # by a SINGLE screen, and the screen that leaks is by definition the one
+  # nobody checked — so consolidating every date onto one path made the promise
+  # true once, and this is what keeps it true.
+  #
+  # Its own job for the reason `i18n-catalogue` above has one: the input it
+  # reads is the FRONTEND and the guard is PHP. Under `backend` it would skip on
+  # every frontend-only PR, which is precisely the PR that adds the next screen.
+  date-display:
+    name: Date-display guard
+    needs: changes
+    if: needs.changes.outputs.date_display == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring
+          coverage: none
+
+      # Same key as static-analysis, so this job normally restores rather than
+      # resolves — the guard needs the autoloader and nothing else.
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Date-display guard
+        run: php scripts/ci-date-display-guard.php
 
   # Migrations / seed / idempotency and the Security suite against a real
   # PostgreSQL engine. Measured 3 s of migrate+seed+re-migrate and 33 s of
@@ -1230,6 +1289,7 @@ jobs:
       - static-analysis
       - history-guards
       - i18n-catalogue
+      - date-display
       - postgres-migrations
       - postgres-integration
       - postgres-dialect
@@ -1244,20 +1304,41 @@ jobs:
       # red, and merging is no longer blocked by it. That is the failure this
       # whole job exists to prevent, so it is checked rather than trusted to a
       # comment.
-      - name: The gate covers every job in this workflow
+      #
+      # The SECOND check is the same failure one level down, and it is worse
+      # because it is silent in both directions. A job gated on
+      # a change filter that is not declared in the `changes` job's `outputs:`
+      # reads back as an EMPTY string, never equals 'true', and skips
+      # on every run forever — and a skipped job is a passing job to the gate
+      # above, so nothing goes red. #1068 shipped a guard wired exactly that way
+      # and it was dead on arrival; the only thing that caught it was a person
+      # reading the check list.
+      - name: The gate covers every job, and every filter it gates on exists
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import sys, yaml
-          d = yaml.safe_load(open('.github/workflows/automated-tests.yml'))
+          import re, sys, yaml
+          raw = open('.github/workflows/automated-tests.yml').read()
+          d = yaml.safe_load(raw)
+          failed = False
+
           jobs = set(d['jobs']) - {'gate'}
           needs = set(d['jobs']['gate']['needs'])
-          missing = sorted(jobs - needs)
-          if missing:
-              for j in missing:
-                  print(f"::error::job '{j}' is not in the CI gate's `needs`, so branch protection does not cover it")
-              sys.exit(1)
-          print(f"gate covers all {len(jobs)} job(s)")
+          for j in sorted(jobs - needs):
+              print(f"::error::job '{j}' is not in the CI gate's `needs`, so branch protection does not cover it")
+              failed = True
+          if not failed:
+              print(f"gate covers all {len(jobs)} job(s)")
+
+          declared = set(d['jobs']['changes'].get('outputs') or {})
+          referenced = set(re.findall(r'needs\.changes\.outputs\.([A-Za-z0-9_]+)', raw))
+          for name in sorted(referenced - declared):
+              print(f"::error::`needs.changes.outputs.{name}` is read but not declared in the `changes` job's `outputs:` — it resolves to an empty string, so every job gated on it skips silently and forever")
+              failed = True
+          if referenced <= declared:
+              print(f"every one of {len(referenced)} change filter(s) is declared")
+
+          sys.exit(1 if failed else 0)
           PY
 
       - name: Every required job succeeded or was skipped

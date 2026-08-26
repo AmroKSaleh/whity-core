@@ -23,8 +23,10 @@ use Whity\Core\Settings\SettingsRegistry;
  * in the worst case, somebody who found the paper in a bin.
  *
  * So the default is the MINIMUM that satisfies verification, and everything
- * beyond it is the tenant's decision — `documents.qr_public_detail`, resolved
- * per-tenant ?? global ?? registry default like every other tunable.
+ * either side of it is the tenant's decision — `documents.qr_public_detail`,
+ * resolved per-tenant ?? global ?? registry default like every other tunable.
+ * `stage` says more; `undated` (#1068) says one field less. The default has not
+ * moved and does not move when a level is added at either end.
  *
  * WHAT `minimal` DISCLOSES, AND WHY EACH FIELD EARNS ITS PLACE
  * ------------------------------------------------------------
@@ -84,6 +86,24 @@ use Whity\Core\Settings\SettingsRegistry;
  */
 final class VerificationPresenter
 {
+    /**
+     * `minimal` with the date withheld (#1068).
+     *
+     * The QUIETEST level, and the only one a tenant reaches by deciding it
+     * rather than by leaving the default alone. It exists because #1068 asked
+     * for dates off every screen and this page is deliberately NOT one of those
+     * screens: the audience here is a stranger holding paper, for whom "issued
+     * on" is doing real verification work that no staff screen's timestamp is
+     * doing. So the answer to "may I also drop it here" is yes — said out loud,
+     * on this key, by a tenant that means it.
+     *
+     * It withholds `issued_on` and, being below {@see DETAIL_STAGE}, discloses
+     * no stage and no `revoked_on` either. The issuer and the reference remain,
+     * which is what keeps the page an answer rather than a shrug: somebody can
+     * still confirm that this organisation issued the sheet in their hand.
+     */
+    public const DETAIL_UNDATED = 'undated';
+
     /** The default: the minimum that satisfies verification. */
     public const DETAIL_MINIMAL = 'minimal';
 
@@ -120,7 +140,11 @@ final class VerificationPresenter
     {
         $level = $effectiveSettings[SettingsRegistry::DOCUMENTS_QR_PUBLIC_DETAIL] ?? self::DETAIL_MINIMAL;
 
-        return $level === self::DETAIL_STAGE ? self::DETAIL_STAGE : self::DETAIL_MINIMAL;
+        return match ($level) {
+            self::DETAIL_STAGE => self::DETAIL_STAGE,
+            self::DETAIL_UNDATED => self::DETAIL_UNDATED,
+            default => self::DETAIL_MINIMAL,
+        };
     }
 
     /**
@@ -142,8 +166,18 @@ final class VerificationPresenter
             'verified' => true,
             'reference' => $reference,
             'issuer' => self::issuerName($tokenRow),
-            'issued_on' => self::dateOnly($document['created_at'] ?? null),
         ];
+
+        // `undated` stops here, one field short of `minimal`. The key is ABSENT
+        // rather than null: a null would say "this document has no issue date",
+        // which is a statement about the record, and the tenant's choice is a
+        // statement about the page. The client renders neither, but a generated
+        // client reading the wire can tell the two apart.
+        if ($detailLevel === self::DETAIL_UNDATED) {
+            return $body;
+        }
+
+        $body['issued_on'] = self::dateOnly($document['created_at'] ?? null);
 
         if ($detailLevel !== self::DETAIL_STAGE) {
             return $body;

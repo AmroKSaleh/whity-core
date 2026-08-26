@@ -328,6 +328,14 @@ final class SettingsRegistry
     // and the argument for where it stops are in
     // {@see \Whity\Core\Document\Qr\VerificationPresenter}.
     //
+    //   undated — `minimal` with the date removed and nothing else changed:
+    //             genuine or not, the issuing ORGANISATION, and the reference.
+    //             Added by #1068 so a tenant that wants no date on the public
+    //             page can SAY so, rather than acquiring it as a side effect of
+    //             `ui.hide_dates` — which governs its own staff's screens and
+    //             deliberately does not reach here, because a stranger holding
+    //             a printed sheet is a different audience and for them the date
+    //             is doing real work.
     //   minimal — the default: genuine or not, the issuing ORGANISATION, the
     //             date, and the reference printed on the paper. Nothing else,
     //             and every way a code can fail collapses to one answer, so the
@@ -420,6 +428,49 @@ final class SettingsRegistry
      * while investigating a problem.
      */
     public const I18N_ENABLED = 'i18n.enabled';
+
+    /**
+     * Whether dates and times are shown on screen at all (#1068).
+     *
+     * A DISPLAY decision and nothing else. Every timestamp keeps being written,
+     * keeps being queryable, keeps its place in the audit trail and keeps
+     * travelling on the wire in the API responses this key does not touch. The
+     * screen simply stops printing it. Turning the setting off again brings
+     * every date back, because nothing was ever lost.
+     *
+     * WHY AN INSTITUTION ASKS FOR THIS. Timestamps on ordinary administrative
+     * work invite scrutiny that helps nobody do the job — "why did this sit for
+     * three days" — and the organisations that asked would rather their people
+     * were not answering that question about a form that was simply waiting its
+     * turn. It is a posture about what the interface volunteers, not a claim
+     * that the record does not exist.
+     *
+     * TENANT-OVERRIDABLE, and not governance. It grants nobody anything and
+     * takes nothing away: a reader who could see a document before can see it
+     * now, and one who could not, still cannot. It is exactly the kind of
+     * question two tenants on one instance answer differently — a registry that
+     * wants its clerks judged on throughput and a ministry office that does
+     * not — so it resolves per-tenant ?? global ?? the default below, like every
+     * other tunable here.
+     *
+     * DEFAULT FALSE. An instance that never sets it behaves exactly as it does
+     * today, which is the only default an existing deployment can be upgraded
+     * onto without anybody noticing.
+     *
+     * NOT A FEATURE_FLAG_KEY, deliberately, and for the reason
+     * {@see DOCUMENTS_QR_ENABLED} is not: that tab is instance-wide capability
+     * toggles with no per-tenant surface, and a tenant-overridable key sitting
+     * there would give an operator a switch that looks global and is not.
+     *
+     * IT DOES NOT REACH THE PUBLIC VERIFICATION PAGE. That page has its own
+     * disclosure control, `documents.qr_public_detail`, because a stranger
+     * holding a printed sheet is a different audience from this tenant's staff
+     * and the date is doing real work for them. A tenant that wants no date
+     * there says so with the `undated` level on that key — explicitly, rather
+     * than as a side effect of a preference about its own screens. See
+     * {@see \Whity\Core\Document\Qr\VerificationPresenter}.
+     */
+    public const UI_HIDE_DATES = 'ui.hide_dates';
 
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
@@ -523,6 +574,7 @@ final class SettingsRegistry
         self::DOCUMENTS_PERSIST_ENABLED,
         self::DOCUMENTS_QR_ENABLED,
         self::I18N_ENABLED,
+        self::UI_HIDE_DATES,
     ];
 
     /**
@@ -597,7 +649,11 @@ final class SettingsRegistry
         // them is choosing a posture, not toggling a field. The vocabulary and
         // the argument for where it stops are in
         // {@see \Whity\Core\Document\Qr\VerificationPresenter}.
-        self::DOCUMENTS_QR_PUBLIC_DETAIL => ['minimal', 'stage'],
+        // Listed in ascending order of disclosure, which is not where the
+        // DEFAULT sits: `minimal` is the middle value and stays the default,
+        // because it is what shipped and adding a quieter level must not change
+        // what any existing tenant discloses.
+        self::DOCUMENTS_QR_PUBLIC_DETAIL => ['undated', 'minimal', 'stage'],
         // 'internal' stores errors in this deployment's own database (no extra
         // infrastructure); 'sentry' ships them to any Sentry-PROTOCOL backend —
         // hosted Sentry, or a self-hosted GlitchTip/Bugsink — via the encrypted
@@ -749,6 +805,11 @@ final class SettingsRegistry
         // A week: long enough to survive a weekend and a missed inbox, short
         // enough that a forwarded link does not stay live for a quarter.
         self::INVITATION_TTL_DAYS => '7',
+        // #1068. OFF: an instance that never sets it renders exactly the dates
+        // it renders today. The opposite default would blank every timestamp on
+        // every screen of every deployment at upgrade time, for a preference
+        // most of them have not expressed.
+        self::UI_HIDE_DATES => 'false',
     ];
 
     /**
@@ -1048,6 +1109,7 @@ final class SettingsRegistry
             self::ERROR_TRACKING_RETENTION_DAYS => self::validateRetentionDays($value),
             self::I18N_ENABLED => self::validateBoolean($value, self::I18N_ENABLED),
             self::INVITATION_TTL_DAYS => self::validateInvitationTtlDays($value),
+            self::UI_HIDE_DATES => self::validateBoolean($value, self::UI_HIDE_DATES),
             default => "Unknown setting key: {$key}",
         };
     }

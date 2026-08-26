@@ -308,6 +308,72 @@ The `Form` layer wires this for you (see [Component-Library › Form](Component-
 
 ---
 
+## Dates and times
+
+**There is one way to put a date on a screen, and a CI guard enforces it.**
+
+```tsx
+import { useDateDisplay } from '@amroksaleh/features/datetime'
+
+const { hidden, date, dateTime, age, relative, dateColumns } = useDateDisplay()
+```
+
+A tenant may set `ui.hide_dates` and be told that no date or time appears
+anywhere in the interface. That promise is falsifiable by a single screen, and
+the screen that leaks is by definition the one nobody checked — so
+`scripts/ci-date-display-guard.php` fails the build on `toLocaleDateString`,
+`toLocaleTimeString`, `Intl.DateTimeFormat`, a raw timestamp rendered as it
+arrived, or a `?? rawValue` fallback around a formatter.
+
+The hook also carries the reader's **resolved language**, which is why no call
+site passes a locale any more. Eight of the twenty call sites of the helper it
+replaced had forgotten to, and those screens quietly formatted in the browser's
+locale — an Arabic reader on an `en-US` machine got `8/24/2026, 5:47 PM` inside
+a right-to-left sentence.
+
+### What to do when a date is hidden
+
+Every formatter returns `null`, exactly as it does for an absent value. What you
+do with that is a design decision, and it differs by surface:
+
+| Surface | Do this | Not this |
+|---|---|---|
+| A table column that is only a date | `dateColumns()` — it returns `[]`, so header and cells go together | a column of em dashes under a header saying "Created" |
+| A stat tile, a `<dt>/<dd>` pair, a whole record row | drop it: `...(hidden ? [] : […])` | a label with nothing beside it, which reads as a load that failed |
+| A trail or history entry | keep the actor, drop the "when" — the rows are still in order | `— · by user 4` |
+| A composed sentence | a **dateless variant** with its own key: `In {unit}` | `In {unit} since —` |
+| A relative age ("3m ago") | hidden exactly as an absolute one is | vaguer phrasing as a middle ground — it is still a date |
+| A date **input** | leave it alone | blanking a control somebody types into |
+
+### The exceptions, and how to declare one
+
+A value that genuinely is not a record timestamp carries a reasoned annotation.
+An annotation with **no reason does not suppress anything** — the reason is the
+whole mechanism.
+
+```tsx
+{/* @date-display-ignore: a time ZONE NAME ("Europe/Berlin"), not an instant. */}
+{Intl.DateTimeFormat().resolvedOptions().timeZone}
+```
+
+The three that exist today are worth knowing, because they mark the boundaries:
+
+- The **public document-verification page** (`/verify/[token]`) is governed by
+  `documents.qr_public_detail`, not by `ui.hide_dates`. Its audience is a
+  stranger holding a printed sheet, for whom the date is doing real verification
+  work. A tenant that wants no date there chooses the `undated` level.
+- **The stats Environment card** prints a time zone name.
+- **A duration** is not a point in time. An outage's length on the status page
+  stays; the moment it started does not.
+
+### What is NOT affected
+
+Nothing behind the screen. Every timestamp is still written, still indexed,
+still queryable, still returned by every API endpoint, and still in the audit
+trail — including the `From`/`To` filters on the audit log, which still query
+the column whose display has just disappeared. Turning the setting off brings every
+date back, because nothing was ever lost.
+
 ## Pattern quick reference
 
 | Pattern | Reach for | Token roles | Real example |

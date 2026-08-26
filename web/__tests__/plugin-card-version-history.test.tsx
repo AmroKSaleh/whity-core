@@ -102,7 +102,7 @@ describe('PluginDetailsModal version history', () => {
       <PluginStoreCard
         plugin={barePlugin({
           versions: [
-            { version: '1.0.0', releasedAt: '2026-08-01', changelog: 'First release.' },
+            { version: '1.0.0', releasedLabel: '2026-08-01', changelog: 'First release.' },
           ],
         })}
       />
@@ -190,8 +190,8 @@ describe('InstalledPluginCard rollback affordance', () => {
           state: 'active',
           version: '2.0.0',
           versions: [
-            { version: '2.0.0', releasedAt: 'Current', isCurrent: true },
-            { version: '1.9.0', releasedAt: '2026-07-01' },
+            { version: '2.0.0', releasedLabel: 'Current', isCurrent: true },
+            { version: '1.9.0', releasedLabel: '2026-07-01' },
           ],
         })}
       />

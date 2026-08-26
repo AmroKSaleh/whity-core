@@ -9,7 +9,7 @@
     "./nav": "./src/nav/index.ts",
     "./demo-catalog": "./src/demo-catalog/index.ts",
     "./record": "./src/record/index.ts",
-    "./record/format": "./src/record/format.ts",
+    "./datetime": "./src/datetime/index.ts",
     "./roles": "./src/roles/index.ts",
     "./document-designer": "./src/document-designer/index.ts",
     "./document-designer/print-document": "./src/document-designer/print-document.tsx",

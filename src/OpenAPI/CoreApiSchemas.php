@@ -102,6 +102,7 @@ final class CoreApiSchemas
             self::languageRoutes(),
             self::translationManagementRoutes(),
             self::brandingRoutes(),
+            self::uiPreferenceRoutes(),
             self::themeRoutes(),
             self::identityRoutes(),
             self::meEmailsRoutes(),
@@ -2069,6 +2070,69 @@ final class CoreApiSchemas
                     422 => self::errorResponse('Invalid hostname format'),
                 ] + self::authErrors(),
             ]),
+        ];
+    }
+
+    /**
+     * How this tenant wants its interface to PRESENT itself (#1068).
+     *
+     * Public and unauthenticated, exactly like {@see brandingRoutes()} and for
+     * the same two reasons: the login screen and the public status page render
+     * before a session exists, and the answer is a fact about how a page LOOKS
+     * rather than about anything the tenant holds.
+     *
+     * Kept off `/api/v1/settings` deliberately. That surface is gated on
+     * `settings:read` — an administrative right — and a preference governing
+     * every screen has to reach the readers who will never hold it. See
+     * {@see \Whity\Api\UiPreferencesApiHandler}.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function uiPreferenceRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/ui/preferences',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Display preferences for the resolved tenant (public)',
+                    'description' =>
+                        'How the interface should PRESENT this tenant, resolved per-tenant then global '
+                        . 'then the registry default. A DISPLAY contract only: nothing behind it is '
+                        . 'filtered, every timestamp is still written, still queryable, still returned by '
+                        . 'every other endpoint and still in the audit trail. A client that ignores this '
+                        . 'answer renders exactly what it renders today. Tenant resolution follows '
+                        . 'branding: the authenticated tenant, else the request host, else the global '
+                        . 'layer. Never fails — an unreachable settings layer answers with the defaults.',
+                    'tags' => ['settings'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The effective display preferences',
+                            [
+                                'type' => 'object',
+                                'properties' => [
+                                    'data' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'hideDates' => [
+                                                'type' => 'boolean',
+                                                'description' =>
+                                                    'When true, no date or time is rendered on any screen '
+                                                    . '(`ui.hide_dates`). It does NOT govern the public '
+                                                    . 'document-verification page, which has its own '
+                                                    . 'disclosure control, `documents.qr_public_detail`.',
+                                            ],
+                                        ],
+                                        'required' => ['hideDates'],
+                                    ],
+                                ],
+                            ]
+                        ),
+                    ],
+                ],
+            ],
         ];
     }
 
@@ -7152,7 +7216,9 @@ final class CoreApiSchemas
                         . 'one produce the SAME body at the default disclosure level, so this endpoint '
                         . 'cannot be asked whether a document exists. A tenant may raise '
                         . '`documents.qr_public_detail` to `stage`, which adds the current routing verb '
-                        . 'and distinguishes a revoked code from an unrecognised one. It never returns a '
+                        . 'and distinguishes a revoked code from an unrecognised one, or LOWER it to '
+                        . '`undated`, which withholds `issued_on` and leaves everything else as '
+                        . '`minimal`. It never returns a '
                         . 'document id, a title, any content, any recipient, or any name of a person or '
                         . 'unit — a signed-in reader who wants the record calls '
                         . 'GET /api/documents/by-verification/{token}, where RBAC decides unchanged.',
@@ -7188,13 +7254,25 @@ final class CoreApiSchemas
                                                 'type' => 'string',
                                                 'description' => 'The issuing ORGANISATION, never a person or a unit',
                                             ],
-                                            'issued_on' => ['type' => 'string', 'nullable' => true],
+                                            'issued_on' => [
+                                                'type' => 'string',
+                                                'nullable' => true,
+                                                'description' =>
+                                                    'The issue DATE (YYYY-MM-DD), not a timestamp. ABSENT '
+                                                    . 'at the `undated` disclosure level — absent rather '
+                                                    . 'than null, because null would be a statement about '
+                                                    . 'the document and this is a statement about the page.',
+                                            ],
                                             'stage' => [
                                                 'type' => 'string',
                                                 'description' => 'Only at the `stage` disclosure level',
                                                 'enum' => ['issued', 'forwarded', 'acknowledged', 'returned', 'noted'],
                                             ],
-                                            'stage_on' => ['type' => 'string', 'nullable' => true],
+                                            'stage_on' => [
+                                                'type' => 'string',
+                                                'nullable' => true,
+                                                'description' => 'Date only, and only at the `stage` level',
+                                            ],
                                         ],
                                         'required' => ['verified'],
                                     ],

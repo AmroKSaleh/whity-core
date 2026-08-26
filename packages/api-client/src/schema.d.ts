@@ -981,7 +981,7 @@ export interface paths {
         };
         /**
          * Verify a document from the QR code printed on it (public, rate-limited)
-         * @description PUBLIC and unauthenticated by design: the caller is somebody holding a printed sheet, and the paper is the whole of their relationship with this system. Always 200. An unknown token, a malformed one, a withdrawn one and a superseded one produce the SAME body at the default disclosure level, so this endpoint cannot be asked whether a document exists. A tenant may raise `documents.qr_public_detail` to `stage`, which adds the current routing verb and distinguishes a revoked code from an unrecognised one. It never returns a document id, a title, any content, any recipient, or any name of a person or unit — a signed-in reader who wants the record calls GET /api/documents/by-verification/{token}, where RBAC decides unchanged.
+         * @description PUBLIC and unauthenticated by design: the caller is somebody holding a printed sheet, and the paper is the whole of their relationship with this system. Always 200. An unknown token, a malformed one, a withdrawn one and a superseded one produce the SAME body at the default disclosure level, so this endpoint cannot be asked whether a document exists. A tenant may raise `documents.qr_public_detail` to `stage`, which adds the current routing verb and distinguishes a revoked code from an unrecognised one, or LOWER it to `undated`, which withholds `issued_on` and leaves everything else as `minimal`. It never returns a document id, a title, any content, any recipient, or any name of a person or unit — a signed-in reader who wants the record calls GET /api/documents/by-verification/{token}, where RBAC decides unchanged.
          */
         get: operations["get_api_v1_document_verifications_token"];
         put?: never;
@@ -3258,6 +3258,26 @@ export interface paths {
         };
         /** Get resolved translations for a language + domain (public) */
         get: operations["get_api_v1_translations_language_code_domain"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ui/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Display preferences for the resolved tenant (public)
+         * @description How the interface should PRESENT this tenant, resolved per-tenant then global then the registry default. A DISPLAY contract only: nothing behind it is filtered, every timestamp is still written, still queryable, still returned by every other endpoint and still in the audit trail. A client that ignores this answer renders exactly what it renders today. Tenant resolution follows branding: the authenticated tenant, else the request host, else the global layer. Never fails — an unreachable settings layer answers with the defaults.
+         */
+        get: operations["get_api_v1_ui_preferences"];
         put?: never;
         post?: never;
         delete?: never;
@@ -11603,12 +11623,14 @@ export interface operations {
                             reference?: string;
                             /** @description The issuing ORGANISATION, never a person or a unit */
                             issuer?: string;
+                            /** @description The issue DATE (YYYY-MM-DD), not a timestamp. ABSENT at the `undated` disclosure level — absent rather than null, because null would be a statement about the document and this is a statement about the page. */
                             issued_on?: string | null;
                             /**
                              * @description Only at the `stage` disclosure level
                              * @enum {string}
                              */
                             stage?: "issued" | "forwarded" | "acknowledged" | "returned" | "noted";
+                            /** @description Date only, and only at the `stage` level */
                             stage_on?: string | null;
                         };
                     };
@@ -25638,6 +25660,58 @@ export interface operations {
                 };
             };
             /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_ui_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The effective display preferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            /** @description When true, no date or time is rendered on any screen (`ui.hide_dates`). It does NOT govern the public document-verification page, which has its own disclosure control, `documents.qr_public_detail`. */
+                            hideDates: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -118,7 +118,14 @@ final class SettingsApiRealEngineTest extends TestCase
         // says how an organisation reaches its people, which is exactly what two
         // tenants on one instance answer differently; the route step says only
         // that its people are told rather than asked.
-        self::assertCount(19, $data['registry']);
+        // 20 since #1068 added ui.hide_dates - whether dates and times are
+        // shown on screen at all. Per-tenant because it is exactly the kind of
+        // question two tenants on one instance answer differently: a registry
+        // that wants its clerks judged on throughput and a ministry office that
+        // does not. It grants nobody anything, so it is a preference rather
+        // than governance, and it defaults FALSE so an instance that never sets
+        // it behaves exactly as it does today.
+        self::assertCount(20, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

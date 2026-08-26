@@ -6938,7 +6938,7 @@
                 "tags": [
                     "documents"
                 ],
-                "description": "PUBLIC and unauthenticated by design: the caller is somebody holding a printed sheet, and the paper is the whole of their relationship with this system. Always 200. An unknown token, a malformed one, a withdrawn one and a superseded one produce the SAME body at the default disclosure level, so this endpoint cannot be asked whether a document exists. A tenant may raise `documents.qr_public_detail` to `stage`, which adds the current routing verb and distinguishes a revoked code from an unrecognised one. It never returns a document id, a title, any content, any recipient, or any name of a person or unit \u2014 a signed-in reader who wants the record calls GET /api/documents/by-verification/{token}, where RBAC decides unchanged.",
+                "description": "PUBLIC and unauthenticated by design: the caller is somebody holding a printed sheet, and the paper is the whole of their relationship with this system. Always 200. An unknown token, a malformed one, a withdrawn one and a superseded one produce the SAME body at the default disclosure level, so this endpoint cannot be asked whether a document exists. A tenant may raise `documents.qr_public_detail` to `stage`, which adds the current routing verb and distinguishes a revoked code from an unrecognised one, or LOWER it to `undated`, which withholds `issued_on` and leaves everything else as `minimal`. It never returns a document id, a title, any content, any recipient, or any name of a person or unit \u2014 a signed-in reader who wants the record calls GET /api/documents/by-verification/{token}, where RBAC decides unchanged.",
                 "parameters": [
                     {
                         "name": "token",
@@ -6987,7 +6987,8 @@
                                                 },
                                                 "issued_on": {
                                                     "type": "string",
-                                                    "nullable": true
+                                                    "nullable": true,
+                                                    "description": "The issue DATE (YYYY-MM-DD), not a timestamp. ABSENT at the `undated` disclosure level \u2014 absent rather than null, because null would be a statement about the document and this is a statement about the page."
                                                 },
                                                 "stage": {
                                                     "type": "string",
@@ -7002,7 +7003,8 @@
                                                 },
                                                 "stage_on": {
                                                     "type": "string",
-                                                    "nullable": true
+                                                    "nullable": true,
+                                                    "description": "Date only, and only at the `stage` level"
                                                 }
                                             },
                                             "required": [
@@ -24433,6 +24435,72 @@
                     },
                     "500": {
                         "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ui/preferences": {
+            "get": {
+                "operationId": "get_api_v1_ui_preferences",
+                "summary": "Display preferences for the resolved tenant (public)",
+                "tags": [
+                    "settings"
+                ],
+                "description": "How the interface should PRESENT this tenant, resolved per-tenant then global then the registry default. A DISPLAY contract only: nothing behind it is filtered, every timestamp is still written, still queryable, still returned by every other endpoint and still in the audit trail. A client that ignores this answer renders exactly what it renders today. Tenant resolution follows branding: the authenticated tenant, else the request host, else the global layer. Never fails \u2014 an unreachable settings layer answers with the defaults.",
+                "responses": {
+                    "200": {
+                        "description": "The effective display preferences",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "hideDates": {
+                                                    "type": "boolean",
+                                                    "description": "When true, no date or time is rendered on any screen (`ui.hide_dates`). It does NOT govern the public document-verification page, which has its own disclosure control, `documents.qr_public_detail`."
+                                                }
+                                            },
+                                            "required": [
+                                                "hideDates"
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "content": {
                             "application/json": {
                                 "schema": {

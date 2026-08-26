@@ -18,6 +18,7 @@ import {
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { CreateTenantModal } from './create-modal';
 import { DeleteTenantModal } from './delete-modal';
 
@@ -38,6 +39,7 @@ export default function TenantsPage() {
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
   const canCreate = hasPermission(TENANTS_WRITE);
   const canEdit = hasPermission(TENANTS_WRITE);
   const canDelete = hasPermission(TENANTS_DELETE);
@@ -121,7 +123,17 @@ export default function TenantsPage() {
       enableColumnFilter: true,
     },
     { accessorKey: 'userCount', header: t('tenants.table.userCount', 'User Count'), enableSorting: true },
-    { accessorKey: 'createdAt', header: t('tenants.table.createdAt', 'Created At'), enableSorting: true },
+    // #1068, and the same two changes the users list needed: gated on the
+    // tenant preference, and formatted at all rather than rendered as the raw
+    // wire string an `accessorKey` with no `cell` produces.
+    ...dates.dateColumns<Tenant>([
+      {
+        id: 'createdAt',
+        header: t('tenants.table.createdAt', 'Created At'),
+        value: (tenant) => tenant.createdAt,
+        enableSorting: true,
+      },
+    ]),
   ];
 
   // Always rendered now: "open this workspace" is a READ, available to anyone

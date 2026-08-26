@@ -81,12 +81,11 @@ import {
   RecordPageError,
   RecordPageShell,
   RecordPageSkeleton,
-  formatRecordDate,
   sectionAccessFrom,
   useRecordResource,
 } from '@amroksaleh/features/record';
 import type { RecordFactsFn, RecordSectionSpec } from '@amroksaleh/features/record';
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import { DocumentViewer } from '@/components/plugin/blocks/document-viewer';
@@ -155,13 +154,14 @@ interface DocumentRecordFields {
  * make, on the artifact the reader is actually looking at, and a header badge
  * derived from the record would contradict it the moment they used the picker.
  */
-// A FACTORY, not a constant, purely so the locale can reach it. `RecordFactsFn`
-// is `(record, t) => facts` and that shape is shared with every other record
-// page, so widening it here to carry a locale would change a contract this
-// screen does not own. Closing over the value instead keeps the change local.
-const documentFactsFor =
-  (locale: string | undefined): RecordFactsFn<DocumentRecordFields> =>
-  (document, t) => ({
+// A plain constant again since #1068. It used to be a FACTORY closing over the
+// locale, because `RecordFactsFn` was `(record, t) => facts` and widening a
+// contract shared with every other record page to carry a locale was not this
+// screen's to make. #1068 widened it for a different reason — a projection
+// cannot call a hook, so the shell now resolves the date formatter once and
+// hands it down — and the locale travels inside that, which is what makes the
+// closure unnecessary.
+const documentFacts: RecordFactsFn<DocumentRecordFields> = (document, t, dates) => ({
   title: document.title,
   subtitle: t('record.subtitle', 'Issued from {template}', { template: document.templateName }),
   stats: [
@@ -170,11 +170,17 @@ const documentFactsFor =
       label: t('record.stat.versions', 'Versions issued'),
       value: document.versionCount,
     },
-    {
-      key: 'issued',
-      label: t('record.stat.issued', 'First issued'),
-      value: formatRecordDate(document.createdAt, locale),
-    },
+    // #1068: the stat GOES when this tenant hides dates, rather than
+    // surviving as "First issued —".
+    ...(dates.hidden
+      ? []
+      : [
+          {
+            key: 'issued',
+            label: t('record.stat.issued', 'First issued'),
+            value: dates.date(document.createdAt),
+          },
+        ]),
     {
       key: 'unit',
       label: t('record.stat.unit', 'Raised from'),
@@ -271,10 +277,7 @@ export interface DocumentRecordScreenProps {
 export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScreenProps) {
   const { apiClient, user } = useAuth();
   const t = useTranslation('documents');
-  const locale = useFormattingLocale();
   const [trailPage, setTrailPage] = useState(FIRST_PAGE);
-
-  const documentFactsMemo = useMemo(() => documentFactsFor(locale), [locale]);
 
   const back = useMemo(
     () => ({ label: t('record.back', 'Back to documents'), onBack }),
@@ -702,7 +705,7 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
     <RecordPageShell
       testId="document-record"
       fields={fields}
-      facts={documentFactsMemo}
+      facts={documentFacts}
       t={t}
       back={back}
       icon={<IconFileText />}

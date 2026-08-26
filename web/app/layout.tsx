@@ -16,6 +16,8 @@ import { getThemeOverrides } from "@/lib/theme";
 import { ThemeModeProvider, ThemeModeInitScript } from "@/lib/theme-mode-context";
 import { DirectionInitScript } from "@/lib/direction-context";
 import { AppLanguageProvider } from "@/lib/app-language-provider";
+import { getUiPreferences } from "@/lib/ui-preferences";
+import { UiPreferencesProvider } from "@/lib/ui-preferences-context";
 
 // Design-token font families (see src/design/tokens/base.json): Noto Sans
 // (latin) + Noto Sans Arabic together drive --font-sans / --font-heading (see
@@ -49,6 +51,10 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const branding = await getBranding();
+  // #1068: resolved on the SERVER so the first paint already honours it. A
+  // client-only fetch would render every date and then blank it a moment
+  // later, which is the setting being briefly false on every navigation.
+  const uiPreferences = await getUiPreferences();
   // WC-242: color overrides an installed plugin may contribute (see
   // web/lib/theme.ts). Both the server (ThemeApiHandler) and the client
   // (getThemeOverrides) already restrict keys to known design-token names
@@ -122,27 +128,35 @@ export default async function RootLayout({
           <ThemeModeProvider>
             <AuthProvider>
               {/*
-                The language provider is ABOVE DirectionProvider deliberately:
-                direction is derived from the resolved language's `direction`
-                property, so the language must resolve first. See
-                lib/direction-context.tsx. It sits INSIDE AuthProvider because
-                it re-resolves the preference when the signed-in identity
-                changes — see lib/app-language-provider.tsx.
+                Inside AuthProvider for the reason the language provider below
+                is: `ui.hide_dates` resolves per TENANT, and a tenant switch
+                changes the identity without reloading the page. See
+                lib/ui-preferences-context.tsx.
               */}
-              <AppLanguageProvider>
-                <DirectionProvider>
-                  <CapabilitiesProvider>
-                    <ToastProvider>
-                      <NavigationProvider>
-                        <PluginFeaturesProvider>
-                          {children}
-                          <ToastContainerMount />
-                        </PluginFeaturesProvider>
-                      </NavigationProvider>
-                    </ToastProvider>
-                  </CapabilitiesProvider>
-                </DirectionProvider>
-              </AppLanguageProvider>
+              <UiPreferencesProvider initial={uiPreferences}>
+                {/*
+                  The language provider is ABOVE DirectionProvider deliberately:
+                  direction is derived from the resolved language's `direction`
+                  property, so the language must resolve first. See
+                  lib/direction-context.tsx. It sits INSIDE AuthProvider because
+                  it re-resolves the preference when the signed-in identity
+                  changes — see lib/app-language-provider.tsx.
+                */}
+                <AppLanguageProvider>
+                  <DirectionProvider>
+                    <CapabilitiesProvider>
+                      <ToastProvider>
+                        <NavigationProvider>
+                          <PluginFeaturesProvider>
+                            {children}
+                            <ToastContainerMount />
+                          </PluginFeaturesProvider>
+                        </NavigationProvider>
+                      </ToastProvider>
+                    </CapabilitiesProvider>
+                  </DirectionProvider>
+                </AppLanguageProvider>
+              </UiPreferencesProvider>
             </AuthProvider>
           </ThemeModeProvider>
         </BrandingProvider>

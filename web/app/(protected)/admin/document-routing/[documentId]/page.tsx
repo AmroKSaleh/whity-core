@@ -47,7 +47,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { EmptyState, ErrorState } from '@amroksaleh/ui/empty-state';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconRoute } from '@tabler/icons-react';
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { useAuth } from '@/lib/auth-context';
 import { useFetch } from '@/hooks/useFetch';
@@ -96,7 +97,7 @@ interface PickerCatalogue<T> {
 
 export default function DocumentRoutingPage() {
   const t = useTranslation('documents');
-  const locale = useFormattingLocale();
+  const dates = useDateDisplay();
   const { apiClient, user } = useAuth();
   const { has, loading: capsLoading } = useCapabilities();
   const router = useRouter();
@@ -537,11 +538,22 @@ export default function DocumentRoutingPage() {
             <Card key={route.id} data-slot="routing-route">
               <CardHeader>
                 <CardTitle className="text-base">{route.title}</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  {t('routing.route.raised', 'Raised {when}', {
-                    when: new Date(route.created_at).toLocaleString(locale),
-                  })}
-                </p>
+                {/*
+                  #1068: the subtitle GOES when dates are hidden — it says
+                  nothing else. The route's TITLE is directly above it and the
+                  steps are below, so a card with no subtitle loses no meaning;
+                  "Raised —" would lose the sentence and keep the gap.
+                */}
+                {(() => {
+                  const raised = dates.dateTime(route.created_at);
+                  if (raised === null) return null;
+
+                  return (
+                    <p className="text-xs text-muted-foreground">
+                      {t('routing.route.raised', 'Raised {when}', { when: raised })}
+                    </p>
+                  );
+                })()}
               </CardHeader>
               <CardContent className="space-y-6">
                 {/*

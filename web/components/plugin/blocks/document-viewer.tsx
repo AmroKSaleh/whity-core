@@ -101,8 +101,8 @@ import { apiClient } from '@/lib/api-client';
 // alternative was a third private copy of a nine-line formatter, which `format.ts`
 // exists specifically to prevent — two copies had already disagreed about whether
 // an empty string is a date.
-import { formatRecordDateTime } from '@amroksaleh/features/record/format';
-import { useFormattingLocale, useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
@@ -444,11 +444,11 @@ function VersionBar({
   onSelect: (id: number) => void;
 }) {
   const t = useTranslation('plugin');
-  const locale = useFormattingLocale();
+  const dates = useDateDisplay();
   const total = artifacts.length;
   const version = versionOf(artifacts, position);
   const superseded = position > 0;
-  const issuedAt = formatRecordDateTime(artifact.rendered_at, locale) ?? artifact.rendered_at;
+  const issuedAt = dates.dateTime(artifact.rendered_at);
 
   return (
     <div className="space-y-2" data-slot="document-viewer-versions">
@@ -461,8 +461,16 @@ function VersionBar({
         </Badge>
         <span className="text-xs text-muted-foreground" data-slot="document-viewer-position">
           {t('blocks.documentViewer.versionOf', 'Version {version} of {total}', { version, total })}
-          {' · '}
-          {issuedAt}
+          {/* #1068: the segment drops out of the strip entirely rather than
+              leaving a stray separator. "Version 2 of 3 · · 41 KB" is a
+              rendering fault; "Version 2 of 3 · 41 KB" is the same sentence
+              with one fact fewer. */}
+          {issuedAt !== null && (
+            <>
+              {' · '}
+              {issuedAt}
+            </>
+          )}
           {artifact.byte_size > 0 ? ` · ${formatBytes(artifact.byte_size)}` : ''}
         </span>
         {total > 1 && (
@@ -475,14 +483,26 @@ function VersionBar({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {artifacts.map((candidate, i) => (
-                  <SelectItem key={candidate.id} value={String(candidate.id)}>
-                    {t('blocks.documentViewer.versionOption', 'Version {version} — {issued}', {
-                      version: versionOf(artifacts, i),
-                      issued: formatRecordDateTime(candidate.rendered_at, locale) ?? candidate.rendered_at,
-                    })}
-                  </SelectItem>
-                ))}
+                {artifacts.map((candidate, i) => {
+                  // #1068: the version NUMBER alone when dates are hidden. It
+                  // is what makes one option distinguishable from another, and
+                  // "Version 2 — —" would be a picker that looks broken on the
+                  // control a reader uses to move between versions.
+                  const issued = dates.dateTime(candidate.rendered_at);
+
+                  return (
+                    <SelectItem key={candidate.id} value={String(candidate.id)}>
+                      {issued === null
+                        ? t('blocks.documentViewer.versionOptionPlain', 'Version {version}', {
+                            version: versionOf(artifacts, i),
+                          })
+                        : t('blocks.documentViewer.versionOption', 'Version {version} — {issued}', {
+                            version: versionOf(artifacts, i),
+                            issued,
+                          })}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
@@ -504,16 +524,24 @@ function VersionBar({
             {t('blocks.documentViewer.supersededTitle', 'You are looking at an earlier version')}
           </AlertTitle>
           <AlertDescription>
-            {t(
-              'blocks.documentViewer.supersededBody',
-              'Version {version} of {total}. A later version was issued on {issued} and is the current one. This version stays available and unchanged.',
-              {
-                version,
-                total,
-                issued:
-                  formatRecordDateTime(artifacts[0].rendered_at, locale) ?? artifacts[0].rendered_at,
-              }
-            )}
+            {(() => {
+              // #1068: a dateless variant, because the WARNING is the point of
+              // this alert and it survives without a date — a later version
+              // exists and this is not it.
+              const issued = dates.dateTime(artifacts[0].rendered_at);
+
+              return issued === null
+                ? t(
+                    'blocks.documentViewer.supersededBodyPlain',
+                    'Version {version} of {total}. A later version was issued and is the current one. This version stays available and unchanged.',
+                    { version, total }
+                  )
+                : t(
+                    'blocks.documentViewer.supersededBody',
+                    'Version {version} of {total}. A later version was issued on {issued} and is the current one. This version stays available and unchanged.',
+                    { version, total, issued }
+                  );
+            })()}
           </AlertDescription>
         </Alert>
       )}

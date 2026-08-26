@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { ErrorState } from '@amroksaleh/ui/empty-state';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import {
   IconAlertTriangle,
   IconMessageCircle,
@@ -121,6 +122,7 @@ async function readErrorMessage(
 export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
   const t = useTranslation('plugin');
+  const dates = useDateDisplay();
 
   const [greetings, setGreetings] = useState<Greeting[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -289,9 +291,19 @@ export function HelloGreetingsScreen({ feature }: { feature: PluginFeature }) {
                   <p className="text-sm font-medium text-foreground">
                     {greeting.message}
                   </p>
+                  {/*
+                    #1068. Two changes: the stamp is FORMATTED at all (it was
+                    the raw wire string interpolated straight into the line),
+                    and the whole ` · <when>` segment drops out when this tenant
+                    hides dates, leaving the id on its own rather than a
+                    dangling separator.
+                  */}
                   <p className="mt-1 text-xs text-muted-foreground">
                     #{greeting.id}
-                    {greeting.createdAt !== null && ` · ${greeting.createdAt}`}
+                    {(() => {
+                      const created = dates.dateTime(greeting.createdAt);
+                      return created === null ? null : ` · ${created}`;
+                    })()}
                   </p>
                 </div>
               </div>

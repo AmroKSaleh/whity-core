@@ -52,6 +52,7 @@ import {
   IconShieldLock,
 } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { isDateFieldName, useDateDisplay } from '@amroksaleh/features/datetime';
 
 /**
  * i18n (domain `plugin`): only the CHROME this file authors is keyed. The
@@ -407,6 +408,7 @@ function DeniedControl({
 export function CrudScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
   const { dir } = useDirection();
+  const dates = useDateDisplay();
   const router = useRouter();
   const t = useTranslation('plugin');
   const { hasPermission } = useCapabilities();
@@ -640,11 +642,27 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
   const editDenial = denialFor('canEdit');
   const deleteDenial = denialFor('canDelete');
 
-  const columns: Column<CrudRow>[] = (model?.columns ?? []).map((column) => ({
-    key: column.key,
-    label: column.label,
-    sortable: true,
-  }));
+  // #1068: a plugin's own timestamp columns are covered by `ui.hide_dates`
+  // like everything else — the issue names plugin screens explicitly, and a
+  // tenant that hides dates on the document organizer has not asked to see
+  // them on a plugin's list of the same records.
+  //
+  // BY NAME, because there is nothing else to go on: `public/openapi.json`
+  // carries `format: date-time` on exactly zero fields, and a plugin's schema is
+  // whatever that plugin declared. `isDateFieldName` is deliberately
+  // conservative about what counts — see it for what it does and does not
+  // match.
+  const dateColumnKeys = (model?.columns ?? [])
+    .filter((column) => isDateFieldName(String(column.key)))
+    .map((column) => column.key);
+
+  const columns: Column<CrudRow>[] = (model?.columns ?? [])
+    .filter((column) => !(dates.hidden && dateColumnKeys.includes(column.key)))
+    .map((column) => ({
+      key: column.key,
+      label: column.label,
+      sortable: true,
+    }));
 
   // WC-532: the thin admin DataTable adapter renders cells via String(...) —
   // a raw {ar,en} LocalizedText value would show "[object Object]". Build a
@@ -656,14 +674,31 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     .filter((column) => column.isLocalizedText)
     .map((column) => column.key);
 
+  // Timestamps are rewritten in the same pass and for the same reason: the
+  // adapter renders every cell through `String(...)`, so an unformatted
+  // `created_at` has been reaching readers as the raw wire string
+  // (`2026-08-25 14:02:11`). Formatting here is what makes it a date in the
+  // reader's own language — and the column is already gone above when the
+  // tenant hides dates, so this branch only ever runs for visible ones.
   const displayRows: CrudRow[] =
-    localizedColumnKeys.length === 0
+    localizedColumnKeys.length === 0 && dateColumnKeys.length === 0
       ? rows
       : rows.map((row) => {
           const displayRow: CrudRow = { ...row };
           for (const key of localizedColumnKeys) {
             const preferred = preferredLocalizedText(toLocalizedTextValue(row[key]), dir);
             displayRow[key] = preferred ?? t('crud.localizedText.untranslated', 'Untranslated');
+          }
+          for (const key of dates.hidden ? [] : dateColumnKeys) {
+            const raw = row[key];
+            if (typeof raw !== 'string') continue;
+            // @date-display-ignore: the raw fallback is reachable only for a
+            // value that does NOT parse as a timestamp, i.e. a plugin that
+            // declared a free-text field under a timestamp-shaped name. The
+            // column is already dropped above when the tenant hides dates, and
+            // this loop does not run in that case, so nothing this line
+            // produces can reach a screen that promised no dates.
+            displayRow[key] = dates.dateTime(raw) ?? raw;
           }
           return displayRow;
         });
