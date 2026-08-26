@@ -119,6 +119,32 @@ use Whity\Sdk\Frontend\Blocks\BlockValidator;
  * `data` is: a dropped feature is a defect in a plugin's declaration, not
  * something the caller could hold rights over, and several of the refusals are
  * precisely that its declared permission was invalid.
+ *
+ * HOST-DECLARED FEATURES (convening, #convening)
+ * ----------------------------------------------
+ * Until now every descriptor came from a plugin, and a CORE subsystem that
+ * wanted a schema-driven screen had no way to declare one: the loader's
+ * validator refuses any descriptor whose `requiredPermission` is a core
+ * permission ("core names are not plugin-ownable"), which is exactly right for a
+ * plugin and leaves core with nowhere to stand.
+ *
+ * So the constructor takes an optional list of HOST descriptors, supplied by
+ * `public/index.php` from the subsystem that owns them
+ * ({@see \Whity\Core\Convening\ConveningFeatures}). They are appended to the
+ * plugin list and then go through THE SAME PIPELINE, not a parallel one: the
+ * per-caller permission filter, the fail-closed block-tree validation, the same
+ * capability resolution, the same `dropped` reporting. A second code path would
+ * be a second place the fail-closed rules could be forgotten.
+ *
+ * Two differences, both narrow and both deliberate:
+ *
+ *  - Their permissions are CORE permissions, which is the whole point, and they
+ *    are not run through the plugin ownership check (there is no plugin to own
+ *    them). The permission is still enforced per caller by the same RoleChecker,
+ *    and the routes behind the screen still enforce their own RBAC.
+ *  - Their API paths are already versioned, because the subsystem emits them
+ *    through {@see Router::versionedPath()} rather than relying on the loader's
+ *    rewrite of plugin-declared paths.
  */
 final class FrontendFeaturesApiHandler
 {
@@ -167,22 +193,31 @@ final class FrontendFeaturesApiHandler
     private Router $router;
     private ?LoggerInterface $logger;
 
+    /** @var list<array<string, mixed>> */
+    private array $hostFeatures;
+
     /**
      * @param PluginLoader        $pluginLoader The live loader carrying the validated descriptors.
      * @param RoleChecker         $roleChecker  Authoritative RBAC resolver for per-caller filtering.
      * @param Router              $router       The live router whose routes back each feature's capabilities.
      * @param LoggerInterface|null $logger      Optional PSR-3 sink for fail-closed omit reasons (WC-226).
+     * @param list<array<string, mixed>> $hostFeatures Descriptors declared by CORE
+     *        subsystems rather than by a plugin. Served through the same filter,
+     *        the same block validation and the same capability resolution as
+     *        every plugin descriptor — see the class docblock.
      */
     public function __construct(
         PluginLoader $pluginLoader,
         RoleChecker $roleChecker,
         Router $router,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        array $hostFeatures = []
     ) {
         $this->pluginLoader = $pluginLoader;
         $this->roleChecker = $roleChecker;
         $this->router = $router;
         $this->logger = $logger;
+        $this->hostFeatures = array_values($hostFeatures);
     }
 
     /**
@@ -226,7 +261,11 @@ final class FrontendFeaturesApiHandler
             $droppedHere = [];
 
             $data = [];
-            foreach ($this->pluginLoader->getFrontendFeatures() as $feature) {
+            // Plugin descriptors first, then the host's own. Order matters only
+            // for reading the response; the client sorts by `group`/`order`.
+            $declared = array_merge($this->pluginLoader->getFrontendFeatures(), $this->hostFeatures);
+
+            foreach ($declared as $feature) {
                 // Defence in depth: a descriptor without a string permission
                 // can never be exposed (the loader already guarantees one).
                 $permission = $feature['requiredPermission'] ?? null;

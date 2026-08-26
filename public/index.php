@@ -1600,7 +1600,22 @@ $router->register('POST', '/api/me/permitted-actions', [$permittedActionsHandler
 // WC-226: pass $logger so a plugin's `screen:'blocks'` feature whose block tree
 // fails host validation is dropped fail-closed with a structured, secret-free
 // reason (feature id + validator errors) — never leaked to the client.
-$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router, $logger);
+// #convening: CORE-declared `screen:'blocks'` features. The loader's validator
+// refuses any PLUGIN descriptor gated on a core permission ("core names are not
+// plugin-ownable"), which is right for a plugin and left core with nowhere to
+// declare a schema-driven screen of its own. These are appended to the plugin
+// list and go through the SAME per-caller permission filter, the SAME
+// fail-closed block validation and the SAME capability resolution — see the
+// handler's docblock. Their API paths are emitted through
+// Router::versionedPath(), because a block `source` is a URL a browser fetches
+// rather than a route registration.
+$frontendFeaturesHandler = new FrontendFeaturesApiHandler(
+    $pluginLoader,
+    $roleChecker,
+    $router,
+    $logger,
+    \Whity\Core\Convening\ConveningFeatures::all($router)
+);
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
 // Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
@@ -2851,6 +2866,127 @@ $routingNotifications = new \Whity\Core\Document\Routing\RoutingNotifications(
     $settingsService
 );
 $routingNotifications->subscribe($hookManager);
+
+// 13b-quinquies-ter. CONVENING (migrations 130/131) — deliberative BODIES that
+// meet, minute numbered decisions, and drive a document's existing approval
+// route with what they decided.
+//
+// Registered HERE, after the notification dispatcher and after the routing
+// engine, because it needs both: invitations go out through the dispatcher (no
+// new mail code — see MeetingNotifications), and a decision reaches a route
+// through DocumentRouter::act() and nothing else.
+//
+// WHAT THIS SUBSYSTEM DOES NOT CONTAIN is the point worth recording at the
+// wiring: there is NO second routing engine. DecisionRouteBridge holds the three
+// routing repositories only to READ — which routes a document has, whether
+// anybody on the body holds an open recipient row, and whether the step they
+// hold is a gate. The single write is the engine's own `act()`, made as a person
+// the route actually reached, so every invariant the engine enforces for a human
+// approval is enforced identically for a body's.
+$conveningBodyRepository = new \Whity\Core\Convening\ConveningBodyRepository($db->getPdo());
+$meetingRepository = new \Whity\Core\Convening\MeetingRepository($db->getPdo(), $sequenceCounters);
+$agendaRepository = new \Whity\Core\Convening\AgendaRepository($db->getPdo());
+$meetingDecisionRepository = new \Whity\Core\Convening\DecisionRepository($db->getPdo());
+$meetingInvitationRepository = new \Whity\Core\Convening\InvitationRepository($db->getPdo());
+
+$meetingService = new \Whity\Core\Convening\MeetingService(
+    $conveningBodyRepository,
+    $meetingRepository,
+    $meetingInvitationRepository,
+    new \Whity\Core\Convening\MeetingNotifications($notificationDispatcher)
+);
+
+$decisionRecorder = new \Whity\Core\Convening\DecisionRecorder(
+    $db->getPdo(),
+    $conveningBodyRepository,
+    $meetingRepository,
+    $agendaRepository,
+    $meetingDecisionRepository,
+    // Decision numbers come from `sequence_counters` — core's one implementation
+    // of "hand out the next number" — never from MAX(seq) + 1, which hands the
+    // same number to two of eight workers on a busy Tuesday.
+    new \Whity\Core\Convening\DecisionNumbers($sequenceCounters),
+    new \Whity\Core\Convening\DecisionRouteBridge(
+        $documentRouter,
+        $routeRepository,
+        $routeStepRepository,
+        $routeRecipientRepository,
+        $conveningBodyRepository
+    )
+);
+
+$conveningBodiesHandler = new \Whity\Api\ConveningBodiesApiHandler($conveningBodyRepository);
+$router->register('GET',    '/api/convening-bodies',                        [$conveningBodiesHandler, 'list'],         null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/convening-bodies',                        [$conveningBodiesHandler, 'create'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'show'],         null, null, CorePermissions::CONVENING_READ);
+$router->register('PATCH',  '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'update'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'delete'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/convening-bodies/{id:\d+}/members',       [$conveningBodiesHandler, 'listMembers'],  null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/convening-bodies/{id:\d+}/members',       [$conveningBodiesHandler, 'addMember'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/convening-bodies/{id:\d+}/members/{profileId:\d+}', [$conveningBodiesHandler, 'removeMember'], null, null, CorePermissions::CONVENING_MANAGE);
+
+$meetingsHandler = new \Whity\Api\MeetingsApiHandler(
+    $conveningBodyRepository,
+    $meetingRepository,
+    $agendaRepository,
+    $meetingDecisionRepository,
+    $meetingInvitationRepository,
+    $meetingService,
+    $decisionRecorder
+);
+$router->register('GET',    '/api/meetings',                                [$meetingsHandler, 'list'],     null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/meetings',                                [$meetingsHandler, 'create'],   null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/meetings/{id:\d+}',                       [$meetingsHandler, 'show'],     null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/meetings/{id:\d+}/schedule',              [$meetingsHandler, 'schedule'], null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/hold',                  [$meetingsHandler, 'hold'],     null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/cancel',                [$meetingsHandler, 'cancel'],   null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/invitations',           [$meetingsHandler, 'invite'],   null, null, CorePermissions::CONVENING_MANAGE);
+// Deliberately UNPERMISSIONED (null, null): BEING INVITED IS THE AUTHORIZATION —
+// the same posture migration 113 takes on acting on a route that reached you, and
+// the same one /api/me/notifications and /api/me/sessions take. Gating it would
+// let a body invite somebody who then cannot answer, leaving the chair counting
+// them as silent for ever. The handler resolves the answering profile from the
+// SESSION and never from the request body, which is the check a tenant-wide
+// permission could not have made.
+$router->register('POST',   '/api/meetings/{id:\d+}/invitations/respond',   [$meetingsHandler, 'respond'],  null);
+// Agenda WRITES are nested under the meeting, because every one of them is an act
+// ON a sitting whose state (draft / scheduled / held / cancelled) decides whether
+// it is allowed.
+$router->register('POST',   '/api/meetings/{id:\d+}/agenda',                [$meetingsHandler, 'addAgendaItem'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('PUT',    '/api/meetings/{id:\d+}/agenda/order',          [$meetingsHandler, 'reorderAgenda'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/meetings/{id:\d+}/agenda/{itemId:\d+}',   [$meetingsHandler, 'removeAgendaItem'], null, null, CorePermissions::CONVENING_MANAGE);
+// THE ONE ROUTE THAT CAN MOVE SOMEBODY ELSE'S DOCUMENT, and the only one gated on
+// `convening:decide`. Recording a decision allocates its number, asks
+// DocumentRouter::act() to apply the verdict, and writes the decision row —
+// all three in one transaction, in that order, so a decision can never claim an
+// approval the engine refused.
+$router->register('POST',   '/api/meetings/{id:\d+}/agenda/{itemId:\d+}/decision', [$meetingsHandler, 'recordDecision'], null, null, CorePermissions::CONVENING_DECIDE);
+// FLAT, FILTERED COLLECTION READS. A tabular client — including the server-driven
+// block screens this subsystem ships — addresses a collection with query
+// parameters and cannot build `/meetings/7/agenda` out of a selection. Each
+// REQUIRES `meeting_id`: an unfiltered tenant-wide list is not a question anybody
+// asks, and answering one would make a forgotten filter look like a working call.
+$router->register('GET',    '/api/agenda-items',                            [$meetingsHandler, 'agendaItems'], null, null, CorePermissions::CONVENING_READ);
+$router->register('GET',    '/api/meeting-decisions',                       [$meetingsHandler, 'decisions'],   null, null, CorePermissions::CONVENING_READ);
+$router->register('GET',    '/api/meeting-invitations',                     [$meetingsHandler, 'invitations'], null, null, CorePermissions::CONVENING_READ);
+// THE REVERSE READ. Without it this subsystem is invisible from the document
+// side: somebody looking at a document that is sitting still has no way to
+// discover it is waiting for a body that meets on the 14th.
+$router->register('GET',    '/api/documents/{id:\d+}/convening',            [$meetingsHandler, 'forDocument'], null, null, CorePermissions::CONVENING_READ);
+
+// The three convening screens in the sidebar. A SECOND `navigation.register`
+// listener rather than more entries in the core one above, for the reason
+// PluginNavigationBridge is a listener too: the items are DERIVED from the same
+// descriptors the features endpoint serves, so a renamed screen cannot end up
+// with one label in the menu and another on the page.
+$hookManager->listen('navigation.register', function ($data, $context) use ($router) {
+    $items = $data['items'] ?? [];
+    foreach (\Whity\Core\Convening\ConveningFeatures::navigationItems($router) as $item) {
+        $items[] = $item;
+    }
+
+    return ['items' => $items];
+});
 
 // In-app notification INBOX (WC-notifications, 6e10d9ea). Self-scoped to the
 // caller's (tenant, profile) — session-gated, no RBAC permission (like

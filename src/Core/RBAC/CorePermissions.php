@@ -322,6 +322,26 @@ final class CorePermissions
     public const TIME_WINDOWS_CLOSE = 'time_windows:close';
     public const TIME_WINDOWS_REOPEN = 'time_windows:reopen';
 
+    // CONVENING (migrations 130/131). Deliberative BODIES that meet, minute a
+    // numbered decision, and — where the agenda item carried a document — drive
+    // that document's existing approval route with the decision.
+    //
+    // THREE slugs rather than a read/write pair, and the third is the reason.
+    // Assembling an agenda, moving a date and sending invitations are
+    // secretarial acts an organisation hands to whoever runs the calendar.
+    // MINUTING WHAT THE BODY CONCLUDED is the act that reaches
+    // {@see \Whity\Core\Document\Routing\DocumentRouter::act()} with a
+    // verdict, so it can approve or reject somebody's document — the same
+    // consequence a recipient's own approval has, from a different chair. An
+    // institution will want that held by fewer people than the calendar, and one
+    // grant covering both would make the separation inexpressible.
+    //
+    // Responding to an INVITATION is under none of them: being invited is the
+    // authorization, exactly as being a recipient is (migration 113).
+    public const CONVENING_READ = 'convening:read';
+    public const CONVENING_MANAGE = 'convening:manage';
+    public const CONVENING_DECIDE = 'convening:decide';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -392,6 +412,9 @@ final class CorePermissions
             self::TIME_WINDOWS_WRITE,
             self::TIME_WINDOWS_CLOSE,
             self::TIME_WINDOWS_REOPEN,
+            self::CONVENING_READ,
+            self::CONVENING_MANAGE,
+            self::CONVENING_DECIDE,
         ];
     }
 }

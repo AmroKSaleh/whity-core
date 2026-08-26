@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Whity\OpenAPI;
 
+use Whity\Core\Convening\DecisionVerdict;
+use Whity\Core\Convening\InvitationStatus;
+use Whity\Core\Convening\MeetingStatus;
+use Whity\Core\Convening\MemberRole;
 use Whity\Core\Document\Organizer\DocumentSortField;
 use Whity\Core\Ou\OuTypeRegistry;
 use Whity\Core\RBAC\CorePermissions;
@@ -93,6 +97,7 @@ final class CoreApiSchemas
             self::ouRoutes(),
             self::ouTypeRoutes(),
             self::timeWindowRoutes(),
+            self::conveningRoutes(),
             self::delegationRoutes(),
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
@@ -1140,6 +1145,377 @@ final class CoreApiSchemas
                     204 => ['description' => 'Deleted'],
                     404 => self::errorResponse('Organizational unit type not found'),
                     409 => self::errorResponse('Units still carry this type; retry with ?force=true'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * CONVENING (#convening, migrations 130/131): deliberative bodies, their
+     * meetings, and the decisions taken at them.
+     *
+     * THE ONE ROUTE WORTH READING FIRST is
+     * `POST /api/v1/meetings/{id}/agenda/{itemId}/decision`. It is the only
+     * endpoint in this subsystem that can move somebody ELSE's document: where
+     * the agenda item carries a document and that document's route has reached
+     * this body, the decision is applied through the existing routing engine —
+     * `DocumentRouter::act()`, with a verdict, as a person the route actually
+     * asked. Nothing here writes to a routing table.
+     *
+     * PERMISSIONS: `convening:read` for every read, `convening:manage` for the
+     * secretarial acts (agenda, dates, invitations), `convening:decide` for
+     * minuting a decision. Answering an INVITATION is unpermissioned — being
+     * invited is the authorization, the same posture migration 113 takes on
+     * acting on a route that reached you.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function conveningRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/convening-bodies', 'convening:read', [
+                'summary' => "List the tenant's convening bodies",
+                'description' => 'Active bodies first, then by key. A retired body stays readable — '
+                    . 'its minute-book outlives its usefulness — but takes no new meetings.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('active', 'string', 'Send `true` to list only active bodies.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's convening bodies", 'ConveningBodyListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/convening-bodies', 'convening:manage', [
+                'summary' => 'Constitute a convening body',
+                'description' => '`body_key` is immutable once set: every decision number the body '
+                    . 'mints quotes it. `name` may be a plain string or an object of language code '
+                    . 'to text — a body has as many real names as it has languages.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created body', 'ConveningBodyResponse'),
+                    422 => self::errorResponse('A malformed or already-taken key, or an empty name'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/convening-bodies/{id:\d+}', 'convening:read', [
+                'summary' => 'Get one body, with its current seats',
+                'description' => 'The membership travels with the body because the two are never '
+                    . 'wanted apart. `?history=true` includes PAST seats, which is how a decision '
+                    . 'taken last March is attributed to the body as it was constituted then.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('history', 'string', 'Send `true` to include seats that have ended.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The body and its members', 'ConveningBodyDetailResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/convening-bodies/{id:\d+}', 'convening:manage', [
+                'summary' => 'Rename a body, re-home it, retire it or revive it',
+                'description' => '`body_key` is refused: decision numbers already quote it, so '
+                    . 'editing it would leave them naming a body that no longer exists.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated body', 'ConveningBodyResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                    422 => self::errorResponse('No updatable field supplied, or an attempt to change body_key'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/convening-bodies/{id:\d+}', 'convening:manage', [
+                'summary' => 'Delete a convening body',
+                'description' => 'Refused, never forced, once the body has met: deleting it would '
+                    . 'destroy agendas and decisions, some of which have already approved documents. '
+                    . 'A body that has finished its work is deactivated.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                        ['deleted' => ['type' => 'boolean']],
+                        ['deleted']
+                    ))),
+                    404 => self::errorResponse('Convening body not found'),
+                    409 => self::errorResponse('The body has meetings on record'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/convening-bodies/{id:\d+}/members', 'convening:read', [
+                'summary' => "List a body's seats",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('history', 'string', 'Send `true` to include seats that have ended.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The seats', 'ConveningBodyMemberListResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/convening-bodies/{id:\d+}/members', 'convening:manage', [
+                'summary' => 'Seat somebody on a body, or move the seat they hold',
+                'description' => 'Appointing a current member to a different seat updates the seat '
+                    . 'they already hold rather than closing it and opening another — a chair who '
+                    . 'becomes secretary did not leave the body for an instant.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyMemberRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The body\'s current seats', 'ConveningBodyMemberListResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                    422 => self::errorResponse('A missing profile_id, or a seat outside the vocabulary'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute(
+                'DELETE',
+                '/api/convening-bodies/{id:\d+}/members/{profileId:\d+}',
+                'convening:manage',
+                [
+                    'summary' => 'End somebody\'s seat on a body',
+                    'description' => 'A DEPARTURE, not a deletion: the row is kept with an end date, '
+                        . 'so a decision taken while they sat remains attributable to the body as it '
+                        . 'was then.',
+                    'tags' => ['convening'],
+                    'responses' => [
+                        200 => self::jsonResponse('The remaining seats', 'ConveningBodyMemberListResponse'),
+                        404 => self::errorResponse('That person does not currently sit on this body'),
+                    ] + self::authErrors(),
+                ]
+            ),
+
+            self::permissionRoute('GET', '/api/meetings', 'convening:read', [
+                'summary' => 'List meetings, narrowed by body and status',
+                'description' => 'Most recent first, by id rather than by date: a draft has no date '
+                    . 'at all, and ordering on a nullable column heaps every draft at whichever end '
+                    . 'the engine sorts nulls.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('body_id', 'integer', 'Restrict to one convening body.'),
+                    self::queryParam('status', 'string', 'Comma-separated: draft, scheduled, held, cancelled.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The matching meetings', 'MeetingListResponse'),
+                    422 => self::errorResponse('A malformed filter'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings', 'convening:manage', [
+                'summary' => 'Open a meeting on a body, in draft',
+                'description' => 'Always `draft`, never straight to `scheduled`. Scheduling is its '
+                    . 'own act with its own meaning ("this is fixed, tell people"), and a sitting '
+                    . 'must not become scheduled as a side effect of somebody starting an agenda.',
+                'tags' => ['convening'],
+                'request' => 'MeetingCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('No such body, or the body is not active'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meetings/{id:\d+}', 'convening:read', [
+                'summary' => 'Get one meeting, with its agenda, decisions and invitations',
+                'description' => 'Everything behind one request, because nobody has ever wanted '
+                    . 'three of the four. A screen that fetched them separately would render an '
+                    . 'agenda before it knew which items had been decided.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The whole sitting', 'MeetingDetailResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/schedule', 'convening:manage', [
+                'summary' => 'Fix a date and a place; re-scheduling is the same call',
+                'description' => 'When the sitting had already been announced, EVERYBODY holding an '
+                    . 'invitation is told it moved — including the people who declined, because '
+                    . 'somebody who could not make the old date may well make the new one.',
+                'tags' => ['convening'],
+                'request' => 'MeetingScheduleRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The scheduled meeting', 'MeetingScheduleResponse'),
+                    422 => self::errorResponse('A meeting that is held or cancelled, or an unreadable date'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/hold', 'convening:manage', [
+                'summary' => 'Record that the meeting took place',
+                'description' => 'Terminal: nothing un-holds a meeting, because decisions minuted at '
+                    . 'it may already have advanced somebody\'s document. `held_at` is supplied '
+                    . 'rather than stamped by the server — a body routinely minutes yesterday\'s '
+                    . 'sitting, and the date chooses the year each decision number is minted under.',
+                'tags' => ['convening'],
+                'request' => 'MeetingHoldRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The held meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('A meeting that is already held or was cancelled'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/cancel', 'convening:manage', [
+                'summary' => 'Call off a meeting that has not happened',
+                'description' => 'A state rather than a deletion: a called-off sitting is a fact the '
+                    . 'minute-book needs, and deleting the row would take its agenda with it.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The cancelled meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('A meeting that has already been held'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/invitations', 'convening:manage', [
+                'summary' => "Invite the body's current members",
+                'description' => 'Membership is resolved NOW, not stored earlier — the same '
+                    . 'rule-not-roster principle the routing engine enforces on its steps. '
+                    . 'Idempotent: somebody already invited is not re-invited, not re-notified, and '
+                    . 'does not have their answer reset, so this is safe to call again after a '
+                    . 'person joins the body.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The meeting\'s invitations', 'MeetingInviteResponse'),
+                    422 => self::errorResponse('A draft, held or cancelled meeting, or a body with no members'),
+                ] + self::authErrors(),
+            ]),
+            // No helper: this is the one route in the subsystem with NO
+            // permission, and `permissionRoute()` cannot express that. Spelled
+            // out so the null is visible rather than defaulted.
+            [
+                'method' => 'POST',
+                'path' => '/api/meetings/{id:\d+}/invitations/respond',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Accept, decline, or answer tentatively',
+                    'description' => 'UNPERMISSIONED on purpose: being invited IS the authorization, '
+                        . 'the same posture `/api/me/notifications` takes. The answering person comes '
+                        . 'from the SESSION and never from the request body. `invited` is not among '
+                        . 'the answers — it is the state the system puts the row in, and '
+                        . '"un-answering" means nothing.',
+                    'tags' => ['convening'],
+                    'request' => 'MeetingInvitationRespondRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('Your answer', 'MeetingInvitationResponse'),
+                        403 => self::errorResponse('Answering an invitation requires a signed-in person'),
+                        422 => self::errorResponse('Not an answer, or you hold no invitation to this meeting'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/agenda', 'convening:manage', [
+                'summary' => 'Put an item — often a document — on a meeting\'s agenda',
+                'description' => 'A draft or scheduled meeting accumulates items freely. Attaching '
+                    . 'to a meeting that has ALREADY BEEN HELD is possible and must be asked for '
+                    . '(`allow_held: true`): it asserts the body considered the item at a sitting '
+                    . 'that is over, which is right for a paper tabled on the day and wrong if you '
+                    . 'meant the next meeting. A cancelled meeting is refused outright.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAgendaItemCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The agenda item', 'MeetingAgendaItemResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('A cancelled meeting, or a held meeting without allow_held'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/meetings/{id:\d+}/agenda/order', 'convening:manage', [
+                'summary' => "Rewrite the whole agenda's order",
+                'description' => 'The list must name every item on the agenda exactly once. A '
+                    . 'partial list describes an order that omits items, and both readings of that '
+                    . '— leave them where they are, or append them — are guesses.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAgendaReorderRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The reordered agenda', 'MeetingAgendaItemListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('The list is not a permutation of this meeting\'s items'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute(
+                'DELETE',
+                '/api/meetings/{id:\d+}/agenda/{itemId:\d+}',
+                'convening:manage',
+                [
+                    'summary' => 'Remove an agenda item, closing the gap it leaves',
+                    'description' => 'Refused once a decision has been recorded against the item: a '
+                        . 'decision may already have approved a document, and deleting what it was '
+                        . 'about would leave it quoting an item nobody can read.',
+                    'tags' => ['convening'],
+                    'responses' => [
+                        200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                            ['deleted' => ['type' => 'boolean']],
+                            ['deleted']
+                        ))),
+                        404 => self::errorResponse('Agenda item not found on this meeting'),
+                        409 => self::errorResponse('A decision has been recorded against this item'),
+                    ] + self::authErrors(),
+                ]
+            ),
+            self::permissionRoute(
+                'POST',
+                '/api/meetings/{id:\d+}/agenda/{itemId:\d+}/decision',
+                'convening:decide',
+                [
+                    'summary' => "Minute the body's decision, and drive the document's approval route",
+                    'description' => 'THE ONE ENDPOINT HERE THAT CAN MOVE SOMEBODY ELSE\'S DOCUMENT. '
+                        . 'One call allocates the decision number from the platform counter, applies '
+                        . 'the verdict through the existing routing engine, and writes the decision '
+                        . 'row — all three in one transaction, in that order, so a decision can never '
+                        . 'claim an approval the engine refused. Approved advances or fires the '
+                        . 'approve edge; rejected fires the reject edge or goes nowhere; a deferral '
+                        . 'is recorded and moves nothing. The `routing` object always says what '
+                        . 'actually happened, including the ordinary cases where nothing did.',
+                    'tags' => ['convening'],
+                    'request' => 'MeetingDecisionRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('The decision, and what it did', 'MeetingDecisionResponse'),
+                        404 => self::errorResponse('Agenda item not found on this meeting'),
+                        422 => self::errorResponse(
+                            'A meeting that has not been held, a verdict outside the vocabulary, or a '
+                            . 'refusal from the routing engine (returned in its own words)'
+                        ),
+                    ] + self::authErrors(),
+                ]
+            ),
+
+            self::permissionRoute('GET', '/api/agenda-items', 'convening:read', [
+                'summary' => "One meeting's agenda, in order",
+                'description' => 'A FLAT, FILTERED collection read: a tabular client addresses a '
+                    . 'collection with query parameters and cannot build a nested path out of a '
+                    . 'selection. `meeting_id` is required — an unfiltered tenant-wide list is not a '
+                    . 'question anybody asks, and answering one would make a forgotten filter look '
+                    . 'like a working call.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose agenda to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The agenda', 'MeetingAgendaItemListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-decisions', 'convening:read', [
+                'summary' => "One meeting's decisions",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose decisions to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The decisions', 'MeetingDecisionListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-invitations', 'convening:read', [
+                'summary' => "One meeting's invitations and answers",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose invitations to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The invitations', 'MeetingInvitationListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\d+}/convening', 'convening:read', [
+                'summary' => 'Which bodies has this document been in front of, and what did they decide?',
+                'description' => 'THE REVERSE READ. Without it the subsystem is invisible from the '
+                    . 'document side: somebody looking at a document that is sitting still has no '
+                    . 'way to discover it is waiting for a body that meets on the 14th.',
+                'tags' => ['convening', 'documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'Every agenda item naming this document, with its meeting, body and decisions',
+                        'DocumentConveningResponse'
+                    ),
                 ] + self::authErrors(),
             ]),
         ];
@@ -4734,6 +5110,265 @@ final class CoreApiSchemas
                 // is never whether it happened but why.
                 'reason' => self::text() + ['minLength' => 1],
             ], ['reason']),
+
+            // #convening (migrations 130/131). DELIBERATIVE BODIES that meet,
+            // minute numbered decisions, and drive a document's existing approval
+            // route with what they decided.
+            //
+            // `name` and `title` are OBJECTS of language code => text, not
+            // strings: this platform's Arabic/RTL support is not a display
+            // setting, and a body HAS two names of which both are the real one.
+            // `display_name` / `display_title` ride alongside for the surfaces
+            // that can carry only ONE string (a notification subject, a cell in a
+            // server-driven table); a localizing client reads the map and ignores
+            // them.
+            'LocalizedLabel' => [
+                'type' => 'object',
+                'additionalProperties' => self::str(),
+                'description' => 'Language code => text. At least one entry.',
+            ],
+            'ConveningBody' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_key' => self::str(),
+                'name' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_name' => self::str(),
+                'ou_id' => self::int(true),
+                'description' => self::str(true),
+                'is_active' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'body_key', 'name', 'display_name', 'ou_id',
+                'description', 'is_active', 'created_at', 'updated_at',
+            ]),
+            // A SEAT, never a permission: holding the chair grants nothing in
+            // RBAC. What it decides is whose name carries the body's decision to
+            // a routing step, among people the route already reached.
+            'ConveningBodyMember' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_id' => self::int(),
+                'profile_id' => self::int(),
+                'member_role' => ['type' => 'string', 'enum' => MemberRole::all()],
+                'joined_at' => self::str(),
+                // NULL means "still a member". A departure is recorded rather
+                // than deleted, so a decision taken in March remains attributable
+                // to the body as it was then.
+                'left_at' => self::str(true),
+            ], ['id', 'tenant_id', 'body_id', 'profile_id', 'member_role', 'joined_at', 'left_at']),
+            'ConveningBodyListResponse' => self::listEnvelope('ConveningBody'),
+            'ConveningBodyResponse' => self::dataEnvelope(SchemaBuilder::ref('ConveningBody')),
+            'ConveningBodyDetailResponse' => self::dataEnvelope(
+                ['allOf' => [
+                    SchemaBuilder::ref('ConveningBody'),
+                    self::object(
+                        ['members' => ['type' => 'array', 'items' => SchemaBuilder::ref('ConveningBodyMember')]],
+                        ['members']
+                    ),
+                ]]
+            ),
+            'ConveningBodyMemberListResponse' => self::listEnvelope('ConveningBodyMember'),
+            'ConveningBodyCreateRequest' => self::object([
+                // Lower-case letters, digits, '-' and '_'. Narrow because it is
+                // quoted inside every decision number the body mints, and a key
+                // with a slash or a space produces numbers nobody can quote
+                // unambiguously.
+                'body_key' => self::str() + ['pattern' => '^[a-z0-9][a-z0-9_-]{0,63}$'],
+                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'ou_id' => self::int(true),
+                'description' => self::text(),
+            ], ['body_key', 'name']),
+            // `body_key` is absent rather than declared-and-ignored: it is
+            // immutable, because decision numbers already quote it.
+            'ConveningBodyUpdateRequest' => self::object([
+                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'ou_id' => self::int(true),
+                'description' => self::text(),
+                'is_active' => self::bool(),
+            ], []) + ['minProperties' => 1],
+            'ConveningBodyMemberRequest' => self::object([
+                'profile_id' => self::int(),
+                'member_role' => ['type' => 'string', 'enum' => MemberRole::all()],
+            ], ['profile_id']),
+
+            // One SITTING. `scheduled_at` and `held_at` are both nullable and
+            // both real: a draft has neither, a scheduled meeting has the first,
+            // and only a meeting that actually took place has the second.
+            // Nothing derives one from the other.
+            'Meeting' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_id' => self::int(),
+                'meeting_number' => self::int(),
+                'title' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_title' => self::str(),
+                'scheduled_at' => self::str(true),
+                'held_at' => self::str(true),
+                'location' => self::str(true),
+                'status' => ['type' => 'string', 'enum' => MeetingStatus::all()],
+                'created_by_profile_id' => self::int(true),
+                'created_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'body_id', 'meeting_number', 'title', 'display_title',
+                'scheduled_at', 'held_at', 'location', 'status', 'created_by_profile_id', 'created_at',
+            ]),
+            'MeetingAgendaItem' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'position' => self::int(),
+                'title' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_title' => self::str(),
+                // THE JOIN to the rest of the platform. An item with a document
+                // is an item a decision can move.
+                'document_id' => self::int(true),
+                'notes' => self::str(true),
+                'created_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'position', 'title', 'display_title',
+                'document_id', 'notes', 'created_at',
+            ]),
+            // `verdict` carries a third value the routing engine does not have.
+            // A deferral IS a decision — numbered, minuted — and it is
+            // deliberately not mapped onto approve or reject, because forcing it
+            // onto either would advance a document nobody approved or reject one
+            // nobody refused.
+            //
+            // `route_id` / `route_event_id` are what separate "the body approved
+            // it and the document advanced" from "the body approved it and
+            // nothing moved". Without them those two render identically.
+            'MeetingDecision' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'agenda_item_id' => self::int(),
+                'decision_number' => self::str(),
+                'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all()],
+                'rationale' => self::str(true),
+                'decided_at' => self::str(),
+                'recorded_by_profile_id' => self::int(true),
+                'route_id' => self::int(true),
+                'route_event_id' => self::int(true),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'agenda_item_id', 'decision_number', 'verdict',
+                'rationale', 'decided_at', 'recorded_by_profile_id', 'route_id', 'route_event_id',
+            ]),
+            // `invited` means "has not answered", never "declined" — which is
+            // why `responded_at` is a separate nullable field.
+            'MeetingInvitation' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'profile_id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => InvitationStatus::all()],
+                'sent_at' => self::str(true),
+                'responded_at' => self::str(true),
+            ], ['id', 'tenant_id', 'meeting_id', 'profile_id', 'status', 'sent_at', 'responded_at']),
+            'MeetingListResponse' => self::listEnvelope('Meeting'),
+            'MeetingResponse' => self::dataEnvelope(SchemaBuilder::ref('Meeting')),
+            'MeetingAgendaItemListResponse' => self::listEnvelope('MeetingAgendaItem'),
+            'MeetingAgendaItemResponse' => self::dataEnvelope(SchemaBuilder::ref('MeetingAgendaItem')),
+            'MeetingDecisionListResponse' => self::listEnvelope('MeetingDecision'),
+            'MeetingInvitationListResponse' => self::listEnvelope('MeetingInvitation'),
+            'MeetingInvitationResponse' => self::dataEnvelope(SchemaBuilder::ref('MeetingInvitation')),
+            'MeetingDetailResponse' => self::dataEnvelope(
+                ['allOf' => [
+                    SchemaBuilder::ref('Meeting'),
+                    self::object([
+                        'body' => SchemaBuilder::ref('ConveningBody'),
+                        'agenda' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAgendaItem')],
+                        'decisions' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingDecision')],
+                        'invitations' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingInvitation')],
+                    ], ['body', 'agenda', 'decisions', 'invitations']),
+                ]]
+            ),
+            'MeetingCreateRequest' => self::object([
+                'body_id' => self::int(),
+                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+            ], ['body_id', 'title']),
+            'MeetingScheduleRequest' => self::object([
+                'scheduled_at' => self::str(),
+                'location' => self::name(),
+            ], ['scheduled_at']),
+            'MeetingScheduleResponse' => self::object([
+                'data' => SchemaBuilder::ref('Meeting'),
+                // How many people were told the date moved. Zero is a real
+                // answer: the sitting had not been announced yet.
+                'notified' => self::int(),
+            ], ['data', 'notified']),
+            'MeetingHoldRequest' => self::object([
+                // Supplied rather than defaulted to now(): a body routinely
+                // minutes yesterday's sitting, and a server-stamped date would
+                // put every such meeting — and the YEAR each of its decision
+                // numbers is minted under — on the wrong day.
+                'held_at' => self::str(),
+            ], []),
+            'MeetingInviteResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingInvitation')],
+                // Two numbers, because they answer different questions: how many
+                // people were newly told, and how many already held an invitation
+                // and were deliberately left alone. One count would make a no-op
+                // re-send indistinguishable from a failure.
+                'invited' => self::int(),
+                'already_invited' => self::int(),
+            ], ['data', 'invited', 'already_invited']),
+            'MeetingInvitationRespondRequest' => self::object([
+                'status' => ['type' => 'string', 'enum' => InvitationStatus::responses()],
+            ], ['status']),
+            'MeetingAgendaItemCreateRequest' => self::object([
+                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'document_id' => self::int(true),
+                'notes' => self::text(),
+                // The EXPLICIT confirmation that an item is being attached to a
+                // sitting that already happened. Allowed, because a paper tabled
+                // on the day is minuted afterwards — and never silent, because
+                // the other reading is somebody on the wrong screen.
+                'allow_held' => self::bool(),
+            ], ['title']),
+            'MeetingAgendaReorderRequest' => self::object([
+                // EVERY item on the agenda, exactly once. A partial list
+                // describes an order that omits some items, and both readings of
+                // that — leave them, or append them — are guesses.
+                'item_ids' => ['type' => 'array', 'items' => self::int(), 'minItems' => 1],
+            ], ['item_ids']),
+            'MeetingDecisionRequest' => self::object([
+                'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all()],
+                'rationale' => self::text(),
+                'decided_at' => self::str(),
+            ], ['verdict']),
+            // WHAT THE DECISION DID, always present beside what it SAID.
+            // `applied` false with a `reason` is an ordinary outcome, not an
+            // error: the item carried no document, the document has no route, the
+            // route never reached this body, or the step it reached is a
+            // circulation rather than a gate.
+            'MeetingDecisionRouting' => self::object([
+                'applied' => self::bool(),
+                'reason' => self::str(),
+                'explanation' => self::str(),
+                'route_id' => self::int(true),
+                'step_id' => self::int(true),
+                'actor_profile_id' => self::int(true),
+                'event_id' => self::int(true),
+                // What the STEP concluded, which is not what this body said:
+                // under a quorum of `all`, the first of three approvals decides
+                // nothing and this is null.
+                'decided' => self::str(true),
+            ], [
+                'applied', 'reason', 'explanation', 'route_id', 'step_id',
+                'actor_profile_id', 'event_id', 'decided',
+            ]),
+            'MeetingDecisionResponse' => self::object([
+                'data' => SchemaBuilder::ref('MeetingDecision'),
+                'routing' => SchemaBuilder::ref('MeetingDecisionRouting'),
+            ], ['data', 'routing']),
+            'DocumentConveningEntry' => self::object([
+                'agenda_item' => SchemaBuilder::ref('MeetingAgendaItem'),
+                'meeting' => SchemaBuilder::ref('Meeting'),
+                'body' => SchemaBuilder::ref('ConveningBody'),
+                'decisions' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingDecision')],
+            ], ['agenda_item', 'meeting', 'body', 'decisions']),
+            'DocumentConveningResponse' => self::listEnvelope('DocumentConveningEntry'),
 
             'Delegation' => $delegation,
             'DelegationListResponse' => self::paginatedListEnvelope('Delegation'),
