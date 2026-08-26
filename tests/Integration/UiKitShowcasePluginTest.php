@@ -1205,27 +1205,75 @@ final class UiKitShowcasePluginTest extends TestCase
         // either side chose to call it: the block wrote `{demo-record-pick}` and
         // the route declares `{name}`.
         //
-        // Captured still PERCENT-ENCODED, and asserted that way because it is
-        // what happens rather than what should. Nothing anywhere between the
-        // wire and a plugin handler decodes a path parameter — there is no
-        // `urldecode` in `src/`, `sdk/src/` or `public/index.php` — so a handler
-        // is handed `Anika%20Patel`.
+        // And captured DECODED — the identifier as the selector published it,
+        // not as the URL carried it (#1078, which this branch is stacked on).
         //
-        // THIS IS A REAL DEFECT AND IT IS NOT THIS CHANGE'S. It is older, and it
-        // is on the READ path too: `resolveContextPath` encodes a token's value
-        // for `dataRecord.source` exactly as `FormProvider` encodes it for a
-        // submit endpoint, so the showcase's own Record tab already fetches
-        // `/rows/Anika%20Patel`, misses the fixture's `'Anika Patel'` key, and
-        // falls through to its default record — for every one of the three
-        // names, all of which contain a space. Filed, not fixed here: decoding
-        // in `Router::match()` is the right general answer and it changes what
-        // every route in the platform hands its handler, which is its own change
-        // with its own blast radius, not a rider on an ownership normalisation.
-        //
-        // When that lands, this assertion goes red. That is the fix arriving,
-        // not a regression — change it to the decoded value and delete this note.
+        // The two halves have to be true together or the save is worse than
+        // useless. This change makes the write REACHABLE; #1078 makes it reach
+        // the row the caller named. Without it the endpoint dispatched fine and
+        // the handler was handed `Anika%20Patel`, matched no record, and — on a
+        // real endpoint that falls back rather than 404s — would have written to
+        // whichever record the fallback picked, reporting success.
         $this->assertArrayHasKey('name', $matched['params']);
-        $this->assertSame(rawurlencode('Anika Patel'), $matched['params']['name']);
+        $this->assertSame('Anika Patel', $matched['params']['name']);
+    }
+
+    /**
+     * The Record tab shows the record you PICKED.
+     *
+     * The showcase's `dataRecord` source is `/api/uikit/demo/rows/{demo-record-pick}`
+     * and the web renderer `encodeURIComponent`s the selector's value into it,
+     * so every one of the three fixture names — all of which contain a space —
+     * arrived percent-encoded, missed `demoRecord`'s lookup, and fell through to
+     * its default. Picking any record showed Anika Patel.
+     *
+     * That is the read half of the same bug this branch's write half depends on,
+     * and it is asserted HERE, against the reference plugin's own declaration and
+     * its own handler, because that is where a reader will look for it. A green
+     * unit test on `Router` does not tell anyone the showcase was lying.
+     */
+    public function testTheRecordTabShowsTheRecordThatWasPicked(): void
+    {
+        $pluginDir = dirname(__DIR__, 2) . '/plugins';
+        $router = new Router('/v1');
+
+        $loader = new PluginLoader($pluginDir, $router, new PermissionRegistry(), new HookManager());
+        $loader->load();
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('ui-kit-reference', $byId);
+
+        /** @var array<mixed> $blocks */
+        $blocks = $byId['ui-kit-reference']['blocks'];
+        $sources = $this->collectDataBoundSources($blocks);
+        $this->assertContains('/api/v1/uikit/demo/rows/{demo-record-pick}', $sources);
+
+        // Every name the demo collection offers, not just the first — the
+        // fallback record is one of them, so testing a single name could pass on
+        // the one case where "the fallback" and "the right answer" coincide.
+        foreach (['Anika Patel', 'Bjorn Larsen', 'Camille Dupont'] as $picked) {
+            // What the renderer builds: resolveContextPath() encodeURIComponent's
+            // the selector's value into the token.
+            $path = str_replace(
+                '{demo-record-pick}',
+                rawurlencode($picked),
+                '/api/v1/uikit/demo/rows/{demo-record-pick}'
+            );
+
+            $matched = $router->match(new Request('GET', $path));
+            $this->assertNotNull($matched, "the record route must match '{$path}'");
+
+            $response = ($matched['handler'])(new Request('GET', $path), $matched['params']);
+            /** @var array<string, mixed> $body */
+            $body = json_decode($response->getBody(), true) ?? [];
+
+            $this->assertSame(
+                $picked,
+                $body['data']['name'] ?? null,
+                "picking '{$picked}' must show '{$picked}' — before #1078 every pick showed the "
+                . "fixture's fallback record instead"
+            );
+        }
     }
 
     /**

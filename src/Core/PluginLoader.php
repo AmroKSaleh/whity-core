@@ -3440,12 +3440,35 @@ class PluginLoader
      * `dataRecord.source` is matched against the GET-route map, which is keyed
      * by path with no method in the key.
      *
+     * IT COLLAPSES TWO DIFFERENT SYNTAXES, which is why the pattern is what it
+     * is. One side is a ROUTE path, whose placeholders are `{name}` or
+     * `{name:constraint}` (WC-160). The other is a BLOCK declaration's context
+     * token — `{demo-record-pick}`, `{edit-person.id}` — which carries hyphens
+     * and dots a route parameter may not. So the inner rule cannot be the
+     * Router's placeholder grammar: applying that would stop collapsing every
+     * context token in the contract and refuse every block declaration there is.
+     *
+     * The braces close on the first `}` that is not part of a `{n}` / `{n,m}`
+     * QUANTIFIER, which is the one piece the previous `\{[^}]*\}` got wrong. A
+     * constraint may legitimately contain one (`{code:[a-f0-9]{10}}`, WC-569 —
+     * `Router::pathToPattern()` accepts it and compiles it), and `[^}]*` cannot
+     * span the inner `}`: it matched `{code:[a-f0-9]{10}` and left a stray brace
+     * behind, so the key became `/api/x/codes/{}}` and could never equal the
+     * `/api/x/codes/{}` a declaration normalises to. A route registered with a
+     * quantifier constraint was therefore unnameable from any block tree.
+     *
+     * No in-tree route uses one today, so this is preventive rather than a live
+     * break — but it is the same helper every ownership comparison in this file
+     * now runs through, on the read side and (since this change) the write side
+     * alike, so the failure it prevents would have been a whole feature silently
+     * dropped at load.
+     *
      * @param string $path A route path or a block's `recordPath` template.
      * @return string The normalized key.
      */
     private static function normalizePathKey(string $path): string
     {
-        return (string) preg_replace('/\{[^}]*\}/', '{}', $path);
+        return (string) preg_replace('/\{(?:[^{}]|\{\d+(?:,\d*)?\})*\}/', '{}', $path);
     }
 
     /**
