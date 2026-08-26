@@ -99,7 +99,11 @@ final class TimeWindowsApiHandler
                 'data' => $this->windows->listForTenant($tenantId, $typeId, $state, $onDate, $parentId),
             ]);
         } catch (WindowRejectedException $e) {
-            return Response::error($e->getMessage(), 422);
+            // ->clientMessage, never ->getMessage(): only text somebody wrote FOR
+            // a caller reaches a caller, and giving it its own field is what
+            // makes that structural rather than a habit. See the exception's
+            // docblock, and WC-186. Every catch site below follows suit.
+            return Response::error($e->clientMessage, 422);
         } catch (\Exception $e) {
             error_log('[TimeWindowsApiHandler] list failed: ' . $e->getMessage());
 
@@ -194,7 +198,7 @@ final class TimeWindowsApiHandler
 
             return Response::json(['data' => $this->windows->find($tenantId, $id)], 201);
         } catch (WindowRejectedException $e) {
-            return Response::error($e->getMessage(), 422);
+            return Response::error($e->clientMessage, 422);
         } catch (\Exception $e) {
             error_log('[TimeWindowsApiHandler] create failed: ' . $e->getMessage());
 
@@ -254,7 +258,7 @@ final class TimeWindowsApiHandler
 
             return Response::json(['data' => $this->windows->find($tenantId, $id)]);
         } catch (WindowRejectedException $e) {
-            return Response::error($e->getMessage(), 422);
+            return Response::error($e->clientMessage, 422);
         } catch (\Exception $e) {
             error_log('[TimeWindowsApiHandler] update failed: ' . $e->getMessage());
 
@@ -334,7 +338,7 @@ final class TimeWindowsApiHandler
                 ],
             ]);
         } catch (WindowRejectedException $e) {
-            return Response::error($e->getMessage(), 422);
+            return Response::error($e->clientMessage, 422);
         } catch (\Exception $e) {
             error_log('[TimeWindowsApiHandler] close failed: ' . $e->getMessage());
 
@@ -383,7 +387,7 @@ final class TimeWindowsApiHandler
                     + ['trail' => $this->windows->trail($tenantId, $id)],
             ]);
         } catch (WindowRejectedException $e) {
-            return Response::error($e->getMessage(), 422);
+            return Response::error($e->clientMessage, 422);
         } catch (\Exception $e) {
             error_log('[TimeWindowsApiHandler] reopen failed: ' . $e->getMessage());
 
