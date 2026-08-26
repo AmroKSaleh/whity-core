@@ -31,7 +31,11 @@
 
 const MAX_BLOCKS = Number(process.env.RENDER_FLOW_MAX_BLOCKS || 20000);
 const MAX_TABLE_ROWS = Number(process.env.RENDER_FLOW_MAX_TABLE_ROWS || 5000);
-const MAX_PAYLOAD_BYTES = Number(process.env.RENDER_FLOW_MAX_BYTES || 40 * 1024 * 1024);
+/* Kept BELOW express's own 25 MiB JSON body limit (src/server.js) on purpose.
+ * A cap above it would never be the thing that fires: express would answer 413
+ * with its own message first, and a caller sent a figure too many would be
+ * told "payload too large" by a layer that knows nothing about figures. */
+const MAX_PAYLOAD_BYTES = Number(process.env.RENDER_FLOW_MAX_BYTES || 20 * 1024 * 1024);
 
 /** Page presets, in mm. A caller may also give explicit widthMm/heightMm. */
 const PAGE_PRESETS = {

@@ -198,7 +198,6 @@ function build(options) {
         // Tables and figures are spread evenly through the body rather than
         // clustered, so page breaks fall inside them often enough to exercise
         // row-splitting and figure placement.
-        const progress = (content.length / options.targetBlocks);
         if (tableIndex < totalTables && random() < (totalTables / options.targetBlocks) * 1.6) {
           tableIndex += 1;
           const token = `TBL-${String(tableIndex).padStart(3, '0')}`;
@@ -215,7 +214,6 @@ function build(options) {
             caption: `${token} ${sentence(random, direction, 5).replace(/\.$/, '')}`,
           });
         }
-        void progress;
       }
 
       if (b === subsections && random() < 0.35) {

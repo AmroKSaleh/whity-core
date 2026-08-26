@@ -156,6 +156,11 @@ app.post('/render', renderRateLimiter, async (req, res) => {
  * generated front matter. A caller cannot know either in advance — that is
  * the definition of a flowing document — and both are needed to check that
  * what came back is what was asked for.
+ *
+ * Shares `renderRateLimiter` with `POST /render` rather than getting its own,
+ * because the resource being protected is the same one: a single Chromium
+ * instance. Two independent windows would let a caller drive twice the
+ * concurrent renders by alternating endpoints.
  */
 app.post('/render/flow', renderRateLimiter, async (req, res) => {
   if (!isAuthorized(req)) {
