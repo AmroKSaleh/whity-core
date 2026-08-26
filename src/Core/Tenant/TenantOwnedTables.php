@@ -365,6 +365,22 @@ final class TenantOwnedTables
         'forms' => '127_create_forms.php',
         'form_fields' => '127_create_forms.php',
         'form_submissions' => '127_create_forms.php',
+        // Convening (migrations 130/131) — deliberative bodies, who sits on
+        // them, their meetings, the agenda each meeting carries, the decisions
+        // taken, and who was invited. All six are tenant-owned without
+        // exception, and none of them has a public or cross-tenant read
+        // anywhere: a body is a tenant's own governance structure, and even the
+        // invitation reply — the one act performed by somebody who may hold no
+        // permission at all — resolves the invitation through the caller's own
+        // bound tenant. No statement in the subsystem carries a guard
+        // annotation, which is the property to preserve rather than a
+        // coincidence to note.
+        'convening_bodies' => '130_create_convening.php',
+        'convening_body_members' => '130_create_convening.php',
+        'meetings' => '130_create_convening.php',
+        'meeting_agenda_items' => '130_create_convening.php',
+        'meeting_decisions' => '130_create_convening.php',
+        'meeting_invitations' => '130_create_convening.php',
     ];
 
     /**
