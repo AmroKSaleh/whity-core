@@ -208,11 +208,33 @@ class Router
 
             $matches = [];
             if (preg_match($route['pattern'], $path, $matches) === 1) {
-                // Extract named parameters
+                // Extract named parameters, PERCENT-DECODED (#1078).
+                //
+                // The same one-line fix as {@see \Whity\Core\Router::match()} in
+                // the canonical `src/Core/Router.php`, which carries the full
+                // reasoning: `rawurldecode` rather than `urldecode` (a `+` is a
+                // literal plus in a path segment), exactly once (an identifier
+                // containing the text `%20` arrives as `%2520`), and applied to
+                // the captured VALUES rather than to the path (so matching and
+                // `{id:\d+}` constraints still see the raw segment).
+                //
+                // Carried here because this host is not a thinner core, it is
+                // the SAME core running offline: it serves the same plugin
+                // routes to the same block trees. Leaving it would have meant
+                // the wrong record on precisely the deployments that run
+                // disconnected — and an Arabic identifier percent-encodes
+                // entirely, so for an institution whose records are named in
+                // Arabic that is not an edge case but every lookup.
+                //
+                // NOTE: this file is a vendored copy that NOTHING GUARDS.
+                // `scripts/ci-vendored-sdk-parity.php` compares `php-host/sdk/src`
+                // against `sdk/src` and stops there, so `php-host/src/Core` can
+                // drift silently — and already had, by at least one method
+                // (`versionedPath`) before this change.
                 $params = [];
                 foreach ($matches as $key => $value) {
                     if (!is_numeric($key)) {
-                        $params[$key] = $value;
+                        $params[$key] = rawurldecode($value);
                     }
                 }
 
