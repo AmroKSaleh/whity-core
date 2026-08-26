@@ -48,6 +48,12 @@ use Whity\Core\Hooks\HookManager;
  * list, and only the second is a reason to close with confidence. The report
  * carries which one it was, so a screen can say "nothing is tracking unfinished
  * work in this period" rather than implying an all-clear nobody gave.
+ *
+ * THE CONTRACT THAT MAKES THAT WORK: a contributor with nothing to report
+ * contributes a group with `count` 0 rather than contributing nothing. Staying
+ * silent is how a contributor says "I do not track this period", and it is not
+ * the same statement as "I track it and it is clear". A contributor that
+ * conflates them turns its own all-clear into a shrug.
  */
 final class WindowCloseReporter
 {
