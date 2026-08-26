@@ -148,6 +148,99 @@ final class FormFrontendFeaturesTest extends TestCase
     }
 
     /**
+     * The public-link control exists, on both ends, aimed at the right routes.
+     *
+     * Two assertions rather than one because the two halves have different
+     * failure modes and only one of them is visible. A missing OPEN control is a
+     * feature nobody can use and somebody notices in a day; a missing CLOSE
+     * control is a form that cannot be shut off, which nobody notices until the
+     * day it matters. Both are pinned here so a tidy-up that removes either
+     * fails.
+     *
+     * The endpoints are asserted in their EMITTED `/api/v1/...` form, and the
+     * open control's path carries `{builderForm}` — the master-detail token the
+     * selector publishes — because a submit endpoint interpolates from the same
+     * context a source does.
+     */
+    public function testTheBuilderCanBothOpenAndCloseAPublicLink(): void
+    {
+        $builder = null;
+        foreach (FormFrontendFeatures::all() as $feature) {
+            if ($feature['id'] === FormFrontendFeatures::BUILDER_ID) {
+                $builder = $feature;
+            }
+        }
+        self::assertIsArray($builder);
+
+        /** @var list<mixed> $blocks */
+        $blocks = $builder['blocks'];
+        $declared = self::mutationsIn($blocks);
+
+        self::assertContains(
+            'POST /api/v1/forms/{builderForm}/public-link',
+            $declared,
+            'the builder must be able to OPEN a public link'
+        );
+        self::assertContains(
+            'DELETE /api/v1/forms/{id}/public-link',
+            $declared,
+            'the builder must be able to CLOSE one, from the catalogue, in one click'
+        );
+    }
+
+    /**
+     * Every "METHOD path" a tree can send, from a `form`/`actionButton` submit
+     * spec or a `dataTable` row action.
+     *
+     * @param list<mixed> $blocks
+     * @return list<string>
+     */
+    private static function mutationsIn(array $blocks): array
+    {
+        $out = [];
+        foreach ($blocks as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+
+            foreach (['submit', 'action'] as $key) {
+                $spec = $node[$key] ?? null;
+                if (is_array($spec) && is_string($spec['method'] ?? null) && is_string($spec['endpoint'] ?? null)) {
+                    $out[] = $spec['method'] . ' ' . $spec['endpoint'];
+                }
+            }
+
+            foreach (['rowActions', 'nodeActions'] as $key) {
+                $actions = $node[$key] ?? null;
+                if (!is_array($actions)) {
+                    continue;
+                }
+                foreach ($actions as $action) {
+                    if (
+                        is_array($action)
+                        && is_string($action['method'] ?? null)
+                        && is_string($action['endpoint'] ?? null)
+                    ) {
+                        $out[] = $action['method'] . ' ' . $action['endpoint'];
+                    }
+                }
+            }
+
+            foreach (BlockContract::knownChildSlots() as $slot) {
+                if (isset($node[$slot]) && is_array($node[$slot])) {
+                    /** @var list<mixed> $children */
+                    $children = $node[$slot];
+                    foreach (self::mutationsIn($children) as $child) {
+                        $out[] = $child;
+                    }
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Every `type` in a tree, including inside every child slot the contract
      * declares — asking {@see BlockContract::childSlots()} rather than reaching
      * for `children`, so a slot added later is not silently skipped here.

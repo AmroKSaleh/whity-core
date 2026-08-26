@@ -230,6 +230,28 @@ class EnforceTenantIsolation
         // POST to this path is a 404 from the router rather than an
         // unauthenticated write that got this far.
         '#^/api/v1/document-verifications/[^/]+$#',
+        // Migration 132: an OPT-IN public form. The person filling in an
+        // external application has no account and, in the case this exists for,
+        // never will — so there is nothing here for this middleware to resolve.
+        // The 256-bit slug names its own tenant, exactly as an invitation and a
+        // verification token do above, and every read and write
+        // {@see \Whity\Api\PublicFormsApiHandler} makes after the lookup binds
+        // the tenant that lookup returned rather than anything the caller said.
+        //
+        // TWO ANCHORED SHAPES, not an open `/api/v1/public/` prefix. An open
+        // prefix is a standing invitation for the next route added beneath it to
+        // become public by accident — the `/api/v1/translations/` lesson three
+        // entries up — and the word "public" in the path makes it likelier here
+        // than anywhere, because it reads as a place to put things rather than as
+        // two specific routes that were each argued for.
+        //
+        // The second is the only PUBLIC WRITE on this list, which is why it is
+        // spelled exactly and not as an optional trailing segment. It is
+        // throttled per IP and per form inside the handler, the tenant never
+        // comes from the request, and CsrfGuard still applies to any caller who
+        // arrives carrying an ambient cookie.
+        '#^/api/v1/public/forms/[^/]+$#',
+        '#^/api/v1/public/forms/[^/]+/submissions$#',
     ];
 
     /**
