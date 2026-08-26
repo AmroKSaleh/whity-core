@@ -69,7 +69,7 @@ final class FormRenderer
         return [
             'form' => $form,
             'fields' => $fields,
-            'sections' => self::sections($fields),
+            'sections' => self::sectionsOf($fields),
             'prefill' => $this->prefill->forFields($tenantId, $profileId, $fields),
             // Reported rather than swallowed. A field naming a source this
             // install cannot resolve renders as an empty box, which is correct
@@ -88,10 +88,20 @@ final class FormRenderer
     /**
      * Group the field keys by section, preserving field order.
      *
+     * PUBLIC, and called from {@see PublicFormView::form()} as well as from
+     * {@see render()} above. Sections are DERIVED from the fields (see the class
+     * docblock), so the public surface must derive them the same way or a
+     * publicly-served form would group its fields differently from the same form
+     * seen by a signed-in colleague — for no reason either of them could find.
+     * One function, two callers, is what makes that impossible.
+     *
+     * It reads only `section_key` and `field_key`, so it works unchanged on the
+     * REDUCED field rows the public view emits.
+     *
      * @param list<array<string, mixed>> $fields
      * @return list<array{key: ?string, field_keys: list<string>}>
      */
-    private static function sections(array $fields): array
+    public static function sectionsOf(array $fields): array
     {
         /** @var array<string, list<string>> $grouped Keyed by section, '' for none. */
         $grouped = [];

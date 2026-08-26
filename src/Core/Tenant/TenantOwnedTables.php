@@ -362,6 +362,29 @@ final class TenantOwnedTables
         // mechanisms that could disagree is exactly one too many, so the
         // submission binds its own `tenant_id` on every read and never infers one
         // from the document it names.
+        //
+        // ONE EXCEPTION, ADDED BY MIGRATION 132 AND WORTH READING BEFORE THE
+        // NEXT ONE IS PROPOSED. `forms` may carry an opt-in PUBLIC SLUG, and
+        // {@see \Whity\Core\Form\FormRepository::findByPublicSlug()} reads by
+        // that slug with NO tenant predicate. It is not a gap in the scoping —
+        // it is the read that ESTABLISHES the tenant, on a path where the caller
+        // has no account and therefore no tenant for the middleware to resolve.
+        // Every alternative source (an X-Tenant-Id header, a query parameter,
+        // the Host header) is a value the anonymous caller chooses, so reading
+        // one would let a stranger aim a public form at an organisation that
+        // never published a link.
+        //
+        // It is safe because the slug is 256 random bits under a GLOBAL partial
+        // unique index, so it names exactly one row; and it is bounded because
+        // it is the ONLY unpredicated statement in the subsystem — everything
+        // {@see \Whity\Api\PublicFormsApiHandler} does afterwards binds the
+        // tenant_id that lookup returned. It carries an explicit
+        // `@tenant-guard-ignore` annotation, exactly as
+        // `document_qr_tokens` and `invitations` do for the same shape.
+        //
+        // `form_fields` and `form_submissions` gain NO exception: the public
+        // handler reads fields and writes a submission with the resolved tenant
+        // bound like any other caller.
         'forms' => '127_create_forms.php',
         'form_fields' => '127_create_forms.php',
         'form_submissions' => '127_create_forms.php',

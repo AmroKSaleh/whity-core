@@ -1204,6 +1204,126 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Form not found'),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/public-link', 'forms:manage', [
+                'summary' => 'Open this form to people who have no account, minting its public address',
+                'description' =>
+                    'OPT-IN and OFF BY DEFAULT on every form: `public_enabled` is only ever true '
+                    . 'because of this call. It mints a 256-bit random slug and returns the absolute '
+                    . '`public_url` built from it — the ONLY credential the public endpoints have, '
+                    . 'which is why it is random rather than derived from the form id or key: a '
+                    . 'guessable address makes the whole catalogue of an install\'s forms walkable '
+                    . 'with curl. '
+                    . 'REFUSED (422) on a form that is not `published` (a link to one answers 404 to '
+                    . 'everybody who follows it), and on a form carrying a `profile_ref`, `ou_ref` or '
+                    . '`file` field — the reference kinds would make the public submit a MEMBERSHIP '
+                    . 'ORACLE, since the existence check behind them reveals whether a given id '
+                    . 'belongs to this organisation, and a file field needs an upload an anonymous '
+                    . 'caller cannot perform. '
+                    . '`opens_at` / `closes_at` are optional; either may be null for "no boundary on '
+                    . 'this side". They are naive local date-times in the instance\'s own clock, and a '
+                    . 'UTC offset is REFUSED rather than silently applied. '
+                    . 'Re-opening after a close mints a DIFFERENT address: a withdrawn link stays '
+                    . 'withdrawn.',
+                'tags' => ['forms'],
+                'request' => 'FormPublicLinkRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The form, with its new public link', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form already has a public link, or it moved under this request'),
+                    422 => self::errorResponse(
+                        'The form is not published, carries a field a stranger could not answer, '
+                        . 'or the window is malformed'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/forms/{id:\d+}/public-link', 'forms:manage', [
+                'summary' => "Close this form's public link",
+                'description' =>
+                    'The slug is DESTROYED, not parked beside a disabled flag, so the old address is '
+                    . 'unresolvable by construction rather than by a check somebody could remove. The '
+                    . 'window dates go with it. IDEMPOTENT: closing a link that is already closed is a '
+                    . '200, because a client that lost a response must be able to retry; '
+                    . '`meta.closed` says whether this call was the one that changed anything. '
+                    . 'Submissions already received are untouched.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, with no public link', 'FormPublicLinkClosedResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'GET',
+                'path' => '/api/public/forms/{slug}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Render a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'PUBLIC and unauthenticated by design: the caller is somebody outside the '
+                        . 'organisation — an applicant, a supplier, a member of the public — who has no '
+                        . 'account and does not need one. '
+                        . 'THE TENANT IS RESOLVED FROM THE SLUG, never from a header, a query parameter '
+                        . 'or the Host — all of which are values this caller chooses. '
+                        . 'A malformed slug, an unknown slug, a form whose link was closed, and a form '
+                        . 'that is not published all produce THE SAME 404 with the same sentence, so '
+                        . 'this endpoint cannot be asked which slugs name a real form or whether an '
+                        . 'organisation uses public forms at all. '
+                        . 'The response carries NO id, tenant id, form key, author, route template, '
+                        . 'submission count, status, version or prefill — an anonymous caller has no '
+                        . 'saved details for the platform to pre-fill, and nothing about how the '
+                        . 'organisation works is disclosed. '
+                        . 'Person, unit and file fields are omitted from the field list, for the reason '
+                        . 'POST /api/v1/forms/{id}/public-link refuses them. '
+                        . 'A form OUTSIDE its submission window still renders, with '
+                        . '`accepts_submissions: false` and the window dates, so somebody holding a '
+                        . 'genuine link is told they are early or late rather than that the link is '
+                        . 'wrong.',
+                    'tags' => ['forms'],
+                    'responses' => [
+                        200 => self::jsonResponse('The form, as a stranger may see it', 'PublicFormResponse'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        429 => self::errorResponse('Too many attempts from this address'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/public/forms/{slug}/submissions',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Submit a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'The answers arrive under `data`, keyed by field key, and NOTHING ELSE in the '
+                        . 'body is read — a body that could also set `submitted_by_profile_id`, '
+                        . '`form_version` or a route template would let an anonymous stranger sign a '
+                        . 'declaration in somebody\'s name or aim it at a flow the organisation did not '
+                        . 'choose. '
+                        . 'The submission is recorded with NO SUBMITTER '
+                        . '(`form_submissions.submitted_by_profile_id` is NULL — no sentinel profile, '
+                        . 'because a fake person is something every membership and permission check '
+                        . 'would have to know to special-case). '
+                        . 'It BECOMES A DOCUMENT and circulates through the tenant\'s existing routing '
+                        . 'engine exactly as an internal submission does, which is safe because the '
+                        . 'caller cannot name a route template: it lives on the FORM, is set only by '
+                        . '`forms:manage`, and is never read from a request body. '
+                        . 'Throttled per IP and per form. '
+                        . 'The response is a receipt, not the submission row: no id, no document id, '
+                        . 'no tenant id.',
+                    'tags' => ['forms'],
+                    'request' => 'FormSubmissionCreateRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('Received', 'PublicFormSubmissionResponse'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        422 => self::errorResponse(
+                            'An answer failed validation, or the form is outside its submission window'
+                        ),
+                        429 => self::errorResponse('Too many attempts from this address, or for this form'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ],
+            ],
             self::permissionRoute('GET', '/api/form-fields', 'forms:read', [
                 'summary' => "One form's fields, addressed by query param",
                 'description' => 'The same list as GET /api/v1/forms/{id}/fields, reachable by '
@@ -5273,9 +5393,37 @@ final class CoreApiSchemas
                 'updated_at' => self::str(),
                 'available_transitions' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'accepts_submissions' => self::bool(),
+                // THE PUBLIC LINK (migration 132). Off by default on every form
+                // in every install: `public_enabled` is only ever true because
+                // somebody holding `forms:manage` called
+                // POST /api/v1/forms/{id}/public-link.
+                'public_enabled' => self::bool(),
+                // 64 hex characters — 256 bits from a CSPRNG. It is the ONLY
+                // credential the public endpoints have, so treat it as one: it is
+                // returned to tenant members (who must be able to hand the link
+                // out) and to nobody else. Null when the form has no link.
+                'public_slug' => self::str(true),
+                // The absolute address the form is served from, composed from the
+                // slug and this instance's own APP_URL rather than stored — an
+                // instance that moves domain must not serve a column pointing at
+                // where it used to live. Null when there is no link, and ALSO
+                // null when the instance has never been told its own address.
+                'public_url' => self::str(true),
+                // The submission window. Either may be null, meaning "no boundary
+                // on this side". Naive local date-times in the instance's own
+                // clock, like every other timestamp in this schema.
+                'public_opens_at' => self::str(true),
+                'public_closes_at' => self::str(true),
+                'public_enabled_at' => self::str(true),
+                'public_enabled_by_profile_id' => self::int(true),
+                // DERIVED, computed by the database against its own clock: is the
+                // form inside its window right now? Emitted so a client does not
+                // compare timestamps in a second timezone and disagree with the
+                // server about whether a link is live.
+                'public_window_open' => self::bool(),
             ], [
                 'id', 'tenant_id', 'form_key', 'name', 'status', 'version',
-                'available_transitions', 'accepts_submissions',
+                'available_transitions', 'accepts_submissions', 'public_enabled',
             ]),
             'FormResponse' => self::dataEnvelope(SchemaBuilder::ref('Form')),
             'FormListResponse' => self::listEnvelope('Form'),
@@ -5447,6 +5595,88 @@ final class CoreApiSchemas
                 // narrower map: one schema cannot express "shaped by another row".
                 'data' => ['type' => 'object', 'additionalProperties' => true],
             ], ['data']),
+            // ---- the public link (migration 132) ----
+            // Both boundaries optional and either nullable: null means "no
+            // boundary on this side", which is the ordinary case and must not
+            // need a sentinel date. A UTC offset is REFUSED rather than applied —
+            // the column is a naive TIMESTAMP compared against the database's own
+            // clock, so accepting one would move the deadline somebody typed
+            // without saying so.
+            'FormPublicLinkRequest' => self::object([
+                'opens_at' => [
+                    'type' => 'string',
+                    'nullable' => true,
+                    'description' => 'YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS] in the instance\'s own '
+                        . 'time zone. A bare date means the START of that day.',
+                ],
+                'closes_at' => [
+                    'type' => 'string',
+                    'nullable' => true,
+                    'description' => 'Same format. A bare date closes at MIDNIGHT THAT MORNING, so '
+                        . '"all of the 30th" is written as the 31st or as an explicit time.',
+                ],
+            ], []),
+            // `meta.closed` is the honest way to be idempotent: the call always
+            // succeeds, and this says whether it was the one that changed
+            // anything.
+            'FormPublicLinkClosedResponse' => self::object([
+                'data' => SchemaBuilder::ref('Form'),
+                'meta' => self::object(['closed' => self::bool()], ['closed']),
+            ], ['data']),
+            // WHAT A STRANGER SEES. Deliberately NOT `Form` plus omissions — it is
+            // its own, much smaller shape, built key by key, so a column added to
+            // `forms` next year is invisible here unless somebody adds it. No id,
+            // no tenant id, no form key, no author, no route template, no
+            // submission count, no status, no version, and no prefill.
+            'PublicFormResponse' => self::dataEnvelope(self::object([
+                'slug' => self::str(),
+                'name' => self::localizedText(),
+                'description' => self::str(true),
+                'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('PublicFormField')],
+                'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                'accepts_submissions' => self::bool(),
+                'opens_at' => self::str(true),
+                'closes_at' => self::str(true),
+            ], ['slug', 'name', 'fields', 'sections', 'accepts_submissions'])),
+            // A field, reduced to what drawing it requires. `id`, `tenant_id` and
+            // `form_id` are internal identifiers a stranger has no use for and
+            // could try elsewhere; `prefill_source` is withheld even though it
+            // holds no value of this caller's, because naming `profile.ou` tells
+            // an outsider the platform models organisational units and that this
+            // form expects one — a free sentence about internals, for a field
+            // that renders identically without it.
+            //
+            // `validation` IS disclosed: the server enforces it either way, so
+            // withholding it only means the person discovers the rule by being
+            // refused.
+            'PublicFormField' => self::object([
+                'field_key' => self::str(),
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select', 'multiselect', 'checkbox',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::str(true),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'validation' => ['type' => 'object', 'additionalProperties' => true],
+                'section_key' => self::str(true),
+                'position' => self::int(),
+                'multi_valued' => self::bool(),
+            ], ['field_key', 'field_type', 'label', 'is_required', 'position']),
+            // A RECEIPT, not the submission row. An anonymous caller gets
+            // confirmation and the timestamp of their own act — never the
+            // submission id, the document id or the tenant id, which would hand
+            // them integers to try against every other surface.
+            'PublicFormSubmissionResponse' => self::object([
+                'data' => self::object([
+                    'received' => self::bool(),
+                    'submitted_at' => self::str(true),
+                ], ['received']),
+                'meta' => self::object([
+                    'routed' => self::bool(),
+                    'ignored_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ], ['routed', 'ignored_keys']),
+            ], ['data']),
             'FormSubmission' => self::object([
                 'id' => self::int(),
                 'tenant_id' => self::int(),
@@ -5454,6 +5684,13 @@ final class CoreApiSchemas
                 // The version the answers were given against. See the publish
                 // route for exactly what this stamp does and does not promise.
                 'form_version' => self::int(),
+                // NULL has two ordinary causes and neither is an error: a service
+                // principal has no profile, and a submission made through a
+                // PUBLIC LINK (migration 132) has no account behind it at all.
+                // There is no sentinel "anonymous" profile — a fake person is
+                // something every membership check and permission resolution
+                // would have to know to special-case, and the ones that did not
+                // would treat it as real.
                 'submitted_by_profile_id' => self::int(true),
                 // Null is ORDINARY: a form with no route template records the
                 // answers and mints no document, and a document deleted later

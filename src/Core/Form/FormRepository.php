@@ -6,6 +6,7 @@ namespace Whity\Core\Form;
 
 use PDO;
 use PDOException;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access layer for `forms` (migration 127). All SQL touching the table
@@ -17,6 +18,22 @@ use PDOException;
  * from another tenant is reported as ABSENT rather than forbidden — form ids are
  * enumerable integers, and "403" on one and "404" on another is an enumeration
  * oracle for which ids exist elsewhere in the install.
+ *
+ * WITH EXACTLY ONE EXCEPTION, AND IT IS THE FEATURE (migration 132)
+ * -----------------------------------------------------------------
+ * {@see findByPublicSlug()} binds NO tenant predicate, because it is reached
+ * from the anonymous public endpoints where there is no tenant context by
+ * construction — the caller has no account, so there is nothing to resolve one
+ * from. It is the read that DERIVES the tenant, and it derives it from a 256-bit
+ * slug that names exactly one row (migration 132's global partial unique index)
+ * rather than from any header or host the caller supplies. It carries an
+ * explicit guard annotation, the reasoning is in its own docblock, and
+ * `forms` records the exception in {@see \Whity\Core\Tenant\TenantOwnedTables} —
+ * the same shape
+ * {@see \Whity\Core\Document\Qr\DocumentQrTokenRepository::findByToken()} and
+ * `InvitationService::findLiveByToken()` already have.
+ *
+ * Everything AFTER that lookup binds the tenant it returned.
  *
  * NO DELETE. See {@see FormStatus} for the argument: a form is what somebody's
  * submission was an answer to, and destroying it makes every submission against
@@ -32,7 +49,34 @@ final class FormRepository
      * cannot reach one caller and not another.
      */
     private const COLUMNS = 'id, tenant_id, form_key, name, description, status, version,
-                             route_template_id, created_by_profile_id, created_at, updated_at';
+                             route_template_id, created_by_profile_id, created_at, updated_at,
+                             public_enabled, public_slug, public_opens_at, public_closes_at,
+                             public_enabled_at, public_enabled_by_profile_id,
+                             ' . self::WINDOW_OPEN_SQL . ' AS public_window_open';
+
+    /**
+     * Whether the form is inside its public submission window RIGHT NOW,
+     * computed in SQL against the DATABASE'S clock.
+     *
+     * In the query rather than in PHP, deliberately. `public_opens_at` and
+     * `public_closes_at` are written from `NOW()` like every other timestamp in
+     * this schema, and comparing them against a PHP `new DateTimeImmutable()`
+     * would introduce a SECOND clock plus a timezone question — so a window
+     * would open at a different instant depending on which process asked, and
+     * nothing on the row would say why. One clock, the one that wrote the
+     * columns.
+     *
+     * A NULL boundary means "no boundary on this side" (migration 132), which is
+     * why each half is `IS NULL OR …` rather than a comparison against a
+     * sentinel date. Both null therefore yields TRUE: a form with no window is
+     * always inside it.
+     *
+     * The parentheses are load-bearing — `AND` binds tighter than `OR`, and
+     * without them this reads as an entirely different predicate that is true
+     * whenever the form has no opening date.
+     */
+    private const WINDOW_OPEN_SQL = '((public_opens_at IS NULL OR public_opens_at <= NOW())
+                                      AND (public_closes_at IS NULL OR public_closes_at > NOW()))';
 
     /**
      * The widest a `form_key` may be, matching `VARCHAR(128)` in migration 127.
@@ -126,6 +170,166 @@ final class FormRepository
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $row === false ? null : self::normalizeRow($row);
+    }
+
+    /**
+     * THE ANONYMOUS LOOKUP (migration 132): the one form a public slug names, or
+     * null.
+     *
+     * THIS IS THE ONLY READ IN THE SUBSYSTEM WITH NO TENANT PREDICATE, and that
+     * is the feature rather than a gap. The caller has no account, so there is no
+     * session, no JWT and no tenant to bind — and the tenant must come from
+     * SOMEWHERE. Every alternative source is a value the anonymous caller
+     * chooses: an `X-Tenant-Id` header, a `?tenant=` parameter, the Host header.
+     * Reading the tenant off any of them would let a stranger point a public form
+     * at somebody else's organisation by editing a request.
+     *
+     * So the tenant is DERIVED FROM THE SLUG, and the slug can name exactly one
+     * row because migration 132 declares a GLOBAL partial unique index on it. The
+     * row it returns carries `tenant_id`, and every read and write the public
+     * handlers make afterwards binds THAT value — never anything from the
+     * request. See {@see \Whity\Api\PublicFormsApiHandler}.
+     *
+     * IT RETURNS THE ROW WHATEVER ITS STATE — draft, archived, public link
+     * disabled, window closed. Filtering here would push the disclosure decision
+     * into the data layer, where the tenant's status and the caller's entitlement
+     * to know it are both out of scope, and it would make "unknown slug" and
+     * "known slug, closed form" indistinguishable to the HANDLER as well as to
+     * the caller — so the handler could no longer choose to distinguish them
+     * where that is the right answer (an expired window says when it reopens; a
+     * disabled link says nothing at all). {@see PublicFormLink} makes that
+     * decision, once, where the whole row is in scope. Same split
+     * {@see \Whity\Core\Document\Qr\DocumentQrTokenRepository::findByToken()}
+     * makes with {@see \Whity\Core\Document\Qr\VerificationPresenter}.
+     *
+     * The slug is compared with `=` on an indexed column, so a wrong slug costs
+     * one index probe and nothing else.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findByPublicSlug(string $slug): ?array
+    {
+        // The annotation is ONE comment, on the line directly above the
+        // statement, because that is where the scanner looks — a multi-line `//`
+        // block is a separate token per line and only the line carrying the tag
+        // counts. The full argument is in this method's docblock.
+        //
+        // @tenant-guard-ignore: the anonymous public-form lookup — this read is what RESOLVES the tenant, from a 256-bit slug under a global unique index (migration 132), on a path where the caller has no account and there is nothing else to resolve one from. Every subsequent read and write in PublicFormsApiHandler binds the tenant_id it returns. Mirrors DocumentQrTokenRepository::findByToken(); recorded against `forms` in TenantOwnedTables.
+        $stmt = $this->db->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM forms WHERE public_slug = :public_slug LIMIT 1'
+        );
+        $stmt->execute([':public_slug' => $slug]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : self::normalizeRow($row);
+    }
+
+    /**
+     * Open a form to the public, minting a fresh slug.
+     *
+     * ALWAYS A NEW SLUG, even on a form that was open a minute ago and closed:
+     * see {@see PublicFormLink} for why re-opening must not resurrect a
+     * withdrawn address.
+     *
+     * The WHERE clause re-binds `public_enabled = FALSE` so two concurrent
+     * enables cannot both mint. The second one writes nothing, its `rowCount()`
+     * is 0, and the caller is told the form moved under it — which is true, and
+     * better than two slugs existing where the loser's is unreachable but live.
+     *
+     * `tenant_id` is bound as well as `id`: a form id from another tenant
+     * updates nothing, so a caller cannot open somebody else's form to the
+     * internet by guessing an integer.
+     *
+     * @throws FormRejectedException When the form is no longer closed, or when
+     *         the minted slug collided (which is not a state that occurs — see
+     *         below — and is refused rather than retried anyway).
+     */
+    public function enablePublicLink(
+        int $tenantId,
+        int $id,
+        string $slug,
+        ?string $opensAt,
+        ?string $closesAt,
+        ?int $enabledByProfileId,
+    ): void {
+        try {
+            $stmt = $this->db->prepare(
+                'UPDATE forms
+                    SET public_enabled = TRUE,
+                        public_slug = :public_slug,
+                        public_opens_at = :opens_at,
+                        public_closes_at = :closes_at,
+                        public_enabled_at = NOW(),
+                        public_enabled_by_profile_id = :enabled_by,
+                        updated_at = NOW()
+                  WHERE tenant_id = :tenant_id AND id = :id AND public_enabled = FALSE'
+            );
+            $stmt->execute([
+                ':public_slug' => $slug,
+                ':opens_at' => $opensAt,
+                ':closes_at' => $closesAt,
+                ':enabled_by' => $enabledByProfileId,
+                ':tenant_id' => $tenantId,
+                ':id' => $id,
+            ]);
+        } catch (PDOException $e) {
+            // The unique index is the authority on collision, not a preceding
+            // SELECT — the same posture create() takes about `form_key`. At 256
+            // bits a collision is not an event anybody will observe; the branch
+            // exists so that if the slug source were ever weakened, the failure
+            // is a refusal rather than two forms sharing an address.
+            throw new FormRejectedException(
+                'Could not open a public link for this form — please try again',
+                'forms public_slug update failed: ' . $e->getMessage(),
+                $e
+            );
+        }
+
+        if ($stmt->rowCount() === 0) {
+            throw new FormRejectedException(
+                'This form already has a public link — close it first if you want a new address'
+            );
+        }
+    }
+
+    /**
+     * Close a form's public link.
+     *
+     * The slug is set to NULL rather than kept beside `public_enabled = FALSE`,
+     * and that is the point of the operation: a retained slug is a live row in a
+     * unique index and a value that a future bug could serve again. Nulling it
+     * makes the old address unresolvable by construction —
+     * {@see findByPublicSlug()} matches on the column, and there is nothing left
+     * to match.
+     *
+     * `public_enabled_at` / `public_enabled_by_profile_id` are cleared with it so
+     * the pair always describes the CURRENT opening; migration 132 records why.
+     * The window dates are cleared too — they belonged to the link that just
+     * ended, and leaving them would silently apply March's deadline to a link
+     * opened in November.
+     *
+     * IDEMPOTENT: closing a link that is already closed writes nothing and is not
+     * an error. A client that lost a response must be able to retry, and "the
+     * door you asked me to shut is shut" is a success.
+     *
+     * @return bool Whether a row actually changed.
+     */
+    public function disablePublicLink(int $tenantId, int $id): bool
+    {
+        $stmt = $this->db->prepare(
+            'UPDATE forms
+                SET public_enabled = FALSE,
+                    public_slug = NULL,
+                    public_opens_at = NULL,
+                    public_closes_at = NULL,
+                    public_enabled_at = NULL,
+                    public_enabled_by_profile_id = NULL,
+                    updated_at = NOW()
+              WHERE tenant_id = :tenant_id AND id = :id AND public_slug IS NOT NULL'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':id' => $id]);
+
+        return $stmt->rowCount() > 0;
     }
 
     /**
@@ -306,6 +510,36 @@ final class FormRepository
                 : (int) $row['created_by_profile_id'],
             'created_at' => (string) $row['created_at'],
             'updated_at' => (string) $row['updated_at'],
+            // ---- the public link (migration 132) ----
+            //
+            // Read through DbBool rather than a `(bool)` cast: a BOOLEAN column
+            // comes back as bool, '1'/'0', 't'/'f' or 'true'/'false' depending on
+            // the driver, and `(bool) 'false'` is TRUE — which on THIS column
+            // would report every form in the install as open to the public. See
+            // {@see \Whity\Core\Db\DbBool} and scripts/ci-db-bool-guard.php.
+            'public_enabled' => DbBool::of($row['public_enabled'] ?? false),
+            // The slug is returned to tenant members, and that is a decision
+            // rather than an oversight: it is not a secret FROM them. The point
+            // of enabling a link is to hand it out, so an author who cannot read
+            // it back cannot use the feature at all, and a `forms:read` holder is
+            // somebody the tenant already trusts with every submission the form
+            // received. It is withheld from exactly one audience — the anonymous
+            // caller, who already has it — see {@see PublicFormView}.
+            'public_slug' => $row['public_slug'] === null ? null : (string) $row['public_slug'],
+            'public_opens_at' => $row['public_opens_at'] === null ? null : (string) $row['public_opens_at'],
+            'public_closes_at' => $row['public_closes_at'] === null ? null : (string) $row['public_closes_at'],
+            'public_enabled_at' => $row['public_enabled_at'] === null
+                ? null
+                : (string) $row['public_enabled_at'],
+            'public_enabled_by_profile_id' => $row['public_enabled_by_profile_id'] === null
+                ? null
+                : (int) $row['public_enabled_by_profile_id'],
+            // Computed by the query, not by this method — see
+            // {@see self::WINDOW_OPEN_SQL} for why the comparison is the
+            // database's and not PHP's. Absent from a row this class did not
+            // fetch (it never is today) defaults to "inside", matching a form
+            // with no window at all.
+            'public_window_open' => DbBool::of($row['public_window_open'] ?? true),
             // Derived, never stored: a client rendering the lifecycle controls
             // should not have to carry a second copy of the transition table.
             // Absent from the column list on purpose — it is an opinion about

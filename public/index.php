@@ -2750,7 +2750,22 @@ $formRenderer = new \Whity\Core\Form\FormRenderer(
     new \Whity\Core\Form\PrefillResolver($db->getPdo())
 );
 
-$formsHandler = new \Whity\Api\FormsApiHandler($formRepository, $formRenderer, $formSubmissionRepository);
+// The link service (migration 132). $appUrl is the instance's own public origin,
+// trimmed further up — the same value DocumentQrService is given, so a public
+// form link and a QR verification link cannot disagree about where this
+// deployment lives. An instance that has never been told its address still MINTS
+// (the slug is what makes the endpoint reachable); it simply returns a null
+// `public_url` until somebody sets APP_URL, rather than emitting a relative path
+// nobody can put on a poster.
+$publicFormLink = new \Whity\Core\Form\PublicFormLink($appUrl);
+
+$formsHandler = new \Whity\Api\FormsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formRenderer,
+    $formSubmissionRepository,
+    $publicFormLink
+);
 $router->register('GET', '/api/forms', [$formsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
 $router->register('POST', '/api/forms', [$formsHandler, 'create'], null, null, CorePermissions::FORMS_MANAGE);
 $router->register('GET', '/api/forms/{id:\d+}', [$formsHandler, 'show'], null, null, CorePermissions::FORMS_READ);
@@ -2758,6 +2773,15 @@ $router->register('PATCH', '/api/forms/{id:\d+}', [$formsHandler, 'update'], nul
 $router->register('POST', '/api/forms/{id:\d+}/publish', [$formsHandler, 'publish'], null, null, CorePermissions::FORMS_MANAGE);
 $router->register('POST', '/api/forms/{id:\d+}/archive', [$formsHandler, 'archive'], null, null, CorePermissions::FORMS_MANAGE);
 $router->register('GET', '/api/forms/{id:\d+}/render', [$formsHandler, 'render'], null, null, CorePermissions::FORMS_SUBMIT);
+// Opening and closing the PUBLIC LINK (migration 132). Ordinary tenant-scoped
+// routes gated on `forms:manage` — the authoring permission, because opening a
+// form to the entire internet is an act of organisational policy and the single
+// most consequential thing that permission does. They are POST/DELETE on a
+// sub-resource rather than a `public_enabled` key on PATCH, for the same reason
+// publish and archive are endpoints: it must not be one stray key away from a
+// body that meant to fix a typo, and the audit must read it as an act.
+$router->register('POST', '/api/forms/{id:\d+}/public-link', [$formsHandler, 'enablePublicLink'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('DELETE', '/api/forms/{id:\d+}/public-link', [$formsHandler, 'disablePublicLink'], null, null, CorePermissions::FORMS_MANAGE);
 
 $formFieldsHandler = new \Whity\Api\FormFieldsApiHandler($formRepository, $formFieldRepository);
 $router->register('GET', '/api/form-fields', [$formFieldsHandler, 'listByQuery'], null, null, CorePermissions::FORMS_READ);
@@ -2786,6 +2810,47 @@ $router->register('GET', '/api/form-submissions/{id:\d+}', [$formSubmissionsHand
 // already name exactly one person, so a tenant-wide permission has nothing left
 // to decide (migration 113's "being a recipient IS the authorization").
 $router->register('GET', '/api/me/form-submissions', [$formSubmissionsHandler, 'listMine'], null, null, CorePermissions::FORMS_SUBMIT);
+
+// THE PUBLIC END (migration 132). Unauthenticated by construction — the person
+// filling in an external application has no account and the whole point is that
+// they do not need one.
+//
+// Registered with NO permission and NO role, which in this router means
+// "unprotected" (RbacMiddleware fails open on a route with neither). That is
+// only half the story and the other half is NOT here: a route the router leaves
+// unprotected is still refused with a 401 by EnforceTenantIsolation unless the
+// path is on its public list, so these two paths are added there as ANCHORED
+// PATTERNS — never an open `/api/v1/public/` prefix, which would make the next
+// route anybody adds beneath it public by default. That is the lesson
+// `/api/v1/translations/` records in that file, and this is the surface where
+// the mistake would be worst.
+//
+// A separate handler from FormsApiHandler on purpose: this one is constructed
+// with no RoleChecker, no visibility policy and no permission resolver of any
+// kind, and it holds NOTHING that can change a form's state. The structural half
+// of "an anonymous caller cannot open, close, edit or publish a form" is that
+// the class reachable without a session has no collaborator that could.
+//
+// The SAME SubmissionIssuer the authenticated path uses, not a reduced copy: a
+// public submission becomes a document and circulates through the existing
+// routing engine exactly as an internal one does. The caller cannot choose the
+// route template — it lives on the FORM, set only by `forms:manage` — so there
+// is no arbitrary flow for an unauthenticated caller to inject work into. See
+// PublicFormsApiHandler's docblock, point 6.
+$publicFormsHandler = new \Whity\Api\PublicFormsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    new \Whity\Core\Form\SubmissionIssuer(
+        $db->getPdo(),
+        $formSubmissionRepository,
+        $documentIssuer,
+        $routeTemplateRepository,
+        $documentRouter
+    ),
+    new DatabaseSharedStore($db->getPdo())
+);
+$router->register('GET', '/api/public/forms/{slug}', [$publicFormsHandler, 'render'], null);
+$router->register('POST', '/api/public/forms/{slug}/submissions', [$publicFormsHandler, 'submit'], null);
 
 // 13a-nonies-quater. Routing's recipients registered as an #881 INBOX SOURCE —
 // not a surface of their own. The `document_route_recipients` table IS an inbox,

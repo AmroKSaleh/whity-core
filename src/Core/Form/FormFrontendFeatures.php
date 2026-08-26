@@ -94,6 +94,15 @@ final class FormFrontendFeatures
      * author moves between constantly — the form and its fields — are never more
      * than a dropdown apart.
      *
+     * THE PUBLIC LINK (migration 132) IS DECLARED IN TWO PLACES, DELIBERATELY.
+     * OPENING one is a modal on the detail pane — a considered act, with the
+     * optional window beside it and a warning above it. CLOSING one is a row
+     * action on the catalogue table, because closing is what somebody does the
+     * moment they discover a form is collecting something it should not be, and
+     * an emergency control behind a dropdown and a modal is a control that
+     * arrives late. The resulting address is a FACT the server composed and the
+     * detail pane displays; nothing here builds a URL.
+     *
      * @return array<string, mixed>
      */
     private static function builder(): array
@@ -128,6 +137,14 @@ final class FormFrontendFeatures
                                 ['key' => 'form_key', 'label' => 'Key', 'sortable' => true, 'filterable' => true],
                                 ['key' => 'status', 'label' => 'Status', 'sortable' => true],
                                 ['key' => 'version', 'label' => 'Version'],
+                                // Which forms this organisation has opened to
+                                // people with no account. In the LIST rather than
+                                // only on the detail pane, because "what have we
+                                // exposed?" is a question asked about the whole
+                                // catalogue at once, and an answer somebody has
+                                // to click through twelve forms to assemble is an
+                                // answer nobody assembles.
+                                ['key' => 'public_enabled', 'label' => 'Public', 'sortable' => true],
                             ],
                             'rowActions' => [
                                 // Publish and archive are POSTs with an empty
@@ -147,6 +164,26 @@ final class FormFrontendFeatures
                                     'method' => 'POST',
                                     'confirm' => 'Archiving stops new submissions. '
                                         . 'Everything already submitted is kept. Continue?',
+                                ],
+                                // THE SHUT-OFF, and it is here rather than only
+                                // in the modal below because of WHEN it gets
+                                // used. Opening a public link is a considered act
+                                // that deserves a form with a date picker;
+                                // closing one is what somebody does the moment
+                                // they realise a form is collecting something it
+                                // should not be, and that must be one click from
+                                // the list. A DELETE row action rather than an
+                                // `actionButton` because `submitSpec` accepts
+                                // POST/PUT/PATCH only — `rowActionList` is the
+                                // one facet in the contract that carries DELETE.
+                                [
+                                    'label' => 'Close public link',
+                                    'endpoint' => '/api/v1/forms/{id}/public-link',
+                                    'method' => 'DELETE',
+                                    'confirm' => 'The public address stops working immediately and '
+                                        . 'cannot be brought back — re-opening the form mints a '
+                                        . 'different one. Submissions already received are kept. '
+                                        . 'Close it?',
                                 ],
                             ],
                         ],
@@ -243,6 +280,28 @@ final class FormFrontendFeatures
                                 ['field' => 'version', 'label' => 'Version'],
                                 ['field' => 'description', 'label' => 'Description'],
                                 ['field' => 'accepts_submissions', 'label' => 'Accepting submissions'],
+                                // THE LINK ITSELF. `public_url` is the whole
+                                // point of the control below — an address an
+                                // author copies onto a poster or into an email —
+                                // and it is a FACT the server composed from the
+                                // slug and this instance's own APP_URL, not
+                                // something a client assembles. A client that
+                                // built the URL itself would be a second place
+                                // the address is spelled, and the day the
+                                // deployment moves it would be the wrong one.
+                                //
+                                // It is empty until the link is opened, and it is
+                                // ALSO empty when the instance has never been told
+                                // its own address (APP_URL unset) — which is a
+                                // real state and shows as a blank field beside
+                                // "Open to the public: yes". `public_slug` is
+                                // deliberately NOT shown beside it: an author
+                                // needs the address, and a bare slug is a
+                                // credential in a place people copy from
+                                // carelessly.
+                                ['field' => 'public_enabled', 'label' => 'Open to the public'],
+                                ['field' => 'public_url', 'label' => 'Public link'],
+                                ['field' => 'public_closes_at', 'label' => 'Public link closes'],
                             ],
                         ],
                         [
@@ -285,6 +344,72 @@ final class FormFrontendFeatures
                                             'placeholder' => 'Do not route submissions',
                                         ],
                                         ['type' => 'submitButton', 'label' => 'Save changes'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        // THE PUBLIC LINK. A modal rather than a bare button
+                        // because opening a form to everybody with an internet
+                        // connection deserves a moment of deliberation and a
+                        // place to put the deadline — and because the window is
+                        // the difference between a link that closes itself on
+                        // the 30th and one that stays open until somebody
+                        // remembers. A control that could only be closed by hand
+                        // is a control that stays open.
+                        //
+                        // Both dates are OPTIONAL. The ordinary case is a form
+                        // that collects until it is closed, and requiring a
+                        // deadline to open a link would make the ordinary case
+                        // the awkward one.
+                        [
+                            'type' => 'modal',
+                            'id' => 'publicLinkModal',
+                            'title' => 'Open this form to the public',
+                            'trigger' => 'Open public link',
+                            'variant' => 'secondary',
+                            'children' => [
+                                [
+                                    'type' => 'alert',
+                                    'variant' => 'warning',
+                                    'title' => 'Anyone with the link can submit',
+                                    'body' => 'This creates a long, random, unguessable web address. '
+                                        . 'Anybody who has it can fill this form in without signing '
+                                        . 'in, and every submission is recorded and circulated '
+                                        . 'exactly as one from a colleague would be — with no name '
+                                        . 'attached, because there is no account behind it. Publish '
+                                        . 'the address only where you mean to. Closing the link '
+                                        . 'stops it immediately; re-opening mints a different one.',
+                                ],
+                                [
+                                    'type' => 'form',
+                                    // `{builderForm}` resolves from the selector
+                                    // above — a submit endpoint interpolates its
+                                    // tokens from the same master-detail context
+                                    // a source does, so the chosen form fills the
+                                    // PATH segment `params` cannot reach. Same
+                                    // mechanism the edit-form and add-field
+                                    // modals beside this one already use.
+                                    'submit' => [
+                                        'method' => 'POST',
+                                        'endpoint' => '/api/v1/forms/{builderForm}/public-link',
+                                    ],
+                                    'requiredPermission' => CorePermissions::FORMS_MANAGE,
+                                    'children' => [
+                                        [
+                                            'type' => 'dateInput',
+                                            'name' => 'opens_at',
+                                            'label' => 'Opens (optional)',
+                                        ],
+                                        [
+                                            'type' => 'dateInput',
+                                            'name' => 'closes_at',
+                                            'label' => 'Closes (optional)',
+                                        ],
+                                        [
+                                            'type' => 'submitButton',
+                                            'label' => 'Open public link',
+                                            'variant' => 'primary',
+                                        ],
                                     ],
                                 ],
                             ],
@@ -423,6 +548,24 @@ final class FormFrontendFeatures
                                 . 'details, so they do not retype what the organisation already knows. '
                                 . 'Sources that nothing in this install stores yet are shown in the '
                                 . 'field editor as unavailable, and simply leave the field empty.',
+                        ],
+                        // Said HERE, beside the field table, rather than only in
+                        // the 422 the server returns. An author who learns which
+                        // fields a public form cannot carry at the moment they
+                        // try to open the link has already built the form around
+                        // them; an author who reads it while adding fields
+                        // builds a different form.
+                        [
+                            'type' => 'alert',
+                            'variant' => 'info',
+                            'title' => 'Forms opened to the public',
+                            'body' => 'A published form can be given a public web link that people '
+                                . 'with no account can fill in. Such a form may only ask for values '
+                                . 'a stranger can actually give, so person, unit and file fields are '
+                                . 'refused on it: a person or unit field would ask somebody outside '
+                                . 'to name one of your records, and a file field needs an upload '
+                                . 'they cannot perform. Public submissions carry no submitter name, '
+                                . 'and nothing is ever pre-filled for them.',
                         ],
                     ],
                 ],
