@@ -80,6 +80,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       render_service: ${{ steps.filter.outputs.render_service }}
       i18n: ${{ steps.filter.outputs.i18n }}
+      date_display: ${{ steps.filter.outputs.date_display }}
       desktop_host: ${{ steps.filter.outputs.desktop_host }}
     steps:
       - name: Checkout code
@@ -1303,20 +1304,41 @@ jobs:
       # red, and merging is no longer blocked by it. That is the failure this
       # whole job exists to prevent, so it is checked rather than trusted to a
       # comment.
-      - name: The gate covers every job in this workflow
+      #
+      # The SECOND check is the same failure one level down, and it is worse
+      # because it is silent in both directions. A job gated on
+      # a change filter that is not declared in the `changes` job's `outputs:`
+      # reads back as an EMPTY string, never equals 'true', and skips
+      # on every run forever — and a skipped job is a passing job to the gate
+      # above, so nothing goes red. #1068 shipped a guard wired exactly that way
+      # and it was dead on arrival; the only thing that caught it was a person
+      # reading the check list.
+      - name: The gate covers every job, and every filter it gates on exists
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import sys, yaml
-          d = yaml.safe_load(open('.github/workflows/automated-tests.yml'))
+          import re, sys, yaml
+          raw = open('.github/workflows/automated-tests.yml').read()
+          d = yaml.safe_load(raw)
+          failed = False
+
           jobs = set(d['jobs']) - {'gate'}
           needs = set(d['jobs']['gate']['needs'])
-          missing = sorted(jobs - needs)
-          if missing:
-              for j in missing:
-                  print(f"::error::job '{j}' is not in the CI gate's `needs`, so branch protection does not cover it")
-              sys.exit(1)
-          print(f"gate covers all {len(jobs)} job(s)")
+          for j in sorted(jobs - needs):
+              print(f"::error::job '{j}' is not in the CI gate's `needs`, so branch protection does not cover it")
+              failed = True
+          if not failed:
+              print(f"gate covers all {len(jobs)} job(s)")
+
+          declared = set(d['jobs']['changes'].get('outputs') or {})
+          referenced = set(re.findall(r'needs\.changes\.outputs\.([A-Za-z0-9_]+)', raw))
+          for name in sorted(referenced - declared):
+              print(f"::error::`needs.changes.outputs.{name}` is read but not declared in the `changes` job's `outputs:` — it resolves to an empty string, so every job gated on it skips silently and forever")
+              failed = True
+          if referenced <= declared:
+              print(f"every one of {len(referenced)} change filter(s) is declared")
+
+          sys.exit(1 if failed else 0)
           PY
 
       - name: Every required job succeeded or was skipped
