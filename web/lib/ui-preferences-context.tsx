@@ -44,7 +44,7 @@ export function UiPreferencesProvider({
   initial: UiPreferences;
   children: ReactNode;
 }) {
-  const { user, isLoading: isAuthLoading, apiClient } = useAuth();
+  const { user, apiClient } = useAuth();
   const [preferences, setPreferences] = useState<UiPreferences>(initial);
 
   // The stable identity driving refetches: a login, a logout, a profile switch
@@ -53,9 +53,26 @@ export function UiPreferencesProvider({
   const userId = user !== null ? user.id : null;
   const tenantId = user !== null ? user.tenant_id : null;
 
+  // IT DOES NOT WAIT FOR AUTH TO RESOLVE, unlike every other auth-aware
+  // provider in this shell, and the difference is the whole point of the
+  // effect.
+  //
+  // The server render CANNOT see a signed-in reader's tenant on a page
+  // request. `access_token` is scoped `Path=/api` (see CookieManager), so the
+  // browser does not send it when fetching `/admin/anything` — Next's
+  // `cookies()` never has it, and the SSR fetch falls through to host
+  // resolution. On a deployment whose hosts map to tenants that is still the
+  // right answer; on one where they do not, the seed is the GLOBAL value and
+  // this fetch is what corrects it.
+  //
+  // Waiting for `isAuthLoading` made that correction take five to ten seconds
+  // — a `/api/v1/me` round trip, sometimes a token refresh — and a browser
+  // pass caught what that looks like: every date on the screen for five
+  // seconds, on a tenant that had asked for none. There is nothing to wait
+  // for. This request is made by the BROWSER, to a path under `/api`, so it
+  // carries the cookie the server render could not see, and the endpoint is
+  // public — it answers whether or not a session has been established yet.
   useEffect(() => {
-    if (isAuthLoading) return;
-
     let cancelled = false;
 
     const load = async (): Promise<void> => {
@@ -85,7 +102,7 @@ export function UiPreferencesProvider({
     return () => {
       cancelled = true;
     };
-  }, [userId, tenantId, isAuthLoading, apiClient]);
+  }, [userId, tenantId, apiClient]);
 
   return <DateDisplayProvider hidden={preferences.hideDates}>{children}</DateDisplayProvider>;
 }
