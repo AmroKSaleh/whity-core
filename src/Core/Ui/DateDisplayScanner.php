@@ -370,8 +370,8 @@ final class DateDisplayScanner
                 continue;
             }
 
-            // ---- string / template literal ------------------------------------
-            if ($char === "'" || $char === '"' || $char === '`') {
+            // ---- quoted string --------------------------------------------------
+            if ($char === "'" || $char === '"') {
                 $j = $i + 1;
                 while ($j < $length) {
                     if ($source[$j] === '\\') {
@@ -395,6 +395,23 @@ final class DateDisplayScanner
                 $line += substr_count($body, "\n");
                 $lastSignificant = $char;
                 $i = $j + 1;
+                continue;
+            }
+
+            // ---- template literal ------------------------------------------------
+            //
+            // ITS `${…}` HOLES ARE CODE, and blanking them was a hole in this
+            // guard rather than in the product: `\`Last synced ${new Date(x)
+            // .toLocaleString()}\`` scanned completely clean, because the whole
+            // literal including its interpolations had been turned into spaces.
+            // A guard blind to an entire syntactic form is a guard that reports
+            // a clean tree either way, which is the failure it exists to remove.
+            //
+            // So the literal TEXT is blanked and each `${…}` span is left
+            // exactly as written, for the rules to read like any other code.
+            if ($char === '`') {
+                $i = $this->maskTemplateLiteral($source, $masked, $line, $i);
+                $lastSignificant = '`';
                 continue;
             }
 
@@ -432,9 +449,150 @@ final class DateDisplayScanner
         }
 
         return [
-            'masked' => $masked,
+            'masked' => $this->maskReactKeys($masked),
             'annotated' => $this->extendThroughComment($source, $masked, $annotated),
         ];
+    }
+
+    /**
+     * Blank the value of every JSX `key={…}` attribute.
+     *
+     * A `key` is React's reconciliation identifier. It is never shown to
+     * anybody, so a timestamp in one is not a date on a screen — and composing
+     * a key out of the fields that make a row unique is the ordinary way to
+     * write one, which is why two correct call sites started failing the moment
+     * this scanner learned to read inside template literals.
+     *
+     * A guard that fires on correct code is worse than no guard at all: it
+     * teaches people to annotate rather than to think, and the next annotation
+     * after that is the one that hides a real leak.
+     *
+     * The `=` is load-bearing. `key:` — an object property, e.g. a column spec's
+     * own `key` — is a different thing entirely and is left alone.
+     */
+    private function maskReactKeys(string $masked): string
+    {
+        $offset = 0;
+
+        while (preg_match('/\bkey\s*=\s*\{/', $masked, $m, PREG_OFFSET_CAPTURE, $offset) === 1) {
+            $open = (int) $m[0][1] + strlen((string) $m[0][0]) - 1;
+            $close = $this->matchingBrace($masked, $open);
+            if ($close === null) {
+                break;
+            }
+
+            $span = substr($masked, $open, $close - $open + 1);
+            $masked = substr_replace(
+                $masked,
+                preg_replace('/[^\n]/', ' ', $span) ?? '',
+                $open,
+                $close - $open + 1
+            );
+            $offset = $close + 1;
+        }
+
+        return $masked;
+    }
+
+    /**
+     * Blank a template literal's TEXT while leaving its `${…}` holes intact.
+     *
+     * Brace-counted rather than parsed, and the counter skips over quoted
+     * strings and nested template literals so a `}` inside one does not close
+     * the hole early. Good enough for the shape this actually has to survive —
+     * an interpolation containing a call — and it fails SAFE if it ever is not:
+     * an unbalanced hole leaves more code visible to the rules, which is a false
+     * positive somebody can annotate, rather than a silent blind spot.
+     *
+     * @param string $masked  Mutated in place.
+     * @param int    $line    Advanced past any newlines consumed.
+     * @return int the offset just past the closing backtick.
+     */
+    private function maskTemplateLiteral(string $source, string &$masked, int &$line, int $start): int
+    {
+        $length = strlen($source);
+        $i = $start + 1;
+
+        while ($i < $length) {
+            $char = $source[$i];
+
+            if ($char === '\\') {
+                $masked[$i] = ' ';
+                if ($i + 1 < $length && $source[$i + 1] !== "\n") {
+                    $masked[$i + 1] = ' ';
+                }
+                $i += 2;
+                continue;
+            }
+
+            if ($char === '`') {
+                return $i + 1;
+            }
+
+            if ($char === '$' && $i + 1 < $length && $source[$i + 1] === '{') {
+                $end = $this->matchingBrace($source, $i + 1);
+                if ($end === null) {
+                    // Unbalanced: leave the rest visible rather than blanking it.
+                    return $length;
+                }
+                $line += substr_count(substr($source, $i, $end - $i + 1), "\n");
+                $i = $end + 1;
+                continue;
+            }
+
+            if ($char === "\n") {
+                $line++;
+            } else {
+                $masked[$i] = ' ';
+            }
+            $i++;
+        }
+
+        return $length;
+    }
+
+    /**
+     * The `}` closing the `{` at $open, skipping over strings and nested
+     * template literals so their braces do not close it early.
+     */
+    private function matchingBrace(string $s, int $open): ?int
+    {
+        $length = strlen($s);
+        $depth = 0;
+
+        for ($i = $open; $i < $length; $i++) {
+            $char = $s[$i];
+
+            if ($char === '\\') {
+                $i++;
+                continue;
+            }
+
+            if ($char === "'" || $char === '"' || $char === '`') {
+                for ($j = $i + 1; $j < $length; $j++) {
+                    if ($s[$j] === '\\') {
+                        $j++;
+                        continue;
+                    }
+                    if ($s[$j] === $char) {
+                        break;
+                    }
+                }
+                $i = min($j, $length - 1);
+                continue;
+            }
+
+            if ($char === '{') {
+                $depth++;
+            } elseif ($char === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    return $i;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

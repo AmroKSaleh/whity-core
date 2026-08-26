@@ -105,7 +105,70 @@ final class DateDisplayScannerTest extends TestCase
         self::assertContains('RAW_PROP', $this->codes('<Fact label={person.birthDate} />'));
     }
 
+    /**
+     * A template literal's `${…}` holes are CODE, and the scanner reads them.
+     *
+     * This was a hole in the GUARD rather than in the product: blanking a
+     * template literal wholesale meant
+     * ``\`Last synced ${new Date(x).toLocaleString()}\``` scanned completely
+     * clean. A guard blind to an entire syntactic form reports a clean tree
+     * either way, which is the failure it exists to remove — and the desktop
+     * template contains exactly that line, which is how it was found.
+     */
+    public function testCodeInsideATemplateLiteralIsNotHiddenFromTheRules(): void
+    {
+        $backtick = chr(96);
+        $source = 'const label = ' . $backtick . 'Last synced ${new Date(x).toLocaleString()}' . $backtick . ';';
+
+        self::assertSame(['LOCALE_STRING'], $this->codes($source));
+    }
+
+    /** A date interpolated into a rendered sentence is a date on a screen. */
+    public function testATimestampInterpolatedIntoATemplateLiteralIsFlagged(): void
+    {
+        $backtick = chr(96);
+        $source = 'const line = ' . $backtick . '#${row.id} · ${row.created_at}' . $backtick . ';';
+
+        self::assertSame(['RAW_RENDER'], $this->codes($source));
+    }
+
+    /** The literal TEXT of a template is still text, and still not code. */
+    public function testTemplateLiteralTextIsStillMasked(): void
+    {
+        $backtick = chr(96);
+        $source = 'const help = ' . $backtick . 'never call toLocaleDateString yourself' . $backtick . ';';
+
+        self::assertSame([], $this->codes($source));
+    }
+
     // ------------------------------------------------------------ restraint
+
+    /**
+     * A React `key` is a reconciliation identifier, never shown to anybody — and
+     * composing one out of the fields that make a row unique is the ordinary way
+     * to write one. Two correct call sites started failing the moment the
+     * scanner learned to read inside template literals, which is precisely the
+     * "fires on correct code" failure that teaches people to annotate rather
+     * than to think.
+     */
+    public function testATimestampInsideAReactKeyIsNotFlagged(): void
+    {
+        $backtick = chr(96);
+        $source = '<li key={' . $backtick . '${row.component}-${row.started_at}' . $backtick . '}>x</li>';
+
+        self::assertSame([], $this->codes($source));
+    }
+
+    public function testAPlainKeyPropertyIsNotConfusedWithAJsxKeyAttribute(): void
+    {
+        // `key:` is an object property — a column spec's own id, for instance —
+        // and has nothing to do with React. Masking it would blank real code.
+        $source = "const spec = { key: 'created', value: row.created_at };";
+
+        self::assertContains('RAW_PROP', $this->codes($source));
+    }
+
+
 
     /**
      * `toLocaleString` is also how a NUMBER is formatted, correctly, in two
