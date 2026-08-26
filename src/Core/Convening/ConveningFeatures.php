@@ -84,18 +84,24 @@ final class ConveningFeatures
         $agendaItems = $router->versionedPath('/api/agenda-items');
         $decisions = $router->versionedPath('/api/meeting-decisions');
         $invitations = $router->versionedPath('/api/meeting-invitations');
+        // Cross-subsystem reads a declaration points at. Emitted through
+        // versionedPath() like every other path here: a literal '/api/v1/...'
+        // happens to be right today and silently wrong the moment the prefix
+        // moves, which is what ConveningFeaturesTest pins.
+        $ous = $router->versionedPath('/api/ous');
+        $documents = $router->versionedPath('/api/documents');
 
         return [
-            self::bodiesFeature($bodies),
+            self::bodiesFeature($bodies, $ous),
             self::meetingsFeature($meetings, $bodies),
-            self::meetingDetailFeature($meetings, $agendaItems, $decisions, $invitations),
+            self::meetingDetailFeature($meetings, $agendaItems, $decisions, $invitations, $documents),
         ];
     }
 
     /**
      * @return array<string, mixed>
      */
-    private static function bodiesFeature(string $bodiesPath): array
+    private static function bodiesFeature(string $bodiesPath, string $ousPath): array
     {
         return [
             'id' => self::BODIES,
@@ -161,7 +167,7 @@ final class ConveningFeatures
                                             'type' => 'referenceSelect',
                                             'name' => 'ou_id',
                                             'label' => 'Belongs to',
-                                            'source' => '/api/v1/ous',
+                                            'source' => $ousPath,
                                             'valueField' => 'id',
                                             'labelField' => 'name',
                                             'placeholder' => 'No particular unit',
@@ -355,7 +361,8 @@ final class ConveningFeatures
         string $meetingsPath,
         string $agendaItemsPath,
         string $decisionsPath,
-        string $invitationsPath
+        string $invitationsPath,
+        string $documentsPath
     ): array {
         return [
             'id' => self::MEETING_DETAIL,
@@ -507,7 +514,7 @@ final class ConveningFeatures
                                             'type' => 'referenceSelect',
                                             'name' => 'document_id',
                                             'label' => 'Document under consideration',
-                                            'source' => '/api/v1/documents',
+                                            'source' => $documentsPath,
                                             'valueField' => 'id',
                                             'labelField' => 'title',
                                             'placeholder' => 'No document',

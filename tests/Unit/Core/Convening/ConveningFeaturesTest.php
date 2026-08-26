@@ -157,8 +157,16 @@ final class ConveningFeaturesTest extends TestCase
             if (!str_starts_with($href, '/admin/x/')) {
                 continue;
             }
+            // A link may address a RECORD as well as a screen:
+            // /admin/x/{featureId}/{recordId} is the record route, and the
+            // trailing segment is a row value the renderer substitutes. Only the
+            // feature id is checkable here — the record part names a row, not a
+            // declaration — so compare the first segment and let the rest be.
+            $target = substr($href, strlen('/admin/x/'));
+            $featureId = explode('/', $target)[0];
+
             self::assertContains(
-                substr($href, strlen('/admin/x/')),
+                $featureId,
                 $ids,
                 "'{$href}' points at a screen this subsystem does not declare — an internal link to a "
                 . 'feature id nothing serves renders an empty page rather than an error'
