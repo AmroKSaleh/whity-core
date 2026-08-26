@@ -217,7 +217,8 @@ class Router
     /**
      * Match a request against registered routes
      *
-     * Returns route information if a match is found, null otherwise.
+     * Returns route information if a match is found, null otherwise. Captured
+     * parameters are percent-DECODED — see the note inside.
      *
      * @param Request $request Request object
      * @return array{handler: callable, params: array<string, string>, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string, schema: array<string, mixed>|null}|null Array if matched, null otherwise
@@ -234,11 +235,58 @@ class Router
 
             $matches = [];
             if (preg_match($route['pattern'], $path, $matches) === 1) {
-                // Extract named parameters
+                // Extract named parameters, PERCENT-DECODED (#1078).
+                //
+                // A path segment is percent-encoded on the wire by definition —
+                // that is how a space, a slash, or any non-ASCII character
+                // survives a URL at all. `Request::fromGlobals()` takes the path
+                // straight out of `REQUEST_URI` through `parse_url()`, which
+                // does not decode, and until this line nothing else did either.
+                // So a handler was handed `%D8%B7%D8%A7%D9%84%D8%A8` for a
+                // record called `طالب`, looked it up by a string no record has
+                // ever been called, and MISSED — and because a lookup that
+                // misses usually falls back to something rather than failing, it
+                // answered 200 with a different record.
+                //
+                // An Arabic identifier percent-encodes ENTIRELY, so this was not
+                // an edge case about spaces in names: on a platform whose
+                // domains are fully bilingual, it was the default for every
+                // institution whose records are named in Arabic.
+                //
+                // `rawurldecode`, NOT `urldecode`. They differ on exactly one
+                // character and it matters: `+` means "space" in a query string
+                // and means a literal plus in a path segment. `urldecode` would
+                // silently corrupt every identifier containing one, into a
+                // plausible string that is not the one requested.
+                //
+                // EXACTLY ONCE. An identifier that legitimately contains the
+                // text `%20` arrives as `%2520`; one pass gives `%20`, and a
+                // second would give a space and address a different record.
+                // Decoding twice is also how a traversal filter gets bypassed —
+                // `%252E` survives one pass and becomes `.` on the next — so
+                // "once" is a security property, not only a correctness one.
+                //
+                // DECODING THE VALUES, NOT THE PATH. Matching still runs against
+                // the raw path above, so an encoded `%2F` cannot smuggle a
+                // segment boundary past a `[^/]+` placeholder and turn a
+                // one-segment route into a two-segment one, and a `{id:\d+}`
+                // constraint still applies to the raw segment rather than to
+                // whatever happened to decode into digits. Only what the handler
+                // receives changes.
+                //
+                // What a handler owes in return: a decoded parameter is
+                // UNTRUSTED INPUT, exactly as a query parameter or a body field
+                // is. It can now contain a slash (from `%2F`) or a dot segment,
+                // so anything building a filesystem path out of one must
+                // validate it first. Every core handler that touches the
+                // filesystem already does — `DesktopPluginsApiHandler::download`
+                // against a name/version regex, `BrandingApiHandler` against the
+                // `BrandingAssetKind` whitelist — and both of those now run
+                // their check against the real value rather than an escaped one.
                 $params = [];
                 foreach ($matches as $key => $value) {
                     if (!is_numeric($key)) {
-                        $params[$key] = $value;
+                        $params[$key] = rawurldecode($value);
                     }
                 }
 
