@@ -242,9 +242,29 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.38.0',
+            '1.39.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.38 GENERALISES THE RULE VOCABULARY OUT OF ROUTING: AudienceRuleContext and '
+            'SDK 1.39 ADDS TIME-WINDOW TYPES: PluginWindowTypesInterface, the contribution point '
+            . 'for the KINDS of named period a deployment slices time into. #1070 puts a named, '
+            . 'non-overlapping period that records can be scoped to and rolled up by — and that can '
+            . 'be CLOSED, the way a set of books is closed — into core, because it is a primitive '
+            . 'the platform did not have: everybody who needed one either built their own or did '
+            . 'without, and two implementations of a period disagree the moment both exist with '
+            . 'nothing reporting that they differ. THE VOCABULARY IS THE PART THAT CANNOT BE '
+            . 'CORE\'S — two deployments slice time into words with nothing in common, so a core '
+            . 'enumeration would have to carry both and ship each deployment the other\'s. A plugin '
+            . 'declares KEYS and the defaults a tenant starts from; an administrator ADOPTS one, '
+            . 'and declaring is a catalogue entry rather than a write into anybody\'s tenant. BARE '
+            . 'SLUGS ONLY, as with OU types, so no plugin can mint a bare key and squat on a name a '
+            . 'tenant might want. NESTING IS DECLARABLE, BOUNDARIES ARE NOT: a sub-period sitting '
+            . 'inside a period is structural and knowable, whereas when a period starts and how '
+            . 'long it runs is not, and assuming it is calendar-aligned is the specific error this '
+            . 'concept exists to avoid. A malformed declaration costs that plugin its whole window '
+            . 'vocabulary rather than one type, which is the one place this differs from the '
+            . 'OU-type catalogue: the declarations are interdependent through nesting, so a partial '
+            . 'store would leave parents pointing at nothing. Additive; every tree that validated '
+            . 'under 1.38 still validates. '
+            . 'SDK 1.38 GENERALISES THE RULE VOCABULARY OUT OF ROUTING: AudienceRuleContext and '
             . 'AudienceRuleResolverInterface. #999 adds NAMED USER GROUPS, and a group is not a '
             . 'membership table — it is one of these same rule expressions given a name and stored '
             . 'once, so that "the instructors" is ONE node referenced from many places rather than a '

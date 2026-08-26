@@ -140,6 +140,19 @@ abstract class BaseCommand
         $ouTypeRegistry->registerCoreOuTypes();
         \Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry);
 
+        // TIME-WINDOW TYPE catalogue (#1070), registered as a service for exactly
+        // the same reason. A command is the natural home for period work — an
+        // import that files records against a period, a scheduled close — and a
+        // CLI-only EMPTY catalogue would report that the period kind a plugin
+        // ships does not exist, so the import would file everything against
+        // nothing and look like it had worked.
+        //
+        // Divergence between the two entry points here is the recurring bug class
+        // this repo has already paid for twice (#717, #724).
+        $windowTypeRegistry = new \Whity\Core\TimeWindow\WindowTypeRegistry($hookManager);
+        $windowTypeRegistry->registerCoreWindowTypes();
+        \Whity\register_service(\Whity\Core\TimeWindow\WindowTypeRegistry::class, $windowTypeRegistry);
+
         // Document ROUTING RULE catalogue (#947 item 3), registered as a service
         // for exactly the same reason. A command that issues or advances a route
         // — a scheduled escalation, an import that circulates what it created —
@@ -358,7 +371,11 @@ abstract class BaseCommand
             // Handed to the loader in BOTH entry points, so a route authored over
             // HTTP against a plugin's kind still resolves when a command advances
             // it.
-            $routingRuleRegistry
+            $routingRuleRegistry,
+            // Plugin-contributed time-window types (#1070). Handed to the loader
+            // in BOTH entry points, so a period kind adopted over HTTP is still
+            // resolvable when a command files something against it.
+            $windowTypeRegistry
         );
         $pluginLoader->load();
 

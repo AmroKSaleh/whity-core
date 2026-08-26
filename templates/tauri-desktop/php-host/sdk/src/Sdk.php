@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.38).
+ * SDK identity (v1.39).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -589,13 +589,52 @@ namespace Whity\Sdk;
  * unchanged and remains the only way to contribute a kind; there is no
  * audience-only declaration, because a rule that can name a set of people can
  * name the recipients of a step.
- * Additive; every tree that validated under 1.37 still validates)
+ * Additive; every tree that validated under 1.37 still validates) ->
+ * 1.39 (TIME-WINDOW TYPES: {@see \Whity\Sdk\TimeWindow\PluginWindowTypesInterface},
+ * the contribution point for the KINDS of named period a deployment slices time
+ * into. #1070 puts a named, non-overlapping period that records can be scoped to
+ * and rolled up by — and that can be CLOSED, the way a set of books is closed —
+ * into core, because it is a primitive the platform did not have and everybody
+ * who needed one either built their own or did without. Two implementations of a
+ * period disagree the moment both exist, and nothing reports that they differ.
+ * THE VOCABULARY IS THE PART THAT CANNOT BE CORE'S. Two deployments slice time
+ * into words with nothing in common — one reasons in a crop year and the growing
+ * seasons inside it, another in a kiln campaign and the firing runs inside it —
+ * so a core enumeration would have to carry both and ship each deployment the
+ * other's. A plugin therefore declares KEYS and the defaults a tenant starts
+ * from, and an administrator ADOPTS one; declaring is a catalogue entry, never a
+ * write into anybody's tenant.
+ * BARE SLUGS ONLY, as with OU types: declare `growing_season`, get
+ * `acme:growing_season`. Two plugins may declare the same slug without
+ * colliding, and no plugin can mint a bare key, because the unprefixed namespace
+ * belongs to core and to the tenant's own vocabulary.
+ * NESTING IS DECLARABLE, BOUNDARIES ARE NOT. A declaration may name the type it
+ * nests inside — a sub-period sitting inside a period is structural and knowable
+ * — but it says nothing about when a period starts, how long it runs, or what
+ * fraction of its parent it occupies, because none of that is knowable and
+ * assuming it is the specific error this concept exists to avoid. Every boundary
+ * is authored per instance, in dates, by somebody who knows. A plugin may only
+ * nest inside its OWN declared types: it does not own another source's type and
+ * cannot know whether a given tenant adopted it.
+ * A malformed declaration costs that plugin its window vocabulary rather than one
+ * type — the one place this differs from the OU-type catalogue, and the nesting
+ * is why: the declarations are interdependent, so storing them one at a time
+ * would either reject a legal forward reference or leave half a hierarchy whose
+ * parents point at nothing.
+ * NO CONTRACT IS PUBLISHED HERE FOR THE CLOSE REPORT. What a close should say is
+ * still unfinished inside a period is contributed through the
+ * `time_window.close_report` FILTER HOOK rather than a typed interface,
+ * deliberately: the shape such an interface should take depends on an open
+ * question this release does not answer — what happens to a record mid-flight
+ * when its period closes — and publishing a vendored, version-pinned contract
+ * before that is publishing one that then has to break.
+ * Additive; every tree that validated under 1.38 still validates)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.38.0';
+    public const VERSION = '1.39.0';
 
     /**
      * Static identity only — never instantiated.
