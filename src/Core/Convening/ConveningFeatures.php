@@ -328,7 +328,7 @@ final class ConveningFeatures
                                     // invitations are three tables, and three
                                     // tables in a drawer is a drawer nobody can
                                     // read.
-                                    'href' => '/admin/x/' . self::MEETING_DETAIL,
+                                    'href' => '/admin/x/' . self::MEETING_DETAIL . '/{id}',
                                 ],
                             ],
                         ],
@@ -371,14 +371,25 @@ final class ConveningFeatures
                     'type' => 'section',
                     'title' => 'Meeting record',
                     'children' => [
+                        // THE RECORD IS IN THE URL, not in a dropdown. This
+                        // page used to pick its subject with a selector, which
+                        // meant the address said nothing about what was on
+                        // screen: a refresh, a shared link, the back button and
+                        // any redirect after an action all landed on an empty
+                        // page asking the reader to choose again. `{record}` is
+                        // the reserved binding the record ROUTE
+                        // (/admin/x/{featureId}/{recordId}) seeds from its own
+                        // segment, so the meeting being read IS the address.
+                        //
+                        // Reached from the sidebar there is no segment to seed,
+                        // and every source below simply stays empty — hence the
+                        // note rather than a control that would half-work.
                         [
-                            'type' => 'selector',
-                            'name' => 'meeting',
-                            'label' => 'Meeting',
-                            'source' => $meetingsPath,
-                            'valueField' => 'id',
-                            'labelField' => 'display_title',
-                            'placeholder' => 'Choose a meeting',
+                            'type' => 'text',
+                            'tone' => 'muted',
+                            'value' => 'Open a meeting from the Meetings list to see its record. '
+                                . 'The address carries the meeting, so this page can be refreshed, '
+                                . 'bookmarked and shared.',
                         ],
                         [
                             'type' => 'dataRecord',
@@ -387,7 +398,7 @@ final class ConveningFeatures
                             // `apiPath` does not — this is the one block in the
                             // tree addressing a single resource rather than a
                             // collection.
-                            'source' => $meetingsPath . '/{meeting}',
+                            'source' => $meetingsPath . '/{record}',
                             'emptyText' => 'Choose a meeting to see its record.',
                             'fields' => [
                                 ['field' => 'display_title', 'label' => 'Title'],
@@ -426,7 +437,7 @@ final class ConveningFeatures
                                     // selected meeting fills the path segment.
                                     'submit' => [
                                         'method' => 'POST',
-                                        'endpoint' => $meetingsPath . '/{meeting}/schedule',
+                                        'endpoint' => $meetingsPath . '/{record}/schedule',
                                     ],
                                     'requiredPermission' => CorePermissions::CONVENING_MANAGE,
                                     'children' => [
@@ -452,7 +463,7 @@ final class ConveningFeatures
                             'requiredPermission' => CorePermissions::CONVENING_MANAGE,
                             'action' => [
                                 'method' => 'POST',
-                                'endpoint' => $meetingsPath . '/{meeting}/invitations',
+                                'endpoint' => $meetingsPath . '/{record}/invitations',
                             ],
                             'confirm' => 'Invite every current member of this body?',
                         ],
@@ -463,7 +474,7 @@ final class ConveningFeatures
                             'requiredPermission' => CorePermissions::CONVENING_MANAGE,
                             'action' => [
                                 'method' => 'POST',
-                                'endpoint' => $meetingsPath . '/{meeting}/hold',
+                                'endpoint' => $meetingsPath . '/{record}/hold',
                             ],
                             'confirm' => 'Mark this meeting as held? Decisions can be minuted afterwards.',
                         ],
@@ -477,7 +488,7 @@ final class ConveningFeatures
                                     'type' => 'form',
                                     'submit' => [
                                         'method' => 'POST',
-                                        'endpoint' => $meetingsPath . '/{meeting}/agenda',
+                                        'endpoint' => $meetingsPath . '/{record}/agenda',
                                     ],
                                     'requiredPermission' => CorePermissions::CONVENING_MANAGE,
                                     'children' => [
@@ -521,7 +532,7 @@ final class ConveningFeatures
                         [
                             'type' => 'dataTable',
                             'source' => $agendaItemsPath,
-                            'params' => [['param' => 'meeting_id', 'from' => 'meeting']],
+                            'params' => [['param' => 'meeting_id', 'from' => 'record']],
                             'emptyText' => 'Nothing on this agenda yet.',
                             'columns' => [
                                 ['key' => 'position', 'label' => '#'],
@@ -586,7 +597,7 @@ final class ConveningFeatures
                         [
                             'type' => 'dataTable',
                             'source' => $decisionsPath,
-                            'params' => [['param' => 'meeting_id', 'from' => 'meeting']],
+                            'params' => [['param' => 'meeting_id', 'from' => 'record']],
                             'emptyText' => 'No decisions recorded for this meeting.',
                             'columns' => [
                                 ['key' => 'decision_number', 'label' => 'Number', 'sortable' => true],
@@ -610,7 +621,7 @@ final class ConveningFeatures
                         [
                             'type' => 'dataTable',
                             'source' => $invitationsPath,
-                            'params' => [['param' => 'meeting_id', 'from' => 'meeting']],
+                            'params' => [['param' => 'meeting_id', 'from' => 'record']],
                             'emptyText' => 'Nobody has been invited to this meeting yet.',
                             'columns' => [
                                 ['key' => 'profile_id', 'label' => 'Person'],
