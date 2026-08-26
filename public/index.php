@@ -652,6 +652,64 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'order' => 3,
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TAGS_READ,
     ];
+    // FORMS (migrations 127/128). Three entries because they are three jobs done
+    // by three audiences — see CorePermissions' FORMS_* block — and each gates on
+    // the permission its own screen's primary fetch requires, so a link somebody
+    // can see is a link that works.
+    //
+    // The hrefs point at `/admin/x/{featureId}`, the descriptor host, because
+    // these screens are `screen:'blocks'` descriptors rather than hand-written
+    // pages ({@see \Whity\Core\Form\FormFrontendFeatures}) — which is what lets
+    // the desktop and mobile clients render them at all.
+    //
+    // Registered HERE rather than left to PluginNavigationBridge: that bridge
+    // reads PluginLoader, and these descriptors are core's, not a plugin's. The
+    // ids therefore carry no `plugin-` prefix, and cannot collide with one.
+    $items[] = [
+        'id' => 'forms-builder',
+        'label' => 'Form Builder',
+        'icon' => 'forms',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::BUILDER_ID,
+        'group' => 'records',
+        // Group-local, a unique positive integer (#1007/#1010 — a fractional
+        // order is silently skipped by a regroup that matches integers, and a
+        // test now enforces the invariant). 1 = Family Relations, 2 = Tag Groups,
+        // 3 = Tags, so this is 4 and the catalogue below it is 5.
+        'order' => 4,
+        // Mirrors POST /api/v1/forms, gated forms:manage. Authoring a form is
+        // organisational policy — deciding what everyone must declare — so this
+        // entry is deliberately NOT visible to the far larger audience that only
+        // fills forms in.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_MANAGE,
+    ];
+    $items[] = [
+        'id' => 'forms-catalog',
+        'label' => 'Forms',
+        'icon' => 'clipboard-list',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::CATALOG_ID,
+        'group' => 'records',
+        'order' => 5,
+        // Mirrors GET /api/v1/forms and /api/v1/form-submissions, both gated
+        // forms:read — the approver's permission, not the author's.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_READ,
+    ];
+    $items[] = [
+        'id' => 'my-form-submissions',
+        'label' => 'My Submissions',
+        'icon' => 'file-check',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::MY_SUBMISSIONS_ID,
+        'group' => 'overview',
+        // In `overview` beside Dashboard (1) and Inbox (2) rather than in
+        // `records`: this is a surface a person opens about THEIR OWN work, like
+        // the inbox above it, where the entries in `records` are things somebody
+        // administers on behalf of the tenant.
+        'order' => 3,
+        // Mirrors GET /api/v1/me/form-submissions, gated forms:submit rather than
+        // forms:read — the rows already name exactly one person, so requiring the
+        // tenant-wide read permission would hide this from precisely the people
+        // whose submissions are in it.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_SUBMIT,
+    ];
     $items[] = [
         'id' => 'tenants',
         'label' => 'Tenants',
@@ -1600,7 +1658,20 @@ $router->register('POST', '/api/me/permitted-actions', [$permittedActionsHandler
 // WC-226: pass $logger so a plugin's `screen:'blocks'` feature whose block tree
 // fails host validation is dropped fail-closed with a structured, secret-free
 // reason (feature id + validator errors) — never leaked to the client.
-$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router, $logger);
+// FORMS (migrations 127/128): core's own `screen:'blocks'` descriptors — the
+// form builder, the form catalogue, and one person's own submissions. They are
+// passed as the fifth argument rather than being hand-written React pages
+// because the desktop and mobile clients render descriptors and cannot render a
+// bespoke page, and they go through the SAME per-caller permission filter and
+// the same fail-closed block validation as any plugin's. See
+// FormFrontendFeatures and FrontendFeaturesApiHandler::allFeatures().
+$frontendFeaturesHandler = new FrontendFeaturesApiHandler(
+    $pluginLoader,
+    $roleChecker,
+    $router,
+    $logger,
+    \Whity\Core\Form\FormFrontendFeatures::all()
+);
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
 // Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
@@ -1841,6 +1912,7 @@ $router->register('PATCH', '/api/time-windows/{id:\d+}', [$timeWindowsHandler, '
 $router->register('GET', '/api/time-windows/{id:\d+}/close-report', [$timeWindowsHandler, 'closeReport'], null, null, CorePermissions::TIME_WINDOWS_READ);
 $router->register('POST', '/api/time-windows/{id:\d+}/close', [$timeWindowsHandler, 'close'], null, null, CorePermissions::TIME_WINDOWS_CLOSE);
 $router->register('POST', '/api/time-windows/{id:\d+}/reopen', [$timeWindowsHandler, 'reopen'], null, null, CorePermissions::TIME_WINDOWS_REOPEN);
+
 
 // 12b. Register permission delegations API handler (WC-34). Gated on the
 // delegation:manage permission (6th positional arg; requiredRole stays null so
@@ -2599,6 +2671,94 @@ $router->register('PUT',    '/api/document-route-templates/{id:\d+}/graph',   [$
 $router->register('GET',    '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'show'],          null, null, CorePermissions::ROUTE_TEMPLATES_READ);
 $router->register('PATCH',  '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'update'],        null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
 $router->register('DELETE', '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'destroy'],       null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
+
+// 13a-nonies-sexies. FORMS (migrations 127/128) — tenant-authored forms, the
+// fields that compose them, and the submissions people make against them.
+//
+// WIRED HERE, AFTER ROUTING AND ROUTE TEMPLATES, AND THE PLACEMENT IS LOAD-
+// BEARING: SubmissionIssuer takes $documentIssuer, $routeTemplateRepository and
+// $documentRouter, all of which are constructed above. Registering this block
+// with the other tenant-configuration subsystems higher up would reference three
+// undefined variables — which passes lint, passes PHPStan, and 500s every
+// request at worker boot.
+//
+// THE POINT OF THE SUBSYSTEM IS THE HANDOFF, NOT THE TABLES. On submit, a
+// submission becomes a core DOCUMENT (DocumentIssuer::raise) and, when the form
+// names a route template, that document is circulated through the EXISTING
+// routing engine — so a submission inherits approvals, the inbox, QR
+// verification, artifacts and row-level visibility without one line of new
+// routing logic. SubmissionIssuer is where the two subsystems meet, and it uses
+// the same RouteTemplateInstantiation converter DocumentRoutingApiHandler uses
+// rather than a second one.
+//
+// THREE gates, not the usual read/write pair, because there are three audiences
+// and two of them barely overlap: AUTHORING a form is organisational policy
+// (`forms:manage`), FILLING ONE IN is the everyday act of the largest audience
+// in the tenant (`forms:submit`), and READING what came back is a third job done
+// by approvers (`forms:read`). Migration 128 grants all three by CAPABILITY —
+// to whoever already holds `roles:write` or `documents:read` — rather than to
+// the role literally named `admin`, which is the #834 hazard.
+//
+// RENDER is gated on `forms:submit`, not `forms:read`: its response carries the
+// CALLER'S OWN prefilled details, so the catalogue-reading audience has no
+// business receiving it and the far larger fill-it-in audience must not be
+// denied it.
+//
+// GET /api/form-fields is the one FLAT route, and it is a read. A master-detail
+// `selector` publishes into a data-bound block's `params`, which append QUERY
+// params to a fixed source and cannot fill a PATH segment — so the builder's
+// field table needs `?form_id=`. Every WRITE stays nested under the form, which
+// is what makes `DELETE /api/forms/7/fields/42` refuse when field 42 belongs to
+// form 9. See FormFieldsApiHandler for why the asymmetry is not a hole.
+//
+// There is deliberately no DELETE for a form and none for a submission. A form
+// is what somebody's submission was an answer TO, and a submission is what
+// somebody declared under their own name while other people acted on it.
+// Archiving replaces the first; submitting again replaces the second.
+$formRepository = new \Whity\Core\Form\FormRepository($db->getPdo());
+$formFieldRepository = new \Whity\Core\Form\FormFieldRepository($db->getPdo());
+$formSubmissionRepository = new \Whity\Core\Form\FormSubmissionRepository($db->getPdo());
+$formRenderer = new \Whity\Core\Form\FormRenderer(
+    $formFieldRepository,
+    new \Whity\Core\Form\PrefillResolver($db->getPdo())
+);
+
+$formsHandler = new \Whity\Api\FormsApiHandler($formRepository, $formRenderer, $formSubmissionRepository);
+$router->register('GET', '/api/forms', [$formsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('POST', '/api/forms', [$formsHandler, 'create'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('GET', '/api/forms/{id:\d+}', [$formsHandler, 'show'], null, null, CorePermissions::FORMS_READ);
+$router->register('PATCH', '/api/forms/{id:\d+}', [$formsHandler, 'update'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('POST', '/api/forms/{id:\d+}/publish', [$formsHandler, 'publish'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('POST', '/api/forms/{id:\d+}/archive', [$formsHandler, 'archive'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('GET', '/api/forms/{id:\d+}/render', [$formsHandler, 'render'], null, null, CorePermissions::FORMS_SUBMIT);
+
+$formFieldsHandler = new \Whity\Api\FormFieldsApiHandler($formRepository, $formFieldRepository);
+$router->register('GET', '/api/form-fields', [$formFieldsHandler, 'listByQuery'], null, null, CorePermissions::FORMS_READ);
+$router->register('GET', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('POST', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'create'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'update'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('DELETE', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'delete'], null, null, CorePermissions::FORMS_MANAGE);
+
+$formSubmissionsHandler = new \Whity\Api\FormSubmissionsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formSubmissionRepository,
+    new \Whity\Core\Form\SubmissionIssuer(
+        $db->getPdo(),
+        $formSubmissionRepository,
+        $documentIssuer,
+        $routeTemplateRepository,
+        $documentRouter
+    )
+);
+$router->register('POST', '/api/forms/{id:\d+}/submissions', [$formSubmissionsHandler, 'submit'], null, null, CorePermissions::FORMS_SUBMIT);
+$router->register('GET', '/api/form-submissions', [$formSubmissionsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('GET', '/api/form-submissions/{id:\d+}', [$formSubmissionsHandler, 'show'], null, null, CorePermissions::FORMS_READ);
+// Only ever the caller's own rows — the ROUTE decides whose, not a query param,
+// so no client can widen it. `forms:submit` rather than `forms:read`: the rows
+// already name exactly one person, so a tenant-wide permission has nothing left
+// to decide (migration 113's "being a recipient IS the authorization").
+$router->register('GET', '/api/me/form-submissions', [$formSubmissionsHandler, 'listMine'], null, null, CorePermissions::FORMS_SUBMIT);
 
 // 13a-nonies-quater. Routing's recipients registered as an #881 INBOX SOURCE —
 // not a surface of their own. The `document_route_recipients` table IS an inbox,

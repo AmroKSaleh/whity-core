@@ -167,22 +167,60 @@ final class FrontendFeaturesApiHandler
     private Router $router;
     private ?LoggerInterface $logger;
 
+    /** @var list<array<string, mixed>> */
+    private array $coreFeatures;
+
     /**
      * @param PluginLoader        $pluginLoader The live loader carrying the validated descriptors.
      * @param RoleChecker         $roleChecker  Authoritative RBAC resolver for per-caller filtering.
      * @param Router              $router       The live router whose routes back each feature's capabilities.
      * @param LoggerInterface|null $logger      Optional PSR-3 sink for fail-closed omit reasons (WC-226).
+     * @param list<array<string, mixed>> $coreFeatures Descriptors contributed by CORE subsystems rather
+     *        than by a plugin — see the note below. Defaults to none, so every existing construction of
+     *        this handler behaves exactly as before.
      */
     public function __construct(
         PluginLoader $pluginLoader,
         RoleChecker $roleChecker,
         Router $router,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        array $coreFeatures = []
     ) {
         $this->pluginLoader = $pluginLoader;
         $this->roleChecker = $roleChecker;
         $this->router = $router;
         $this->logger = $logger;
+        $this->coreFeatures = $coreFeatures;
+    }
+
+    /**
+     * Every descriptor this endpoint serves: core's first, then the plugins'.
+     *
+     * WHY CORE CONTRIBUTES DESCRIPTORS AT ALL
+     * ----------------------------------------
+     * Until the forms engine, every descriptor came from a plugin and core
+     * features got hand-written pages under `web/app/(protected)/admin/...`. That
+     * works for the web and only for the web: the desktop and mobile clients
+     * consume descriptors, so a core feature with a bespoke React page is a core
+     * feature those clients cannot render at all.
+     *
+     * A core descriptor goes through EXACTLY the same gates as a plugin's — the
+     * per-caller permission filter and the fail-closed
+     * {@see BlockValidator::validate()} pass — for the reason those gates exist:
+     * they are not distrust of plugin AUTHORS, they are a guarantee about what
+     * can reach a renderer, and an exemption for code that happens to live in
+     * this repository would make the guarantee conditional on where a tree was
+     * written rather than on whether it is valid.
+     *
+     * Core first so a plugin cannot displace a core screen by id — the merge is
+     * order-preserving and the consumer resolves by id, so whichever comes first
+     * wins the name.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function allFeatures(): array
+    {
+        return array_merge($this->coreFeatures, $this->pluginLoader->getFrontendFeatures());
     }
 
     /**
@@ -226,7 +264,7 @@ final class FrontendFeaturesApiHandler
             $droppedHere = [];
 
             $data = [];
-            foreach ($this->pluginLoader->getFrontendFeatures() as $feature) {
+            foreach ($this->allFeatures() as $feature) {
                 // Defence in depth: a descriptor without a string permission
                 // can never be exposed (the loader already guarantees one).
                 $permission = $feature['requiredPermission'] ?? null;
