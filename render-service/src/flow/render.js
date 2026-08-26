@@ -76,17 +76,19 @@ async function renderFlowToPdf(payload) {
     if (outcome.result.pageCount < 1) {
       throw new Error('Flow pagination produced no pages');
     }
-    if (Array.isArray(outcome.result.overflow) && outcome.result.overflow.length > 0) {
-      // Refusing here is the point. An overrun content box means a unit was
-      // placed where it does not fit, so at least one recorded page number is
-      // a claim about a layout that did not happen — and every cross-reference
-      // after it is suspect. A contents list of plausible-looking wrong
-      // numbers is worse than no contents list, so this fails the render
-      // instead of shipping one.
-      const first = outcome.result.overflow[0];
+    if (Array.isArray(outcome.result.problems) && outcome.result.problems.length > 0) {
+      // Refusing here is the point. Either a unit was placed where it does not
+      // fit — so at least one recorded page number is a claim about a layout
+      // that did not happen — or a front-matter entry prints a number that
+      // disagrees with where its anchor was recorded, which is what a
+      // non-converged front-matter loop looks like. Both make every
+      // cross-reference after them suspect, and a contents list of
+      // plausible-looking wrong numbers is a worse outcome than no contents
+      // list, so this fails the render instead of shipping one.
+      const first = outcome.result.problems[0];
       throw new Error(
-        `Flow pagination overran page ${first.page} (${first.reason})` +
-          (outcome.result.overflow.length > 1 ? ` and ${outcome.result.overflow.length - 1} more` : '')
+        `Flow pagination problem on page ${first.page}: ${first.reason}` +
+          (outcome.result.problems.length > 1 ? ` (and ${outcome.result.problems.length - 1} more)` : '')
       );
     }
 

@@ -64,7 +64,7 @@
     contentWidthPx: 0,
     contentHeightPx: 0,
     anchorPage: Object.create(null),
-    overflow: [],
+    problems: [],
     frontMatterPasses: 0,
   };
 
@@ -147,7 +147,7 @@
       if (guard > guardCeiling) {
         // Something is not shrinking. Stop rather than hang the render: the
         // overflow report below turns this into a loud failure upstream.
-        state.overflow.push({ page: pages.length, reason: 'fragmentation did not converge' });
+        state.problems.push({ page: pages.length, reason: 'fragmentation did not converge' });
         break;
       }
 
@@ -206,7 +206,7 @@
         current.content.appendChild(node);
         scaleFigureToFit(node, limit - contentTop);
         if (bottomOf(node) > limit + FIT_EPSILON) {
-          state.overflow.push({
+          state.problems.push({
             page: pages.length,
             reason: 'unit taller than the content box',
             anchor: node.getAttribute ? node.getAttribute('data-anchor') : null,
@@ -633,7 +633,7 @@
       for (var j = 0; j < children.length; j += 1) {
         var rect = children[j].getBoundingClientRect();
         if (rect.bottom > box.bottom + FIT_EPSILON + 1) {
-          state.overflow.push({
+          state.problems.push({
             page: i + 1,
             reason: 'content overruns the page box by ' + Math.round(rect.bottom - box.bottom) + 'px',
             anchor: children[j].getAttribute ? children[j].getAttribute('data-anchor') : null,
@@ -641,6 +641,55 @@
         }
       }
     }
+  }
+
+  /**
+   * Every printed front-matter number must equal the page recorded for the
+   * same anchor.
+   *
+   * The two are produced at DIFFERENT times: the number is printed while the
+   * front matter is being built, against whatever front-matter length that
+   * pass assumed, and the recorded page is fixed afterwards, once the length
+   * is known. A generated list changes the page numbers it prints, because the
+   * list itself occupies pages — so if that loop ever failed to converge, the
+   * list would be printed against a length the document does not have and
+   * every number in it would be stale by the difference. That is the failure
+   * mode of every implementation of this, it is invisible in a small fixture
+   * (where the list is one page and the numbers happen to survive), and
+   * nothing about the output looks wrong.
+   *
+   * This is the cheap check that the two agree. It is not a substitute for
+   * reading the numbers back out of the finished PDF — that is what
+   * scripts/verify-flow-pdf.js does, and it is the only check that does not
+   * take this file's word for anything — but it catches a stale list before a
+   * PDF is ever produced.
+   */
+  function verifyPrintedNumbers(pages) {
+    var checked = 0;
+    for (var i = 0; i < pages.length; i += 1) {
+      var entries = pages[i].el.querySelectorAll('.flow-toc-entry[data-toc-for]');
+      for (var j = 0; j < entries.length; j += 1) {
+        var anchorId = entries[j].getAttribute('data-toc-for');
+        var slot = entries[j].querySelector('.flow-toc-page');
+        var printed = slot ? parseInt(slot.textContent.replace(/[^0-9]/g, ''), 10) : NaN;
+        var recorded = state.anchorPage[anchorId];
+        checked += 1;
+        if (!(recorded > 0)) {
+          state.problems.push({
+            page: i + 1,
+            reason: 'front-matter entry points at an anchor with no recorded page',
+            anchor: anchorId,
+          });
+        } else if (printed !== recorded) {
+          state.problems.push({
+            page: i + 1,
+            reason: 'front-matter entry prints page ' + printed + ' but the anchor is recorded on ' + recorded,
+            anchor: anchorId,
+          });
+        }
+      }
+    }
+    return checked;
   }
 
   /* --------------------------------------------------------------- main */
@@ -738,14 +787,16 @@
     applyRunningFurniture(allPages, sectionMarks);
 
     verifyPages(allPages);
+    var entriesChecked = verifyPrintedNumbers(allPages);
 
     window.__FLOW_RESULT__ = {
+      frontMatterEntriesChecked: entriesChecked,
       pageCount: allPages.length,
       frontMatterPages: frontPages.length,
       bodyPages: bodyPages.length,
       frontMatterPasses: state.frontMatterPasses,
       anchors: state.anchorPage,
-      overflow: state.overflow,
+      problems: state.problems,
       paginateMs: Date.now() - started,
     };
     window.__FLOW_READY__ = true;
