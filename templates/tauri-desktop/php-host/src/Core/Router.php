@@ -234,7 +234,7 @@ class Router
                 $params = [];
                 foreach ($matches as $key => $value) {
                     if (!is_numeric($key)) {
-                        $params[$key] = rawurldecode($value);
+                        $params[$key] = self::decodeSegment($value);
                     }
                 }
 
@@ -325,6 +325,34 @@ class Router
     public function getMiddleware(): array
     {
         return $this->middleware;
+    }
+
+    /**
+     * Percent-decode ONE captured path segment, and never hand back bytes that
+     * are not text.
+     *
+     * The same guard as {@see \Whity\Core\Router::decodeSegment()} in the
+     * canonical `src/Core/Router.php`, which carries the full reasoning:
+     * `rawurldecode('%FF')` is a byte that is valid UTF-8 in no sequence, and a
+     * handler echoing it through `Response::json()` raises
+     * `RuntimeException: JSON encoding failed: Malformed UTF-8 characters`
+     * where the same request previously returned 200. Every real identifier is
+     * UTF-8 by construction, so nothing the decode was written for is affected;
+     * a segment that decodes to something else names no record and is passed
+     * through raw.
+     *
+     * `preg_match('//u', …)` rather than `mb_check_encoding()`: `ext-mbstring`
+     * is not a hard requirement, and PCRE's UTF-8 mode answers the same question
+     * with no extension.
+     *
+     * @param string $value The raw captured segment, still percent-encoded.
+     * @return string The decoded segment, or the raw one when decoding would not yield UTF-8.
+     */
+    private static function decodeSegment(string $value): string
+    {
+        $decoded = rawurldecode($value);
+
+        return preg_match('//u', $decoded) === 1 ? $decoded : $value;
     }
 
     /**
