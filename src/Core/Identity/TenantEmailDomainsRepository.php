@@ -66,6 +66,56 @@ final class TenantEmailDomainsRepository
     }
 
     /**
+     * Change what a domain's arrivals become: its default role, whether it
+     * auto-provisions, or both. Tenant-scoped.
+     *
+     * Deliberately does NOT touch `verified_at`. Ownership verification is a
+     * statement about the DNS, not about policy, and re-pointing the default
+     * role does not un-prove that the tenant owns the domain. Bundling the two
+     * would mean a policy edit silently disabled provisioning until somebody
+     * re-ran a DNS challenge.
+     *
+     * Both parameters are nullable meaning "leave alone", which is what makes
+     * this a PATCH rather than a PUT: a caller changing `auto_provision` must
+     * not have to restate a `default_role_id` it never intended to touch.
+     *
+     * @return int Rows affected — 0 when the row does not belong to the tenant.
+     */
+    public function updateSettings(
+        int $id,
+        int $tenantId,
+        ?int $defaultRoleId,
+        ?bool $autoProvision,
+    ): int {
+        $sets = [];
+        $params = [':id' => $id, ':tenant_id' => $tenantId];
+
+        if ($defaultRoleId !== null) {
+            $sets[] = 'default_role_id = :default_role_id';
+            $params[':default_role_id'] = $defaultRoleId;
+        }
+
+        if ($autoProvision !== null) {
+            // Inlined as a literal for the reason insert() gives: binding a PHP
+            // bool to a PostgreSQL boolean is the 42804 trap, and false binds as
+            // '' which PG rejects outright. Controlled value, never user text.
+            $sets[] = 'auto_provision = ' . ($autoProvision ? 'TRUE' : 'FALSE');
+        }
+
+        if ($sets === []) {
+            return 0;
+        }
+
+        $stmt = $this->db->prepare(
+            'UPDATE tenant_email_domains SET ' . implode(', ', $sets)
+            . ' WHERE id = :id AND tenant_id = :tenant_id'
+        );
+        $stmt->execute($params);
+
+        return $stmt->rowCount();
+    }
+
+    /**
      * Ensure the registration has a verification token, generating one if absent
      * (e.g. rows created before ownership verification existed). Tenant-scoped.
      *
