@@ -121,26 +121,57 @@ export function FormField({
           />
           <span className="text-sm text-muted-foreground">Yes</span>
         </div>
-      ) : field.field_type === 'select' || field.field_type === 'multiselect' ? (
-        // A NATIVE select. This page is opened by strangers on devices nobody
-        // chose, and a custom picker assumes a pointer, a viewport and script
-        // behaviour a public form has no right to assume.
+      ) : multiple ? (
+        // CHECKBOXES, not `<select multiple>`. A native multi-select is a list
+        // box you operate by ctrl-clicking: on a phone it is barely usable, and
+        // on a desktop most people never discover that more than one choice was
+        // possible — they pick one and move on, and the form quietly collects a
+        // single answer to a question that asked for several.
+        <div className="space-y-2 rounded-xl border border-border/60 bg-card p-3 shadow-2xs">
+          {field.options.map((option, index) => {
+            const optValue = optionValue(option);
+            const selected = Array.isArray(value) ? value : [];
+            const checked = selected.includes(optValue);
+            const optId = `${id}-${index}`;
+
+            return (
+              <div key={index} className="flex items-center gap-2">
+                <Checkbox
+                  id={optId}
+                  checked={checked}
+                  onCheckedChange={(next) => {
+                    // Rebuilt from the declared order rather than by appending,
+                    // so what is stored reads the way the form reads.
+                    const wanted = new Set(selected);
+                    if (next === true) {
+                      wanted.add(optValue);
+                    } else {
+                      wanted.delete(optValue);
+                    }
+                    onChange(
+                      field.options.map(optionValue).filter((v) => wanted.has(v))
+                    );
+                  }}
+                />
+                <label htmlFor={optId} className="text-sm">
+                  {optionLabel(option, preferArabic)}
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      ) : field.field_type === 'select' ? (
+        // A NATIVE select for the single-choice case. This page is opened by
+        // strangers on devices nobody chose, and a custom picker assumes a
+        // pointer, a viewport and script behaviour a public form may not.
         <select
           id={id}
           required={field.is_required}
-          multiple={multiple}
           className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          value={multiple ? (Array.isArray(value) ? value : []) : typeof value === 'string' ? value : ''}
-          onChange={(e) => {
-            if (multiple) {
-              onChange(Array.from(e.target.selectedOptions).map((o) => o.value));
-
-              return;
-            }
-            onChange(e.target.value);
-          }}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
         >
-          {!multiple && <option value="">—</option>}
+          <option value="">—</option>
           {field.options.map((option, index) => (
             <option key={index} value={optionValue(option)}>
               {optionLabel(option, preferArabic)}
