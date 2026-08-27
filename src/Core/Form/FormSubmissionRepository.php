@@ -50,6 +50,36 @@ final class FormSubmissionRepository
      *
      * @param array<string, mixed> $values The validated, normalized answers.
      */
+    /**
+     * Where the paper is now, derived from the routing trail.
+     *
+     * Derived and not stored: `documents` has no status column by design —
+     * state lives in the append-only `document_route_events` — so a copy kept
+     * here could only ever drift from it. `current_step` is the label of the
+     * desk still holding it, which is the question somebody who submitted
+     * actually has.
+     */
+    private const ROUTE_STATE = ",
+                       CASE
+                         WHEN s.document_id IS NULL THEN 'not routed'
+                         WHEN NOT EXISTS (
+                           SELECT 1 FROM document_routes dr
+                            WHERE dr.document_id = s.document_id AND dr.tenant_id = s.tenant_id
+                         ) THEN 'not routed'
+                         WHEN EXISTS (
+                           SELECT 1 FROM document_route_recipients rc
+                            WHERE rc.document_id = s.document_id AND rc.tenant_id = s.tenant_id
+                              AND rc.closed_by_event_id IS NULL
+                         ) THEN 'in progress'
+                         ELSE 'completed'
+                       END AS state,
+                       (SELECT st.label
+                          FROM document_route_recipients rc
+                          JOIN document_route_steps st ON st.id = rc.step_id
+                         WHERE rc.document_id = s.document_id AND rc.tenant_id = s.tenant_id
+                           AND rc.closed_by_event_id IS NULL
+                         ORDER BY rc.id DESC LIMIT 1) AS current_step";
+
     public function create(
         int $tenantId,
         int $formId,
@@ -102,7 +132,7 @@ final class FormSubmissionRepository
         int $limit = 50,
         int $offset = 0,
     ): array {
-        $sql = 'SELECT ' . self::COLUMNS . ', f.form_key, f.name AS form_name
+        $sql = 'SELECT ' . self::COLUMNS . ', f.form_key, f.name AS form_name' . self::ROUTE_STATE . '
                   FROM form_submissions s
                   JOIN forms f ON f.id = s.form_id AND f.tenant_id = s.tenant_id
                  WHERE s.tenant_id = :tenant_id';
@@ -148,7 +178,7 @@ final class FormSubmissionRepository
      */
     public function find(int $tenantId, int $id, ?int $submittedByProfileId = null): ?array
     {
-        $sql = 'SELECT ' . self::COLUMNS . ', f.form_key, f.name AS form_name
+        $sql = 'SELECT ' . self::COLUMNS . ', f.form_key, f.name AS form_name' . self::ROUTE_STATE . '
                   FROM form_submissions s
                   JOIN forms f ON f.id = s.form_id AND f.tenant_id = s.tenant_id
                  WHERE s.tenant_id = :tenant_id AND s.id = :id';
