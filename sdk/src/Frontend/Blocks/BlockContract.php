@@ -836,9 +836,10 @@ final class BlockContract
             // `source` stays OPTIONAL: a `fieldArray` without one is unchanged,
             // still starts empty, and is still the right block for composing new
             // rows. Both `apiPath` ownership-checking and version rewriting come
-            // free — {@see \Whity\Core\PluginLoader} derives what to check from
-            // this table, so a plugin cannot point a sourced array at somebody
-            // else's route.
+            // free — the host's plugin loader derives what to check from this
+            // table, so a plugin cannot point a sourced array at somebody
+            // else's route. (Named in prose rather than linked: the SDK ships
+            // standalone and may not reference a host symbol, even in a comment.)
             'fieldArray' => ['container' => true, 'props' => [
                 'name'      => ['type' => 'inputName', 'required' => true],
                 'label'     => ['type' => 'string',    'required' => true],

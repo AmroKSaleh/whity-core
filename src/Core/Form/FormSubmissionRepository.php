@@ -80,6 +80,16 @@ final class FormSubmissionRepository
                            AND rc.closed_by_event_id IS NULL
                          ORDER BY rc.id DESC LIMIT 1) AS current_step";
 
+    /**
+     * @param array<string, mixed> $values The answers, keyed by field key.
+     *                                     `mixed` is honest rather than lazy:
+     *                                     a field yields a string, a list of
+     *                                     strings for choose-several, a number,
+     *                                     a bool, an upload reference or null,
+     *                                     and which one is the field type's
+     *                                     business — this repository stores the
+     *                                     answer set, it does not interpret it.
+     */
     public function create(
         int $tenantId,
         int $formId,

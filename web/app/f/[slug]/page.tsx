@@ -28,6 +28,7 @@ import { use, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Button } from '@amroksaleh/ui/button';
 import { useDirection } from '@/lib/direction-context';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import {
   FormField,
   localized,
@@ -51,6 +52,10 @@ export default function PublicFormPage({ params }: { params: Promise<{ slug: str
   const { slug } = use(params);
   const { dir } = useDirection();
   const preferArabic = dir === 'rtl';
+  // Safe with no provider above it — the hook is documented as non-throwing and
+  // falls back to "dates are shown", which is what a page a stranger opens has
+  // always done. Nothing here reads a session.
+  const { dateTime } = useDateDisplay();
 
   const [form, setForm] = useState<PublicForm | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -190,6 +195,7 @@ export default function PublicFormPage({ params }: { params: Promise<{ slug: str
   }
 
   const title = localized(form.name, preferArabic) || 'Form';
+  const closedOn = dateTime(form.closes_at);
 
   if (submitted) {
     return shell(
@@ -215,7 +221,14 @@ export default function PublicFormPage({ params }: { params: Promise<{ slug: str
         {!form.accepts_submissions ? (
           <p className="py-6 text-sm text-muted-foreground">
             This form is not accepting responses
-            {form.closes_at !== null ? ` (it closed on ${form.closes_at})` : ''}.
+            {/*
+              No `?? form.closes_at` fallback: when the formatter declines, the
+              whole clause goes, rather than printing the wire timestamp in the
+              browser's locale. "This form is not accepting responses." is a
+              complete answer on its own — the closing date was only ever the
+              courtesy half.
+            */}
+            {closedOn !== null ? ` (it closed on ${closedOn})` : ''}.
           </p>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-6" noValidate>
