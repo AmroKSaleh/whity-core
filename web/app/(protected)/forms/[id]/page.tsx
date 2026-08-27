@@ -22,6 +22,7 @@ import { use, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Button } from '@amroksaleh/ui/button';
 import { useDirection } from '@/lib/direction-context';
+import { apiClient } from '@/lib/api-client';
 import {
   FormField,
   localized,
@@ -47,6 +48,25 @@ interface RenderedForm {
   accepts_submissions: boolean;
 }
 
+/** Per-form, per-browser. Never sent anywhere. */
+function draftKey(id: string): string {
+  return `whity:form-draft:${id}`;
+}
+
+function readDraft(id: string): Record<string, Answer> {
+  try {
+    const raw = window.localStorage.getItem(draftKey(id));
+    if (raw === null) return {};
+    const parsed: unknown = JSON.parse(raw);
+
+    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, Answer>) : {};
+  } catch {
+    // Private windows, cleared site data and browsers set to block storage all
+    // land here. A draft is a convenience; losing it must never cost the form.
+    return {};
+  }
+}
+
 export default function FillFormPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { dir } = useDirection();
@@ -60,6 +80,7 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [units, setUnits] = useState<ReferenceOption[]>([]);
+  const [restored, setRestored] = useState(false);
 
   // The unit list for any `ou_ref` field. Fetched by the PAGE rather than by the
   // field, because whether this reader may see a list of the tenant's units is a
@@ -68,7 +89,7 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
   useEffect(() => {
     let cancelled = false;
 
-    fetch('/api/v1/ous', { headers: { Accept: 'application/json' } })
+    apiClient('/api/v1/ous', { headers: { Accept: 'application/json' } })
       .then(async (response) => {
         if (!response.ok) return;
         const body = (await response.json().catch(() => ({}))) as {
@@ -97,7 +118,7 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`/api/v1/forms/${encodeURIComponent(id)}/render`, { headers: { Accept: 'application/json' } })
+    apiClient(`/api/v1/forms/${encodeURIComponent(id)}/render`, { headers: { Accept: 'application/json' } })
       .then(async (response) => {
         const body = (await response.json().catch(() => ({}))) as { data?: RenderedForm; error?: string };
         if (cancelled) return;
@@ -116,7 +137,11 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
         for (const [key, value] of Object.entries(body.data.prefill ?? {})) {
           if (typeof value === 'string' && value !== '') seed[key] = value;
         }
-        setAnswers(seed);
+        // Prefill first, then whatever was already typed — a draft is a
+        // later statement of intent than a default, so it wins.
+        const draft = readDraft(id);
+        setAnswers({ ...seed, ...draft });
+        setRestored(Object.keys(draft).length > 0);
       })
       .catch(() => {
         if (!cancelled) setLoadError('This form could not be loaded. Check your connection and try again.');
@@ -129,6 +154,32 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
       cancelled = true;
     };
   }, [id]);
+
+  // Keep the draft current. File answers are deliberately EXCLUDED: an upload
+  // reference is single-use, so restoring one would hand the server a reference
+  // it has already spent and refuse the submission for a reason nobody can see.
+  useEffect(() => {
+    if (rendered === null || submitted) return;
+
+    const fileKeys = new Set(
+      rendered.fields.filter((f) => f.field_type === 'file').map((f) => f.field_key)
+    );
+    const keep = Object.fromEntries(Object.entries(answers).filter(([key]) => !fileKeys.has(key)));
+
+    try {
+      window.localStorage.setItem(draftKey(id), JSON.stringify(keep));
+    } catch {
+      // Storage unavailable or full — the form still works.
+    }
+  }, [answers, id, rendered, submitted]);
+
+  function discardDraft() {
+    try {
+      window.localStorage.removeItem(draftKey(id));
+    } catch {
+      // nothing to do
+    }
+  }
 
   const ordered = useMemo(
     () => (rendered?.fields ?? []).slice().sort((a, b) => a.position - b.position),
@@ -157,7 +208,7 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
     const body = new FormData();
     body.append('file', file);
 
-    const response = await fetch(`/api/v1/forms/${encodeURIComponent(id)}/uploads`, {
+    const response = await apiClient(`/api/v1/forms/${encodeURIComponent(id)}/uploads`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body,
@@ -180,7 +231,7 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const response = await fetch(`/api/v1/forms/${encodeURIComponent(id)}/submissions`, {
+      const response = await apiClient(`/api/v1/forms/${encodeURIComponent(id)}/submissions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -200,6 +251,9 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
 
         return;
       }
+      // Only once the server has it. Clearing on the attempt would lose the
+      // answers precisely when the attempt failed.
+      discardDraft();
       setSubmitted(true);
     } catch {
       setSubmitError('This could not be submitted. Check your connection and try again.');
@@ -259,6 +313,26 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
             </p>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+              {restored && (
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-card p-3 text-sm shadow-2xs">
+                  <span className="text-muted-foreground">
+                    Your unsent answers were restored from this browser.
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      discardDraft();
+                      setAnswers({});
+                      setRestored(false);
+                    }}
+                  >
+                    Start again
+                  </Button>
+                </div>
+              )}
+
               {ordered.map((field) => (
                 <FormField
                   key={field.field_key}
