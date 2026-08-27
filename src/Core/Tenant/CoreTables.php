@@ -82,6 +82,7 @@ final class CoreTables
         'external_identities' => '047_create_external_identities.php',
         'form_fields' => '127_create_forms.php',
         'form_submissions' => '127_create_forms.php',
+        'form_uploads' => '134_create_form_uploads.php',
         'forms' => '127_create_forms.php',
         'health_samples' => '085_create_health_samples.php',
         'identity_providers' => '048_create_identity_providers.php',

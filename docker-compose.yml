@@ -134,10 +134,18 @@ services:
       - sh
       - -c
       - |
-        echo "[cron] revoked-tokens cleanup scheduler started (daily)";
+        echo "[cron] maintenance scheduler started (daily)";
         while true; do
           echo "[cron] $$(date -u +%FT%TZ) running revoked-tokens:cleanup";
           php public/index.php revoked-tokens:cleanup || echo "[cron] cleanup failed (will retry next cycle)";
+          # The other half of the form-upload feature (migration 134): a `file`
+          # answer's bytes are written BEFORE the submission exists, so every
+          # abandoned form leaves an object nothing references. Run in the SAME
+          # loop rather than as a second service — it is the same kind of job at
+          # the same cadence, and a second container would be one more thing an
+          # operator has to know to start.
+          echo "[cron] $$(date -u +%FT%TZ) running form-uploads:sweep";
+          php public/index.php form-uploads:sweep || echo "[cron] form-upload sweep failed (will retry next cycle)";
           sleep 86400;
         done
 

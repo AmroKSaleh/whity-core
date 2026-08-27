@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
+use Whity\Core\Form\FieldType;
 use Whity\Core\Form\FormFieldRepository;
 use Whity\Core\Form\FormRejectedException;
 use Whity\Core\Form\FormRepository;
+use Whity\Core\Form\FormUploadPolicy;
+use Whity\Core\Form\FormUploadStore;
 use Whity\Core\Form\PublicFormLink;
 use Whity\Core\Form\PublicFormView;
 use Whity\Core\Form\SubmissionIssuer;
@@ -16,11 +19,15 @@ use Whity\Core\Response;
 use Whity\Core\Store\SharedStoreInterface;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
+use Whity\Http\UploadedFilePart;
+use Whity\Http\UploadedFilePartException;
+use Whity\Storage\StorageException;
 
 /**
  * The UNAUTHENTICATED end of a public form (migration 132):
  *
  *   GET  /api/v1/public/forms/{slug}              — what am I being asked?
+ *   POST /api/v1/public/forms/{slug}/uploads      — here is my attachment.
  *   POST /api/v1/public/forms/{slug}/submissions  — here is my answer.
  *
  * The caller has no account, no session and no tenant. That is not a limitation
@@ -127,7 +134,47 @@ use Whity\Http\JsonBody;
  * ({@see \Whity\Core\RateLimit\RateLimitRule::ip()}), the opt-in itself, and the
  * submission window.
  *
- * 7. CSRF AND THE POST
+ * 7. AN ANONYMOUS CALLER MAY NOW UPLOAD A FILE, AND HERE IS THE ARGUMENT
+ * ----------------------------------------------------------------------
+ * {@see PublicFormView} used to strip `file` fields alongside `profile_ref` and
+ * `ou_ref`. The three were never the same case and are no longer treated as
+ * one. A person picker on a public form is a READ of the tenant's data — a
+ * directory, with a membership oracle behind it. A file input reads nothing: it
+ * offers no list, resolves no id against this organisation, and returns one
+ * opaque reference to the caller's own bytes. There is no question about the
+ * tenant it can be asked.
+ *
+ * `file` was stripped for a narrower and then-true reason: every upload route
+ * was gated, so an anonymous caller could not produce a reference and the field
+ * would have rendered above a submit button that refused them. That premise died
+ * with {@see self::upload()}, and the exclusion dies with it — otherwise the
+ * exact case the feature exists for (an external applicant attaching their
+ * published paper to an application) is the one case it cannot serve.
+ *
+ * WHAT THE TENANT IS ACTUALLY EXPOSED TO IS BYTES, and bytes are bounded rather
+ * than argued away — the same posture point 6 takes about volume:
+ *
+ *   - a per-IP hourly ceiling on uploads, TIGHTER than the submit ceiling
+ *     (`UPLOAD_IP_MAX`), because an upload costs storage where a submission
+ *     costs rows;
+ *   - a per-FORM hourly ceiling that holds across many addresses, so a
+ *     distributed flood is bounded too;
+ *   - a size ceiling of {@see FormUploadPolicy::PUBLIC_MAX_BYTES} — HALF the
+ *     authenticated one — so the product of the two limits (bytes per address
+ *     per hour) is what is capped, not just the count;
+ *   - a three-entry content-type allow-list checked against the LEADING BYTES,
+ *     never the client's label;
+ *   - the 256-bit slug, the opt-in that minted it, and the submission window,
+ *     all of which must be live before the route does any work at all;
+ *   - {@see \Whity\Core\Form\FormUploadSweeper}, which deletes anything nobody
+ *     ever submitted, so an abandoned upload is a day of storage rather than a
+ *     permanent one.
+ *
+ * AND THE REFUSAL SHAPE IS THE SAME 404. The upload route resolves the slug
+ * through {@see self::resolve()} and collapses to {@see refuse()} exactly as the
+ * other two do, so it cannot be asked which slugs exist either.
+ *
+ * 8. CSRF AND THE POST
  * ---------------------
  * {@see \Whity\Http\Middleware\CsrfGuard} requires its custom header only for
  * requests carrying an AMBIENT credential (an auth cookie) or targeting the auth
@@ -159,6 +206,33 @@ final class PublicFormsApiHandler
     private const SUBMIT_IP_MAX = 20;
 
     /**
+     * Per-IP ceiling on UPLOADS, tighter than the submit ceiling.
+     *
+     * Tighter because the two cost the tenant different things. A submission
+     * costs rows and one person's attention; an upload costs STORAGE, which is
+     * metered, billed, and not reclaimed by the tenant noticing. Ten an hour
+     * against a 5 MiB ceiling bounds one address to 50 MiB an hour, which is
+     * generous for an applicant attaching one paper and useless as a way to fill
+     * somebody's bucket.
+     *
+     * It is deliberately HIGHER than one: a person who picks the wrong file, or
+     * whose upload times out on a phone, must be able to try again without being
+     * locked out of the application they came to file.
+     */
+    private const UPLOAD_IP_MAX = 10;
+
+    /**
+     * Per-FORM ceiling on uploads, across every address — the distributed-flood
+     * half, exactly as {@see self::SUBMIT_FORM_MAX} is for submissions.
+     *
+     * Sized against SUBMIT_FORM_MAX rather than independently: a form that
+     * accepts 300 submissions an hour and asks for one attachment each needs
+     * room for about that many uploads, plus slack for the re-tries a per-IP
+     * limit deliberately allows.
+     */
+    private const UPLOAD_FORM_MAX = 400;
+
+    /**
      * Per-FORM ceiling on submissions, across every address.
      *
      * The per-IP limit alone is not enough for the one thing that actually
@@ -184,6 +258,7 @@ final class PublicFormsApiHandler
         private readonly FormFieldRepository $fields,
         private readonly SubmissionIssuer $issuer,
         private readonly SharedStoreInterface $store,
+        private readonly FormUploadStore $uploads,
     ) {
     }
 
@@ -234,6 +309,114 @@ final class PublicFormsApiHandler
             error_log('[PublicFormsApiHandler] render failed: ' . $e->getMessage());
 
             return Response::error('This form is temporarily unavailable', 503);
+        }
+    }
+
+    /**
+     * `POST /api/v1/public/forms/{slug}/uploads` — attach a file to a public
+     * form, with no account.
+     *
+     * MULTIPART, one part named `file`, and nothing else in the body is read —
+     * the same rule the submit states, and it matters more here because there is
+     * no session to constrain what a body could otherwise claim. The tenant and
+     * the form come from the SLUG, as they do on every route in this class.
+     *
+     * The ORDER of the gates is deliberate and mirrors {@see self::submit()}:
+     * the per-IP throttle is counted BEFORE the slug is examined, so the
+     * boundary carries no information about whether a slug was real; then the
+     * 404-collapse; then the form's own state; then the per-form ceiling, which
+     * can only be counted once the form is known and costs nothing because
+     * reaching it required a live slug; and only then are any bytes read.
+     *
+     * WHY THE FORM MUST ASK FOR A FILE. Without that check this is a write into
+     * a tenant's storage that anybody holding ANY of that tenant's public slugs
+     * can aim at ANY of its public forms. With it, the surface is exactly the
+     * forms whose author asked for an attachment.
+     *
+     * @param array<string, string> $params
+     */
+    public function upload(Request $request, array $params): Response
+    {
+        $throttled = $this->throttle($request, 'upload', self::UPLOAD_IP_MAX);
+        if ($throttled instanceof Response) {
+            return $throttled;
+        }
+
+        try {
+            $form = $this->resolve($params);
+            if ($form === null) {
+                return self::refuse();
+            }
+
+            $tenantId = (int) $form['tenant_id'];
+            $formId = (int) $form['id'];
+
+            $fields = PublicFormView::answerableFields($this->fields->listForForm($tenantId, $formId));
+
+            if (!PublicFormLink::acceptsPublicSubmissions($form) || $fields === []) {
+                // The same sentence the submit gives for the same state. An
+                // upload accepted against a form that will refuse the submission
+                // would spend the tenant's storage on bytes nobody can ever
+                // attach to anything.
+                return Response::error('This form is not accepting submissions right now', 422);
+            }
+
+            if (!self::asksForAFile($fields)) {
+                return Response::error('This form does not ask for a file', 422);
+            }
+
+            $ceiling = $this->count('pubform:upload:form:' . $tenantId . ':' . $formId, self::UPLOAD_FORM_MAX);
+            if ($ceiling instanceof Response) {
+                return $ceiling;
+            }
+
+            $part = UploadedFilePart::read($request, 'file');
+
+            // The PUBLIC ceiling — half the authenticated one. See
+            // FormUploadPolicy for why the two differ.
+            $contentType = FormUploadPolicy::assertAcceptable(
+                $part['bytes'],
+                $part['media_type'],
+                FormUploadPolicy::PUBLIC_MAX_BYTES,
+            );
+
+            $stored = $this->uploads->put(
+                $tenantId,
+                $formId,
+                $part['bytes'],
+                $contentType,
+                $part['filename'],
+                // NO UPLOADER, for the reason point 5 gives about the submitter:
+                // null rather than a sentinel profile. The claim at submit time
+                // compares null to null, so an anonymous upload can only be
+                // spent by an anonymous submission — a signed-in member cannot
+                // adopt one, and vice versa.
+                null,
+            );
+
+            return Response::json([
+                'data' => [
+                    'reference'       => $stored['storage_key'],
+                    'filename'        => $stored['filename'],
+                    'content_type'    => $stored['content_type'],
+                    'byte_size'       => $stored['byte_size'],
+                    'checksum_sha256' => $stored['checksum_sha256'],
+                ],
+            ], 201);
+        } catch (UploadedFilePartException $e) {
+            error_log('[PublicFormsApiHandler] upload part rejected: ' . $e->getMessage());
+
+            return Response::error($e->clientMessage, $e->status);
+        } catch (FormRejectedException $e) {
+            return Response::error($e->clientMessage, 422);
+        } catch (StorageException $e) {
+            error_log('[PublicFormsApiHandler] upload storage write failed: ' . $e->getMessage());
+
+            return Response::error('The file could not be stored. Please try again.', 503);
+        } catch (\Throwable $e) {
+            error_log('[PublicFormsApiHandler] upload failed: ' . $e->getMessage());
+
+            return Response::error('The file could not be uploaded. Please try again.', 503);
         }
     }
 
@@ -362,6 +545,28 @@ final class PublicFormsApiHandler
 
             return Response::error('Your submission could not be recorded. Please try again.', 503);
         }
+    }
+
+    /**
+     * Whether any of the form's PUBLICLY-SERVED fields is a `file` field.
+     *
+     * Asked of the already-filtered list rather than of every field on the form,
+     * so a `file` field that some future rule stripped from the public surface
+     * cannot be the thing that authorises an anonymous upload. Same discipline
+     * the submit applies: what a stranger may be asked and what a stranger may
+     * send are computed from ONE list.
+     *
+     * @param list<array<string, mixed>> $fields
+     */
+    private static function asksForAFile(array $fields): bool
+    {
+        foreach ($fields as $field) {
+            if ((string) ($field['field_type'] ?? '') === FieldType::FILE) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

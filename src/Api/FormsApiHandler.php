@@ -384,15 +384,24 @@ final class FormsApiHandler
      * archive and comes back if the form is republished.
      *
      * THE FORM MUST ASK ONLY QUESTIONS A STRANGER CAN ANSWER. A `profile_ref` or
-     * `ou_ref` field would make the submit endpoint a membership oracle, and a
-     * `file` field is unfillable without an upload route the caller cannot reach
-     * — {@see PublicFormView::isPubliclyAnswerable()} has the full argument. Both
-     * are refused HERE, at the moment the door opens, naming the offending fields,
-     * rather than silently serving a shorter form. A field added AFTER the link is
-     * open is omitted rather than refused, because closing a live public form
-     * because somebody edited it is a worse failure than serving the rest of it —
-     * so this check is the author-facing half and {@see PublicFormView} is the
-     * structural half, and neither is load-bearing alone.
+     * `ou_ref` field would make the submit endpoint a membership oracle —
+     * {@see PublicFormView::isPubliclyAnswerable()} has the full argument. Those
+     * are refused HERE, at the moment the door opens, naming the offending
+     * fields, rather than silently serving a shorter form. A field added AFTER
+     * the link is open is omitted rather than refused, because closing a live
+     * public form because somebody edited it is a worse failure than serving the
+     * rest of it — so this check is the author-facing half and
+     * {@see PublicFormView} is the structural half, and neither is load-bearing
+     * alone.
+     *
+     * A `file` FIELD IS NO LONGER ONE OF THEM. It was, while there was no
+     * anonymous upload route and the field would have rendered above a submit
+     * button that refused. Migration 134 added
+     * `POST /api/v1/public/forms/{slug}/uploads`, so a public form may now ask
+     * an external applicant to attach their paper — which is the case the whole
+     * feature exists for. The list this check consults is
+     * {@see PublicFormView::unanswerableFieldKeys()}, so it changed with the
+     * policy rather than needing to be remembered separately.
      *
      * `opens_at` / `closes_at` are optional and either may be null. They are
      * interpreted in the INSTANCE'S OWN CLOCK — the same naive `TIMESTAMP` every
@@ -431,8 +440,7 @@ final class FormsApiHandler
                     'A public form can only ask for values somebody outside the organisation can '
                     . 'actually give. These fields cannot be: ' . implode(', ', $unanswerable)
                     . '. A person or unit field would ask an anonymous caller to name one of your '
-                    . 'records, and a file field needs an upload they cannot perform. Remove them, '
-                    . 'or collect this form from signed-in members instead.',
+                    . 'records. Remove them, or collect this form from signed-in members instead.',
                     422
                 );
             }

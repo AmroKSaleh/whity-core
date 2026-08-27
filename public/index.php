@@ -86,6 +86,52 @@ if ($isCli && isset($argv[1])) {
         exit(0);
     }
 
+    // The retention sweep for form attachments nobody ever submitted (migration
+    // 134). A `file` answer's bytes are written BEFORE the submission exists —
+    // they have to be — so every abandoned form leaves an object no row will
+    // ever reference. See \Whity\Core\Form\FormUploadSweeper for why a TTL beats
+    // the alternatives, and docs/wiki/Cron-Operations.md for the schedule.
+    //
+    // THE DRIVER IS BUILT THE SAME WAY THE HTTP PATH BUILDS IT, and that is
+    // load-bearing rather than ceremony: an entitled tenant's uploads live in
+    // that tenant's own bucket, so a sweep holding only the platform default
+    // would delete the rows and then fail to find the objects — reporting a
+    // successful sweep while the storage bill kept growing. Six lines to get
+    // the same TenantRoutingStorageDriver the writes used.
+    if ($command === 'form-uploads:sweep') {
+        $db = \Whity\Database\Database::connect();
+        $sweepPdo = $db->getPdo();
+        $sweepSettings = new \Whity\Core\Settings\SettingsService(
+            new \Whity\Core\Settings\GlobalSettingsRepository($sweepPdo),
+            new \Whity\Core\Settings\TenantSettingsRepository($sweepPdo)
+        );
+        $sweepDefaultDriver = \Whity\Storage\StorageDriverFactory::fromSettings(
+            $sweepSettings,
+            $_ENV,
+            getenv('STORAGE_ROOT') ?: (dirname(__DIR__) . '/storage')
+        );
+        $sweepDriver = new \Whity\Storage\TenantRoutingStorageDriver(
+            $sweepDefaultDriver,
+            new \Whity\Storage\TenantStorageResolver(
+                $sweepDefaultDriver,
+                new \Whity\Storage\TenantStorageConfigRepository($sweepPdo),
+                new \Whity\Core\Entitlement\EntitlementService(
+                    new \Whity\Core\Entitlement\TenantEntitlementRepository($sweepPdo)
+                ),
+                \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV)
+            )
+        );
+        $sweepCommand = new \Whity\Commands\FormUploadsSweepCommand(
+            new \Whity\Core\Form\FormUploadSweeper(
+                new \Whity\Core\Form\FormUploadRepository($sweepPdo),
+                $sweepDriver
+            )
+        );
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'form-uploads:sweep'
+        exit($sweepCommand->execute($argv));
+    }
+
     if ($command === 'update:check') {
         $updateCheckCommand = new \Whity\Cli\Commands\UpdateCheckCommand();
         array_shift($argv); // Remove script name
@@ -123,6 +169,7 @@ if ($isCli && isset($argv[1])) {
     echo "  migrate                    Manage database migrations\n";
     echo "  seed                       Seed database with default data\n";
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
+    echo "  form-uploads:sweep         Delete form attachments nobody ever submitted\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
@@ -2759,6 +2806,22 @@ $formRenderer = new \Whity\Core\Form\FormRenderer(
 // nobody can put on a poster.
 $publicFormLink = new \Whity\Core\Form\PublicFormLink($appUrl);
 
+// FILE ATTACHMENTS (migration 134). The staging record for a file uploaded
+// against a `file` field, plus the store that writes the bytes.
+//
+// $storageDriver is the SAME per-tenant routing driver branding and document
+// artifacts use — built once in 13a-storage above and handed here rather than
+// rebuilt, because two drivers built from the same settings is the split-backend
+// hazard StorageDriverFactory's own docblock warns about. There is deliberately
+// no storage client anywhere in the forms subsystem.
+//
+// $formUploadRepository is shared by the STORE (which records an upload) and by
+// SubmissionIssuer (which spends one). It has to be the same table and the same
+// statements: the claim is what makes a storage key not a capability, and a
+// second access path is a second place for that check to be got wrong.
+$formUploadRepository = new \Whity\Core\Form\FormUploadRepository($db->getPdo());
+$formUploadStore = new \Whity\Core\Form\FormUploadStore($storageDriver, $formUploadRepository);
+
 $formsHandler = new \Whity\Api\FormsApiHandler(
     $formRepository,
     $formFieldRepository,
@@ -2793,6 +2856,22 @@ $router->register('PUT', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'rep
 $router->register('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'update'], null, null, CorePermissions::FORMS_MANAGE);
 $router->register('DELETE', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'delete'], null, null, CorePermissions::FORMS_MANAGE);
 
+// ATTACHING A FILE (migration 134). Gated `forms:submit` — the SAME permission
+// as the submit itself, because uploading is half of answering: a grant of one
+// without the other produces a person who can submit a form they cannot
+// complete. MULTIPART rather than base64 JSON; FormUploadsApiHandler's docblock
+// argues the trade (a 9 MB paper is a 12 MB base64 body held as two live strings
+// against a 128 MB memory_limit, times eight workers).
+//
+// Registered ABOVE the submit route it feeds, in the order a client uses them.
+$formUploadsHandler = new \Whity\Api\FormUploadsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formUploadStore,
+    new DatabaseSharedStore($db->getPdo())
+);
+$router->register('POST', '/api/forms/{id:\d+}/uploads', [$formUploadsHandler, 'upload'], null, null, CorePermissions::FORMS_SUBMIT);
+
 $formSubmissionsHandler = new \Whity\Api\FormSubmissionsApiHandler(
     $formRepository,
     $formFieldRepository,
@@ -2802,7 +2881,14 @@ $formSubmissionsHandler = new \Whity\Api\FormSubmissionsApiHandler(
         $formSubmissionRepository,
         $documentIssuer,
         $routeTemplateRepository,
-        $documentRouter
+        $documentRouter,
+        // The two collaborators that turn a `file` answer into evidence: the
+        // upload repository CLAIMS the staged upload (the check that stops a key
+        // from another tenant becoming an artifact on this one), and the artifact
+        // repository records the row that makes the bytes reachable through the
+        // ordinary document-artifact download route.
+        $formUploadRepository,
+        $documentArtifactRepository
     )
 );
 $router->register('POST', '/api/forms/{id:\d+}/submissions', [$formSubmissionsHandler, 'submit'], null, null, CorePermissions::FORMS_SUBMIT);
@@ -2848,11 +2934,31 @@ $publicFormsHandler = new \Whity\Api\PublicFormsApiHandler(
         $formSubmissionRepository,
         $documentIssuer,
         $routeTemplateRepository,
-        $documentRouter
+        $documentRouter,
+        $formUploadRepository,
+        $documentArtifactRepository
     ),
-    new DatabaseSharedStore($db->getPdo())
+    new DatabaseSharedStore($db->getPdo()),
+    // The SAME store the authenticated path uses. An anonymous upload differs
+    // only in its ceiling, its throttle and its null uploader — none of which is
+    // a reason for a second storage path.
+    $formUploadStore
 );
 $router->register('GET', '/api/public/forms/{slug}', [$publicFormsHandler, 'render'], null);
+// AN ANONYMOUS UPLOAD (migration 134). `file` fields used to be stripped from
+// the public surface on the grounds that every upload route was gated, so a
+// stranger could not produce a reference — true about the platform, not about
+// the field. A file input asks the tenant's data NOTHING, so unlike the person
+// and unit pickers beside it, it is not an oracle. This route is what removed
+// the premise; PublicFormView::isPubliclyAnswerable() carries the argument and
+// PublicFormsApiHandler point 7 carries the bounds (a tighter per-IP ceiling
+// than the submit, a per-form ceiling, HALF the authenticated size limit, a
+// sniffed content-type allow-list, and the retention sweep).
+//
+// Added to EnforceTenantIsolation's public list as its own anchored pattern —
+// never as an open `/api/v1/public/` prefix, which is the lesson recorded beside
+// the other two.
+$router->register('POST', '/api/public/forms/{slug}/uploads', [$publicFormsHandler, 'upload'], null);
 $router->register('POST', '/api/public/forms/{slug}/submissions', [$publicFormsHandler, 'submit'], null);
 
 // 13a-nonies-quater. Routing's recipients registered as an #881 INBOX SOURCE —

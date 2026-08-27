@@ -16,6 +16,7 @@
  * answers end up in the same table, would be a difference nobody could see.
  */
 
+import { useState } from 'react';
 import { Input } from '@amroksaleh/ui/input';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import { Checkbox } from '@amroksaleh/ui/checkbox';
@@ -79,12 +80,164 @@ export interface ReferenceOption {
   label: string;
 }
 
+/**
+ * What the server hands back for one uploaded file.
+ *
+ * `reference` is what the `file` ANSWER carries — the same string the field
+ * would have held if somebody had typed it, which is why no type change was
+ * needed on `Answer`. Everything else is for showing the person what was
+ * received: they attached a file and are entitled to see that the server agrees
+ * about which one.
+ */
+export interface UploadedFileRef {
+  reference: string;
+  filename: string | null;
+  content_type: string;
+  byte_size: number;
+  checksum_sha256: string;
+}
+
+/**
+ * Uploads one file and resolves with the reference to answer with.
+ *
+ * Supplied BY THE PAGE, not by this component, for the same reason `references`
+ * is: the two pages post to different endpoints — `/forms/{id}/uploads` and
+ * `/public/forms/{slug}/uploads` — and which one a reader may use is a question
+ * about the reader. A component that picked its own endpoint would have to know
+ * whether it was being rendered publicly, which is exactly the thing it must not
+ * decide.
+ *
+ * It REJECTS with an Error whose message is the server's own sentence ("That
+ * file is too large — the limit is 10 MB."), because the server is the only
+ * party that knows the limits and it already writes them for a person.
+ */
+export type FileUploader = (file: File) => Promise<UploadedFileRef>;
+
+/**
+ * The kinds the server accepts, as an `accept` attribute.
+ *
+ * A HINT, not a rule. The server decides from the file's LEADING BYTES and will
+ * refuse a renamed `.pdf` this list would have let through — so nothing here is
+ * load-bearing, and it is worth having only because a file picker that offers
+ * the whole disk makes people choose a file that is then rejected.
+ */
+const ACCEPTED_FILE_TYPES = 'application/pdf,image/png,image/jpeg';
+
+/** A byte count as a person would read it. */
+function humanSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * A `file` field: a file input that UPLOADS, then holds the reference it got
+ * back.
+ *
+ * A separate component rather than a branch inside {@link FormField} because it
+ * is the only field kind with state of its own — in flight, failed, attached —
+ * and hooks may not be called conditionally. Keeping them here means the other
+ * nine kinds pay nothing for this one.
+ *
+ * THE ANSWER IS THE REFERENCE, NEVER THE FILE. A file input cannot be given a
+ * value programmatically, so re-rendering the page would otherwise lose the
+ * attachment silently. What is remembered is the server's reference, which is
+ * what the submission actually carries — and the file's name is shown beside it
+ * so the person can see that something IS attached rather than inferring it from
+ * an input that looks empty.
+ *
+ * A FAILED UPLOAD CLEARS THE ANSWER. Leaving the previous reference in place
+ * after a failed replacement would submit the OLD file while showing an error
+ * about the new one — the "renders one thing, does another" failure. Clearing it
+ * makes a required field refuse, which is the honest outcome.
+ */
+function FileField({
+  id,
+  required,
+  value,
+  upload,
+  onChange,
+}: {
+  id: string;
+  required: boolean;
+  value: string | undefined;
+  upload: FileUploader | undefined;
+  onChange: (value: Answer) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [attached, setAttached] = useState<{ name: string; size: number } | null>(null);
+
+  if (upload === undefined) {
+    // No uploader means this surface cannot accept files. Say so rather than
+    // drawing an input that would do nothing — a control that silently fails is
+    // worse than an absent one.
+    return (
+      <p className="text-sm text-muted-foreground" role="note">
+        Files cannot be attached here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <input
+        id={id}
+        type="file"
+        accept={ACCEPTED_FILE_TYPES}
+        // `required` is passed through for assistive technology; both fill pages
+        // set `noValidate`, and the browser could not see the attachment anyway
+        // — the input's own value is cleared as soon as the upload finishes.
+        required={required && value === undefined}
+        disabled={busy}
+        className="block w-full text-sm file:me-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-secondary/80"
+        onChange={(e) => {
+          const picked = e.target.files?.[0];
+          if (picked === undefined) return;
+
+          setBusy(true);
+          setError(null);
+          void upload(picked)
+            .then((stored) => {
+              setAttached({ name: stored.filename ?? picked.name, size: stored.byte_size });
+              onChange(stored.reference);
+            })
+            .catch((cause: unknown) => {
+              setAttached(null);
+              // The answer is cleared, not left pointing at whatever was
+              // attached before — see the component docblock.
+              onChange('');
+              setError(cause instanceof Error ? cause.message : 'That file could not be uploaded.');
+            })
+            .finally(() => setBusy(false));
+        }}
+      />
+
+      {busy && <p className="text-xs text-muted-foreground">Uploading…</p>}
+
+      {!busy && attached !== null && (
+        <p className="text-xs text-muted-foreground">
+          Attached: {attached.name} ({humanSize(attached.size)})
+        </p>
+      )}
+
+      {error !== null && (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function FormField({
   field,
   value,
   preferArabic,
   onChange,
   references,
+  upload,
 }: {
   field: FormFieldSpec;
   value: Answer | undefined;
@@ -98,6 +251,17 @@ export function FormField({
    * picker of real units or real people is a directory, handed to a stranger.
    */
   references?: Partial<Record<string, ReferenceOption[]>>;
+  /**
+   * How a `file` field uploads. Supplied by the page for the same reason
+   * `references` is — the two fill pages post to different endpoints — and
+   * OMITTED means this surface cannot take files, which the field says out loud
+   * rather than drawing an input that would do nothing.
+   *
+   * Both pages supply one. A `file` field is served publicly as well as
+   * internally: unlike the person and unit pickers beside it, a file input reads
+   * nothing about the organisation, so it is not the oracle they are.
+   */
+  upload?: FileUploader;
 }) {
   const label = localized(field.label, preferArabic) || field.field_key;
   const id = `field-${field.field_key}`;
@@ -118,7 +282,19 @@ export function FormField({
         <p className="text-xs text-muted-foreground">{field.help_text}</p>
       )}
 
-      {field.field_type === 'textarea' ? (
+      {field.field_type === 'file' ? (
+        // AN UPLOAD, not a text box. Before this branch existed a `file` field
+        // fell through to the `<Input type="text">` at the bottom, so the form
+        // asked somebody to "upload your paper" and gave them a place to type a
+        // storage key they had no way to obtain.
+        <FileField
+          id={id}
+          required={field.is_required}
+          value={typeof value === 'string' && value !== '' ? value : undefined}
+          upload={upload}
+          onChange={onChange}
+        />
+      ) : field.field_type === 'textarea' ? (
         <Textarea
           id={id}
           rows={4}
