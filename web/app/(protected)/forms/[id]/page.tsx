@@ -180,7 +180,16 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
     try {
       const response = await fetch(`/api/v1/forms/${encodeURIComponent(id)}/submissions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          // The CSRF guard requires this on a cookie-authenticated write. It is
+          // NOT optional here: a bearer token is exempt from the guard, so every
+          // curl check of this endpoint passed while the browser — which has a
+          // session cookie and no token — was refused with "cross-site request
+          // rejected". The uploader already sent it; the submit did not.
+          'X-Requested-With': 'XMLHttpRequest',
+        },
         body: JSON.stringify({ data: answers }),
       });
       const body = (await response.json().catch(() => ({}))) as { error?: string };
