@@ -825,6 +825,11 @@ final class FormFrontendFeatures
                             'columns' => [
                                 ['key' => 'form_key', 'label' => 'Form', 'sortable' => true, 'filterable' => true],
                                 ['key' => 'submitted_at', 'label' => 'Submitted', 'sortable' => true],
+                                // WHERE IT IS NOW. Somebody who submitted a request does not
+                                // want to be told it was received; they want to know whose desk
+                                // it is on. Derived from the routing trail, so it cannot go stale.
+                                ['key' => 'state', 'label' => 'State', 'sortable' => true, 'filterable' => true],
+                                ['key' => 'current_step', 'label' => 'Now with'],
                             ],
                         ],
                         [
