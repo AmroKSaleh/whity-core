@@ -81,6 +81,98 @@ final class FormFieldRepository
      *
      * @return array<string, mixed>|null
      */
+    /**
+     * Save a form's whole field set in one transaction.
+     *
+     * RECONCILED BY `field_key`. The key is the stable identity a recorded
+     * ANSWER refers to, and it is deliberately not updatable — so a key in both
+     * the incoming set and the stored one is the SAME question (edited, perhaps
+     * moved), and a stored key absent from the incoming set is a question
+     * genuinely withdrawn. Matching on position instead would rename every
+     * question below an insertion and silently reattribute its answers.
+     *
+     * POSITION IS THE ORDER GIVEN. The caller owns the sequence it shows; making
+     * it maintain a separate position integer is two things that must agree and
+     * eventually will not.
+     *
+     * ALL OR NOTHING. A half-applied reorder is a form whose questions sit in an
+     * order nobody chose, which is worse than a refused save.
+     *
+     * @param list<array<string, mixed>> $fields already validated and normalised
+     * @return list<array<string, mixed>> the resulting field set, in order
+     */
+    public function replaceAll(int $tenantId, int $formId, array $fields): array
+    {
+        $existing = [];
+        foreach ($this->listForForm($tenantId, $formId) as $row) {
+            $existing[(string) $row['field_key']] = $row;
+        }
+
+        $incomingKeys = [];
+        foreach ($fields as $field) {
+            $incomingKeys[(string) $field['field_key']] = true;
+        }
+
+        $ownTransaction = !$this->db->inTransaction();
+        if ($ownTransaction) {
+            $this->db->beginTransaction();
+        }
+
+        try {
+            $position = 0;
+            foreach ($fields as $field) {
+                $position++;
+                $key = (string) $field['field_key'];
+
+                if (isset($existing[$key])) {
+                    $changes = $field;
+                    unset($changes['field_key']);
+                    $changes['position'] = $position;
+                    $this->update($tenantId, $formId, (int) $existing[$key]['id'], $changes);
+
+                    continue;
+                }
+
+                $this->create(
+                    $tenantId,
+                    $formId,
+                    $key,
+                    (string) $field['field_type'],
+                    /** @var array<string, string> */ $field['label'],
+                    $field['help_text'] === null ? null : (string) $field['help_text'],
+                    (bool) $field['is_required'],
+                    /** @var list<mixed> */ $field['options'],
+                    /** @var array<string, mixed> */ $field['validation'],
+                    $field['prefill_source'] === null ? null : (string) $field['prefill_source'],
+                    $field['section_key'] === null ? null : (string) $field['section_key'],
+                    $position,
+                );
+            }
+
+            // Withdrawn questions. Answers already given to them stay recorded
+            // and simply stop having a label — the same consequence the
+            // single-field delete carries, and the reason this is a deliberate
+            // act rather than a side effect of reordering.
+            foreach ($existing as $key => $row) {
+                if (!isset($incomingKeys[$key])) {
+                    $this->delete($tenantId, $formId, (int) $row['id']);
+                }
+            }
+
+            if ($ownTransaction) {
+                $this->db->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+
+            throw $e;
+        }
+
+        return $this->listForForm($tenantId, $formId);
+    }
+
     public function find(int $tenantId, int $formId, int $id): ?array
     {
         $stmt = $this->db->prepare(

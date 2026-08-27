@@ -225,6 +225,119 @@ final class FormFieldsApiHandler
     }
 
     /**
+     * PUT /api/v1/forms/{id}/fields — save the whole field set at once.
+     *
+     * Authoring a form is one act of composition, not a sequence of independent
+     * single-field decisions. An editor that mirrors that — question cards you
+     * add to, reorder and delete in place, saved together — cannot rest on
+     * per-field calls without inventing a client-side transaction and hoping
+     * every leg lands. One request, one reconciliation, one outcome.
+     *
+     * @param array<string, string> $params
+     */
+    public function replace(Request $request, array $params): Response
+    {
+        try {
+            $context = $this->context($params);
+            if ($context instanceof Response) {
+                return $context;
+            }
+            [$tenantId, $form] = $context;
+
+            if ($editable = self::refuseIfNotEditable($form)) {
+                return $editable;
+            }
+
+            $body = JsonBody::parsed($request);
+            $incoming = $body['fields'] ?? null;
+            if (!is_array($incoming) || !array_is_list($incoming)) {
+                return Response::error("'fields' must be a list of field definitions", 422);
+            }
+
+            /** @var list<array<string, mixed>> $normalised */
+            $normalised = [];
+            $seen = [];
+
+            foreach ($incoming as $index => $entry) {
+                if (!is_array($entry)) {
+                    return Response::error("fields[{$index}] must be an object", 422);
+                }
+
+                $fieldKey = trim((string) ($entry['field_key'] ?? ''));
+                if ($fieldKey === '') {
+                    return Response::error("fields[{$index}].field_key is required", 422);
+                }
+                if ($keyError = self::validateKey($fieldKey)) {
+                    return $keyError;
+                }
+                if (isset($seen[$fieldKey])) {
+                    // Two questions cannot share a key: an answer could then
+                    // belong to either and nothing downstream could tell which.
+                    return Response::error(
+                        "fields[{$index}].field_key '{$fieldKey}' appears more than once in this request",
+                        422
+                    );
+                }
+                $seen[$fieldKey] = true;
+
+                $fieldType = trim((string) ($entry['field_type'] ?? ''));
+                if (!FieldType::isValid($fieldType)) {
+                    return Response::error(
+                        "fields[{$index}].field_type must be one of: " . implode(', ', FieldType::all()),
+                        422
+                    );
+                }
+
+                $label = LocalizedLabel::fromInput($entry['label'] ?? null, "fields[{$index}].label");
+
+                $options = self::options($entry, $fieldType);
+                if ($options instanceof Response) {
+                    return $options;
+                }
+                $validation = self::validationRules($entry);
+                if ($validation instanceof Response) {
+                    return $validation;
+                }
+                $prefill = self::prefillSource($entry);
+                if ($prefill instanceof Response) {
+                    return $prefill;
+                }
+                $helpText = self::optionalText($entry, 'help_text');
+                if ($helpText instanceof Response) {
+                    return $helpText;
+                }
+                $sectionKey = self::optionalName($entry, 'section_key');
+                if ($sectionKey instanceof Response) {
+                    return $sectionKey;
+                }
+
+                $normalised[] = [
+                    'field_key' => $fieldKey,
+                    'field_type' => $fieldType,
+                    'label' => $label,
+                    'help_text' => $helpText,
+                    'is_required' => ($entry['is_required'] ?? false) === true,
+                    'options' => $options,
+                    'validation' => $validation,
+                    'prefill_source' => $prefill,
+                    'section_key' => $sectionKey,
+                ];
+            }
+
+            return Response::json([
+                'data' => $this->fields->replaceAll($tenantId, (int) $form['id'], $normalised),
+            ]);
+        } catch (FormRejectedException $e) {
+            // ->clientMessage, never ->getMessage() (WC-186).
+            return Response::error($e->clientMessage, 422);
+        } catch (\Exception $e) {
+            error_log('[FormFieldsApiHandler] replace failed: ' . $e->getMessage());
+
+            return Response::error('Failed to save the form fields', 500);
+        }
+    }
+
+    /**
      * PATCH /api/v1/forms/{id}/fields/{fieldId} — edit a field in place, or move
      * it in the order.
      *

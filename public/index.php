@@ -2787,6 +2787,9 @@ $formFieldsHandler = new \Whity\Api\FormFieldsApiHandler($formRepository, $formF
 $router->register('GET', '/api/form-fields', [$formFieldsHandler, 'listByQuery'], null, null, CorePermissions::FORMS_READ);
 $router->register('GET', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
 $router->register('POST', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'create'], null, null, CorePermissions::FORMS_MANAGE);
+// The whole set at once, for an editor that composes a form as one act
+// rather than as a sequence of single-field calls it must sequence itself.
+$router->register('PUT', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'replace'], null, null, CorePermissions::FORMS_MANAGE);
 $router->register('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'update'], null, null, CorePermissions::FORMS_MANAGE);
 $router->register('DELETE', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'delete'], null, null, CorePermissions::FORMS_MANAGE);
 
