@@ -1660,7 +1660,11 @@ export interface paths {
          * @description Ordered by `position`, then `id` — the id tie-break makes the sequence TOTAL, since `position` carries no unique index (a drag-reorderable ordinal must not, or a two-field swap becomes a three-statement dance). `meta` carries the vocabularies a builder renders its pickers from, so a client cannot hold a stale copy of the field kinds or the prefill sources.
          */
         get: operations["get_api_v1_forms_id_fields"];
-        put?: never;
+        /**
+         * Save a form's whole field set at once
+         * @description Authoring a form is one act of composition, not a sequence of independent single-field decisions — an editor that adds, reorders and deletes question cards in place cannot rest on per-field calls without inventing a client-side transaction and hoping every leg lands. Reconciled by `field_key`, which is the stable identity a recorded ANSWER refers to and is deliberately not updatable: a key present in both the payload and the stored set is the SAME question, edited or moved, while a stored key absent from the payload is a question withdrawn — and its answers stay recorded but stop having a label. Matching on position instead would rename every question below an insertion and silently reattribute its answers. Position comes from the order sent, and the whole reconciliation is one transaction.
+         */
+        put: operations["put_api_v1_forms_id_fields"];
         /**
          * Add a field to a form
          * @description Appended AFTER the current maximum position unless one is given: a builder that adds a field expects it at the end, where the author is looking. `select` and `multiselect` require a non-empty `options` list; `profile_ref` and `ou_ref` accept none, because their choices are RESOLVED from the tenant's live people and units rather than authored — a pasted roster is wrong by the end of the month, still renders, and still reports success. `prefill_source` names a rule for reaching the submitter's own details and is resolved at render time, never stored.
@@ -1707,7 +1711,7 @@ export interface paths {
         put?: never;
         /**
          * Open this form to people who have no account, minting its public address
-         * @description OPT-IN and OFF BY DEFAULT on every form: `public_enabled` is only ever true because of this call. It mints a 256-bit random slug and returns the absolute `public_url` built from it — the ONLY credential the public endpoints have, which is why it is random rather than derived from the form id or key: a guessable address makes the whole catalogue of an install's forms walkable with curl. REFUSED (422) on a form that is not `published` (a link to one answers 404 to everybody who follows it), and on a form carrying a `profile_ref`, `ou_ref` or `file` field — the reference kinds would make the public submit a MEMBERSHIP ORACLE, since the existence check behind them reveals whether a given id belongs to this organisation, and a file field needs an upload an anonymous caller cannot perform. `opens_at` / `closes_at` are optional; either may be null for "no boundary on this side". They are naive local date-times in the instance's own clock, and a UTC offset is REFUSED rather than silently applied. Re-opening after a close mints a DIFFERENT address: a withdrawn link stays withdrawn.
+         * @description OPT-IN and OFF BY DEFAULT on every form: `public_enabled` is only ever true because of this call. It mints a 256-bit random slug and returns the absolute `public_url` built from it — the ONLY credential the public endpoints have, which is why it is random rather than derived from the form id or key: a guessable address makes the whole catalogue of an install's forms walkable with curl. REFUSED (422) on a form that is not `published` (a link to one answers 404 to everybody who follows it), and on a form carrying a `profile_ref` or `ou_ref` field — the reference kinds would make the public submit a MEMBERSHIP ORACLE, since the existence check behind them reveals whether a given id belongs to this organisation. A `file` field is ACCEPTED (it was refused until migration 134 only because no anonymous upload route existed; a file input asks the tenant's data nothing, so it cannot answer anything about it). `opens_at` / `closes_at` are optional; either may be null for "no boundary on this side". They are naive local date-times in the instance's own clock, and a UTC offset is REFUSED rather than silently applied. Re-opening after a close mints a DIFFERENT address: a withdrawn link stays withdrawn.
          */
         post: operations["post_api_v1_forms_id_public_link"];
         /**
@@ -1774,6 +1778,26 @@ export interface paths {
          * @description Answers arrive under `data`, keyed by field key; everything else in the body is ignored, because a body that could also set `submitted_by_profile_id` would let a caller sign a declaration in somebody else's name. On success the submission ALSO becomes a core DOCUMENT, so it inherits routing, approvals, the inbox, QR verification, artifacts and row-level visibility — and when the form names a route template, that document starts circulating in the same transaction. `meta.routed` says whether it did, so a client never tells somebody their request is on its way when nothing is moving. `meta.ignored_keys` names answers that matched no field (a stale client): they are dropped rather than refused, so a race nobody caused does not discard everything the person typed.
          */
         post: operations["post_api_v1_forms_id_submissions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a file to a form you are filling in
+         * @description MULTIPART, one part named `file`. Returns the `reference` a `file` answer carries, plus the filename, the SNIFFED content type, the byte size and the server's SHA-256 of what it stored. Gated `forms:submit` — the same permission as the submit itself, because uploading is half of answering. ACCEPTS application/pdf, image/png and image/jpeg ONLY, decided by the LEADING BYTES: a declared Content-Type that contradicts the bytes is a 422, and a declared type is never what gets stored. Office formats are absent on purpose — a .docx is indistinguishable from any other ZIP by magic bytes. MAXIMUM 10 MiB. REFUSED (422) on a form that is not accepting submissions, and on a form with no `file` field — so a broad permission cannot be aimed at arbitrary form ids as a way into a tenant's storage. THROTTLED to 20 uploads per caller per hour. THE UPLOAD IS SINGLE-USE and expires: it is spent by the first submission that names it, and anything never submitted is deleted by the `form-uploads:sweep` retention job (24 h by default).
+         */
+        post: operations["post_api_v1_forms_id_uploads"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2405,6 +2429,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/meeting-attendees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One meeting's attendance, and what each attendee had answered
+         * @description Every row carries `was_invited` and `invitation_status` beside the attendance, because the interesting rows are the ones where the two disagree: somebody who declined and came anyway, somebody who holds no invitation at all. `convening:read` and not `convening:manage`, so that a caller who can already see this meeting's invitations and decisions is not refused the less sensitive fact of who was in the room.
+         */
+        get: operations["get_api_v1_meeting_attendees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/meeting-decisions": {
         parameters: {
             query?: never;
@@ -2557,6 +2601,26 @@ export interface paths {
          * @description THE ONE ENDPOINT HERE THAT CAN MOVE SOMEBODY ELSE'S DOCUMENT. One call allocates the decision number from the platform counter, applies the verdict through the existing routing engine, and writes the decision row — all three in one transaction, in that order, so a decision can never claim an approval the engine refused. Approved advances or fires the approve edge; rejected fires the reject edge or goes nowhere; a deferral is recorded and moves nothing. The `routing` object always says what actually happened, including the ordinary cases where nothing did.
          */
         post: operations["post_api_v1_meetings_id_agenda_itemid_decision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/attendance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record who actually attended a meeting that has been held
+         * @description A REPLACEMENT of the whole list, which is why it is a PUT: a secretary reads a sign-in sheet and asserts the entire set, not a stream of arrivals. Anybody omitted is removed from the record of who attended. ATTENDANCE IS NOT AN INVITATION ANSWER — an acceptance is a prediction made before the sitting and attendance is what happened at it, they disagree constantly, and neither overwrites the other. Somebody who was never invited can be recorded: give a `profile_id` for a person with an account or an `attendee_name` for a guest without one. Refused unless the meeting has been HELD — attendance taken beforehand is a guess, and the platform already holds guesses as invitation answers.
+         */
+        put: operations["put_api_v1_meetings_id_attendance"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3151,6 +3215,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plugin-store/index.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Machine-readable registry index for host sync */
+        get: operations["get_api_v1_plugin_store_index_json"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plugin-store/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List catalogued plugins (with their latest version) */
+        get: operations["get_api_v1_plugin_store_plugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plugin-store/plugins/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A plugin and its published versions */
+        get: operations["get_api_v1_plugin_store_plugins_slug"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plugin-store/plugins/{slug}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish a plugin package version (package as base64 in the body) */
+        post: operations["post_api_v1_plugin_store_plugins_slug_versions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plugin-store/plugins/{slug}/versions/{version}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a plugin package (requires Authorization: Bearer <store-token>) */
+        get: operations["get_api_v1_plugin_store_plugins_slug_versions_version_download"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plugin-store/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List issued download tokens (metadata only) */
+        get: operations["get_api_v1_plugin_store_tokens"];
+        put?: never;
+        /** Mint a download token (returned once) */
+        post: operations["post_api_v1_plugin_store_tokens"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plugin-store/tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a download token */
+        delete: operations["delete_api_v1_plugin_store_tokens_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plugins": {
         parameters: {
             query?: never;
@@ -3356,7 +3540,7 @@ export interface paths {
         };
         /**
          * Render a publicly-opened form (PUBLIC, unauthenticated, rate-limited)
-         * @description PUBLIC and unauthenticated by design: the caller is somebody outside the organisation — an applicant, a supplier, a member of the public — who has no account and does not need one. THE TENANT IS RESOLVED FROM THE SLUG, never from a header, a query parameter or the Host — all of which are values this caller chooses. A malformed slug, an unknown slug, a form whose link was closed, and a form that is not published all produce THE SAME 404 with the same sentence, so this endpoint cannot be asked which slugs name a real form or whether an organisation uses public forms at all. The response carries NO id, tenant id, form key, author, route template, submission count, status, version or prefill — an anonymous caller has no saved details for the platform to pre-fill, and nothing about how the organisation works is disclosed. Person, unit and file fields are omitted from the field list, for the reason POST /api/v1/forms/{id}/public-link refuses them. A form OUTSIDE its submission window still renders, with `accepts_submissions: false` and the window dates, so somebody holding a genuine link is told they are early or late rather than that the link is wrong.
+         * @description PUBLIC and unauthenticated by design: the caller is somebody outside the organisation — an applicant, a supplier, a member of the public — who has no account and does not need one. THE TENANT IS RESOLVED FROM THE SLUG, never from a header, a query parameter or the Host — all of which are values this caller chooses. A malformed slug, an unknown slug, a form whose link was closed, and a form that is not published all produce THE SAME 404 with the same sentence, so this endpoint cannot be asked which slugs name a real form or whether an organisation uses public forms at all. The response carries NO id, tenant id, form key, author, route template, submission count, status, version or prefill — an anonymous caller has no saved details for the platform to pre-fill, and nothing about how the organisation works is disclosed. Person and unit fields are omitted from the field list, for the reason POST /api/v1/forms/{id}/public-link refuses them. FILE fields ARE served: attach the bytes at POST /api/v1/public/forms/{slug}/uploads first and put the returned `reference` in the answer. A form OUTSIDE its submission window still renders, with `accepts_submissions: false` and the window dates, so somebody holding a genuine link is told they are early or late rather than that the link is wrong.
          */
         get: operations["get_api_v1_public_forms_slug"];
         put?: never;
@@ -3381,6 +3565,26 @@ export interface paths {
          * @description The answers arrive under `data`, keyed by field key, and NOTHING ELSE in the body is read — a body that could also set `submitted_by_profile_id`, `form_version` or a route template would let an anonymous stranger sign a declaration in somebody's name or aim it at a flow the organisation did not choose. The submission is recorded with NO SUBMITTER (`form_submissions.submitted_by_profile_id` is NULL — no sentinel profile, because a fake person is something every membership and permission check would have to know to special-case). It BECOMES A DOCUMENT and circulates through the tenant's existing routing engine exactly as an internal submission does, which is safe because the caller cannot name a route template: it lives on the FORM, is set only by `forms:manage`, and is never read from a request body. Throttled per IP and per form. The response is a receipt, not the submission row: no id, no document id, no tenant id.
          */
         post: operations["post_api_v1_public_forms_slug_submissions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/forms/{slug}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a file to a publicly-opened form (PUBLIC, unauthenticated, rate-limited)
+         * @description The anonymous half of the upload above, and the route that made `file` fields servable on a public form at all. A file input is NOT the membership oracle a person or unit picker is: it offers no list, resolves no id against this organisation, and returns one opaque reference to the caller's own bytes — so there is no question about the tenant it can be asked. THE TENANT IS RESOLVED FROM THE SLUG, and every reason there is no publicly served form behind it collapses to the SAME 404 as the render and the submit. BOUNDED, because what a stranger can spend here is storage: 10 uploads per IP per hour, 400 per form per hour across all addresses, and a size ceiling of 5 MiB — HALF the authenticated one, so bytes-per-address-per-hour is what is capped rather than just the count. Same three accepted kinds, same magic-byte check. Anything never submitted is deleted by the retention sweep, so an abandoned upload costs a day of storage rather than a permanent one.
+         */
+        post: operations["post_api_v1_public_forms_slug_uploads"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5349,6 +5553,10 @@ export interface components {
         FormFieldResponse: {
             data: components["schemas"]["FormField"];
         };
+        FormFieldSetRequest: {
+            /** @description Every field the form should have after this call. A stored field_key absent from this list is withdrawn; answers already given to it stay recorded and stop having a label. */
+            fields: components["schemas"]["FormFieldCreateRequest"][];
+        };
         FormFieldUpdateRequest: {
             /** @enum {string} */
             field_type?: "text" | "textarea" | "number" | "date" | "select" | "multiselect" | "checkbox" | "file" | "profile_ref" | "ou_ref";
@@ -5454,6 +5662,15 @@ export interface components {
             };
             description?: string;
             route_template_id?: number | null;
+        };
+        FormUploadResponse: {
+            data: {
+                reference: string;
+                filename?: string | null;
+                content_type: string;
+                byte_size: number;
+                checksum_sha256: string;
+            };
         };
         FrontendFeature: {
             id: string;
@@ -5857,6 +6074,43 @@ export interface components {
         MeetingAgendaReorderRequest: {
             item_ids: number[];
         };
+        MeetingAttendanceCount: {
+            attendees: number;
+            attendees_who_held_an_invitation: number;
+            attendees_who_did_not: number;
+            invitations_issued: number;
+            invited_who_did_not_attend: number;
+            quorum_evaluated: boolean;
+            basis: string;
+        };
+        MeetingAttendanceEntryRequest: {
+            profile_id?: number | null;
+            attendee_name?: string | null;
+            /** @enum {string} */
+            capacity?: "member" | "substitute" | "guest";
+            note?: string | null;
+        };
+        MeetingAttendanceRequest: {
+            attendees: components["schemas"]["MeetingAttendanceEntryRequest"][];
+        };
+        MeetingAttendanceResponse: {
+            data: components["schemas"]["MeetingAttendee"][];
+            counted: components["schemas"]["MeetingAttendanceCount"];
+        };
+        MeetingAttendee: {
+            id: number;
+            tenant_id: number;
+            meeting_id: number;
+            profile_id: number | null;
+            attendee_name: string | null;
+            /** @enum {string} */
+            capacity: "member" | "substitute" | "guest";
+            note: string | null;
+            recorded_at: string;
+            recorded_by_profile_id: number | null;
+            was_invited: boolean;
+            invitation_status: string | null;
+        };
         MeetingCreateRequest: {
             body_id: number;
             title: string | components["schemas"]["LocalizedLabel"];
@@ -5882,6 +6136,7 @@ export interface components {
             /** @enum {string} */
             verdict: "approved" | "rejected" | "deferred";
             rationale?: string;
+            decision_number?: string;
             decided_at?: string;
         };
         MeetingDecisionResponse: {
@@ -5904,6 +6159,7 @@ export interface components {
                 agenda: components["schemas"]["MeetingAgendaItem"][];
                 decisions: components["schemas"]["MeetingDecision"][];
                 invitations: components["schemas"]["MeetingInvitation"][];
+                attendance: components["schemas"]["MeetingAttendee"][];
             };
         };
         MeetingHoldRequest: {
@@ -6369,6 +6625,28 @@ export interface components {
         PluginListResponse: {
             data: components["schemas"]["PluginEntry"][];
             meta: components["schemas"]["PluginListMeta"];
+        };
+        PluginStoreListResponse: {
+            data: components["schemas"]["PluginStorePlugin"][];
+        };
+        PluginStorePlugin: {
+            slug: string;
+            name: string;
+            description?: string;
+            author?: string;
+            tags?: string[];
+            latest_version?: string | null;
+        };
+        PluginStorePluginResponse: {
+            data: components["schemas"]["PluginStorePlugin"];
+        };
+        PluginStoreVersion: {
+            version?: string;
+            sha256?: string;
+            size_bytes?: number;
+            min_sdk?: string;
+            changelog?: string;
+            published_at?: string;
         };
         PluginUploadResponse: {
             data: components["schemas"]["PluginEntry"];
@@ -16905,6 +17183,104 @@ export interface operations {
             };
         };
     };
+    put_api_v1_forms_id_fields: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormFieldSetRequest"];
+            };
+        };
+        responses: {
+            /** @description The resulting field set, in order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormFieldListResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form is archived, so its fields cannot be changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A malformed or duplicated key, an unknown kind or prefill source, a choice-bearing field with no choices, or an invalid validation pattern */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     post_api_v1_forms_id_fields: {
         parameters: {
             query?: never;
@@ -17580,6 +17956,119 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_forms_id_uploads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by filename or Content-Type. Maximum 10 MiB.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored file, and the reference to answer with */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormUploadResponse"];
+                };
+            };
+            /** @description No file part, or the multipart body could not be read */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too large, not an accepted kind, the form asks for no file, or the form is not accepting submissions */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many uploads from this caller */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The file could not be stored */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20946,6 +21435,83 @@ export interface operations {
             };
         };
     };
+    get_api_v1_meeting_attendees: {
+        parameters: {
+            query: {
+                /** @description The meeting whose attendance to read. */
+                meeting_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The attendance, and what was counted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingAttendanceResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_id is required */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_meeting_decisions: {
         parameters: {
             query: {
@@ -21663,6 +22229,95 @@ export interface operations {
                 };
             };
             /** @description A meeting that has not been held, a verdict outside the vocabulary, or a refusal from the routing engine (returned in its own words) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_meetings_id_attendance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingAttendanceRequest"];
+            };
+        };
+        responses: {
+            /** @description The recorded attendance, and what was counted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingAttendanceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A meeting that has not been held, an attendee that identifies nobody, a duplicated profile, or a capacity outside the vocabulary */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -25125,6 +25780,466 @@ export interface operations {
             };
         };
     };
+    get_api_v1_plugin_store_index_json: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registry index (plugins + versions + download paths + checksums) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plugin_store_plugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PluginStoreListResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginStoreListResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plugin_store_plugins_slug: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PluginStorePluginResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginStorePluginResponse"];
+                };
+            };
+            /** @description Plugin not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_plugin_store_plugins_slug_versions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Version published (slug, version, sha256, size_bytes) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Version already published (immutable) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid slug/version/package */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plugin_store_plugins_slug_versions_version_download: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The plugin package (application/zip) + X-Checksum-SHA256 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid store download token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Package not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plugin_store_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token metadata list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_plugin_store_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token minted (raw token shown once) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_plugin_store_tokens_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Token not found or already revoked */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_plugins: {
         parameters: {
             query?: never;
@@ -26148,6 +27263,101 @@ export interface operations {
                 };
             };
             /** @description Too many attempts from this address, or for this form */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Temporarily unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_public_forms_slug_uploads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by filename or Content-Type. Maximum 5 MiB on this public surface.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored file, and the reference to answer with */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormUploadResponse"];
+                };
+            };
+            /** @description No file part, or the multipart body could not be read */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No publicly-open form is served at this address */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too large, not an accepted kind, the form asks for no file, or the form is outside its submission window */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many uploads from this address, or for this form */
             429: {
                 headers: {
                     [name: string]: unknown;
