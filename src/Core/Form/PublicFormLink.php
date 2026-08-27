@@ -139,7 +139,12 @@ final class PublicFormLink
             return null;
         }
 
-        return $this->publicBaseUrl . '/api/v1/public/forms/' . rawurlencode($slug);
+        // THE PAGE, NOT THE ENDPOINT. This URL is copied into an email and
+        // opened in a browser by somebody with no account, so it has to be
+        // an address that renders a form. Pointing it at the API meant the
+        // recipient was handed raw JSON — the API is what that page calls,
+        // not what a person opens.
+        return $this->publicBaseUrl . '/f/' . rawurlencode($slug);
     }
 
     /**
