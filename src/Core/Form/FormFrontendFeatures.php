@@ -414,17 +414,95 @@ final class FormFrontendFeatures
                                 ],
                             ],
                         ],
+                        // THE QUESTION EDITOR — the Fields section's whole point,
+                        // and a deliberate retirement of the modal that used to
+                        // be here.
+                        //
+                        // WHY THE MODAL WENT. Authoring a form is composition:
+                        // you write a question, read it back next to the one
+                        // above it, move it, change your mind about the one
+                        // below. A dialog answers a different question — "add
+                        // one thing, in isolation, then close" — and it made the
+                        // ordinary act of arranging a form into a sequence of
+                        // disconnected single-field decisions with a `position`
+                        // NUMBER as the only way to say what goes where. The
+                        // author could not see the form they were building.
+                        //
+                        // So: a vertical stack of question cards, edited in
+                        // place, reordered and removed on the card, saved
+                        // together. One `PUT` of the whole set, which is what
+                        // {@see \Whity\Api\FormFieldsApiHandler::replace()}
+                        // exists for — and `position` disappears as a field
+                        // somebody types, because the order IS the order of the
+                        // cards.
+                        //
+                        // THE FIELD TABLE THAT USED TO SIT BELOW IS GONE WITH IT,
+                        // and not merely as tidying. It would have shown the
+                        // STORED set beside an editor showing the set about to be
+                        // saved, refreshed by nothing this form does — so the
+                        // moment an author saved, the table beneath would have
+                        // gone on displaying the previous order. A second view
+                        // that silently goes stale is worse than no second view,
+                        // and its one unique affordance (Remove a field) is now
+                        // what removing a card and saving does.
+                        //
+                        // THE SAVE IS A REPLACEMENT, AND THAT IS SAID OUT LOUD.
+                        // A question removed from the stack and then saved is
+                        // WITHDRAWN: answers already given to it stay recorded
+                        // and stop having a label. That is the same consequence
+                        // the old per-row Remove action carried, so nothing new
+                        // is destructible here — but it now happens on save
+                        // rather than on click, which is a change an author has
+                        // to be told about rather than left to discover.
+                        //
+                        // The renderer will not let this array submit until it
+                        // has actually loaded the stored questions for the form
+                        // the selector names — see the `fieldArray` entry in
+                        // {@see \Whity\Sdk\Frontend\Blocks\BlockContract}. An
+                        // editor that rendered empty while loading would save
+                        // "this form has no questions" over a form that has ten.
                         [
-                            'type' => 'modal',
-                            'id' => 'addFieldModal',
-                            'title' => 'Add a field',
-                            'trigger' => 'Add field',
-                            'size' => 'lg',
+                            'type' => 'text',
+                            'value' => 'Add, edit and reorder this form\'s questions below, then save '
+                                . 'them together. Saving replaces the whole set: a question you '
+                                . 'remove here is withdrawn when you save, and answers already '
+                                . 'given to it stay recorded but stop having a label.',
+                            'tone' => 'muted',
+                        ],
+                        [
+                            'type' => 'form',
+                            // `{builderForm}` resolves from the selector above —
+                            // the same master-detail token the edit-form and
+                            // public-link controls use to fill a PATH segment
+                            // that `params` cannot reach.
+                            'submit' => [
+                                'method' => 'PUT',
+                                'endpoint' => '/api/v1/forms/{builderForm}/fields',
+                            ],
+                            'requiredPermission' => CorePermissions::FORMS_MANAGE,
                             'children' => [
                                 [
-                                    'type' => 'form',
-                                    'submit' => ['method' => 'POST', 'endpoint' => '/api/v1/forms/{builderForm}/fields'],
-                                    'requiredPermission' => CorePermissions::FORMS_MANAGE,
+                                    'type' => 'fieldArray',
+                                    // The payload key the endpoint reads. Named
+                                    // for the wire, not for the screen — the
+                                    // human noun is `label`/`itemLabel`.
+                                    'name' => 'fields',
+                                    'label' => 'Questions',
+                                    'itemLabel' => 'Question',
+                                    // The FLAT read, addressed by query param,
+                                    // because `params` cannot fill a path
+                                    // segment. The WRITE stays nested under the
+                                    // form — see FormFieldsApiHandler for why
+                                    // that asymmetry is not a hole.
+                                    'source' => '/api/v1/form-fields',
+                                    'params' => [
+                                        ['param' => 'form_id', 'from' => 'builderForm'],
+                                    ],
+                                    // NO `min`. A form with no questions is a
+                                    // real state an author may want, and a
+                                    // minimum here would make "withdraw the last
+                                    // question" impossible through the only
+                                    // surface that can withdraw one.
                                     'children' => [
                                         [
                                             'type' => 'textInput',
@@ -438,21 +516,13 @@ final class FormFrontendFeatures
                                             'name' => 'field_type',
                                             'label' => 'Kind',
                                             'required' => true,
-                                            // The vocabulary FieldType accepts, not a
-                                            // longer list a person could pick from and
-                                            // then be refused on submit.
-                                            'options' => [
-                                                ['value' => 'text', 'label' => 'Short text'],
-                                                ['value' => 'textarea', 'label' => 'Long text'],
-                                                ['value' => 'number', 'label' => 'Number'],
-                                                ['value' => 'date', 'label' => 'Date'],
-                                                ['value' => 'select', 'label' => 'Choose one'],
-                                                ['value' => 'multiselect', 'label' => 'Choose several'],
-                                                ['value' => 'checkbox', 'label' => 'Yes / no'],
-                                                ['value' => 'file', 'label' => 'File'],
-                                                ['value' => 'profile_ref', 'label' => 'A person'],
-                                                ['value' => 'ou_ref', 'label' => 'An organizational unit'],
-                                            ],
+                                            // Derived from the vocabulary rather
+                                            // than transcribed from it: a kind
+                                            // added to FieldType and not to a
+                                            // hand-written list here is a kind
+                                            // the builder cannot author, which is
+                                            // invisible until somebody needs it.
+                                            'options' => self::fieldTypeOptions(),
                                         ],
                                         [
                                             'type' => 'bilingualText',
@@ -477,66 +547,20 @@ final class FormFrontendFeatures
                                             'type' => 'textInput',
                                             'name' => 'section_key',
                                             'label' => 'Section',
-                                            'placeholder' => 'Groups fields under one heading',
-                                        ],
-                                        [
-                                            'type' => 'numberInput',
-                                            'name' => 'position',
-                                            'label' => 'Position',
-                                            'min' => 1,
+                                            'placeholder' => 'Groups questions under one heading',
                                         ],
                                         [
                                             'type' => 'select',
                                             'name' => 'prefill_source',
                                             'label' => 'Prefill from the submitter',
-                                            // `profile.phone` and `profile.job_title` are
-                                            // declared but have no backing column yet;
-                                            // the render response reports them under
-                                            // `unresolved_prefill` rather than quietly
-                                            // returning an empty string.
-                                            'options' => [
-                                                ['value' => '', 'label' => 'Do not prefill'],
-                                                ['value' => 'profile.display_name', 'label' => 'Their name'],
-                                                ['value' => 'profile.email', 'label' => 'Their email'],
-                                                ['value' => 'profile.ou', 'label' => 'Their unit'],
-                                            ],
+                                            'options' => self::prefillSourceOptions(),
                                         ],
-                                        ['type' => 'submitButton', 'label' => 'Add field'],
                                     ],
                                 ],
-                            ],
-                        ],
-                        [
-                            'type' => 'dataTable',
-                            // The FLAT read, not the nested one: `params` append
-                            // query params to a fixed source and cannot fill a
-                            // path segment, so a selector-driven field table has
-                            // to address the form by query. Writes stay nested —
-                            // see FormFieldsApiHandler for why the asymmetry is
-                            // not a hole.
-                            'source' => '/api/v1/form-fields',
-                            'emptyText' => 'Pick a form above, then add its first field.',
-                            'columns' => [
-                                ['key' => 'position', 'label' => '#'],
-                                ['key' => 'field_key', 'label' => 'Key', 'filterable' => true],
-                                ['key' => 'field_type', 'label' => 'Kind', 'sortable' => true],
-                                ['key' => 'section_key', 'label' => 'Section'],
-                                ['key' => 'prefill_source', 'label' => 'Prefills from'],
-                            ],
-                            // The selected form's id is appended as a query param.
-                            // The base `source` stays a plain path — only
-                            // whitelisted params interpolate — so nothing here
-                            // widens what a client may fetch.
-                            'params' => [
-                                ['param' => 'form_id', 'from' => 'builderForm'],
-                            ],
-                            'rowActions' => [
                                 [
-                                    'label' => 'Remove',
-                                    'endpoint' => '/api/v1/forms/{form_id}/fields/{id}',
-                                    'method' => 'DELETE',
-                                    'confirm' => 'Answers already given to this field stay recorded, '
-                                        . 'but stop having a label. Remove it?',
+                                    'type' => 'submitButton',
+                                    'label' => 'Save questions',
+                                    'variant' => 'primary',
                                 ],
                             ],
                         ],
@@ -573,6 +597,86 @@ final class FormFrontendFeatures
         ];
     }
 
+
+    /**
+     * The question-kind picker's options, DERIVED from {@see FieldType::all()}
+     * rather than transcribed beside it.
+     *
+     * The version this replaced was a hand-written list of ten `['value' =>
+     * 'text', 'label' => 'Short text']` pairs, and it was correct on the day it
+     * was written. That is the whole problem: the vocabulary is closed and
+     * central, the picker was a copy of it, and nothing compared the two. A kind
+     * added to `FieldType` would be accepted by the API, refused by no
+     * validator, and simply absent from the only screen that authors one — a
+     * capability that exists and cannot be reached, which is the failure this
+     * codebase keeps finding in its own copies of a list.
+     *
+     * The `?? $type` fallback is deliberate and is the reason this is safe to
+     * leave unattended: a kind with no prose here still appears, labelled by its
+     * own key. Ugly, present, and fixable — rather than missing and invisible.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    private static function fieldTypeOptions(): array
+    {
+        $labels = [
+            FieldType::TEXT => 'Short text',
+            FieldType::TEXTAREA => 'Long text',
+            FieldType::NUMBER => 'Number',
+            FieldType::DATE => 'Date',
+            FieldType::SELECT => 'Choose one',
+            FieldType::MULTISELECT => 'Choose several',
+            FieldType::CHECKBOX => 'Yes / no',
+            FieldType::FILE => 'File',
+            FieldType::PROFILE_REF => 'A person',
+            FieldType::OU_REF => 'An organizational unit',
+        ];
+
+        $options = [];
+        foreach (FieldType::all() as $type) {
+            $options[] = ['value' => $type, 'label' => $labels[$type] ?? $type];
+        }
+
+        return $options;
+    }
+
+    /**
+     * The prefill picker's options, derived from {@see PrefillSource::all()}.
+     *
+     * EVERY declared source is offered, INCLUDING the two that nothing in this
+     * schema stores — and each of those says so in its own label. That is
+     * {@see PrefillSource}'s argument carried through to the surface it was
+     * written for: an author who cannot see "phone" adds a plain text question
+     * and every submitter retypes a number, whereas an author who sees "Their
+     * phone — nothing in this install stores it yet" makes an informed choice
+     * and the seam stays visible.
+     *
+     * The empty-string option is "do not prefill", which is what a field carries
+     * when the column is null.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    private static function prefillSourceOptions(): array
+    {
+        $labels = [
+            PrefillSource::DISPLAY_NAME => 'Their name',
+            PrefillSource::EMAIL => 'Their email',
+            PrefillSource::OU => 'Their unit',
+            PrefillSource::PHONE => 'Their phone',
+            PrefillSource::JOB_TITLE => 'Their job title',
+        ];
+
+        $options = [['value' => '', 'label' => 'Do not prefill']];
+        foreach (PrefillSource::all() as $source) {
+            $label = $labels[$source] ?? $source;
+            if (!PrefillSource::isBacked($source)) {
+                $label .= ' — nothing in this install stores it yet';
+            }
+            $options[] = ['value' => $source, 'label' => $label];
+        }
+
+        return $options;
+    }
     /**
      * The CATALOGUE — which forms exist, and what has come back.
      *

@@ -3855,7 +3855,19 @@ class PluginLoader
                 if (is_string($type)) {
                     $rule = \Whity\Sdk\Frontend\Blocks\BlockContract::rulesFor($type);
                     $sourceKind = $rule !== null ? ($rule['props']['source']['type'] ?? null) : null;
-                    if ($sourceKind === 'apiPath' || $sourceKind === 'recordPath') {
+                    // `array_key_exists` and not just the kind: since `fieldArray`
+                    // a `source` prop may be OPTIONAL, so a node of a
+                    // source-bearing type need not carry one. Reading
+                    // `$node['source']` unconditionally warned and produced null,
+                    // which failed the ownership check and DROPPED the whole
+                    // feature — every source-less `fieldArray` on the platform,
+                    // silently, for a prop it never declared. BlockValidator has
+                    // already refused a `source` of the wrong shape by here; what
+                    // it cannot do is invent one that was never written.
+                    if (
+                        ($sourceKind === 'apiPath' || $sourceKind === 'recordPath')
+                        && array_key_exists('source', $node)
+                    ) {
                         /** @var string $source — guaranteed a valid apiPath/recordPath by BlockValidator */
                         $source = $node['source'];
                         // #883: a `recordPath` (`dataRecord.source`) may carry
