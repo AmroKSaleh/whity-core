@@ -192,15 +192,23 @@ final class FormUploadRepository
     {
         $cutoff = date('Y-m-d H:i:s', time() - max(0, $olderThanSeconds));
 
-        // @tenant-guard-ignore: retention sweep — deliberately cross-tenant. It
-        // is an operator job with no tenant context (no session, no request), and
-        // narrowing it to one tenant would mean either enumerating tenants here
-        // or leaving every tenant but one accumulating orphaned objects forever.
-        // The predicate that makes it safe is `claimed_at IS NULL AND created_at <
-        // cutoff`: an upload nobody submitted, from before the TTL, is unreachable
-        // by construction — the only path that could ever reference it is
-        // FormUploadRepository::claim(), which refuses a claimed row and cannot
+        // A retention sweep, and deliberately cross-tenant: an operator job with
+        // no tenant context (no session, no request). Narrowing it to one tenant
+        // would mean either enumerating tenants here or leaving every tenant but
+        // one accumulating orphaned objects forever.
+        //
+        // What makes it safe is the predicate itself. `claimed_at IS NULL AND
+        // created_at < cutoff` selects an upload nobody submitted, from before
+        // the TTL: unreachable by construction, because the only path that could
+        // ever reference it is claim(), which refuses a claimed row and cannot
         // resurrect a deleted one.
+        //
+        // The tag sits at the END of this block on purpose. Only the line
+        // carrying it counts as annotated, and the scanner looks at most three
+        // lines above the statement — so a long reason written tag-first puts
+        // the tag out of range and the suppression silently does nothing.
+        // @tenant-guard-ignore: retention sweep, no tenant context; safe by the
+        // claimed_at/created_at predicate reasoned above.
         $select = $this->db->prepare(
             'SELECT id, storage_key FROM form_uploads
               WHERE claimed_at IS NULL AND created_at < :cutoff

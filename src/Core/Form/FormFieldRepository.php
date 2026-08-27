@@ -140,7 +140,13 @@ final class FormFieldRepository
                     (string) $field['field_type'],
                     /** @var array<string, string> */ $field['label'],
                     $field['help_text'] === null ? null : (string) $field['help_text'],
-                    (bool) $field['is_required'],
+                    // `=== true` rather than a cast, matching how the API handler
+                    // normalises this on the way in. These fields arrive from a
+                    // request body, not a row, but a cast would answer TRUE for
+                    // the string 'false' — and this column is a BOOLEAN
+                    // elsewhere, so the cast reads like a database boolean and
+                    // invites the driver-dependent version of the same bug.
+                    $field['is_required'] === true,
                     /** @var list<mixed> */ $field['options'],
                     /** @var array<string, mixed> */ $field['validation'],
                     $field['prefill_source'] === null ? null : (string) $field['prefill_source'],
