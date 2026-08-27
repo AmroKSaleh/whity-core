@@ -153,6 +153,8 @@ final class FormFrontendFeatures
                                 // because publishing is the last thing an author
                                 // does and making them navigate for it is how a
                                 // form stays in draft by accident.
+                                ['label' => 'Fill in', 'href' => '/forms/{id}'],
+                                ['label' => 'Public link', 'href' => '/f/{public_slug}'],
                                 [
                                     'label' => 'Publish',
                                     'endpoint' => '/api/v1/forms/{id}/publish',
@@ -709,7 +711,31 @@ final class FormFrontendFeatures
                             'columns' => [
                                 ['key' => 'form_key', 'label' => 'Key', 'sortable' => true, 'filterable' => true],
                                 ['key' => 'version', 'label' => 'Version'],
+                                ['key' => 'public_enabled', 'label' => 'Open to the public'],
+                                ['key' => 'public_url', 'label' => 'Public link'],
                                 ['key' => 'created_at', 'label' => 'Created', 'sortable' => true],
+                            ],
+                            // WHERE THE LINKS LIVE. A form had two addresses and
+                            // neither was reachable from a screen: the public URL
+                            // was printed as text on a pane you only saw after
+                            // picking the form in a dropdown, and the signed-in
+                            // fill page had no link at all. Somebody who wanted
+                            // to send a colleague a form had to be told the URL
+                            // scheme by hand.
+                            //
+                            // `{id}` and `{public_slug}` are substituted from the
+                            // ROW. The link is the INTERNAL path, not the stored
+                            // `public_url`: an href must start with '/' — the
+                            // contract rejects absolute URLs, which is what stops
+                            // a descriptor becoming an open redirect. It also
+                            // keeps the reader on whichever host they are already
+                            // browsing, rather than on whatever APP_URL happens
+                            // to say. On a form nobody has opened to the public
+                            // the slug is blank, and the `Open to the public`
+                            // column beside it says why.
+                            'rowActions' => [
+                                ['label' => 'Fill in', 'href' => '/forms/{id}'],
+                                ['label' => 'Public link', 'href' => '/f/{public_slug}'],
                             ],
                         ],
                     ],
