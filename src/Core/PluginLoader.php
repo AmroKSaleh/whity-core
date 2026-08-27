@@ -4029,6 +4029,74 @@ class PluginLoader
                         }
                     }
 
+                    // (c3-f) a `rowActionList` prop — `dataTable.rowActions`,
+                    // `flow.nodeActions` — may carry `{method, endpoint}` mutation
+                    // entries, and those came through this walk UNTOUCHED: neither
+                    // ownership-checked nor version-rewritten. Both halves matter.
+                    //
+                    // The endpoint reached the browser unversioned, so the action
+                    // POSTed to a path the router does not serve and answered 404
+                    // on click. The block rendered, the button looked live, and
+                    // only pressing it said otherwise — the failure was invisible
+                    // to every check that stops at "does the feature load".
+                    //
+                    // And this was the one write endpoint in the contract a plugin
+                    // could aim at a route it does not own, while `form.submit`,
+                    // `actionButton.action` and an inbox action are each refused
+                    // for precisely that.
+                    //
+                    // Found from the contract rather than by name, so a third type
+                    // declaring a `rowActionList` is covered the day it is added
+                    // instead of the day somebody notices it 404s.
+                    foreach (($rule['props'] ?? []) as $propName => $propRule) {
+                        $entries = $node[$propName] ?? null;
+                        if ($propRule['type'] !== 'rowActionList' || !is_array($entries)) {
+                            continue;
+                        }
+
+                        $rewrittenEntries = [];
+                        foreach ($entries as $entry) {
+                            // An `href` entry is internal navigation and an `open`
+                            // entry is a block id. Neither names a route, and
+                            // BlockValidator already refused any other shape.
+                            if (!is_array($entry)
+                                || !is_string($entry['endpoint'] ?? null)
+                                || !is_string($entry['method'] ?? null)
+                            ) {
+                                $rewrittenEntries[] = $entry;
+
+                                continue;
+                            }
+
+                            $rowMethod   = strtoupper($entry['method']);
+                            $rowEndpoint = $entry['endpoint'];
+
+                            // Same key an inbox action and an `accessGate` write
+                            // check use, so a declared `{record}` matches a
+                            // registered `{id}`.
+                            if (!array_key_exists(
+                                self::normalizeRouteKey($rowMethod, $rowEndpoint),
+                                $registeredWriteRoutes
+                            )) {
+                                $dropReason = "{$type}.{$propName} action endpoint "
+                                    . "'{$rowMethod} {$rowEndpoint}' is not a write route this plugin registered";
+
+                                return null;
+                            }
+
+                            if ($vp !== '') {
+                                $pos = strpos($rowEndpoint, '/', 1);
+                                $entry['endpoint'] = $pos === false
+                                    ? $rowEndpoint . $vp
+                                    : substr($rowEndpoint, 0, $pos) . $vp . substr($rowEndpoint, $pos);
+                            }
+
+                            $rewrittenEntries[] = $entry;
+                        }
+
+                        $node[$propName] = $rewrittenEntries;
+                    }
+
                     if ($endpointSpec !== null) {
                         $method   = strtoupper((string) $endpointSpec['method']);
                         $endpoint = (string) $endpointSpec['endpoint'];
