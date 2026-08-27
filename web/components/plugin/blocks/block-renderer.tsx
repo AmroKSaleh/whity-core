@@ -598,13 +598,57 @@ function StatRenderer({ block }: { block: StatBlock }) {
   );
 }
 
+/**
+ * A value somebody is meant to SEND somewhere else — a shareable link.
+ *
+ * Detected rather than declared: a URL shown in a key/value list is almost
+ * always one a person needs to put in an email, and requiring every descriptor
+ * to opt in would mean the one place it was forgotten is the one place someone
+ * retypes a 64-character slug by hand. Nothing is hidden or reformatted — the
+ * full value still reads exactly as before, with a control beside it.
+ */
+function isShareableUrl(value: unknown): value is string {
+  return typeof value === 'string' && /^https?:\/\//.test(value);
+}
+
+function CopyableValue({ value }: { value: string }) {
+  const t = useTranslation('plugin');
+  const { addToast } = useToast();
+
+  return (
+    <span className="inline-flex items-start gap-2">
+      <span className="break-all">{value}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="shrink-0"
+        onClick={() => {
+          // `?.` because clipboard access is absent on an insecure origin, and
+          // a control that throws is worse than one that says it could not.
+          void navigator.clipboard
+            ?.writeText(value)
+            .then(
+              () => addToast(t('blocks.keyValue.copied', 'Link copied'), 'success'),
+              () => addToast(t('blocks.keyValue.copyFailed', 'Could not copy — select the link and copy it'), 'error')
+            );
+        }}
+      >
+        {t('blocks.keyValue.copy', 'Copy')}
+      </Button>
+    </span>
+  );
+}
+
 function KeyValueRenderer({ block }: { block: KeyValueBlock }) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs/relaxed">
       {block.items.map((item, index) => (
         <React.Fragment key={index}>
           <dt className="font-medium text-muted-foreground">{item.label}</dt>
-          <dd className="text-foreground">{item.value}</dd>
+          <dd className="text-foreground">
+            {isShareableUrl(item.value) ? <CopyableValue value={item.value} /> : item.value}
+          </dd>
         </React.Fragment>
       ))}
     </dl>
