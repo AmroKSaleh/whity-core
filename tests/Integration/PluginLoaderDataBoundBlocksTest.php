@@ -46,13 +46,25 @@ final class PluginLoaderDataBoundBlocksTest extends TestCase
     public function getPermissions(): array { return ['x:view']; }
     public function getRoutes(): array
     {
-        return [[
-            'method' => 'GET',
-            'path' => '/api/x/rows',
-            'handler' => static fn ($r) => \Whity\Sdk\Http\Response::json(['data' => []]),
-            'requiredRole' => null,
-            'requiredPermission' => 'x:view',
-        ]];
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/x/rows',
+                'handler' => static fn ($r) => \Whity\Sdk\Http\Response::json(['data' => []]),
+                'requiredRole' => null,
+                'requiredPermission' => 'x:view',
+            ],
+            // The write the fieldArray features below submit to. Its permission
+            // must EQUAL the block's declared one or the loader drops the
+            // feature for a reason unrelated to what these tests are about.
+            [
+                'method' => 'PUT',
+                'path' => '/api/x/rows',
+                'handler' => static fn ($r) => \Whity\Sdk\Http\Response::json(['data' => []]),
+                'requiredRole' => null,
+                'requiredPermission' => 'x:view',
+            ],
+        ];
     }
     public function getFrontendFeatures(): array
     {
@@ -89,6 +101,62 @@ final class PluginLoaderDataBoundBlocksTest extends TestCase
                     'series' => [['key' => 'id', 'label' => 'ID', 'color' => 1]],
                 ]],
             ],
+            // A `fieldArray` with NO source. It is a source-BEARING type now
+            // (the contract gives it an optional `source`), and this feature
+            // exists to prove that a declaration which simply does not use the
+            // prop still survives. Before the loader guarded on the key's
+            // PRESENCE rather than on the type's rule, this shape read
+            // `$node['source']` off a node that had none, failed the ownership
+            // comparison against null, and dropped the whole feature — every
+            // source-less fieldArray on the platform, for a prop it never wrote.
+            [
+                'id' => 'x-array-plain',
+                'label' => 'X Array Plain',
+                'screen' => 'blocks',
+                'requiredPermission' => 'x:view',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/x/rows'],
+                    'requiredPermission' => 'x:view',
+                    'children' => [
+                        [
+                            'type' => 'fieldArray',
+                            'name' => 'lines',
+                            'label' => 'Lines',
+                            'children' => [
+                                ['type' => 'textInput', 'name' => 'title', 'label' => 'Title'],
+                            ],
+                        ],
+                        ['type' => 'submitButton', 'label' => 'Save'],
+                    ],
+                ]],
+            ],
+            // A `fieldArray` WITH an owned source: ownership-checked and
+            // version-rewritten by the same generic walk, with no fieldArray
+            // knowledge anywhere in PluginLoader.
+            [
+                'id' => 'x-array-sourced',
+                'label' => 'X Array Sourced',
+                'screen' => 'blocks',
+                'requiredPermission' => 'x:view',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/x/rows'],
+                    'requiredPermission' => 'x:view',
+                    'children' => [
+                        [
+                            'type' => 'fieldArray',
+                            'name' => 'lines',
+                            'label' => 'Lines',
+                            'source' => '/api/x/rows',
+                            'children' => [
+                                ['type' => 'textInput', 'name' => 'title', 'label' => 'Title'],
+                            ],
+                        ],
+                        ['type' => 'submitButton', 'label' => 'Save'],
+                    ],
+                ]],
+            ],
             // Sibling static feature: must be unaffected by data-bound logic.
             [
                 'id' => 'x-static',
@@ -107,13 +175,26 @@ PHP);
     public function getPermissions(): array { return ['y:view']; }
     public function getRoutes(): array
     {
-        return [[
-            'method' => 'GET',
-            'path' => '/api/y/own',
-            'handler' => static fn ($r) => \Whity\Sdk\Http\Response::json(['data' => []]),
-            'requiredRole' => null,
-            'requiredPermission' => 'y:view',
-        ]];
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/y/own',
+                'handler' => static fn ($r) => \Whity\Sdk\Http\Response::json(['data' => []]),
+                'requiredRole' => null,
+                'requiredPermission' => 'y:view',
+            ],
+            // A LEGITIMATE write, so the fieldArray feature below is dropped for
+            // its source and nothing else. Without this the form's own submit
+            // was the violation, the feature was refused before its source was
+            // ever looked at, and the test passed while proving nothing.
+            [
+                'method' => 'POST',
+                'path' => '/api/y/write',
+                'handler' => static fn ($r) => \Whity\Sdk\Http\Response::json(['data' => []]),
+                'requiredRole' => null,
+                'requiredPermission' => 'y:view',
+            ],
+        ];
     }
     public function getFrontendFeatures(): array
     {
@@ -141,6 +222,30 @@ PHP);
                     'source' => '/api/other/thing',
                     'chartType' => 'bar',
                     'series' => [['key' => 'id', 'label' => 'ID', 'color' => 1]],
+                ]],
+            ],
+            // Same ownership check, reached through a `fieldArray.source`.
+            [
+                'id' => 'y-foreign-array',
+                'label' => 'Y Foreign Array',
+                'screen' => 'blocks',
+                'requiredPermission' => 'y:view',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'POST', 'endpoint' => '/api/y/write'],
+                    'requiredPermission' => 'y:view',
+                    'children' => [
+                        [
+                            'type' => 'fieldArray',
+                            'name' => 'lines',
+                            'label' => 'Lines',
+                            'source' => '/api/other/thing',
+                            'children' => [
+                                ['type' => 'textInput', 'name' => 'title', 'label' => 'Title'],
+                            ],
+                        ],
+                        ['type' => 'submitButton', 'label' => 'Save'],
+                    ],
                 ]],
             ],
             // VALID sibling: must survive even though the above is dropped.
@@ -232,6 +337,98 @@ PHP);
         $this->assertSame('/api/v1/x/rows', $node['source']);
         $this->assertSame('bar', $node['chartType']);
         $this->assertSame([['key' => 'id', 'label' => 'ID', 'color' => 1]], $node['series']);
+    }
+
+    /**
+     * A source-BEARING type that declares NO source is served untouched.
+     *
+     * `fieldArray` is the first type whose `source` is optional, and optional
+     * changed a rule the loader had been able to take for granted: that a type
+     * whose contract mentions `source` always has one. It did not guard on the
+     * key, so a source-less `fieldArray` read `null`, failed the ownership
+     * comparison, and dropped the ENTIRE feature — silently, fail-closed, for a
+     * prop the author never wrote. Every plugin already shipping a plain
+     * repeatable field-group would have lost its screen the moment the contract
+     * gained the prop.
+     *
+     * The block is asserted to still carry no `source` afterwards: "survived"
+     * is not enough if the loader invented one on the way through.
+     */
+    public function testASourceBearingBlockWithNoSourceIsServedUnchanged(): void
+    {
+        [$loader] = $this->loadDir(self::$ownedSourceDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey(
+            'x-array-plain',
+            $byId,
+            'A fieldArray that declares no source must not be treated as a foreign source'
+        );
+
+        $array = $byId['x-array-plain']['blocks'][0]['children'][0];
+        $this->assertSame('fieldArray', $array['type']);
+        $this->assertArrayNotHasKey(
+            'source',
+            $array,
+            'The loader must not invent a source for a block that declared none'
+        );
+    }
+
+    /**
+     * The same generic walk ownership-checks and versions a `fieldArray.source`,
+     * with no fieldArray-specific code anywhere in the loader — the reuse
+     * `chart` and `dataRecord` already demonstrate, extended to an OPTIONAL
+     * source.
+     */
+    public function testFieldArrayOwnedSourceIsServedAndVersioned(): void
+    {
+        [$loader] = $this->loadDir(self::$ownedSourceDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('x-array-sourced', $byId);
+
+        $array = $byId['x-array-sourced']['blocks'][0]['children'][0];
+        $this->assertSame('fieldArray', $array['type']);
+        $this->assertSame(
+            '/api/v1/x/rows',
+            $array['source'],
+            'A fieldArray source must be rewritten to the versioned URL like any other'
+        );
+    }
+
+    /**
+     * And a `fieldArray` aimed at somebody else's route drops the feature
+     * fail-closed.
+     *
+     * This one matters more than the `dataTable` case it mirrors. A foreign
+     * source on a table shows a plugin data it does not own; a foreign source
+     * on a `fieldArray` SEEDS AN EDITOR from another plugin's rows, and the
+     * form around it then submits them somewhere. Read and write in one gesture,
+     * through a prop that looks like presentation.
+     */
+    public function testForeignFieldArraySourceDropsTheFeatureFailClosed(): void
+    {
+        [$loader] = $this->loadDir(self::$foreignSourceDir, new Router('/v1'));
+
+        $ids = array_column($loader->getFrontendFeatures(), 'id');
+        $this->assertNotContains(
+            'y-foreign-array',
+            $ids,
+            'A fieldArray bound to a route the plugin does not own must drop the feature'
+        );
+        $this->assertContains('y-static', $ids, 'and must not take its siblings with it');
+
+        // The REASON, not just the absence. The first cut of this test passed
+        // while the feature was being refused for an unrelated defect in its own
+        // fixture (a submit endpoint the plugin had not registered), so the
+        // source it was written to exercise was never reached. Asserting the
+        // recorded reason is what makes "dropped" mean "dropped for this".
+        $dropped = array_column($loader->getDroppedFrontendFeatures(), null, 'featureId');
+        $this->assertArrayHasKey('y-foreign-array', $dropped);
+        $this->assertStringContainsString(
+            "data-bound block source '/api/other/thing' is not a GET route this plugin registered",
+            $dropped['y-foreign-array']['reason']
+        );
     }
 
     // ── TEST 2: foreign source → dropped fail-closed ──────────────────────

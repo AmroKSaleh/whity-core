@@ -438,7 +438,21 @@ final class UiKitShowcasePluginTest extends TestCase
 
         $this->walkDataBound($blocks, $dataBoundTypes, $registeredGetPaths, $foundBound);
 
-        foreach ($dataBoundTypes as $type) {
+        // A LIVE INSTANCE is demanded only of the types that MUST carry a
+        // source. `fieldArray` carries an OPTIONAL one: without it the block is
+        // the composer it has always been, and it is the ordinary declaration —
+        // so requiring the showcase to contain a sourced one would be demanding
+        // a demo of the rarer case in order to test the common one, and the
+        // showcase's source-less array (the composer) would fail the walk above
+        // for a prop it never declared.
+        //
+        // What the ownership invariant actually needs is that a source, WHEN
+        // WRITTEN, is checked — and that is the walk, which covers every node
+        // that carries one whatever its type. The loader's own behaviour on an
+        // optional source, present and absent, is pinned directly in
+        // {@see \Tests\Integration\PluginLoaderDataBoundBlocksTest} rather
+        // than inferred from a showcase page.
+        foreach (self::requiredSourceTypes() as $type) {
             $this->assertTrue(
                 $foundBound[$type],
                 "The tree must contain at least one '{$type}' block with a plugin-owned source"
@@ -463,6 +477,26 @@ final class UiKitShowcasePluginTest extends TestCase
             $rule = BlockContract::rulesFor($type);
             $kind = $rule['props']['source']['type'] ?? null;
             if ($kind === 'apiPath' || $kind === 'recordPath') {
+                $types[] = $type;
+            }
+        }
+
+        return $types;
+    }
+
+    /**
+     * The subset of {@see sourceBearingTypes()} whose `source` the contract
+     * makes REQUIRED — the types for which "has no source" is a malformed
+     * declaration rather than a deliberate one.
+     *
+     * @return list<string>
+     */
+    private static function requiredSourceTypes(): array
+    {
+        $types = [];
+        foreach (self::sourceBearingTypes() as $type) {
+            $rule = BlockContract::rulesFor($type);
+            if (($rule['props']['source']['required'] ?? false) === true) {
                 $types[] = $type;
             }
         }
@@ -1486,6 +1520,17 @@ final class UiKitShowcasePluginTest extends TestCase
 
             if (in_array($node['type'], $dataBoundTypes, true)) {
                 $source = $node['source'] ?? null;
+                // An OPTIONAL source that is simply not written is not a
+                // violation — it is the block declining to be data-bound, which
+                // for a `fieldArray` is the ordinary case. Only a type whose
+                // contract says the source is REQUIRED is failed for missing it.
+                if ($source === null && !in_array($node['type'], self::requiredSourceTypes(), true)) {
+                    foreach ($this->childListsOf($node) as $childList) {
+                        $this->walkDataBound($childList, $dataBoundTypes, $registeredGetPaths, $foundBound);
+                    }
+
+                    continue;
+                }
                 $this->assertIsString($source, "Data-bound node of type '{$node['type']}' must have a string 'source'");
                 // #883: a `recordPath` may carry `{token}` segments the renderer
                 // substitutes from context, so ownership is judged with route

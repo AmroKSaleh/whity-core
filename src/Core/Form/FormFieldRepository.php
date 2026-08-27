@@ -173,6 +173,11 @@ final class FormFieldRepository
         return $this->listForForm($tenantId, $formId);
     }
 
+    /**
+     * One field of one form, or null.
+     *
+     * @return array<string, mixed>|null
+     */
     public function find(int $tenantId, int $formId, int $id): ?array
     {
         $stmt = $this->db->prepare(

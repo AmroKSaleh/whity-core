@@ -811,12 +811,42 @@ final class BlockContract
             // rows as a JSON array under `name`. Form-only (needs a `form`
             // ancestor) and, like `form`, scopes its template input names per
             // row. `min`/`max` bound the row count; `itemLabel` names each row.
+            //
+            // `source`/`params` MAKE IT AN EDITOR RATHER THAN A COMPOSER, AND
+            // THAT TURNS IT INTO A DESTRUCTIVE INSTRUMENT
+            // -----------------------------------------------------------------
+            // Without a `source` this block only ever ADDS: it starts empty, the
+            // user builds rows, and the submit creates them. With one, it starts
+            // from what is already stored and the submit is a REPLACEMENT — the
+            // whole point of "edit the questions in place, then save the set" —
+            // and a replacement endpoint deletes whatever the payload omits.
+            //
+            // So an array that rendered empty because its fetch had not landed,
+            // or had failed, or had never been aimed at a record, would submit
+            // "there are no rows" and be believed. That is not a display bug with
+            // a data consequence; it is the data consequence. The renderer
+            // therefore treats a sourced array as NOT SUBMITTABLE until the fetch
+            // has actually delivered rows for the CURRENTLY bound source — it
+            // holds the enclosing form's submit rather than sending an empty set —
+            // and, unlike `dataTable`, it does not fetch at all until every
+            // declared `param` resolves. A read whose `params` are half-bound
+            // shows a shorter table; a WRITE whose params were half-bound saves
+            // one form's questions over another's.
+            //
+            // `source` stays OPTIONAL: a `fieldArray` without one is unchanged,
+            // still starts empty, and is still the right block for composing new
+            // rows. Both `apiPath` ownership-checking and version rewriting come
+            // free — {@see \Whity\Core\PluginLoader} derives what to check from
+            // this table, so a plugin cannot point a sourced array at somebody
+            // else's route.
             'fieldArray' => ['container' => true, 'props' => [
                 'name'      => ['type' => 'inputName', 'required' => true],
                 'label'     => ['type' => 'string',    'required' => true],
                 'itemLabel' => ['type' => 'string',    'required' => false],
                 'min'       => ['type' => 'int',       'required' => false],
                 'max'       => ['type' => 'int',       'required' => false],
+                'source'    => ['type' => 'apiPath',        'required' => false],
+                'params'    => ['type' => 'sourceParamList', 'required' => false],
             ]],
             // WC-532 A3 / #909: `visibleWhen` is no longer declared per type.
             // It is a UNIVERSAL facet ({@see self::UNIVERSAL_PROPS}) merged into

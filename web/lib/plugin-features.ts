@@ -429,6 +429,11 @@ export interface FormBlock {
  * WC-532 A2: a repeatable field-group (form only). `children` is the per-row
  * sub-form template; the renderer collects the rows into a JSON array submitted
  * under `name`. `min`/`max` bound the row count; `itemLabel` names each row.
+ *
+ * `source` (optional) turns it from a composer into an EDITOR: the rows are
+ * seeded once from that path and the submit replaces the stored set. See the
+ * `fieldArray` entry in the SDK `BlockContract` for why that makes an empty
+ * render a destructive act, and `FieldArrayRenderer` for the gate that stops it.
  */
 export interface FieldArrayBlock {
   type: 'fieldArray';
@@ -437,6 +442,10 @@ export interface FieldArrayBlock {
   itemLabel?: string;
   min?: number;
   max?: number;
+  /** If present, rows are seeded from this path instead of starting empty. */
+  source?: string;
+  /** Master-detail bindings for `source`; ALL must resolve before it fetches. */
+  params?: SourceParam[];
   children: Block[];
 }
 
