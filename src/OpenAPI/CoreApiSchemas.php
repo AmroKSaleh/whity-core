@@ -1456,6 +1456,31 @@ final class CoreApiSchemas
                     ),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute('PUT', '/api/forms/{id:\d+}/fields', 'forms:manage', [
+                'summary' => "Save a form's whole field set at once",
+                'description' => 'Authoring a form is one act of composition, not a sequence of '
+                    . 'independent single-field decisions — an editor that adds, reorders and deletes '
+                    . 'question cards in place cannot rest on per-field calls without inventing a '
+                    . 'client-side transaction and hoping every leg lands. Reconciled by `field_key`, '
+                    . 'which is the stable identity a recorded ANSWER refers to and is deliberately not '
+                    . 'updatable: a key present in both the payload and the stored set is the SAME '
+                    . 'question, edited or moved, while a stored key absent from the payload is a '
+                    . 'question withdrawn — and its answers stay recorded but stop having a label. '
+                    . 'Matching on position instead would rename every question below an insertion and '
+                    . 'silently reattribute its answers. Position comes from the order sent, and the '
+                    . 'whole reconciliation is one transaction.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldSetRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The resulting field set, in order', 'FormFieldListResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicated key, an unknown kind or prefill source, a '
+                        . 'choice-bearing field with no choices, or an invalid validation pattern'
+                    ),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', 'forms:manage', [
                 'summary' => 'Edit a field, or move it in the order',
                 'description' => '`field_key` is immutable and a body carrying one is REFUSED: answers '
@@ -5670,6 +5695,18 @@ final class CoreApiSchemas
                 // Absent means the server appends it after the current maximum.
                 'position' => self::int(),
             ], ['field_key', 'field_type', 'label']),
+            // The WHOLE set, in order. Each entry is a create-shaped field; the
+            // list's order IS the position, so a caller that shows a sequence
+            // does not also have to maintain an integer that agrees with it.
+            'FormFieldSetRequest' => self::object([
+                'fields' => [
+                    'type' => 'array',
+                    'items' => SchemaBuilder::ref('FormFieldCreateRequest'),
+                    'description' => 'Every field the form should have after this call. A stored '
+                        . 'field_key absent from this list is withdrawn; answers already given to it '
+                        . 'stay recorded and stop having a label.',
+                ],
+            ], ['fields']),
             'FormFieldUpdateRequest' => self::object([
                 'field_type' => ['type' => 'string', 'enum' => [
                     'text', 'textarea', 'number', 'date', 'select',
@@ -5793,7 +5830,7 @@ final class CoreApiSchemas
             // ROW. And a key from elsewhere cannot become such a row: the submit
             // path accepts a `file` answer only by CLAIMING an unspent
             // `form_uploads` row bound to this tenant, this form and this
-            // uploader (migration 134).
+            // uploader (migration 133).
             //
             // `checksum_sha256` is the server's own hash of the bytes it stored,
             // returned so a client can verify the upload before committing to a

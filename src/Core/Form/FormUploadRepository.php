@@ -7,7 +7,7 @@ namespace Whity\Core\Form;
 use PDO;
 
 /**
- * Data-access for `form_uploads` (migration 134) — the staging record for a file
+ * Data-access for `form_uploads` (migration 133) — the staging record for a file
  * attached to a `file` answer.
  *
  * THREE OPERATIONS, AND THE MIDDLE ONE IS THE SECURITY BOUNDARY
@@ -19,7 +19,7 @@ use PDO;
  * There is deliberately no `find()` and no `listForForm()`. Every read anybody
  * needs is one of the three above, and a general lookup by storage key is the
  * exact shape that would let a future caller resolve a key WITHOUT the tenant
- * and form predicates that make the claim safe. Migration 134's docblock spells
+ * and form predicates that make the claim safe. Migration 133's docblock spells
  * out what goes wrong then. An absent method cannot be misused.
  *
  * THE CLAIM IS ONE STATEMENT ON PURPOSE

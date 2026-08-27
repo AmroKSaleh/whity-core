@@ -51,7 +51,7 @@ use Whity\Sdk\Http\Response;
 use Whity\Storage\LocalStorageDriver;
 
 /**
- * ATTACHING A FILE TO A FORM, END TO END (migration 134).
+ * ATTACHING A FILE TO A FORM, END TO END (migration 133).
  *
  * The claim this suite exists to hold is ONE sentence: an applicant uploads a
  * paper with their application, and the document that submission mints carries a

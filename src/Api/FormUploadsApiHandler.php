@@ -68,7 +68,7 @@ use Whity\Storage\StorageException;
  * ROW — the request never supplies one. And a key from elsewhere cannot become
  * such a row: {@see \Whity\Core\Form\SubmissionIssuer} accepts a `file` answer
  * only by CLAIMING an unspent `form_uploads` row bound to this tenant, this form
- * and this uploader (migration 134).
+ * and this uploader (migration 133).
  *
  * WHY THE FORM MUST HAVE A `file` FIELD
  * --------------------------------------

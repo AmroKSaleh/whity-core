@@ -72,7 +72,7 @@ final class FormUploadStore
      *
      * The returned `storage_key` is what a `file` answer carries. It is not a
      * capability: nothing in the platform reads bytes from a key a request
-     * supplied — see {@see FormUploadRepository::claim()} and migration 134.
+     * supplied — see {@see FormUploadRepository::claim()} and migration 133.
      *
      * @param string $contentType The SNIFFED type from
      *        {@see FormUploadPolicy::assertAcceptable()}, never the client's.

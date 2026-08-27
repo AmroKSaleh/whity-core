@@ -76,7 +76,7 @@ namespace Whity\Core\Form;
  * `file` USED TO BE A THIRD, AND IS NOT ANY MORE. It was excluded on the
  * grounds that "every upload route in this platform is gated — so an anonymous
  * caller has no way to produce one", which was a true statement about the
- * platform rather than about the field. Migration 134 added
+ * platform rather than about the field. Migration 133 added
  * `POST /api/v1/public/forms/{slug}/uploads`, so the premise is gone. The
  * argument for excluding it never survived the premise: unlike a person picker,
  * a file input asks the tenant's data NOTHING and so cannot answer anything
@@ -118,7 +118,7 @@ final class PublicFormView
      * reference to the caller's OWN bytes. There is no question about the
      * organisation it can be asked, so there is no answer it can leak.
      *
-     * It was excluded until migration 134 for a different and then-correct
+     * It was excluded until migration 133 for a different and then-correct
      * reason — no gated caller meant no anonymous upload route, so the field
      * would have rendered above a submit button that refused. That is the
      * "renders fine, behaves wrongly" failure, and it was the right call while

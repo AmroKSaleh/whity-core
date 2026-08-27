@@ -73,7 +73,7 @@ use Whity\Core\Document\Routing\RoutingRejectedException;
  * A `file` ANSWER BECOMES A `document_artifacts` ROW, AND THAT IS THE POINT
  * -------------------------------------------------------------------------
  * A form can ask "upload your paper", and the answer is the storage key of an
- * object {@see FormUploadStore} already wrote (migration 134). Storing that
+ * object {@see FormUploadStore} already wrote (migration 133). Storing that
  * string in `form_submissions.data` and stopping there would leave the file
  * reachable only by somebody who knows to look inside a jsonb column and parse
  * it — so every downstream reader that wants the EVIDENCE (an accreditation

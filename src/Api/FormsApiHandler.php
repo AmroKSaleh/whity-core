@@ -396,7 +396,7 @@ final class FormsApiHandler
      *
      * A `file` FIELD IS NO LONGER ONE OF THEM. It was, while there was no
      * anonymous upload route and the field would have rendered above a submit
-     * button that refused. Migration 134 added
+     * button that refused. Migration 133 added
      * `POST /api/v1/public/forms/{slug}/uploads`, so a public form may now ask
      * an external applicant to attach their paper — which is the case the whole
      * feature exists for. The list this check consults is

@@ -253,7 +253,7 @@ class EnforceTenantIsolation
         // never comes from the request, and CsrfGuard still applies to any caller
         // who arrives carrying an ambient cookie.
         //
-        // `/uploads` (migration 134) writes BYTES rather than rows, so its bounds
+        // `/uploads` (migration 133) writes BYTES rather than rows, so its bounds
         // are sized for that: a tighter per-IP ceiling than the submit, a size
         // limit half the authenticated one, a content-type allow-list checked
         // against the leading bytes, and a retention sweep that deletes anything

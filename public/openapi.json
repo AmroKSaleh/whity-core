@@ -12146,6 +12146,131 @@
                         "bearerAuth": []
                     }
                 ]
+            },
+            "put": {
+                "operationId": "put_api_v1_forms_id_fields",
+                "summary": "Save a form's whole field set at once",
+                "tags": [
+                    "forms"
+                ],
+                "description": "Authoring a form is one act of composition, not a sequence of independent single-field decisions \u2014 an editor that adds, reorders and deletes question cards in place cannot rest on per-field calls without inventing a client-side transaction and hoping every leg lands. Reconciled by `field_key`, which is the stable identity a recorded ANSWER refers to and is deliberately not updatable: a key present in both the payload and the stored set is the SAME question, edited or moved, while a stored key absent from the payload is a question withdrawn \u2014 and its answers stay recorded but stop having a label. Matching on position instead would rename every question below an insertion and silently reattribute its answers. Position comes from the order sent, and the whole reconciliation is one transaction.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FormFieldSetRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The resulting field set, in order",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormFieldListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The form is archived, so its fields cannot be changed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A malformed or duplicated key, an unknown kind or prefill source, a choice-bearing field with no choices, or an invalid validation pattern",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/forms/{id}/fields/{fieldId}": {
@@ -12494,7 +12619,7 @@
                 "tags": [
                     "forms"
                 ],
-                "description": "OPT-IN and OFF BY DEFAULT on every form: `public_enabled` is only ever true because of this call. It mints a 256-bit random slug and returns the absolute `public_url` built from it \u2014 the ONLY credential the public endpoints have, which is why it is random rather than derived from the form id or key: a guessable address makes the whole catalogue of an install's forms walkable with curl. REFUSED (422) on a form that is not `published` (a link to one answers 404 to everybody who follows it), and on a form carrying a `profile_ref`, `ou_ref` or `file` field \u2014 the reference kinds would make the public submit a MEMBERSHIP ORACLE, since the existence check behind them reveals whether a given id belongs to this organisation, and a file field needs an upload an anonymous caller cannot perform. `opens_at` / `closes_at` are optional; either may be null for \"no boundary on this side\". They are naive local date-times in the instance's own clock, and a UTC offset is REFUSED rather than silently applied. Re-opening after a close mints a DIFFERENT address: a withdrawn link stays withdrawn.",
+                "description": "OPT-IN and OFF BY DEFAULT on every form: `public_enabled` is only ever true because of this call. It mints a 256-bit random slug and returns the absolute `public_url` built from it \u2014 the ONLY credential the public endpoints have, which is why it is random rather than derived from the form id or key: a guessable address makes the whole catalogue of an install's forms walkable with curl. REFUSED (422) on a form that is not `published` (a link to one answers 404 to everybody who follows it), and on a form carrying a `profile_ref` or `ou_ref` field \u2014 the reference kinds would make the public submit a MEMBERSHIP ORACLE, since the existence check behind them reveals whether a given id belongs to this organisation. A `file` field is ACCEPTED (it was refused until migration 134 only because no anonymous upload route existed; a file input asks the tenant's data nothing, so it cannot answer anything about it). `opens_at` / `closes_at` are optional; either may be null for \"no boundary on this side\". They are naive local date-times in the instance's own clock, and a UTC offset is REFUSED rather than silently applied. Re-opening after a close mints a DIFFERENT address: a withdrawn link stays withdrawn.",
                 "parameters": [
                     {
                         "name": "id",
@@ -12909,6 +13034,153 @@
                     },
                     "500": {
                         "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/forms/{id}/uploads": {
+            "post": {
+                "operationId": "post_api_v1_forms_id_uploads",
+                "summary": "Attach a file to a form you are filling in",
+                "tags": [
+                    "forms"
+                ],
+                "description": "MULTIPART, one part named `file`. Returns the `reference` a `file` answer carries, plus the filename, the SNIFFED content type, the byte size and the server's SHA-256 of what it stored. Gated `forms:submit` \u2014 the same permission as the submit itself, because uploading is half of answering. ACCEPTS application/pdf, image/png and image/jpeg ONLY, decided by the LEADING BYTES: a declared Content-Type that contradicts the bytes is a 422, and a declared type is never what gets stored. Office formats are absent on purpose \u2014 a .docx is indistinguishable from any other ZIP by magic bytes. MAXIMUM 10 MiB. REFUSED (422) on a form that is not accepting submissions, and on a form with no `file` field \u2014 so a broad permission cannot be aimed at arbitrary form ids as a way into a tenant's storage. THROTTLED to 20 uploads per caller per hour. THE UPLOAD IS SINGLE-USE and expires: it is spent by the first submission that names it, and anything never submitted is deleted by the `form-uploads:sweep` retention job (24 h by default).",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by filename or Content-Type. Maximum 10 MiB."
+                                    }
+                                },
+                                "required": [
+                                    "file"
+                                ]
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The stored file, and the reference to answer with",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormUploadResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "No file part, or the multipart body could not be read",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Form not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Too large, not an accepted kind, the form asks for no file, or the form is not accepting submissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many uploads from this caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The file could not be stored",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -23323,7 +23595,7 @@
                 "tags": [
                     "forms"
                 ],
-                "description": "PUBLIC and unauthenticated by design: the caller is somebody outside the organisation \u2014 an applicant, a supplier, a member of the public \u2014 who has no account and does not need one. THE TENANT IS RESOLVED FROM THE SLUG, never from a header, a query parameter or the Host \u2014 all of which are values this caller chooses. A malformed slug, an unknown slug, a form whose link was closed, and a form that is not published all produce THE SAME 404 with the same sentence, so this endpoint cannot be asked which slugs name a real form or whether an organisation uses public forms at all. The response carries NO id, tenant id, form key, author, route template, submission count, status, version or prefill \u2014 an anonymous caller has no saved details for the platform to pre-fill, and nothing about how the organisation works is disclosed. Person, unit and file fields are omitted from the field list, for the reason POST /api/v1/forms/{id}/public-link refuses them. A form OUTSIDE its submission window still renders, with `accepts_submissions: false` and the window dates, so somebody holding a genuine link is told they are early or late rather than that the link is wrong.",
+                "description": "PUBLIC and unauthenticated by design: the caller is somebody outside the organisation \u2014 an applicant, a supplier, a member of the public \u2014 who has no account and does not need one. THE TENANT IS RESOLVED FROM THE SLUG, never from a header, a query parameter or the Host \u2014 all of which are values this caller chooses. A malformed slug, an unknown slug, a form whose link was closed, and a form that is not published all produce THE SAME 404 with the same sentence, so this endpoint cannot be asked which slugs name a real form or whether an organisation uses public forms at all. The response carries NO id, tenant id, form key, author, route template, submission count, status, version or prefill \u2014 an anonymous caller has no saved details for the platform to pre-fill, and nothing about how the organisation works is disclosed. Person and unit fields are omitted from the field list, for the reason POST /api/v1/forms/{id}/public-link refuses them. FILE fields ARE served: attach the bytes at POST /api/v1/public/forms/{slug}/uploads first and put the returned `reference` in the answer. A form OUTSIDE its submission window still renders, with `accepts_submissions: false` and the window dates, so somebody holding a genuine link is told they are early or late rather than that the link is wrong.",
                 "parameters": [
                     {
                         "name": "slug",
@@ -23479,6 +23751,128 @@
                     },
                     "429": {
                         "description": "Too many attempts from this address, or for this form",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Temporarily unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/public/forms/{slug}/uploads": {
+            "post": {
+                "operationId": "post_api_v1_public_forms_slug_uploads",
+                "summary": "Attach a file to a publicly-opened form (PUBLIC, unauthenticated, rate-limited)",
+                "tags": [
+                    "forms"
+                ],
+                "description": "The anonymous half of the upload above, and the route that made `file` fields servable on a public form at all. A file input is NOT the membership oracle a person or unit picker is: it offers no list, resolves no id against this organisation, and returns one opaque reference to the caller's own bytes \u2014 so there is no question about the tenant it can be asked. THE TENANT IS RESOLVED FROM THE SLUG, and every reason there is no publicly served form behind it collapses to the SAME 404 as the render and the submit. BOUNDED, because what a stranger can spend here is storage: 10 uploads per IP per hour, 400 per form per hour across all addresses, and a size ceiling of 5 MiB \u2014 HALF the authenticated one, so bytes-per-address-per-hour is what is capped rather than just the count. Same three accepted kinds, same magic-byte check. Anything never submitted is deleted by the retention sweep, so an abandoned upload costs a day of storage rather than a permanent one.",
+                "parameters": [
+                    {
+                        "name": "slug",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by filename or Content-Type. Maximum 5 MiB on this public surface."
+                                    }
+                                },
+                                "required": [
+                                    "file"
+                                ]
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The stored file, and the reference to answer with",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormUploadResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "No file part, or the multipart body could not be read",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No publicly-open form is served at this address",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Too large, not an accepted kind, the form asks for no file, or the form is outside its submission window",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many uploads from this address, or for this form",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -36204,6 +36598,21 @@
                     "data"
                 ]
             },
+            "FormFieldSetRequest": {
+                "type": "object",
+                "properties": {
+                    "fields": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FormFieldCreateRequest"
+                        },
+                        "description": "Every field the form should have after this call. A stored field_key absent from this list is withdrawn; answers already given to it stay recorded and stop having a label."
+                    }
+                },
+                "required": [
+                    "fields"
+                ]
+            },
             "FormFieldUpdateRequest": {
                 "type": "object",
                 "properties": {
@@ -36598,6 +37007,41 @@
                     }
                 },
                 "minProperties": 1
+            },
+            "FormUploadResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "reference": {
+                                "type": "string"
+                            },
+                            "filename": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "content_type": {
+                                "type": "string"
+                            },
+                            "byte_size": {
+                                "type": "integer"
+                            },
+                            "checksum_sha256": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "reference",
+                            "content_type",
+                            "byte_size",
+                            "checksum_sha256"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "FrontendFeature": {
                 "type": "object",

@@ -117,7 +117,7 @@ final class PublicFormsApiRealEngineTest extends TestCase
 
         $this->recipients = new RouteRecipientRepository($this->pdo);
 
-        // Migration 134's two collaborators. Wired here rather than stubbed
+        // Migration 133's two collaborators. Wired here rather than stubbed
         // because the whole suite is about a handler behaving as it does in
         // production, and a SubmissionIssuer that could not attach a file is a
         // different object from the one public/index.php builds.
@@ -511,7 +511,7 @@ final class PublicFormsApiRealEngineTest extends TestCase
     }
 
     /**
-     * A `file` FIELD NO LONGER BLOCKS THE DOOR (migration 134).
+     * A `file` FIELD NO LONGER BLOCKS THE DOOR (migration 133).
      *
      * It used to, and the reason it did was never that a file input is unsafe on
      * a public form — it was that no anonymous upload route existed, so the
@@ -647,7 +647,11 @@ final class PublicFormsApiRealEngineTest extends TestCase
         $response = $this->manage->show($this->request('GET', '/x'), ['id' => (string) $formId]);
 
         self::assertSame(
-            'https://records.example.test/api/v1/public/forms/' . $slug,
+            // THE PAGE, not the endpoint. This URL is pasted into an email and
+            // opened in a browser, so it has to be an address that renders a
+            // form; the API is what that page calls. Changed with the public
+            // fill page — before it, a recipient was handed raw JSON.
+            'https://records.example.test/f/' . $slug,
             self::data($response)['public_url']
         );
     }
