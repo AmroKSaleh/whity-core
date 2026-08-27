@@ -692,6 +692,28 @@ final class FormFieldsApiHandler
             $rules['pattern'] = $pattern;
         }
 
+        // WHICH KIND of unit an `ou_ref` accepts.
+        //
+        // Without it a department picker can only offer the whole org chart —
+        // the institution, its faculties, the deanships and the finance office
+        // beside the three actual departments — and choosing wrongly is a data
+        // error nothing detects, because nothing knows the difference.
+        //
+        // Kept as a validation rule rather than a new column: it constrains
+        // what the answer may be, which is what every other entry here does.
+        // The key shape is the registry's (`source:key`); whether that type
+        // exists is not asserted here, because a type adopted after the field
+        // was authored must not retroactively invalidate the field.
+        if (isset($raw['ou_type'])) {
+            if (!is_string($raw['ou_type']) || preg_match('/^[a-z0-9_]+:[a-z0-9_]+$/', $raw['ou_type']) !== 1) {
+                return Response::error(
+                    "validation.ou_type must be an organizational-unit type key, as 'source:key'",
+                    422
+                );
+            }
+            $rules['ou_type'] = $raw['ou_type'];
+        }
+
         return $rules;
     }
 

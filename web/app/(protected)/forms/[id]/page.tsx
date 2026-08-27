@@ -72,14 +72,16 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
       .then(async (response) => {
         if (!response.ok) return;
         const body = (await response.json().catch(() => ({}))) as {
-          data?: Array<{ id?: number; name?: string }>;
+          data?: Array<{ id?: number; name?: string; ou_type_key?: string | null }>;
         };
         if (cancelled) return;
         setUnits(
           (body.data ?? [])
-            .filter((ou): ou is { id: number; name: string } =>
+            .filter((ou): ou is { id: number; name: string; ou_type_key?: string | null } =>
               typeof ou.id === 'number' && typeof ou.name === 'string')
-            .map((ou) => ({ value: String(ou.id), label: ou.name }))
+            // The kind travels with the option so a field constrained to
+            // `ou_type` can narrow this one list rather than refetching.
+            .map((ou) => ({ value: String(ou.id), label: ou.name, type: ou.ou_type_key ?? null }))
         );
       })
       .catch(() => {

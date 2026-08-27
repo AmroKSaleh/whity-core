@@ -36,6 +36,8 @@ export interface FormFieldSpec {
   options: Array<{ value?: string; label?: LocalizedText | string } | string>;
   multi_valued: boolean;
   position: number;
+  /** Constraints on the answer. `ou_type` narrows which KIND of unit an `ou_ref` accepts. */
+  validation?: { ou_type?: string } | null;
 }
 
 export type Answer = string | string[] | boolean;
@@ -78,6 +80,8 @@ function optionLabel(option: FormFieldSpec['options'][number], preferArabic: boo
 export interface ReferenceOption {
   value: string;
   label: string;
+  /** The option's own kind, so a field can accept only some of them. */
+  type?: string | null;
 }
 
 /**
@@ -363,7 +367,16 @@ export function FormField({
           onChange={(e) => onChange(e.target.value)}
         >
           <option value="">—</option>
-          {(references?.[field.field_type] ?? []).map((option) => (
+          {(references?.[field.field_type] ?? [])
+            // A department picker offers departments. Filtering here rather
+            // than at the fetch keeps ONE list serving every reference field on
+            // the form; a field that names no type still sees everything.
+            .filter((option) => {
+              const wanted = field.validation?.ou_type;
+
+              return wanted === undefined || wanted === null || option.type === wanted;
+            })
+            .map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
