@@ -93,6 +93,36 @@ final class DecisionRepository
         return $row === false ? null : self::normalize($row);
     }
 
+    /**
+     * The decision already holding this number in this tenant, if any.
+     *
+     * PER TENANT, because that is the scope of the unique index migration 130
+     * created — see its class docblock, and
+     * {@see DecisionRecorder::record()} for why the scope was kept rather than
+     * narrowed when hand-typed numbers arrived.
+     *
+     * This read is NOT the uniqueness guarantee and must not be mistaken for
+     * one. It exists so a caller who supplied a colliding number gets a sentence
+     * naming what it collides with instead of a constraint violation, and it is
+     * a READ followed by a WRITE — two requests can both pass it. The guarantee
+     * is the index; this is the explanation.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findByNumber(int $tenantId, string $decisionNumber): ?array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT id, tenant_id, meeting_id, agenda_item_id, decision_number, verdict, rationale,
+                    decided_at, recorded_by_profile_id, route_id, route_event_id
+               FROM meeting_decisions
+              WHERE tenant_id = :tenant_id AND decision_number = :decision_number'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':decision_number' => $decisionNumber]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : self::normalize($row);
+    }
+
     public function create(
         int $tenantId,
         int $meetingId,

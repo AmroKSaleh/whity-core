@@ -91,6 +91,7 @@ final class CoreTables
         'languages' => '081_create_language_tables.php',
         'mcp_tokens' => '033_create_mcp_tokens.php',
         'meeting_agenda_items' => '130_create_convening.php',
+        'meeting_attendees' => '134_create_meeting_attendance.php',
         'meeting_decisions' => '130_create_convening.php',
         'meeting_invitations' => '130_create_convening.php',
         'meetings' => '130_create_convening.php',

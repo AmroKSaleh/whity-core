@@ -807,6 +807,21 @@ interface MasterDetail {
   // `options.refresh` bumps `refreshSignal` (passed ONLY from a form's
   // submit-success path) so a plain dismiss/cancel never triggers a refetch.
   closeTarget: (id: string, options?: { refresh?: boolean }) => void;
+  // Bump `refreshSignal` WITHOUT closing anything — what an INLINE form calls
+  // when it has saved.
+  //
+  // This exists because retiring the dialogs took the refetch with them. A form
+  // used to reach `refreshSignal` only through `closeTarget`, since a modal was
+  // the only place a form ever lived; a form composed on the page therefore
+  // saved successfully and left every `dataTable` beside it showing the state
+  // before the save. That is the "second view that silently goes stale" this
+  // codebase treats as worse than no second view — and on a minute screen it is
+  // worse still, because the stale table is the list of decisions somebody is
+  // reading to decide what to record next.
+  //
+  // Closing is the OVERLAY's concern; refetching is the SAVE's. Splitting them
+  // is what lets an inline form have the second without the first.
+  refresh: () => void;
   refreshSignal: number;
 }
 
@@ -887,6 +902,7 @@ function MasterDetailProvider({
     setOpenTargets((prev) => ({ ...prev, [id]: true }));
     if (row !== undefined) setRows((prev) => ({ ...prev, [id]: row }));
   }, []);
+  const refresh = React.useCallback(() => setRefreshSignal((s) => s + 1), []);
   const closeTarget = React.useCallback((id: string, options?: { refresh?: boolean }) => {
     setOpenTargets((prev) => ({ ...prev, [id]: false }));
     if (options?.refresh === true) setRefreshSignal((s) => s + 1);
@@ -917,8 +933,8 @@ function MasterDetailProvider({
   }, [record]);
 
   const value = React.useMemo<MasterDetail>(
-    () => ({ selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, publishRecord, refreshSignal }),
-    [selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, publishRecord, refreshSignal]
+    () => ({ selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, refresh, publishRecord, refreshSignal }),
+    [selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, refresh, publishRecord, refreshSignal]
   );
   return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>;
 }
@@ -2856,8 +2872,16 @@ function FormRenderer({ block }: { block: FormBlock }) {
     (ref: string) => resolveContextRef(md, ref),
     [md]
   );
+  // A form inside an overlay closes it AND refetches. A form composed on the
+  // page has nothing to close, and still has to refetch — otherwise every
+  // `dataTable` beside it goes on showing the state before the save. See
+  // `MasterDetail.refresh`.
   const onSubmitSuccess = React.useCallback(() => {
-    if (scopeId !== null) md?.closeTarget(scopeId, { refresh: true });
+    if (scopeId !== null) {
+      md?.closeTarget(scopeId, { refresh: true });
+      return;
+    }
+    md?.refresh();
   }, [scopeId, md]);
   return (
     <FormProvider block={block} resolveRef={resolveRef} onSubmitSuccess={onSubmitSuccess}>

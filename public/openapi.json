@@ -17214,6 +17214,104 @@
                 }
             }
         },
+        "/api/v1/meeting-attendees": {
+            "get": {
+                "operationId": "get_api_v1_meeting_attendees",
+                "summary": "One meeting's attendance, and what each attendee had answered",
+                "tags": [
+                    "convening"
+                ],
+                "description": "Every row carries `was_invited` and `invitation_status` beside the attendance, because the interesting rows are the ones where the two disagree: somebody who declined and came anyway, somebody who holds no invitation at all. `convening:read` and not `convening:manage`, so that a caller who can already see this meeting's invitations and decisions is not refused the less sensitive fact of who was in the room.",
+                "parameters": [
+                    {
+                        "name": "meeting_id",
+                        "in": "query",
+                        "required": true,
+                        "description": "The meeting whose attendance to read.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The attendance, and what was counted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MeetingAttendanceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Meeting not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "meeting_id is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/meeting-decisions": {
             "get": {
                 "operationId": "get_api_v1_meeting_decisions",
@@ -18161,6 +18259,123 @@
                     },
                     "422": {
                         "description": "A meeting that has not been held, a verdict outside the vocabulary, or a refusal from the routing engine (returned in its own words)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/meetings/{id}/attendance": {
+            "put": {
+                "operationId": "put_api_v1_meetings_id_attendance",
+                "summary": "Record who actually attended a meeting that has been held",
+                "tags": [
+                    "convening"
+                ],
+                "description": "A REPLACEMENT of the whole list, which is why it is a PUT: a secretary reads a sign-in sheet and asserts the entire set, not a stream of arrivals. Anybody omitted is removed from the record of who attended. ATTENDANCE IS NOT AN INVITATION ANSWER \u2014 an acceptance is a prediction made before the sitting and attendance is what happened at it, they disagree constantly, and neither overwrites the other. Somebody who was never invited can be recorded: give a `profile_id` for a person with an account or an `attendee_name` for a guest without one. Refused unless the meeting has been HELD \u2014 attendance taken beforehand is a guess, and the platform already holds guesses as invitation answers.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/MeetingAttendanceRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The recorded attendance, and what was counted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MeetingAttendanceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Meeting not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A meeting that has not been held, an attendee that identifies nobody, a duplicated profile, or a capacity outside the vocabulary",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -38582,6 +38797,164 @@
                     "item_ids"
                 ]
             },
+            "MeetingAttendanceCount": {
+                "type": "object",
+                "properties": {
+                    "attendees": {
+                        "type": "integer"
+                    },
+                    "attendees_who_held_an_invitation": {
+                        "type": "integer"
+                    },
+                    "attendees_who_did_not": {
+                        "type": "integer"
+                    },
+                    "invitations_issued": {
+                        "type": "integer"
+                    },
+                    "invited_who_did_not_attend": {
+                        "type": "integer"
+                    },
+                    "quorum_evaluated": {
+                        "type": "boolean"
+                    },
+                    "basis": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "attendees",
+                    "attendees_who_held_an_invitation",
+                    "attendees_who_did_not",
+                    "invitations_issued",
+                    "invited_who_did_not_attend",
+                    "quorum_evaluated",
+                    "basis"
+                ]
+            },
+            "MeetingAttendanceEntryRequest": {
+                "type": "object",
+                "properties": {
+                    "profile_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "attendee_name": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "nullable": true
+                    },
+                    "capacity": {
+                        "type": "string",
+                        "enum": [
+                            "member",
+                            "substitute",
+                            "guest"
+                        ]
+                    },
+                    "note": {
+                        "type": "string",
+                        "maxLength": 2000,
+                        "nullable": true
+                    }
+                }
+            },
+            "MeetingAttendanceRequest": {
+                "type": "object",
+                "properties": {
+                    "attendees": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MeetingAttendanceEntryRequest"
+                        },
+                        "maxItems": 1000
+                    }
+                },
+                "required": [
+                    "attendees"
+                ]
+            },
+            "MeetingAttendanceResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MeetingAttendee"
+                        }
+                    },
+                    "counted": {
+                        "$ref": "#/components/schemas/MeetingAttendanceCount"
+                    }
+                },
+                "required": [
+                    "data",
+                    "counted"
+                ]
+            },
+            "MeetingAttendee": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "meeting_id": {
+                        "type": "integer"
+                    },
+                    "profile_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "attendee_name": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "nullable": true
+                    },
+                    "capacity": {
+                        "type": "string",
+                        "enum": [
+                            "member",
+                            "substitute",
+                            "guest"
+                        ]
+                    },
+                    "note": {
+                        "type": "string",
+                        "maxLength": 2000,
+                        "nullable": true
+                    },
+                    "recorded_at": {
+                        "type": "string"
+                    },
+                    "recorded_by_profile_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "was_invited": {
+                        "type": "boolean"
+                    },
+                    "invitation_status": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "meeting_id",
+                    "profile_id",
+                    "attendee_name",
+                    "capacity",
+                    "note",
+                    "recorded_at",
+                    "recorded_by_profile_id",
+                    "was_invited",
+                    "invitation_status"
+                ]
+            },
             "MeetingCreateRequest": {
                 "type": "object",
                 "properties": {
@@ -38693,6 +39066,10 @@
                         "type": "string",
                         "maxLength": 10000
                     },
+                    "decision_number": {
+                        "type": "string",
+                        "maxLength": 64
+                    },
                     "decided_at": {
                         "type": "string"
                     }
@@ -38791,13 +39168,20 @@
                                         "items": {
                                             "$ref": "#/components/schemas/MeetingInvitation"
                                         }
+                                    },
+                                    "attendance": {
+                                        "type": "array",
+                                        "items": {
+                                            "$ref": "#/components/schemas/MeetingAttendee"
+                                        }
                                     }
                                 },
                                 "required": [
                                     "body",
                                     "agenda",
                                     "decisions",
-                                    "invitations"
+                                    "invitations",
+                                    "attendance"
                                 ]
                             }
                         ]

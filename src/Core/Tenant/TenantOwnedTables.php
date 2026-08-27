@@ -405,22 +405,30 @@ final class TenantOwnedTables
         // state is unreachable by construction, since the only path that could
         // ever reference it is the claim, which refuses a claimed row.
         'form_uploads' => '133_create_form_uploads.php',
-        // Convening (migrations 130/131) — deliberative bodies, who sits on
+        // Convening (migrations 130/131/134) — deliberative bodies, who sits on
         // them, their meetings, the agenda each meeting carries, the decisions
-        // taken, and who was invited. All six are tenant-owned without
-        // exception, and none of them has a public or cross-tenant read
-        // anywhere: a body is a tenant's own governance structure, and even the
-        // invitation reply — the one act performed by somebody who may hold no
-        // permission at all — resolves the invitation through the caller's own
-        // bound tenant. No statement in the subsystem carries a guard
-        // annotation, which is the property to preserve rather than a
-        // coincidence to note.
+        // taken, who was invited, and who actually turned up. All seven are
+        // tenant-owned without exception, and none of them has a public or
+        // cross-tenant read anywhere: a body is a tenant's own governance
+        // structure, and even the invitation reply — the one act performed by
+        // somebody who may hold no permission at all — resolves the invitation
+        // through the caller's own bound tenant. No statement in the subsystem
+        // carries a guard annotation, which is the property to preserve rather
+        // than a coincidence to note.
         'convening_bodies' => '130_create_convening.php',
         'convening_body_members' => '130_create_convening.php',
         'meetings' => '130_create_convening.php',
         'meeting_agenda_items' => '130_create_convening.php',
         'meeting_decisions' => '130_create_convening.php',
         'meeting_invitations' => '130_create_convening.php',
+        // Attendance is a SEPARATE table from invitations rather than a column
+        // on one, because somebody attends who was never invited and an
+        // attendance expressed as an invitation's column has nowhere to put
+        // them. Migration 134 carries the full argument. Its one read joins the
+        // invitations, and that join binds the tenant on BOTH sides — a
+        // profile-only join condition would be satisfiable by another tenant's
+        // invitation row.
+        'meeting_attendees' => '134_create_meeting_attendance.php',
     ];
 
     /**

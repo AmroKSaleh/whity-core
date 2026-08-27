@@ -39,6 +39,7 @@ final class MeetingService
         private readonly MeetingRepository $meetings,
         private readonly InvitationRepository $invitations,
         private readonly MeetingNotifications $notifications,
+        private readonly AttendanceRepository $attendance,
     ) {
     }
 
@@ -258,6 +259,71 @@ final class MeetingService
         $this->meetings->hold($tenantId, $meetingId, $stamp);
 
         return $this->requireMeeting($tenantId, $meetingId);
+    }
+
+    /**
+     * Record who was in the room, replacing whatever was recorded before.
+     *
+     * A TRANSITION RULE PLUS A WRITE, which is why it is here rather than in the
+     * handler or the repository: the rule is
+     * {@see MeetingStatus::canRecordAttendance()} and the write is a
+     * REPLACEMENT, and a second caller must get both in that order.
+     *
+     * THE REFUSAL SAYS WHY, NOT MERELY NO. A person who has just typed a
+     * sign-in sheet into a form and is told "conflict" has no idea that the fix
+     * is one button on the same screen. Each branch below names the state and
+     * the next move.
+     *
+     * REPLACEMENT, NOT ACCUMULATION, and stated in the API's own words
+     * elsewhere. It is the right shape for the act — a secretary asserts the
+     * WHOLE list off a sheet, not a stream of arrivals — and it is the reason
+     * {@see AttendanceEntry::parseSet()} validates the entire set before this
+     * method touches the table.
+     *
+     * NO NOTIFICATION. Every other act here announces something, and this one
+     * deliberately does not: attendance is a record written after the fact, and
+     * mailing people to tell them they were at a meeting they were at is the
+     * kind of message that teaches an organisation to filter the ones that
+     * matter.
+     *
+     * @param list<array{profile_id: ?int, attendee_name: ?string, capacity: string, note: ?string}> $attendees
+     *
+     * @return array{meeting: array<string, mixed>, attendance: list<array<string, mixed>>, recorded: int}
+     *
+     * @throws ConveningRejectedException
+     */
+    public function recordAttendance(
+        int $tenantId,
+        int $meetingId,
+        array $attendees,
+        ?int $recordedBy
+    ): array {
+        $meeting = $this->requireMeeting($tenantId, $meetingId);
+        $status = (string) $meeting['status'];
+
+        if (!MeetingStatus::canRecordAttendance($status)) {
+            if ($status === MeetingStatus::CANCELLED) {
+                throw ConveningRejectedException::because(
+                    'This meeting was cancelled, so nobody was present at it. If the body met anyway, '
+                    . 'that was a meeting — hold one and record the attendance against it.'
+                );
+            }
+
+            throw ConveningRejectedException::because(
+                'Attendance can only be recorded against a meeting that has been held. This one is '
+                . '"' . $status . '". Attendance is a record of who was in the room, and before the '
+                . 'sitting there is no room — what people have SAID they will do is already on their '
+                . 'invitations. Record that the meeting took place first.'
+            );
+        }
+
+        $recorded = $this->attendance->replace($tenantId, $meetingId, $attendees, $recordedBy);
+
+        return [
+            'meeting' => $meeting,
+            'attendance' => $this->attendance->listForMeeting($tenantId, $meetingId),
+            'recorded' => $recorded,
+        ];
     }
 
     /**

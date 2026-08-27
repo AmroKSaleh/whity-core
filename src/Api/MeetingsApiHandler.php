@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use Whity\Core\Convening\AgendaRepository;
+use Whity\Core\Convening\AttendanceEntry;
+use Whity\Core\Convening\AttendanceRepository;
 use Whity\Core\Convening\ConveningBodyRepository;
 use Whity\Core\Convening\ConveningRejectedException;
 use Whity\Core\Convening\DecisionRecorder;
@@ -44,10 +46,23 @@ use Whity\Http\JsonBody;
  * THE DETAIL READ CARRIES EVERYTHING AT ONCE
  * ------------------------------------------
  * `GET /api/v1/meetings/{id}` returns the meeting, its body, its agenda, the
- * decisions taken and who was invited — five reads behind one request, because
- * nobody has ever wanted four of them. A screen that fetched them separately
- * would render an agenda before it knew which items had been decided, which is
- * the one arrangement guaranteed to look like a bug.
+ * decisions taken, who was invited and who attended — six reads behind one
+ * request, because nobody has ever wanted five of them. A screen that fetched
+ * them separately would render an agenda before it knew which items had been
+ * decided, which is the one arrangement guaranteed to look like a bug.
+ *
+ * ATTENDANCE READS ON `convening:read`, WRITES ON `convening:manage`
+ * -----------------------------------------------------------------
+ * The write is a secretarial act of exactly the kind `convening:manage` already
+ * covers. The READ is deliberately the ordinary read gate and not the manage
+ * one, and the reason is who holds each: migration 131 grants `convening:read`
+ * to `settings:read` AND `documents:route`, and `convening:manage` only to
+ * `settings:write`. Gating the attendance read on manage would mean somebody who
+ * can already see this meeting's INVITATIONS and its DECISIONS — strictly more
+ * sensitive material — gets a 403 on the list of who was in the room, and the
+ * meeting-record screen (itself gated on `convening:read`) would render one
+ * empty table among five populated ones with no explanation. One subsystem, one
+ * read gate.
  */
 final class MeetingsApiHandler
 {
@@ -57,6 +72,7 @@ final class MeetingsApiHandler
         private readonly AgendaRepository $agenda,
         private readonly DecisionRepository $decisions,
         private readonly InvitationRepository $invitations,
+        private readonly AttendanceRepository $attendance,
         private readonly MeetingService $service,
         private readonly DecisionRecorder $recorder,
     ) {
@@ -432,6 +448,111 @@ final class MeetingsApiHandler
     }
 
     /**
+     * PUT /api/v1/meetings/{id}/attendance — record who was actually there.
+     *
+     * PUT AND NOT POST, because the act is a REPLACEMENT of the whole list and
+     * the method should say so. A secretary reads a sign-in sheet and asserts
+     * "these are the people who were here" — a statement about the entire set,
+     * made once, corrected by making it again. POST would suggest each call
+     * ADDS somebody, and a client written against that reading would double the
+     * list on every retry.
+     *
+     * WHICH MEANS AN OMITTED PERSON IS REMOVED, and that is said out loud in
+     * the screen's own text and in the OpenAPI description rather than left to
+     * be discovered. It is also why {@see AttendanceEntry::parseSet()} validates
+     * the whole payload before any of it is written: a list whose ninth entry
+     * names nobody must leave the stored attendance exactly as it was, not
+     * truncated to the eight that parsed.
+     *
+     * REFUSED BEFORE THE MEETING IS HELD — see
+     * {@see \Whity\Core\Convening\MeetingService::recordAttendance()}, which
+     * carries the reasoning and the sentence the caller gets.
+     *
+     * @param array<string, string> $params
+     */
+    public function recordAttendance(Request $request, array $params): Response
+    {
+        try {
+            $tenantId = self::tenantId();
+            if ($tenantId instanceof Response) {
+                return $tenantId;
+            }
+
+            $meetingId = (int) ($params['id'] ?? 0);
+            if ($this->meetings->find($tenantId, $meetingId) === null) {
+                return Response::error('Meeting not found', 404);
+            }
+
+            $body = JsonBody::parsed($request);
+
+            // `attendees` is REQUIRED and its absence is not an empty list. A
+            // client that forgot the key means something different from one
+            // that sent `[]` — the second is "nobody attended", which is a real
+            // and recordable fact, and treating the first as the second would
+            // let a malformed request erase a minute.
+            if (!array_key_exists('attendees', $body)) {
+                return Response::error(
+                    'attendees is required. It replaces this meeting\'s whole attendance list, so '
+                    . 'send every person who was present — including anybody who was not invited. '
+                    . 'Send [] to record that nobody attended.',
+                    422
+                );
+            }
+
+            $result = $this->service->recordAttendance(
+                $tenantId,
+                $meetingId,
+                AttendanceEntry::parseSet($body['attendees']),
+                self::actorProfileId($request)
+            );
+
+            return Response::json([
+                'data' => $result['attendance'],
+                'counted' => self::counted($tenantId, $meetingId, $result['attendance']),
+            ]);
+        } catch (ConveningRejectedException $e) {
+            return Response::error($e->clientMessage, 422);
+        } catch (\Exception $e) {
+            error_log('[MeetingsApiHandler] recordAttendance failed: ' . $e->getMessage());
+
+            return Response::error('Failed to record attendance', 500);
+        }
+    }
+
+    /**
+     * GET /api/v1/meeting-attendees?meeting_id=N — who attended, and what each
+     * of them had said beforehand.
+     */
+    public function attendance(Request $request): Response
+    {
+        try {
+            $tenantId = self::tenantId();
+            if ($tenantId instanceof Response) {
+                return $tenantId;
+            }
+
+            $meetingId = self::requiredMeetingIdParam($request);
+            if ($meetingId instanceof Response) {
+                return $meetingId;
+            }
+            if ($this->meetings->find($tenantId, $meetingId) === null) {
+                return Response::error('Meeting not found', 404);
+            }
+
+            $rows = $this->attendance->listForMeeting($tenantId, $meetingId);
+
+            return Response::json([
+                'data' => $rows,
+                'counted' => self::counted($tenantId, $meetingId, $rows),
+            ]);
+        } catch (\Exception $e) {
+            error_log('[MeetingsApiHandler] attendance failed: ' . $e->getMessage());
+
+            return Response::error('Failed to fetch attendance', 500);
+        }
+    }
+
+    /**
      * GET /api/v1/meeting-invitations?meeting_id=N
      */
     public function invitations(Request $request): Response
@@ -618,6 +739,14 @@ final class MeetingsApiHandler
      * step") and a convening-flavoured restatement would be a second, worse
      * explanation of a decision this code did not make.
      *
+     * `decision_number` AND `decided_at` ARE BOTH THE INSTITUTION'S TO SUPPLY,
+     * and they are the two halves of one fact: a minute book records that
+     * decision N was taken on date D, and both are assigned by hand, in the
+     * institution's own format, often weeks after the sitting. `decided_at` has
+     * always been accepted here and is untouched. `decision_number` is the new
+     * half; omit it and one is allocated from the body's counter exactly as
+     * before, so nothing already written against this endpoint changes.
+     *
      * @param array<string, string> $params
      */
     public function recordDecision(Request $request, array $params): Response
@@ -649,13 +778,33 @@ final class MeetingsApiHandler
                 ? trim($body['decided_at'])
                 : date('Y-m-d H:i:s');
 
+            // THE INSTITUTION'S OWN NUMBER, when there is one.
+            //
+            // An absent field and an EMPTY one both mean "allocate it", and
+            // that pairing is deliberate rather than lazy. Absent is the
+            // existing caller, written before this field existed, whose
+            // behaviour must not change. Empty is a person who opened the form,
+            // did not type in the optional number box, and submitted — every
+            // HTML form on every client sends `""` for that, and refusing it
+            // would turn the ordinary path through the new screen into a 422.
+            //
+            // Anything else is passed through UNTOUCHED. The bounds it must
+            // clear (length, and characters that are not text) live in
+            // DecisionNumbers::validateSupplied(); no shape is imposed here or
+            // anywhere, because the shape is the institution's.
+            $decisionNumber = isset($body['decision_number']) && is_string($body['decision_number'])
+                && trim($body['decision_number']) !== ''
+                ? $body['decision_number']
+                : null;
+
             $result = $this->recorder->record(
                 $tenantId,
                 (int) $item['id'],
                 $verdict,
                 $rationale === '' ? null : $rationale,
                 $decidedAt,
-                self::actorProfileId($request)
+                self::actorProfileId($request),
+                $decisionNumber
             );
 
             return Response::json([
@@ -724,8 +873,16 @@ final class MeetingsApiHandler
     // -- helpers ------------------------------------------------------------
 
     /**
-     * The whole sitting: the meeting, its body, its agenda, its decisions and
-     * its invitations.
+     * The whole sitting: the meeting, its body, its agenda, its decisions, its
+     * invitations and its attendance.
+     *
+     * `invitations` AND `attendance` are both here and neither is derived from
+     * the other. Who was asked and who came are different facts recorded at
+     * different times ({@see \Whity\Core\Convening\InvitationStatus} refuses to
+     * hold both on one column) and they disagree constantly — people accept and
+     * do not come, people who declined turn up. A detail read that carried one
+     * of them would make the disagreement invisible on the one screen that
+     * shows the whole sitting.
      *
      * @param array<string, mixed> $meeting
      * @return array<string, mixed>
@@ -739,6 +896,79 @@ final class MeetingsApiHandler
             'agenda' => $this->agenda->listForMeeting($tenantId, $meetingId),
             'decisions' => $this->decisions->listForMeeting($tenantId, $meetingId),
             'invitations' => $this->invitations->listForMeeting($tenantId, $meetingId),
+            'attendance' => $this->attendance->listForMeeting($tenantId, $meetingId),
+        ];
+    }
+
+    /**
+     * The counts this endpoint is willing to stand behind, each named for
+     * exactly what it counted.
+     *
+     * THIS IS NOT A QUORUM CHECK AND THE PAYLOAD SAYS SO IN A FIELD
+     * ------------------------------------------------------------
+     * The temptation on an attendance endpoint is to return `attendees: 5` and
+     * let the reader draw a conclusion. They will draw the wrong one. A bare
+     * count sitting on a meeting record reads, on every screen it reaches, as
+     * "the body was quorate" — and this platform holds NO quorum rule for any
+     * body, has no column to keep one in, and evaluates nothing. A body's
+     * quorum lives in its constitution ("half the voting members plus one,
+     * excluding vacancies"; "three of the five faculty representatives"; rules
+     * with proxies in them) and it is not a number a platform can infer from a
+     * membership table.
+     *
+     * So every key here is a verb phrase describing the count, `quorum` is
+     * present as an explicit `false`, and `basis` is a sentence a person can
+     * read. Naming the fields this way is the whole mitigation: a consumer that
+     * wants to display "5 attended" has to read a key that says `attendees`,
+     * and one that wants to claim quorum has to ignore a field that says nobody
+     * checked.
+     *
+     * WHY `invited_who_did_not_attend` IS DERIVED RATHER THAN STORED. Absence
+     * is the invited set minus the attended set; keeping it as rows would give
+     * one fact two homes that can disagree. See
+     * {@see \Database\Migrations\CreateMeetingAttendance}.
+     *
+     * @param list<array<string, mixed>> $rows The attendance already read.
+     * @return array<string, mixed>
+     */
+    private function counted(int $tenantId, int $meetingId, array $rows): array
+    {
+        $invited = $this->invitations->listForMeeting($tenantId, $meetingId);
+        $invitedProfiles = [];
+        foreach ($invited as $invitation) {
+            $invitedProfiles[(int) $invitation['profile_id']] = true;
+        }
+
+        $attendedInvitedProfiles = [];
+        $notInvited = 0;
+        foreach ($rows as $row) {
+            $profileId = $row['profile_id'];
+            if (is_int($profileId) && isset($invitedProfiles[$profileId])) {
+                $attendedInvitedProfiles[$profileId] = true;
+            } else {
+                // Everybody else: a named guest with no profile, and a profile
+                // that holds no invitation to this sitting. Both are people who
+                // attended without being asked, which is the case this whole
+                // feature exists for.
+                $notInvited++;
+            }
+        }
+
+        return [
+            // Rows in the attendance list. Nothing more.
+            'attendees' => count($rows),
+            'attendees_who_held_an_invitation' => count($attendedInvitedProfiles),
+            'attendees_who_did_not' => $notInvited,
+            'invitations_issued' => count($invited),
+            'invited_who_did_not_attend' => count($invitedProfiles) - count($attendedInvitedProfiles),
+            // ALWAYS false, and always present. A field that only appeared when
+            // something HAD been checked would be a field consumers learn to
+            // ignore; one that is always here and always says no cannot be
+            // mistaken for a result.
+            'quorum_evaluated' => false,
+            'basis' => 'Counted from the attendance recorded against this meeting and the '
+                . 'invitations issued for it. No quorum rule was applied: this system holds no '
+                . 'quorum rule for any body.',
         ];
     }
 

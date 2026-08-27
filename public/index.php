@@ -3234,12 +3234,17 @@ $meetingRepository = new \Whity\Core\Convening\MeetingRepository($db->getPdo(), 
 $agendaRepository = new \Whity\Core\Convening\AgendaRepository($db->getPdo());
 $meetingDecisionRepository = new \Whity\Core\Convening\DecisionRepository($db->getPdo());
 $meetingInvitationRepository = new \Whity\Core\Convening\InvitationRepository($db->getPdo());
+// Attendance is its OWN table, not a column on an invitation: somebody attends
+// who was never invited, and an attendance expressed as an invitation's column
+// has nowhere to record them. Migration 134 carries the argument.
+$meetingAttendanceRepository = new \Whity\Core\Convening\AttendanceRepository($db->getPdo());
 
 $meetingService = new \Whity\Core\Convening\MeetingService(
     $conveningBodyRepository,
     $meetingRepository,
     $meetingInvitationRepository,
-    new \Whity\Core\Convening\MeetingNotifications($notificationDispatcher)
+    new \Whity\Core\Convening\MeetingNotifications($notificationDispatcher),
+    $meetingAttendanceRepository
 );
 
 $decisionRecorder = new \Whity\Core\Convening\DecisionRecorder(
@@ -3277,6 +3282,7 @@ $meetingsHandler = new \Whity\Api\MeetingsApiHandler(
     $agendaRepository,
     $meetingDecisionRepository,
     $meetingInvitationRepository,
+    $meetingAttendanceRepository,
     $meetingService,
     $decisionRecorder
 );
@@ -3287,6 +3293,14 @@ $router->register('POST',   '/api/meetings/{id:\d+}/schedule',              [$me
 $router->register('POST',   '/api/meetings/{id:\d+}/hold',                  [$meetingsHandler, 'hold'],     null, null, CorePermissions::CONVENING_MANAGE);
 $router->register('POST',   '/api/meetings/{id:\d+}/cancel',                [$meetingsHandler, 'cancel'],   null, null, CorePermissions::CONVENING_MANAGE);
 $router->register('POST',   '/api/meetings/{id:\d+}/invitations',           [$meetingsHandler, 'invite'],   null, null, CorePermissions::CONVENING_MANAGE);
+// WHO ACTUALLY TURNED UP. PUT, because the act REPLACES the whole list — a
+// secretary reads a sign-in sheet and asserts the entire set, not a stream of
+// arrivals — and a POST would invite a client to double the list on every retry.
+// Refused before the meeting is held: attendance taken beforehand is a guess,
+// and the platform already holds guesses under a name that says so (an
+// invitation somebody accepted). `convening:manage`, the secretarial gate that
+// already covers agendas, dates and invitations.
+$router->register('PUT',    '/api/meetings/{id:\d+}/attendance',            [$meetingsHandler, 'recordAttendance'], null, null, CorePermissions::CONVENING_MANAGE);
 // Deliberately UNPERMISSIONED (null, null): BEING INVITED IS THE AUTHORIZATION —
 // the same posture migration 113 takes on acting on a route that reached you, and
 // the same one /api/me/notifications and /api/me/sessions take. Gating it would
@@ -3315,6 +3329,12 @@ $router->register('POST',   '/api/meetings/{id:\d+}/agenda/{itemId:\d+}/decision
 $router->register('GET',    '/api/agenda-items',                            [$meetingsHandler, 'agendaItems'], null, null, CorePermissions::CONVENING_READ);
 $router->register('GET',    '/api/meeting-decisions',                       [$meetingsHandler, 'decisions'],   null, null, CorePermissions::CONVENING_READ);
 $router->register('GET',    '/api/meeting-invitations',                     [$meetingsHandler, 'invitations'], null, null, CorePermissions::CONVENING_READ);
+// `convening:read` and NOT `convening:manage`, deliberately. Migration 131 grants
+// the read gate to `settings:read` AND `documents:route` and the manage gate only
+// to `settings:write`; gating this one on manage would 403 somebody who can
+// already see this meeting's invitations and decisions — strictly more sensitive
+// — and leave the meeting-record screen showing one empty table among five.
+$router->register('GET',    '/api/meeting-attendees',                       [$meetingsHandler, 'attendance'],  null, null, CorePermissions::CONVENING_READ);
 // THE REVERSE READ. Without it this subsystem is invisible from the document
 // side: somebody looking at a document that is sitting still has no way to
 // discover it is waiting for a body that meets on the 14th.
