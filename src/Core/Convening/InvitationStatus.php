@@ -24,8 +24,23 @@ namespace Whity\Core\Convening;
  * somebody said before it, and the two disagree constantly: people accept and do
  * not come, and people who declined turn up. Modelling both on one column would
  * mean the acceptance a chair planned around gets overwritten by the attendance
- * afterwards, and the planning record would be gone. If attendance is ever
- * wanted it is a second fact on the row, not a fifth value on this one.
+ * afterwards, and the planning record would be gone.
+ *
+ * ATTENDANCE ARRIVED, AND IT IS NOT ON THIS ROW EITHER
+ * ----------------------------------------------------
+ * This docblock used to guess that attendance, when it came, would be "a second
+ * fact on the row". It is not, and the reason is a person rather than a schema
+ * preference: SOMEBODY ATTENDS WHO WAS NEVER INVITED — a substitute, a co-opted
+ * member, a guest, the officer taking the minute. None of them holds a row here,
+ * so attendance expressed as a column on an invitation has nowhere to put them
+ * at all; recording them would mean first inventing an invitation, with a
+ * `sent_at` for a message nobody sent, which corrupts the very count this class
+ * exists to keep honest.
+ *
+ * So it lives in `meeting_attendees` (migration 134). The separation also makes
+ * the paragraph above STRUCTURAL instead of a rule somebody has to remember:
+ * with two tables there is no statement anywhere that can write an attendance
+ * over an acceptance.
  */
 final class InvitationStatus
 {

@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Whity\OpenAPI;
 
+use Whity\Core\Convening\AttendanceCapacity;
+use Whity\Core\Convening\AttendanceEntry;
+use Whity\Core\Convening\AttendanceRepository;
+use Whity\Core\Convening\DecisionNumbers;
 use Whity\Core\Convening\DecisionVerdict;
 use Whity\Core\Convening\InvitationStatus;
 use Whity\Core\Convening\MeetingStatus;
@@ -2063,6 +2067,53 @@ final class CoreApiSchemas
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The invitations', 'MeetingInvitationListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/meetings/{id:\d+}/attendance', 'convening:manage', [
+                'summary' => 'Record who actually attended a meeting that has been held',
+                'description' => 'A REPLACEMENT of the whole list, which is why it is a PUT: a '
+                    . 'secretary reads a sign-in sheet and asserts the entire set, not a stream of '
+                    . 'arrivals. Anybody omitted is removed from the record of who attended. '
+                    . 'ATTENDANCE IS NOT AN INVITATION ANSWER — an acceptance is a prediction made '
+                    . 'before the sitting and attendance is what happened at it, they disagree '
+                    . 'constantly, and neither overwrites the other. Somebody who was never invited '
+                    . 'can be recorded: give a `profile_id` for a person with an account or an '
+                    . '`attendee_name` for a guest without one. Refused unless the meeting has been '
+                    . 'HELD — attendance taken beforehand is a guess, and the platform already holds '
+                    . 'guesses as invitation answers.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAttendanceRequest',
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The recorded attendance, and what was counted',
+                        'MeetingAttendanceResponse'
+                    ),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse(
+                        'A meeting that has not been held, an attendee that identifies nobody, a '
+                        . 'duplicated profile, or a capacity outside the vocabulary'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-attendees', 'convening:read', [
+                'summary' => "One meeting's attendance, and what each attendee had answered",
+                'description' => 'Every row carries `was_invited` and `invitation_status` beside the '
+                    . 'attendance, because the interesting rows are the ones where the two disagree: '
+                    . 'somebody who declined and came anyway, somebody who holds no invitation at '
+                    . 'all. `convening:read` and not `convening:manage`, so that a caller who can '
+                    . "already see this meeting's invitations and decisions is not refused the "
+                    . 'less sensitive fact of who was in the room.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose attendance to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The attendance, and what was counted',
+                        'MeetingAttendanceResponse'
+                    ),
                     404 => self::errorResponse('Meeting not found'),
                     422 => self::errorResponse('meeting_id is required'),
                 ] + self::authErrors(),
@@ -6217,6 +6268,83 @@ final class CoreApiSchemas
                 'sent_at' => self::str(true),
                 'responded_at' => self::str(true),
             ], ['id', 'tenant_id', 'meeting_id', 'profile_id', 'status', 'sent_at', 'responded_at']),
+            // WHO WAS IN THE ROOM. A separate record from the invitation, not a
+            // state on it: an acceptance is a PREDICTION made before the sitting
+            // and this is what happened at it, and the two disagree constantly.
+            //
+            // `profile_id` is nullable and `attendee_name` is why: a guest from
+            // outside the institution has no account, and requiring one would
+            // mean either refusing to record them or inventing a person in the
+            // identity system to satisfy a foreign key.
+            //
+            // `was_invited` / `invitation_status` are DERIVED at read time and
+            // are the fields that make the disagreement visible. `was_invited`
+            // false is somebody who came without being asked — the case this
+            // table exists for.
+            'MeetingAttendee' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'profile_id' => self::int(true),
+                'attendee_name' => self::attendeeName(),
+                'capacity' => ['type' => 'string', 'enum' => AttendanceCapacity::all()],
+                'note' => self::attendanceNote(),
+                'recorded_at' => self::str(),
+                'recorded_by_profile_id' => self::int(true),
+                'was_invited' => self::bool(),
+                'invitation_status' => self::str(true),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'profile_id', 'attendee_name', 'capacity', 'note',
+                'recorded_at', 'recorded_by_profile_id', 'was_invited', 'invitation_status',
+            ]),
+            // WHAT WAS COUNTED, named so it cannot be mistaken for a quorum
+            // check. `quorum_evaluated` is always false and always present:
+            // Whity holds no quorum rule for any body and evaluates none, and a
+            // bare attendee count on a meeting record reads as "the body was
+            // quorate" on every screen it reaches. A field that only appeared
+            // when something HAD been checked would be one consumers learn to
+            // ignore.
+            'MeetingAttendanceCount' => self::object([
+                'attendees' => self::int(),
+                'attendees_who_held_an_invitation' => self::int(),
+                'attendees_who_did_not' => self::int(),
+                'invitations_issued' => self::int(),
+                'invited_who_did_not_attend' => self::int(),
+                'quorum_evaluated' => self::bool(),
+                'basis' => self::str(),
+            ], [
+                'attendees', 'attendees_who_held_an_invitation', 'attendees_who_did_not',
+                'invitations_issued', 'invited_who_did_not_attend', 'quorum_evaluated', 'basis',
+            ]),
+            'MeetingAttendanceResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAttendee')],
+                'counted' => SchemaBuilder::ref('MeetingAttendanceCount'),
+            ], ['data', 'counted']),
+            'MeetingAttendanceEntryRequest' => self::object([
+                // ONE of these two identifies the attendee, and a row with
+                // neither is refused. `profile_id` for somebody with an account;
+                // `attendee_name` for a guest who has none.
+                'profile_id' => self::int(true),
+                'attendee_name' => self::attendeeName(),
+                // DESCRIPTIVE ONLY. Nothing branches on it: it is not a
+                // permission, not a vote weight, and not an input to any count
+                // that claims to be a quorum. It exists because an attendance
+                // list on which a substitute is indistinguishable from a member
+                // cannot answer the question anybody asks it afterwards.
+                'capacity' => ['type' => 'string', 'enum' => AttendanceCapacity::all()],
+                'note' => self::attendanceNote(),
+            ], []),
+            'MeetingAttendanceRequest' => self::object([
+                // REQUIRED, and its absence is not an empty list: a client that
+                // forgot the key means something different from one that sent
+                // `[]`, which records that nobody attended. Sending the whole
+                // set REPLACES the stored one.
+                'attendees' => [
+                    'type' => 'array',
+                    'items' => SchemaBuilder::ref('MeetingAttendanceEntryRequest'),
+                    'maxItems' => AttendanceEntry::MAX_ATTENDEES,
+                ],
+            ], ['attendees']),
             'MeetingListResponse' => self::listEnvelope('Meeting'),
             'MeetingResponse' => self::dataEnvelope(SchemaBuilder::ref('Meeting')),
             'MeetingAgendaItemListResponse' => self::listEnvelope('MeetingAgendaItem'),
@@ -6232,7 +6360,11 @@ final class CoreApiSchemas
                         'agenda' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAgendaItem')],
                         'decisions' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingDecision')],
                         'invitations' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingInvitation')],
-                    ], ['body', 'agenda', 'decisions', 'invitations']),
+                        // BOTH, and neither derived from the other. Who was
+                        // asked and who came are separate facts recorded at
+                        // different times, and they disagree constantly.
+                        'attendance' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAttendee')],
+                    ], ['body', 'agenda', 'decisions', 'invitations', 'attendance']),
                 ]]
             ),
             'MeetingCreateRequest' => self::object([
@@ -6287,6 +6419,23 @@ final class CoreApiSchemas
             'MeetingDecisionRequest' => self::object([
                 'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all()],
                 'rationale' => self::text(),
+                // BOTH OF THESE ARE THE INSTITUTION'S TO ASSIGN, and they are
+                // the two halves of one fact: a minute book records that
+                // decision N was taken on date D. Both are written by hand, in
+                // the institution's own format, often weeks after the sitting.
+                //
+                // `decision_number` is a STRING and no shape is imposed —
+                // `CE-CM-2026-014` and `ق.ع/٢٠٢٦/١٤` are both real. What is
+                // bounded is the length and the refusal of characters that are
+                // not text. Omit it (or send an empty string) and one is
+                // allocated from the body's per-year counter exactly as before,
+                // so callers written before this field existed are unaffected.
+                //
+                // A supplied number that another decision in this tenant already
+                // holds is REFUSED, not silently accepted: two minutes under one
+                // number cannot be told apart afterwards, which is the whole
+                // reason a decision has a number.
+                'decision_number' => ['type' => 'string', 'maxLength' => DecisionNumbers::MAX_LENGTH],
                 'decided_at' => self::str(),
             ], ['verdict']),
             // WHAT THE DECISION DID, always present beside what it SAID.
@@ -9887,6 +10036,49 @@ final class CoreApiSchemas
      * bound it through {@see InputLimits::NAME_MAX} — past it they answer 422.
      *
      * @param bool $nonEmpty Whether the handler also refuses an empty string.
+     * @return array<string, mixed>
+     */
+    /**
+     * An ATTENDEE'S typed name: nullable, and bounded by the same column shape
+     * every other VARCHAR(255) identifier is.
+     *
+     * Nullable and not merely optional, because null is the meaningful value —
+     * it is how a row says "this attendee is identified by their profile, not by
+     * a name I typed". {@see self::name()} cannot express that: its flag means
+     * NON-EMPTY, which is the opposite question.
+     *
+     * @return array<string, mixed>
+     */
+    private static function attendeeName(): array
+    {
+        return [
+            'type' => 'string',
+            'maxLength' => AttendanceRepository::NAME_MAX,
+            'nullable' => true,
+        ];
+    }
+
+    /**
+     * The free-text note on one attendance row.
+     *
+     * Bounded at {@see AttendanceEntry::NOTE_MAX} rather than
+     * {@see InputLimits::TEXT_MAX}, because that is what the handler actually
+     * refuses past. A declaration citing the larger bound would let a generated
+     * client build a request the schema calls valid and the API answers 422 to —
+     * the exact drift {@see self::password()} exists to record.
+     *
+     * @return array<string, mixed>
+     */
+    private static function attendanceNote(): array
+    {
+        return [
+            'type' => 'string',
+            'maxLength' => AttendanceEntry::NOTE_MAX,
+            'nullable' => true,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private static function name(bool $nonEmpty = false): array

@@ -84,6 +84,7 @@ final class ConveningFeatures
         $agendaItems = $router->versionedPath('/api/agenda-items');
         $decisions = $router->versionedPath('/api/meeting-decisions');
         $invitations = $router->versionedPath('/api/meeting-invitations');
+        $attendees = $router->versionedPath('/api/meeting-attendees');
         // Cross-subsystem reads a declaration points at. Emitted through
         // versionedPath() like every other path here: a literal '/api/v1/...'
         // happens to be right today and silently wrong the moment the prefix
@@ -94,7 +95,14 @@ final class ConveningFeatures
         return [
             self::bodiesFeature($bodies, $ous),
             self::meetingsFeature($meetings, $bodies),
-            self::meetingDetailFeature($meetings, $agendaItems, $decisions, $invitations, $documents),
+            self::meetingDetailFeature(
+                $meetings,
+                $agendaItems,
+                $decisions,
+                $invitations,
+                $attendees,
+                $documents
+            ),
         ];
     }
 
@@ -362,6 +370,7 @@ final class ConveningFeatures
         string $agendaItemsPath,
         string $decisionsPath,
         string $invitationsPath,
+        string $attendeesPath,
         string $documentsPath
     ): array {
         return [
@@ -551,38 +560,146 @@ final class ConveningFeatures
                                 ['key' => 'notes', 'label' => 'Notes'],
                             ],
                             'rowActions' => [
-                                ['label' => 'Minute a decision', 'open' => 'decisionModal'],
+                                // `open` still PUBLISHES the row under this id —
+                                // that is what makes {minutedItem.meeting_id}
+                                // and {minutedItem.id} resolve below. What it no
+                                // longer opens is a dialog: the target is a
+                                // `card`, and the composing form lives on the
+                                // page. See the card's own note.
+                                ['label' => 'Minute a decision', 'open' => 'minutedItem'],
                             ],
                         ],
                         [
-                            'type' => 'modal',
-                            'id' => 'decisionModal',
+                            // COMPOSING A MINUTE IS NOT A CONFIRMATION, SO IT IS
+                            // NOT A DIALOG.
+                            //
+                            // This was a modal. Minuting a decision is five
+                            // fields — a verdict, a rationale in the body's own
+                            // words, the number the institution assigned and the
+                            // date it assigned it against — and it is typed
+                            // while READING the agenda item it is about. A dialog
+                            // covers exactly that: the person composing the
+                            // minute loses sight of the item, the document
+                            // attached to it, and the decisions already recorded
+                            // at this sitting, which is the context that tells
+                            // them what number comes next.
+                            //
+                            // It is also typed from a piece of paper. Somebody
+                            // transcribing a minute book looks down at the book
+                            // and back at the screen, and a dialog that swallows
+                            // an accidental click on the backdrop takes four
+                            // fields with it.
+                            //
+                            // A `card` inside the section, addressed by the same
+                            // published row token. The one dialog-shaped thing
+                            // left in this subsystem is a `confirm` on an action
+                            // button, which is a yes/no about an act already
+                            // decided — the case a dialog is actually for.
+                            'type' => 'card',
                             'title' => 'Minute a decision',
+                            'description' => 'Choose an agenda item above, then record what the body '
+                                . 'concluded about it. A decision can only be minuted once the meeting '
+                                . 'has been held, and it cannot be edited afterwards — a body that '
+                                . 'changes its mind takes a new decision at a later sitting.',
                             'children' => [
                                 [
+                                    'type' => 'text',
+                                    'tone' => 'muted',
+                                    'value' => 'Nothing is minuted until you press Record decision. '
+                                        . 'If the item carries a document and this body is the one its '
+                                        . 'approval route is waiting for, an approval here advances '
+                                        . 'that document and a rejection stops it.',
+                                ],
+                                [
                                     'type' => 'form',
-                                    // Both path segments come from the row this
-                                    // modal was opened from, so the decision
-                                    // lands on the item somebody actually chose.
+                                    // Both path segments come from the row the
+                                    // "Minute a decision" action published, so
+                                    // the decision lands on the item somebody
+                                    // actually chose.
                                     'submit' => [
                                         'method' => 'POST',
                                         'endpoint' => $meetingsPath
-                                            . '/{decisionModal.meeting_id}/agenda/{decisionModal.id}/decision',
+                                            . '/{minutedItem.meeting_id}/agenda/{minutedItem.id}/decision',
                                     ],
                                     'requiredPermission' => CorePermissions::CONVENING_DECIDE,
                                     'children' => [
+                                        [
+                                            // WHICH ITEM THIS MINUTE IS ABOUT,
+                                            // named on the form itself. The
+                                            // submit addresses the item by a
+                                            // token, so without this line the
+                                            // form looks identical whichever row
+                                            // was chosen — and identical again
+                                            // when NO row has been chosen, which
+                                            // is the state in which submitting
+                                            // does nothing useful.
+                                            //
+                                            // `value` is the FALLBACK, not a
+                                            // prefix: `useBoundText` replaces the
+                                            // literal outright once `valueFrom`
+                                            // resolves. So the literal has to
+                                            // read as a sentence on its own —
+                                            // one carrying a {token} would render
+                                            // the token to a person.
+                                            'type' => 'text',
+                                            'value' => 'No agenda item chosen yet — use "Minute a '
+                                                . 'decision" on a row above.',
+                                            'valueFrom' => 'minutedItem.display_title',
+                                        ],
                                         [
                                             'type' => 'select',
                                             'name' => 'verdict',
                                             'label' => 'Verdict',
                                             'required' => true,
-                                            'options' => [
-                                                ['value' => 'approved', 'label' => 'Approved'],
-                                                ['value' => 'rejected', 'label' => 'Rejected'],
-                                                // Deferred minutes the discussion
-                                                // without moving the document.
-                                                ['value' => 'deferred', 'label' => 'Deferred'],
-                                            ],
+                                            // Derived from the vocabulary rather
+                                            // than transcribed, so a fourth
+                                            // verdict cannot exist in
+                                            // DecisionVerdict and be unreachable
+                                            // from the only screen that records
+                                            // one.
+                                            'options' => self::verdictOptions(),
+                                        ],
+                                        [
+                                            // THE NUMBER THE INSTITUTION
+                                            // ASSIGNED, and the reason this
+                                            // screen changed at all.
+                                            //
+                                            // A decision number is what a
+                                            // reviewer quotes back to the
+                                            // institution to check that a
+                                            // decision was real, and they check
+                                            // it against a minute book kept by
+                                            // hand. A number this platform
+                                            // invented appears in no minute book.
+                                            //
+                                            // OPTIONAL, and the placeholder says
+                                            // what happens when it is left
+                                            // blank — a required field here
+                                            // would block every deployment that
+                                            // keeps no separate minute book and
+                                            // is happy with an allocated number.
+                                            //
+                                            // A PLAIN TEXT INPUT, not a masked
+                                            // or patterned one: these are
+                                            // strings like CE-CM-2026-014 and
+                                            // ق.ع/٢٠٢٦/١٤, and any shape this
+                                            // screen imposed would be a shape
+                                            // some institution does not use.
+                                            'type' => 'textInput',
+                                            'name' => 'decision_number',
+                                            'label' => 'Decision number (from the minute book)',
+                                            'placeholder' => 'Leave blank to allocate one automatically',
+                                        ],
+                                        [
+                                            // THE DATE THE INSTITUTION MINUTED
+                                            // IT AGAINST, which is not today. A
+                                            // body routinely types up a sitting
+                                            // weeks later, and the year in this
+                                            // date is the year an allocated
+                                            // number is minted under.
+                                            'type' => 'dateInput',
+                                            'name' => 'decided_at',
+                                            'label' => 'Date of the decision',
                                         ],
                                         [
                                             'type' => 'textArea',
@@ -626,6 +743,12 @@ final class ConveningFeatures
                     'title' => 'Invitations',
                     'children' => [
                         [
+                            'type' => 'text',
+                            'tone' => 'muted',
+                            'value' => 'What people SAID before the sitting. An acceptance is a '
+                                . 'prediction; who actually came is recorded separately, below.',
+                        ],
+                        [
                             'type' => 'dataTable',
                             'source' => $invitationsPath,
                             'params' => [['param' => 'meeting_id', 'from' => 'record']],
@@ -639,8 +762,219 @@ final class ConveningFeatures
                         ],
                     ],
                 ],
+                self::attendanceSection($meetingsPath, $attendeesPath),
             ],
         ];
+    }
+
+    /**
+     * WHO WAS ACTUALLY THERE — the section, its editor, and the sentence that
+     * stops the count being read as a quorum.
+     *
+     * THE EDITOR IS INLINE, AND IT IS A SOURCED `fieldArray`
+     * ------------------------------------------------------
+     * Recording attendance is transcription: somebody has a sign-in sheet, or a
+     * page of a notebook, and works down it. That is composition — write a line,
+     * read it back against the one above, correct the one below — and it is
+     * exactly the shape a dialog is worst at. It is also long: an attendance
+     * list is as many rows as there were people in the room, and a dialog that
+     * scrolls internally beside a page that also scrolls is a page nobody can
+     * work in.
+     *
+     * So the same instrument the form builder uses for its questions: a stack of
+     * cards, edited in place, reordered and removed on the card, SAVED TOGETHER
+     * as one `PUT` of the whole set. It is the block type that already exists
+     * for "edit a stored set in place", and reaching for a second one would mean
+     * two answers to one question.
+     *
+     * THE SAVE IS A REPLACEMENT, AND THAT IS SAID OUT LOUD rather than left to
+     * be discovered — a person removed from the stack and then saved is removed
+     * from the record of who attended. The renderer will not let the array
+     * submit until it has actually LOADED what is stored for the meeting the
+     * address names, which is what stops a form that had not finished loading
+     * from saving "nobody attended" over a minuted list.
+     *
+     * ONLY ON A HELD MEETING. `visibleWhen` reads the status off the record this
+     * page is already showing, so the editor is simply not there before the
+     * sitting. That is presentation and not enforcement — the server refuses it
+     * regardless, in
+     * {@see MeetingService::recordAttendance()} — but a control that appears and
+     * then 422s is a control that teaches people the screen is unreliable.
+     *
+     * @return array<string, mixed>
+     */
+    private static function attendanceSection(string $meetingsPath, string $attendeesPath): array
+    {
+        return [
+            'type' => 'section',
+            'title' => 'Attendance',
+            'children' => [
+                [
+                    'type' => 'text',
+                    'tone' => 'muted',
+                    'value' => 'Who was actually in the room. This is a separate record from the '
+                        . 'invitations above and the two disagree often: people accept and do not '
+                        . 'come, and people who declined turn up. Anybody may be recorded here, '
+                        . 'including somebody who was never invited — a substitute, a co-opted '
+                        . 'member, a guest.',
+                ],
+                [
+                    // THE HONEST SENTENCE ABOUT COUNTING. A list of names on a
+                    // meeting record invites exactly one inference — "so the body
+                    // was quorate" — and this platform holds no quorum rule for
+                    // any body and evaluates none. Said here, on the screen,
+                    // rather than only in the API payload, because the person who
+                    // would draw the inference is looking at the screen.
+                    'type' => 'alert',
+                    'variant' => 'info',
+                    'title' => 'This is a record, not a quorum check',
+                    'body' => 'Whity does not hold any body\'s quorum rule and does not check one. '
+                        . 'What is below is the list of people recorded as present, and nothing '
+                        . 'more.',
+                ],
+                [
+                    'type' => 'dataTable',
+                    'source' => $attendeesPath,
+                    'params' => [['param' => 'meeting_id', 'from' => 'record']],
+                    'emptyText' => 'No attendance recorded for this meeting yet.',
+                    'columns' => [
+                        ['key' => 'profile_id', 'label' => 'Person'],
+                        // The name is what carries somebody with no account, and
+                        // it is the column that makes a guest legible at all.
+                        ['key' => 'attendee_name', 'label' => 'Name'],
+                        ['key' => 'capacity', 'label' => 'In what capacity', 'filterable' => true],
+                        // THE DISAGREEMENT, made visible. `was_invited` false is
+                        // somebody who came without being asked; an
+                        // `invitation_status` of `declined` beside a row that
+                        // EXISTS is somebody who said no and came anyway. Neither
+                        // is visible at all without these two columns.
+                        ['key' => 'was_invited', 'label' => 'Was invited'],
+                        ['key' => 'invitation_status', 'label' => 'Had answered'],
+                        ['key' => 'note', 'label' => 'Note'],
+                    ],
+                ],
+                [
+                    'type' => 'card',
+                    'title' => 'Record who attended',
+                    'description' => 'Saving replaces the whole list: anybody you remove here stops '
+                        . 'being on the record of who attended this sitting. Somebody who was never '
+                        . 'invited can be added — give a name instead of a profile if they have no '
+                        . 'account.',
+                    // Only once the sitting has happened. Attendance taken
+                    // beforehand is a guess, and the platform already holds
+                    // guesses under a name that says so (an invitation somebody
+                    // accepted).
+                    'visibleWhen' => ['from' => 'meetingRecord.status', 'equals' => MeetingStatus::HELD],
+                    'children' => [
+                        [
+                            'type' => 'form',
+                            'submit' => [
+                                // PUT, because the act replaces the set. See
+                                // MeetingsApiHandler::recordAttendance().
+                                'method' => 'PUT',
+                                'endpoint' => $meetingsPath . '/{record}/attendance',
+                            ],
+                            'requiredPermission' => CorePermissions::CONVENING_MANAGE,
+                            'children' => [
+                                [
+                                    'type' => 'fieldArray',
+                                    // The payload key the endpoint reads. Named
+                                    // for the wire; the human noun is the label.
+                                    'name' => 'attendees',
+                                    'label' => 'People present',
+                                    'itemLabel' => 'Attendee',
+                                    // The FLAT read, addressed by query param,
+                                    // because `params` cannot fill a path
+                                    // segment. The WRITE stays nested under the
+                                    // meeting, whose STATUS is what decides
+                                    // whether it is allowed at all.
+                                    'source' => $attendeesPath,
+                                    'params' => [['param' => 'meeting_id', 'from' => 'record']],
+                                    // NO `min`. A sitting abandoned for want of
+                                    // attendance is a real thing to record, and a
+                                    // minimum here would make it unrecordable
+                                    // through the only surface that can record
+                                    // it.
+                                    'children' => [
+                                        [
+                                            // A NUMBER, not a picker, and that is
+                                            // the honest choice rather than a
+                                            // missing feature: there is no
+                                            // tenant-wide profile collection to
+                                            // point a `referenceSelect` at, and
+                                            // the members endpoint cannot be
+                                            // narrowed to this meeting's body
+                                            // (that type carries no `params`).
+                                            // The invitations table above shows
+                                            // profile ids for the same reason.
+                                            'type' => 'numberInput',
+                                            'name' => 'profile_id',
+                                            'label' => 'Profile',
+                                            'min' => 1,
+                                        ],
+                                        [
+                                            'type' => 'textInput',
+                                            'name' => 'attendee_name',
+                                            'label' => 'Name (for somebody with no account)',
+                                            'placeholder' => 'A guest, or an external member',
+                                        ],
+                                        [
+                                            'type' => 'select',
+                                            'name' => 'capacity',
+                                            'label' => 'In what capacity',
+                                            // Derived from the vocabulary, so a
+                                            // capacity added to
+                                            // AttendanceCapacity and not to a
+                                            // hand-written list here cannot
+                                            // become one nobody can choose.
+                                            'options' => self::capacityOptions(),
+                                            'default' => AttendanceCapacity::DEFAULT,
+                                        ],
+                                        [
+                                            'type' => 'textInput',
+                                            'name' => 'note',
+                                            'label' => 'Note',
+                                            'placeholder' => 'e.g. standing in for a member, or left after item 3',
+                                        ],
+                                    ],
+                                ],
+                                ['type' => 'submitButton', 'label' => 'Save attendance'],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The verdicts, derived from the vocabulary rather than transcribed.
+     *
+     * A fourth value added to {@see DecisionVerdict} and not to a hand-written
+     * list here would be a verdict the only screen that minutes one cannot
+     * choose — invisible until somebody needs it. `ucfirst` rather than a label
+     * map: the three values are already the words a person would read, and a map
+     * would be a second place for them to drift.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    private static function verdictOptions(): array
+    {
+        return array_map(
+            static fn (string $v): array => ['value' => $v, 'label' => ucfirst($v)],
+            DecisionVerdict::all()
+        );
+    }
+
+    /**
+     * @return list<array{value: string, label: string}>
+     */
+    private static function capacityOptions(): array
+    {
+        return array_map(
+            static fn (string $c): array => ['value' => $c, 'label' => ucfirst($c)],
+            AttendanceCapacity::all()
+        );
     }
 
     /**

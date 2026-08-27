@@ -98,4 +98,37 @@ final class MeetingStatus
     {
         return $status === self::DRAFT || $status === self::SCHEDULED;
     }
+
+    /**
+     * May who was in the room be recorded?
+     *
+     * ONLY FROM `held`, and this is the tightest predicate in the class.
+     *
+     * Attendance is a record of a sitting that HAPPENED. Taken before the
+     * meeting it is not attendance at all — it is a guess about who will come,
+     * and the platform already holds that under a name that says so
+     * ({@see InvitationStatus::ACCEPTED}, which is a prediction). Allowing it on
+     * a `scheduled` meeting would produce a list that is indistinguishable, on
+     * every screen and in every export, from a list of people who actually
+     * turned up; and because `held` is terminal and attendance is a
+     * REPLACEMENT, nothing would ever force that guess to be revisited. The
+     * minute would carry an attendance nobody took.
+     *
+     * `draft` for the same reason and more so — there is not even a date.
+     *
+     * `cancelled` is refused because a sitting that was called off had nobody
+     * present at it. A body that met anyway held a meeting, and holding it is
+     * the assertion being made; it is one call and it is the honest one.
+     *
+     * "AT OR AFTER hold" is what this permits, and the "at" half matters: the
+     * hold and the attendance are two calls, not one, and a secretary minuting
+     * a sitting as it finishes makes them seconds apart. There is deliberately
+     * no window after which the list closes — an institution types its minute
+     * weeks later, which is the same reason `held_at` and `decided_at` are
+     * caller-supplied.
+     */
+    public static function canRecordAttendance(string $status): bool
+    {
+        return $status === self::HELD;
+    }
 }
