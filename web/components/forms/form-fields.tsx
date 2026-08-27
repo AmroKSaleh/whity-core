@@ -32,7 +32,7 @@ export interface FormFieldSpec {
   label: LocalizedText | string | null;
   help_text: string | null;
   is_required: boolean;
-  options: Array<{ value?: string; label?: string } | string>;
+  options: Array<{ value?: string; label?: LocalizedText | string } | string>;
   multi_valued: boolean;
   position: number;
 }
@@ -62,8 +62,16 @@ function optionValue(option: FormFieldSpec['options'][number]): string {
   return typeof option === 'string' ? option : String(option.value ?? '');
 }
 
-function optionLabel(option: FormFieldSpec['options'][number]): string {
-  return typeof option === 'string' ? option : String(option.label ?? option.value ?? '');
+/**
+ * An option's label is a LOCALIZED object, not a string — the server normalises
+ * `{"value":"Q1","label":"Q1"}` into `{"value":"Q1","label":{"en":"Q1"}}`, so
+ * stringifying it renders "[object Object]" in the dropdown. Falls back to the
+ * value, which is always a plain string.
+ */
+function optionLabel(option: FormFieldSpec['options'][number], preferArabic: boolean): string {
+  if (typeof option === 'string') return option;
+
+  return localized(option.label, preferArabic) || String(option.value ?? '');
 }
 
 export function FormField({
@@ -135,7 +143,7 @@ export function FormField({
           {!multiple && <option value="">—</option>}
           {field.options.map((option, index) => (
             <option key={index} value={optionValue(option)}>
-              {optionLabel(option)}
+              {optionLabel(option, preferArabic)}
             </option>
           ))}
         </select>
