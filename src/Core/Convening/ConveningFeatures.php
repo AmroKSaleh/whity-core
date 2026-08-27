@@ -534,6 +534,21 @@ final class ConveningFeatures
                                             'label' => 'Notes',
                                             'rows' => 2,
                                         ],
+                                        [
+                                            // The API refuses to add an item to a
+                                            // meeting that is already OVER unless
+                                            // the caller says they mean it —
+                                            // right for a paper tabled on the day
+                                            // and minuted afterwards, wrong if
+                                            // somebody meant the next meeting.
+                                            // Without a way to answer that here,
+                                            // the refusal was a dead end: the
+                                            // screen asked a question it gave no
+                                            // means of answering.
+                                            'type' => 'checkbox',
+                                            'name' => 'allow_held',
+                                            'label' => 'This meeting has already been held — add it to that sitting anyway',
+                                        ],
                                         ['type' => 'submitButton', 'label' => 'Add to agenda'],
                                     ],
                                 ],
