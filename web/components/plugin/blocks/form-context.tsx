@@ -26,8 +26,32 @@ import { useTranslation } from '@amroksaleh/features/i18n';
 /** Sentinel: when a sensitive field holds this value, it is omitted from the submit payload. */
 export const SENSITIVE_SENTINEL = '••••••';
 
+/**
+ * One cell of a `fieldArray` row.
+ *
+ * The first five members are what a template input WRITES. The last two exist
+ * for what a seeded row CARRIES: a `fieldArray` with a `source` copies each
+ * fetched row whole and lets the template overlay the keys it names, so a fact
+ * the editor does not render — a `select` question's `options`, a field's
+ * `validation` rules — rides back out on the submit exactly as it arrived.
+ *
+ * That passthrough is not a convenience. The submit behind a sourced array is a
+ * REPLACEMENT, so a key the editor dropped on the way in is a key the server is
+ * being told to forget. Carrying the row whole means the editor can only ever
+ * change what it actually shows somebody.
+ */
+export type FieldArrayCell =
+  | string
+  | boolean
+  | LocalizedTextValue
+  | OuScopeValue
+  | number
+  | null
+  | unknown[]
+  | Record<string, unknown>;
+
 /** A `fieldArray` (WC-532 A2) value: an ordered list of per-row sub-records. */
-export type FieldArrayValue = Record<string, string | boolean | LocalizedTextValue | OuScopeValue>[];
+export type FieldArrayValue = Record<string, FieldArrayCell>[];
 
 /**
  * A single form field's value. Most inputs are `string | boolean`; a
@@ -41,10 +65,40 @@ export type FormValue = string | boolean | LocalizedTextValue | FieldArrayValue 
 /** The value shape exposed to all form descendants via context. */
 export interface FormBlockContextValue {
   values: Record<string, FormValue>;
-  setValue(name: string, value: FormValue): void;
+  /**
+   * Write a field's value. `undefined` REMOVES the key from the value map
+   * rather than storing an empty one, and the difference is load-bearing for a
+   * sourced `fieldArray`: an absent key is omitted from the submit payload
+   * entirely, so a replace endpoint handed no list at all refuses the request,
+   * where one handed `[]` would empty the record and report success.
+   */
+  setValue(name: string, value: FormValue | undefined): void;
   errors: Record<string, string>;
   isSubmitting: boolean;
   submit(): void;
+  /**
+   * A descendant declares that the form MUST NOT be submitted yet, and says
+   * why; `null` releases the hold. `submit()` refuses while any hold stands and
+   * shows each reason under the field that raised it.
+   *
+   * This exists because of one specific way a form can lie. An input renders
+   * its own emptiness, and for most inputs an empty render is just an empty
+   * value — the server sees a blank and decides. But a `fieldArray` bound to a
+   * `source` submits a REPLACEMENT set, so "I have no rows" is not a blank, it
+   * is an instruction to delete every stored row. Until its fetch has landed, an
+   * empty render means "I do not know yet", and the two are indistinguishable
+   * from outside the block. So the block that knows the difference is the one
+   * that gets to say so, rather than the provider guessing from the value.
+   *
+   * Deliberately NOT the same mechanism as `errors`: an error is the outcome of
+   * a submit the user asked for, and a hold is a state the form is in before
+   * they ask. Holds therefore also disable the submit button, so the ordinary
+   * case is a control that is visibly not ready rather than one that refuses
+   * after the fact.
+   */
+  holdSubmit(name: string, reason: string | null): void;
+  /** Whether any descendant currently holds the submit. */
+  submitHeld: boolean;
 }
 
 const FormBlockContext = React.createContext<FormBlockContextValue | null>(null);
@@ -158,8 +212,14 @@ const FORM_INPUT_TYPES = [
  * anywhere inside a `form` (the `inForm` ancestor rule), so default-seeding and
  * required-validation must reach them too. A nested `form` owns its own
  * inputs, so we never descend into one.
+ *
+ * Exported for `FieldArrayRenderer`, which needs the same walk over a ROW
+ * TEMPLATE in order to map a fetched row onto the inputs that will edit it.
+ * Deriving that from the one walk rather than a second list is what keeps
+ * "which children are inputs" a single answer: a template input the seeder did
+ * not know about would render blank over a stored value and then save the blank.
  */
-function collectFormInputs(blocks: Block[]): Block[] {
+export function collectFormInputs(blocks: Block[]): Block[] {
   const inputs: Block[] = [];
   for (const block of blocks) {
     if ((FORM_INPUT_TYPES as readonly string[]).includes(block.type)) {
@@ -207,6 +267,17 @@ function collectDefaults(
   const defaults: Record<string, FormValue> = {};
   for (const input of collectFormInputs(children)) {
     if (input.type === 'fieldArray') {
+      // A SOURCED array is left OUT of the value map entirely — not seeded with
+      // `[]`. Its rows are the stored ones, and until the fetch lands nobody
+      // knows what they are; `[]` would be a confident answer to that question,
+      // and the wrong one, submitted to an endpoint that reads it as "delete
+      // them all". Absent is the honest state, and it is also a second line of
+      // defence: a submit that somehow escaped the hold below would omit the key
+      // rather than send an empty list, and a replace endpoint that is handed no
+      // list at all refuses the request instead of emptying the record.
+      if (input.source !== undefined && input.source !== '') {
+        continue;
+      }
       // Seed `min` empty rows (each with the template's own defaults) so a
       // required-min array starts populated; 0 min → an empty array.
       const min = typeof input.min === 'number' && input.min > 0 ? input.min : 0;
@@ -291,6 +362,25 @@ export function FormProvider({
   const [serverIssues, setServerIssues] = React.useState<ActionIssue[] | null>(null);
   const [isLoading, setIsLoading] = React.useState(block.dataSource !== undefined);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  // Reasons descendants have given for why this form is not ready to be sent,
+  // keyed by the input name that raised each. See `holdSubmit` on the context.
+  const [holds, setHolds] = React.useState<Record<string, string>>({});
+
+  // Idempotent by construction: re-registering the SAME reason returns the
+  // previous object, so a child that calls this from an effect on every render
+  // cannot drive a render loop.
+  const holdSubmit = React.useCallback((name: string, reason: string | null) => {
+    setHolds((prev) => {
+      if (reason === null) {
+        if (!(name in prev)) return prev;
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      }
+      if (prev[name] === reason) return prev;
+      return { ...prev, [name]: reason };
+    });
+  }, []);
 
   // #949: `dataSource.path` carries the same `{token}` syntax a
   // `dataRecord.source` does, and it now resolves by the same rule — NOT AT
@@ -339,8 +429,16 @@ export function FormProvider({
   }, [dataSourcePath, dataSourceMethod, loadErrorText]);
 
   const setValue = React.useCallback(
-    (name: string, value: string | boolean) => {
-      setValues((prev) => ({ ...prev, [name]: value }));
+    (name: string, value: FormValue | undefined) => {
+      setValues((prev) => {
+        if (value === undefined) {
+          if (!(name in prev)) return prev;
+          const next = { ...prev };
+          delete next[name];
+          return next;
+        }
+        return { ...prev, [name]: value };
+      });
       // Clear the field error when the user edits the field.
       setErrors((prev) => {
         if (!(name in prev)) return prev;
@@ -355,6 +453,7 @@ export function FormProvider({
   const submit = React.useCallback(() => {
     // Collect required-field errors across all descendant inputs (any depth).
     const newErrors: Record<string, string> = {};
+
     for (const child of collectFormInputs(block.children)) {
       if (
         (child.type === 'textInput' ||
@@ -403,6 +502,21 @@ export function FormProvider({
           newErrors[child.name] = `${child.label} needs at least ${child.min} ${child.min === 1 ? 'entry' : 'entries'}`;
         }
       }
+    }
+
+    // Holds are applied LAST and overwrite anything the loop above wrote for the
+    // same name, because a hold is the more specific truth. An array still
+    // waiting on its rows fails the min-count check too, and "needs at least 1
+    // entry" would send the author off to add one — which is precisely the
+    // wrong instruction, since the rows they are missing already exist and are
+    // on their way.
+    //
+    // This is the AUTHORITATIVE refusal. The submit button is disabled while a
+    // hold stands, but a disabled button is an affordance; this is the check a
+    // programmatic `submit()` still has to get past, and the one the destructive
+    // case is actually tested against.
+    for (const [name, reason] of Object.entries(holds)) {
+      newErrors[name] = reason;
     }
 
     setErrors(newErrors);
@@ -465,7 +579,7 @@ export function FormProvider({
         }
       }
     );
-  }, [block, values, addToast, t, onSubmitSuccess, resolveRef]);
+  }, [block, values, holds, addToast, t, onSubmitSuccess, resolveRef]);
 
   const contextValue: FormBlockContextValue = {
     values,
@@ -473,6 +587,8 @@ export function FormProvider({
     errors,
     isSubmitting,
     submit,
+    holdSubmit,
+    submitHeld: Object.keys(holds).length > 0,
   };
 
   return (

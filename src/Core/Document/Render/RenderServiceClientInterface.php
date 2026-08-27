@@ -31,4 +31,20 @@ interface RenderServiceClientInterface
      *         non-200 response, or a 200 body that is not a PDF.
      */
     public function render(array $payload): string;
+
+    /**
+     * The service's OTHER mode: a content tree with no positions, paginated by
+     * the renderer.
+     *
+     * Kept as a separate method rather than a flag on {@see render()} because
+     * the two modes share no payload field and no response shape — a caller
+     * that guessed wrong would get a 422 describing a schema it never meant to
+     * send. The return type differs for the same reason: only this mode has a
+     * page count that the caller could not have worked out for itself.
+     *
+     * @param array<string, mixed> $payload {page, direction, content, ...}
+     * @throws RenderServiceUnavailableException On any transport failure, a
+     *         non-200 response, or a 200 body that is not a PDF.
+     */
+    public function renderFlow(array $payload): RenderedDocument;
 }

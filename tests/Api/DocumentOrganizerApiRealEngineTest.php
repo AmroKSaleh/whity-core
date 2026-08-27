@@ -342,6 +342,13 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         // is refused by the foreign key on PostgreSQL. CASCADE covers the
         // dependency either way and SQLite has no such clause, which is why the
         // order is written out rather than relied upon.
+        // `meeting_decisions` joins the same queue for the same reason: a
+        // minuted decision points at the route event it settled, so PostgreSQL
+        // refuses to drop the trail while that constraint stands. It belongs
+        // here on the scenario's own terms too — an installation that never ran
+        // migration 112 records no route events, so it has no decision that
+        // could reference one.
+        $this->pdo->exec('DROP TABLE meeting_decisions');
         $this->pdo->exec('DROP TABLE document_route_recipients');
         $this->pdo->exec('DROP TABLE document_route_events');
 

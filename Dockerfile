@@ -22,6 +22,30 @@ RUN apt-get update && apt-get install -y \
 # Install PostgreSQL + zip extensions
 RUN docker-php-ext-install pgsql pdo_pgsql zip
 
+# Upload limits, raised ABOVE the application's own ceilings on purpose.
+#
+# PHP ships upload_max_filesize=2M and post_max_size=8M. A form attachment is
+# capped at 10 MiB by \Whity\Core\Form\FormUploadPolicy and a plugin package at
+# 32 MiB by MultipartConfig — so on the stock ini, PHP refuses a 3 MB paper
+# before a single line of that policy runs, with UPLOAD_ERR_INI_SIZE and no
+# sentence anybody can act on. Worse, a body over post_max_size is DISCARDED
+# entirely: $_POST and $_FILES arrive empty and the request looks like a client
+# that sent nothing.
+#
+# The ini is therefore set ABOVE every application ceiling rather than equal to
+# one, so the thing that refuses an oversized upload is always the application —
+# which knows which endpoint it is, what that endpoint's limit is, and how to say
+# so. The ini is the backstop for a request no endpoint would accept anyway.
+#
+# memory_limit is raised with them: a 32 MiB package arrives as a temp file but
+# is read into a string to be inspected, and 128M leaves no room for the process
+# doing that in a worker that is also holding a request.
+RUN { \
+      echo 'upload_max_filesize = 48M'; \
+      echo 'post_max_size = 64M'; \
+      echo 'memory_limit = 256M'; \
+    } > "$PHP_INI_DIR/conf.d/zz-whity-uploads.ini"
+
 # Set working directory
 WORKDIR /app
 

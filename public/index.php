@@ -86,6 +86,52 @@ if ($isCli && isset($argv[1])) {
         exit(0);
     }
 
+    // The retention sweep for form attachments nobody ever submitted (migration
+    // 134). A `file` answer's bytes are written BEFORE the submission exists —
+    // they have to be — so every abandoned form leaves an object no row will
+    // ever reference. See \Whity\Core\Form\FormUploadSweeper for why a TTL beats
+    // the alternatives, and docs/wiki/Cron-Operations.md for the schedule.
+    //
+    // THE DRIVER IS BUILT THE SAME WAY THE HTTP PATH BUILDS IT, and that is
+    // load-bearing rather than ceremony: an entitled tenant's uploads live in
+    // that tenant's own bucket, so a sweep holding only the platform default
+    // would delete the rows and then fail to find the objects — reporting a
+    // successful sweep while the storage bill kept growing. Six lines to get
+    // the same TenantRoutingStorageDriver the writes used.
+    if ($command === 'form-uploads:sweep') {
+        $db = \Whity\Database\Database::connect();
+        $sweepPdo = $db->getPdo();
+        $sweepSettings = new \Whity\Core\Settings\SettingsService(
+            new \Whity\Core\Settings\GlobalSettingsRepository($sweepPdo),
+            new \Whity\Core\Settings\TenantSettingsRepository($sweepPdo)
+        );
+        $sweepDefaultDriver = \Whity\Storage\StorageDriverFactory::fromSettings(
+            $sweepSettings,
+            $_ENV,
+            getenv('STORAGE_ROOT') ?: (dirname(__DIR__) . '/storage')
+        );
+        $sweepDriver = new \Whity\Storage\TenantRoutingStorageDriver(
+            $sweepDefaultDriver,
+            new \Whity\Storage\TenantStorageResolver(
+                $sweepDefaultDriver,
+                new \Whity\Storage\TenantStorageConfigRepository($sweepPdo),
+                new \Whity\Core\Entitlement\EntitlementService(
+                    new \Whity\Core\Entitlement\TenantEntitlementRepository($sweepPdo)
+                ),
+                \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV)
+            )
+        );
+        $sweepCommand = new \Whity\Commands\FormUploadsSweepCommand(
+            new \Whity\Core\Form\FormUploadSweeper(
+                new \Whity\Core\Form\FormUploadRepository($sweepPdo),
+                $sweepDriver
+            )
+        );
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'form-uploads:sweep'
+        exit($sweepCommand->execute($argv));
+    }
+
     if ($command === 'update:check') {
         $updateCheckCommand = new \Whity\Cli\Commands\UpdateCheckCommand();
         array_shift($argv); // Remove script name
@@ -123,6 +169,7 @@ if ($isCli && isset($argv[1])) {
     echo "  migrate                    Manage database migrations\n";
     echo "  seed                       Seed database with default data\n";
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
+    echo "  form-uploads:sweep         Delete form attachments nobody ever submitted\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
@@ -651,6 +698,64 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'group' => 'records',
         'order' => 3,
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TAGS_READ,
+    ];
+    // FORMS (migrations 127/128). Three entries because they are three jobs done
+    // by three audiences — see CorePermissions' FORMS_* block — and each gates on
+    // the permission its own screen's primary fetch requires, so a link somebody
+    // can see is a link that works.
+    //
+    // The hrefs point at `/admin/x/{featureId}`, the descriptor host, because
+    // these screens are `screen:'blocks'` descriptors rather than hand-written
+    // pages ({@see \Whity\Core\Form\FormFrontendFeatures}) — which is what lets
+    // the desktop and mobile clients render them at all.
+    //
+    // Registered HERE rather than left to PluginNavigationBridge: that bridge
+    // reads PluginLoader, and these descriptors are core's, not a plugin's. The
+    // ids therefore carry no `plugin-` prefix, and cannot collide with one.
+    $items[] = [
+        'id' => 'forms-builder',
+        'label' => 'Form Builder',
+        'icon' => 'forms',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::BUILDER_ID,
+        'group' => 'records',
+        // Group-local, a unique positive integer (#1007/#1010 — a fractional
+        // order is silently skipped by a regroup that matches integers, and a
+        // test now enforces the invariant). 1 = Family Relations, 2 = Tag Groups,
+        // 3 = Tags, so this is 4 and the catalogue below it is 5.
+        'order' => 4,
+        // Mirrors POST /api/v1/forms, gated forms:manage. Authoring a form is
+        // organisational policy — deciding what everyone must declare — so this
+        // entry is deliberately NOT visible to the far larger audience that only
+        // fills forms in.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_MANAGE,
+    ];
+    $items[] = [
+        'id' => 'forms-catalog',
+        'label' => 'Forms',
+        'icon' => 'clipboard-list',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::CATALOG_ID,
+        'group' => 'records',
+        'order' => 5,
+        // Mirrors GET /api/v1/forms and /api/v1/form-submissions, both gated
+        // forms:read — the approver's permission, not the author's.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_READ,
+    ];
+    $items[] = [
+        'id' => 'my-form-submissions',
+        'label' => 'My Submissions',
+        'icon' => 'file-check',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::MY_SUBMISSIONS_ID,
+        'group' => 'overview',
+        // In `overview` beside Dashboard (1) and Inbox (2) rather than in
+        // `records`: this is a surface a person opens about THEIR OWN work, like
+        // the inbox above it, where the entries in `records` are things somebody
+        // administers on behalf of the tenant.
+        'order' => 3,
+        // Mirrors GET /api/v1/me/form-submissions, gated forms:submit rather than
+        // forms:read — the rows already name exactly one person, so requiring the
+        // tenant-wide read permission would hide this from precisely the people
+        // whose submissions are in it.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_SUBMIT,
     ];
     $items[] = [
         'id' => 'tenants',
@@ -1600,7 +1705,34 @@ $router->register('POST', '/api/me/permitted-actions', [$permittedActionsHandler
 // WC-226: pass $logger so a plugin's `screen:'blocks'` feature whose block tree
 // fails host validation is dropped fail-closed with a structured, secret-free
 // reason (feature id + validator errors) — never leaked to the client.
-$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router, $logger);
+
+// FORMS (migrations 127/128): core's own `screen:'blocks'` descriptors — the
+// form builder, the form catalogue, and one person's own submissions. They are
+// passed as the fifth argument rather than being hand-written React pages
+// because the desktop and mobile clients render descriptors and cannot render a
+// bespoke page, and they go through the SAME per-caller permission filter and
+// the same fail-closed block validation as any plugin's. See
+// FormFrontendFeatures and FrontendFeaturesApiHandler::allFeatures().
+
+// #convening: CORE-declared `screen:'blocks'` features. The loader's validator
+// refuses any PLUGIN descriptor gated on a core permission ("core names are not
+// plugin-ownable"), which is right for a plugin and left core with nowhere to
+// declare a schema-driven screen of its own. These are appended to the plugin
+// list and go through the SAME per-caller permission filter, the SAME
+// fail-closed block validation and the SAME capability resolution — see the
+// handler's docblock. Their API paths are emitted through
+// Router::versionedPath(), because a block `source` is a URL a browser fetches
+// rather than a route registration.
+$frontendFeaturesHandler = new FrontendFeaturesApiHandler(
+    $pluginLoader,
+    $roleChecker,
+    $router,
+    $logger,
+    array_merge(
+        \Whity\Core\Form\FormFrontendFeatures::all(),
+        \Whity\Core\Convening\ConveningFeatures::all($router)
+    )
+);
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
 // Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
@@ -1841,6 +1973,7 @@ $router->register('PATCH', '/api/time-windows/{id:\d+}', [$timeWindowsHandler, '
 $router->register('GET', '/api/time-windows/{id:\d+}/close-report', [$timeWindowsHandler, 'closeReport'], null, null, CorePermissions::TIME_WINDOWS_READ);
 $router->register('POST', '/api/time-windows/{id:\d+}/close', [$timeWindowsHandler, 'close'], null, null, CorePermissions::TIME_WINDOWS_CLOSE);
 $router->register('POST', '/api/time-windows/{id:\d+}/reopen', [$timeWindowsHandler, 'reopen'], null, null, CorePermissions::TIME_WINDOWS_REOPEN);
+
 
 // 12b. Register permission delegations API handler (WC-34). Gated on the
 // delegation:manage permission (6th positional arg; requiredRole stays null so
@@ -2181,6 +2314,19 @@ $documentArtifactRepository = new \Whity\Core\Document\DocumentArtifactRepositor
 // an entitled tenant's documents land in its own bucket, everyone else's on the
 // platform default, and there is exactly one storage story to keep correct.
 $documentArtifactStore = new \Whity\Core\Document\DocumentArtifactStore($storageDriver);
+// EXPOSED TO PLUGINS, and the reason is a defect visible in this repository
+// own consumers. Storing a file is a platform concern: it has to honour the
+// per-tenant routing above, the immutability rule the store enforces, and the
+// content-type-at-write-time constraint that no read-time lookup can repair.
+// None of that was reachable from a plugin, so a plugin needing to keep an
+// uploaded file did the only thing left to it and shipped its OWN storage
+// client, reading its own environment variables and bypassing per-tenant
+// storage configuration entirely. That is not a plugin author mistake; it is
+// what a missing seam produces. Registering these under their class names
+// makes the platform's storage the path of least resistance again.
+\Whity\register_service(\Whity\Core\Document\DocumentArtifactStore::class, $documentArtifactStore); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Core\Document\DocumentArtifactRepository::class, $documentArtifactRepository); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Storage\StorageDriverInterface::class, $storageDriver); // @phpstan-ignore-line
 $documentIssuer = new \Whity\Core\Document\DocumentIssuer(
     $db->getPdo(),
     $documentRepository,
@@ -2600,6 +2746,221 @@ $router->register('GET',    '/api/document-route-templates/{id:\d+}',         [$
 $router->register('PATCH',  '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'update'],        null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
 $router->register('DELETE', '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'destroy'],       null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
 
+// 13a-nonies-sexies. FORMS (migrations 127/128) — tenant-authored forms, the
+// fields that compose them, and the submissions people make against them.
+//
+// WIRED HERE, AFTER ROUTING AND ROUTE TEMPLATES, AND THE PLACEMENT IS LOAD-
+// BEARING: SubmissionIssuer takes $documentIssuer, $routeTemplateRepository and
+// $documentRouter, all of which are constructed above. Registering this block
+// with the other tenant-configuration subsystems higher up would reference three
+// undefined variables — which passes lint, passes PHPStan, and 500s every
+// request at worker boot.
+//
+// THE POINT OF THE SUBSYSTEM IS THE HANDOFF, NOT THE TABLES. On submit, a
+// submission becomes a core DOCUMENT (DocumentIssuer::raise) and, when the form
+// names a route template, that document is circulated through the EXISTING
+// routing engine — so a submission inherits approvals, the inbox, QR
+// verification, artifacts and row-level visibility without one line of new
+// routing logic. SubmissionIssuer is where the two subsystems meet, and it uses
+// the same RouteTemplateInstantiation converter DocumentRoutingApiHandler uses
+// rather than a second one.
+//
+// THREE gates, not the usual read/write pair, because there are three audiences
+// and two of them barely overlap: AUTHORING a form is organisational policy
+// (`forms:manage`), FILLING ONE IN is the everyday act of the largest audience
+// in the tenant (`forms:submit`), and READING what came back is a third job done
+// by approvers (`forms:read`). Migration 128 grants all three by CAPABILITY —
+// to whoever already holds `roles:write` or `documents:read` — rather than to
+// the role literally named `admin`, which is the #834 hazard.
+//
+// RENDER is gated on `forms:submit`, not `forms:read`: its response carries the
+// CALLER'S OWN prefilled details, so the catalogue-reading audience has no
+// business receiving it and the far larger fill-it-in audience must not be
+// denied it.
+//
+// GET /api/form-fields is the one FLAT route, and it is a read. A master-detail
+// `selector` publishes into a data-bound block's `params`, which append QUERY
+// params to a fixed source and cannot fill a PATH segment — so the builder's
+// field table needs `?form_id=`. Every WRITE stays nested under the form, which
+// is what makes `DELETE /api/forms/7/fields/42` refuse when field 42 belongs to
+// form 9. See FormFieldsApiHandler for why the asymmetry is not a hole.
+//
+// There is deliberately no DELETE for a form and none for a submission. A form
+// is what somebody's submission was an answer TO, and a submission is what
+// somebody declared under their own name while other people acted on it.
+// Archiving replaces the first; submitting again replaces the second.
+$formRepository = new \Whity\Core\Form\FormRepository($db->getPdo());
+$formFieldRepository = new \Whity\Core\Form\FormFieldRepository($db->getPdo());
+$formSubmissionRepository = new \Whity\Core\Form\FormSubmissionRepository($db->getPdo());
+$formRenderer = new \Whity\Core\Form\FormRenderer(
+    $formFieldRepository,
+    new \Whity\Core\Form\PrefillResolver($db->getPdo())
+);
+
+// The link service (migration 132). $appUrl is the instance's own public origin,
+// trimmed further up — the same value DocumentQrService is given, so a public
+// form link and a QR verification link cannot disagree about where this
+// deployment lives. An instance that has never been told its address still MINTS
+// (the slug is what makes the endpoint reachable); it simply returns a null
+// `public_url` until somebody sets APP_URL, rather than emitting a relative path
+// nobody can put on a poster.
+$publicFormLink = new \Whity\Core\Form\PublicFormLink($appUrl);
+
+// FILE ATTACHMENTS (migration 134). The staging record for a file uploaded
+// against a `file` field, plus the store that writes the bytes.
+//
+// $storageDriver is the SAME per-tenant routing driver branding and document
+// artifacts use — built once in 13a-storage above and handed here rather than
+// rebuilt, because two drivers built from the same settings is the split-backend
+// hazard StorageDriverFactory's own docblock warns about. There is deliberately
+// no storage client anywhere in the forms subsystem.
+//
+// $formUploadRepository is shared by the STORE (which records an upload) and by
+// SubmissionIssuer (which spends one). It has to be the same table and the same
+// statements: the claim is what makes a storage key not a capability, and a
+// second access path is a second place for that check to be got wrong.
+$formUploadRepository = new \Whity\Core\Form\FormUploadRepository($db->getPdo());
+$formUploadStore = new \Whity\Core\Form\FormUploadStore($storageDriver, $formUploadRepository);
+
+$formsHandler = new \Whity\Api\FormsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formRenderer,
+    $formSubmissionRepository,
+    $publicFormLink
+);
+$router->register('GET', '/api/forms', [$formsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('POST', '/api/forms', [$formsHandler, 'create'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('GET', '/api/forms/{id:\d+}', [$formsHandler, 'show'], null, null, CorePermissions::FORMS_READ);
+$router->register('PATCH', '/api/forms/{id:\d+}', [$formsHandler, 'update'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('POST', '/api/forms/{id:\d+}/publish', [$formsHandler, 'publish'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('POST', '/api/forms/{id:\d+}/archive', [$formsHandler, 'archive'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('GET', '/api/forms/{id:\d+}/render', [$formsHandler, 'render'], null, null, CorePermissions::FORMS_SUBMIT);
+// Opening and closing the PUBLIC LINK (migration 132). Ordinary tenant-scoped
+// routes gated on `forms:manage` — the authoring permission, because opening a
+// form to the entire internet is an act of organisational policy and the single
+// most consequential thing that permission does. They are POST/DELETE on a
+// sub-resource rather than a `public_enabled` key on PATCH, for the same reason
+// publish and archive are endpoints: it must not be one stray key away from a
+// body that meant to fix a typo, and the audit must read it as an act.
+$router->register('POST', '/api/forms/{id:\d+}/public-link', [$formsHandler, 'enablePublicLink'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('DELETE', '/api/forms/{id:\d+}/public-link', [$formsHandler, 'disablePublicLink'], null, null, CorePermissions::FORMS_MANAGE);
+
+$formFieldsHandler = new \Whity\Api\FormFieldsApiHandler($formRepository, $formFieldRepository);
+$router->register('GET', '/api/form-fields', [$formFieldsHandler, 'listByQuery'], null, null, CorePermissions::FORMS_READ);
+$router->register('GET', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('POST', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'create'], null, null, CorePermissions::FORMS_MANAGE);
+// The whole set at once, for an editor that composes a form as one act
+// rather than as a sequence of single-field calls it must sequence itself.
+$router->register('PUT', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'replace'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'update'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('DELETE', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'delete'], null, null, CorePermissions::FORMS_MANAGE);
+
+// ATTACHING A FILE (migration 134). Gated `forms:submit` — the SAME permission
+// as the submit itself, because uploading is half of answering: a grant of one
+// without the other produces a person who can submit a form they cannot
+// complete. MULTIPART rather than base64 JSON; FormUploadsApiHandler's docblock
+// argues the trade (a 9 MB paper is a 12 MB base64 body held as two live strings
+// against a 128 MB memory_limit, times eight workers).
+//
+// Registered ABOVE the submit route it feeds, in the order a client uses them.
+$formUploadsHandler = new \Whity\Api\FormUploadsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formUploadStore,
+    new DatabaseSharedStore($db->getPdo())
+);
+$router->register('POST', '/api/forms/{id:\d+}/uploads', [$formUploadsHandler, 'upload'], null, null, CorePermissions::FORMS_SUBMIT);
+
+$formSubmissionsHandler = new \Whity\Api\FormSubmissionsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formSubmissionRepository,
+    new \Whity\Core\Form\SubmissionIssuer(
+        $db->getPdo(),
+        $formSubmissionRepository,
+        $documentIssuer,
+        $routeTemplateRepository,
+        $documentRouter,
+        // The two collaborators that turn a `file` answer into evidence: the
+        // upload repository CLAIMS the staged upload (the check that stops a key
+        // from another tenant becoming an artifact on this one), and the artifact
+        // repository records the row that makes the bytes reachable through the
+        // ordinary document-artifact download route.
+        $formUploadRepository,
+        $documentArtifactRepository
+    )
+);
+$router->register('POST', '/api/forms/{id:\d+}/submissions', [$formSubmissionsHandler, 'submit'], null, null, CorePermissions::FORMS_SUBMIT);
+$router->register('GET', '/api/form-submissions', [$formSubmissionsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('GET', '/api/form-submissions/{id:\d+}', [$formSubmissionsHandler, 'show'], null, null, CorePermissions::FORMS_READ);
+// Only ever the caller's own rows — the ROUTE decides whose, not a query param,
+// so no client can widen it. `forms:submit` rather than `forms:read`: the rows
+// already name exactly one person, so a tenant-wide permission has nothing left
+// to decide (migration 113's "being a recipient IS the authorization").
+$router->register('GET', '/api/me/form-submissions', [$formSubmissionsHandler, 'listMine'], null, null, CorePermissions::FORMS_SUBMIT);
+
+// THE PUBLIC END (migration 132). Unauthenticated by construction — the person
+// filling in an external application has no account and the whole point is that
+// they do not need one.
+//
+// Registered with NO permission and NO role, which in this router means
+// "unprotected" (RbacMiddleware fails open on a route with neither). That is
+// only half the story and the other half is NOT here: a route the router leaves
+// unprotected is still refused with a 401 by EnforceTenantIsolation unless the
+// path is on its public list, so these two paths are added there as ANCHORED
+// PATTERNS — never an open `/api/v1/public/` prefix, which would make the next
+// route anybody adds beneath it public by default. That is the lesson
+// `/api/v1/translations/` records in that file, and this is the surface where
+// the mistake would be worst.
+//
+// A separate handler from FormsApiHandler on purpose: this one is constructed
+// with no RoleChecker, no visibility policy and no permission resolver of any
+// kind, and it holds NOTHING that can change a form's state. The structural half
+// of "an anonymous caller cannot open, close, edit or publish a form" is that
+// the class reachable without a session has no collaborator that could.
+//
+// The SAME SubmissionIssuer the authenticated path uses, not a reduced copy: a
+// public submission becomes a document and circulates through the existing
+// routing engine exactly as an internal one does. The caller cannot choose the
+// route template — it lives on the FORM, set only by `forms:manage` — so there
+// is no arbitrary flow for an unauthenticated caller to inject work into. See
+// PublicFormsApiHandler's docblock, point 6.
+$publicFormsHandler = new \Whity\Api\PublicFormsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    new \Whity\Core\Form\SubmissionIssuer(
+        $db->getPdo(),
+        $formSubmissionRepository,
+        $documentIssuer,
+        $routeTemplateRepository,
+        $documentRouter,
+        $formUploadRepository,
+        $documentArtifactRepository
+    ),
+    new DatabaseSharedStore($db->getPdo()),
+    // The SAME store the authenticated path uses. An anonymous upload differs
+    // only in its ceiling, its throttle and its null uploader — none of which is
+    // a reason for a second storage path.
+    $formUploadStore
+);
+$router->register('GET', '/api/public/forms/{slug}', [$publicFormsHandler, 'render'], null);
+// AN ANONYMOUS UPLOAD (migration 134). `file` fields used to be stripped from
+// the public surface on the grounds that every upload route was gated, so a
+// stranger could not produce a reference — true about the platform, not about
+// the field. A file input asks the tenant's data NOTHING, so unlike the person
+// and unit pickers beside it, it is not an oracle. This route is what removed
+// the premise; PublicFormView::isPubliclyAnswerable() carries the argument and
+// PublicFormsApiHandler point 7 carries the bounds (a tighter per-IP ceiling
+// than the submit, a per-form ceiling, HALF the authenticated size limit, a
+// sniffed content-type allow-list, and the retention sweep).
+//
+// Added to EnforceTenantIsolation's public list as its own anchored pattern —
+// never as an open `/api/v1/public/` prefix, which is the lesson recorded beside
+// the other two.
+$router->register('POST', '/api/public/forms/{slug}/uploads', [$publicFormsHandler, 'upload'], null);
+$router->register('POST', '/api/public/forms/{slug}/submissions', [$publicFormsHandler, 'submit'], null);
+
 // 13a-nonies-quater. Routing's recipients registered as an #881 INBOX SOURCE —
 // not a surface of their own. The `document_route_recipients` table IS an inbox,
 // and a second inbox endpoint beside the notification one would leave a person
@@ -2851,6 +3212,147 @@ $routingNotifications = new \Whity\Core\Document\Routing\RoutingNotifications(
     $settingsService
 );
 $routingNotifications->subscribe($hookManager);
+
+// 13b-quinquies-ter. CONVENING (migrations 130/131) — deliberative BODIES that
+// meet, minute numbered decisions, and drive a document's existing approval
+// route with what they decided.
+//
+// Registered HERE, after the notification dispatcher and after the routing
+// engine, because it needs both: invitations go out through the dispatcher (no
+// new mail code — see MeetingNotifications), and a decision reaches a route
+// through DocumentRouter::act() and nothing else.
+//
+// WHAT THIS SUBSYSTEM DOES NOT CONTAIN is the point worth recording at the
+// wiring: there is NO second routing engine. DecisionRouteBridge holds the three
+// routing repositories only to READ — which routes a document has, whether
+// anybody on the body holds an open recipient row, and whether the step they
+// hold is a gate. The single write is the engine's own `act()`, made as a person
+// the route actually reached, so every invariant the engine enforces for a human
+// approval is enforced identically for a body's.
+$conveningBodyRepository = new \Whity\Core\Convening\ConveningBodyRepository($db->getPdo());
+$meetingRepository = new \Whity\Core\Convening\MeetingRepository($db->getPdo(), $sequenceCounters);
+$agendaRepository = new \Whity\Core\Convening\AgendaRepository($db->getPdo());
+$meetingDecisionRepository = new \Whity\Core\Convening\DecisionRepository($db->getPdo());
+$meetingInvitationRepository = new \Whity\Core\Convening\InvitationRepository($db->getPdo());
+// Attendance is its OWN table, not a column on an invitation: somebody attends
+// who was never invited, and an attendance expressed as an invitation's column
+// has nowhere to record them. Migration 134 carries the argument.
+$meetingAttendanceRepository = new \Whity\Core\Convening\AttendanceRepository($db->getPdo());
+
+$meetingService = new \Whity\Core\Convening\MeetingService(
+    $conveningBodyRepository,
+    $meetingRepository,
+    $meetingInvitationRepository,
+    new \Whity\Core\Convening\MeetingNotifications($notificationDispatcher),
+    $meetingAttendanceRepository
+);
+
+$decisionRecorder = new \Whity\Core\Convening\DecisionRecorder(
+    $db->getPdo(),
+    $conveningBodyRepository,
+    $meetingRepository,
+    $agendaRepository,
+    $meetingDecisionRepository,
+    // Decision numbers come from `sequence_counters` — core's one implementation
+    // of "hand out the next number" — never from MAX(seq) + 1, which hands the
+    // same number to two of eight workers on a busy Tuesday.
+    new \Whity\Core\Convening\DecisionNumbers($sequenceCounters),
+    new \Whity\Core\Convening\DecisionRouteBridge(
+        $documentRouter,
+        $routeRepository,
+        $routeStepRepository,
+        $routeRecipientRepository,
+        $conveningBodyRepository
+    )
+);
+
+$conveningBodiesHandler = new \Whity\Api\ConveningBodiesApiHandler($conveningBodyRepository);
+$router->register('GET',    '/api/convening-bodies',                        [$conveningBodiesHandler, 'list'],         null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/convening-bodies',                        [$conveningBodiesHandler, 'create'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'show'],         null, null, CorePermissions::CONVENING_READ);
+$router->register('PATCH',  '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'update'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'delete'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/convening-bodies/{id:\d+}/members',       [$conveningBodiesHandler, 'listMembers'],  null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/convening-bodies/{id:\d+}/members',       [$conveningBodiesHandler, 'addMember'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/convening-bodies/{id:\d+}/members/{profileId:\d+}', [$conveningBodiesHandler, 'removeMember'], null, null, CorePermissions::CONVENING_MANAGE);
+
+$meetingsHandler = new \Whity\Api\MeetingsApiHandler(
+    $conveningBodyRepository,
+    $meetingRepository,
+    $agendaRepository,
+    $meetingDecisionRepository,
+    $meetingInvitationRepository,
+    $meetingAttendanceRepository,
+    $meetingService,
+    $decisionRecorder
+);
+$router->register('GET',    '/api/meetings',                                [$meetingsHandler, 'list'],     null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/meetings',                                [$meetingsHandler, 'create'],   null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/meetings/{id:\d+}',                       [$meetingsHandler, 'show'],     null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/meetings/{id:\d+}/schedule',              [$meetingsHandler, 'schedule'], null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/hold',                  [$meetingsHandler, 'hold'],     null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/cancel',                [$meetingsHandler, 'cancel'],   null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/invitations',           [$meetingsHandler, 'invite'],   null, null, CorePermissions::CONVENING_MANAGE);
+// WHO ACTUALLY TURNED UP. PUT, because the act REPLACES the whole list — a
+// secretary reads a sign-in sheet and asserts the entire set, not a stream of
+// arrivals — and a POST would invite a client to double the list on every retry.
+// Refused before the meeting is held: attendance taken beforehand is a guess,
+// and the platform already holds guesses under a name that says so (an
+// invitation somebody accepted). `convening:manage`, the secretarial gate that
+// already covers agendas, dates and invitations.
+$router->register('PUT',    '/api/meetings/{id:\d+}/attendance',            [$meetingsHandler, 'recordAttendance'], null, null, CorePermissions::CONVENING_MANAGE);
+// Deliberately UNPERMISSIONED (null, null): BEING INVITED IS THE AUTHORIZATION —
+// the same posture migration 113 takes on acting on a route that reached you, and
+// the same one /api/me/notifications and /api/me/sessions take. Gating it would
+// let a body invite somebody who then cannot answer, leaving the chair counting
+// them as silent for ever. The handler resolves the answering profile from the
+// SESSION and never from the request body, which is the check a tenant-wide
+// permission could not have made.
+$router->register('POST',   '/api/meetings/{id:\d+}/invitations/respond',   [$meetingsHandler, 'respond'],  null);
+// Agenda WRITES are nested under the meeting, because every one of them is an act
+// ON a sitting whose state (draft / scheduled / held / cancelled) decides whether
+// it is allowed.
+$router->register('POST',   '/api/meetings/{id:\d+}/agenda',                [$meetingsHandler, 'addAgendaItem'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('PUT',    '/api/meetings/{id:\d+}/agenda/order',          [$meetingsHandler, 'reorderAgenda'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/meetings/{id:\d+}/agenda/{itemId:\d+}',   [$meetingsHandler, 'removeAgendaItem'], null, null, CorePermissions::CONVENING_MANAGE);
+// THE ONE ROUTE THAT CAN MOVE SOMEBODY ELSE'S DOCUMENT, and the only one gated on
+// `convening:decide`. Recording a decision allocates its number, asks
+// DocumentRouter::act() to apply the verdict, and writes the decision row —
+// all three in one transaction, in that order, so a decision can never claim an
+// approval the engine refused.
+$router->register('POST',   '/api/meetings/{id:\d+}/agenda/{itemId:\d+}/decision', [$meetingsHandler, 'recordDecision'], null, null, CorePermissions::CONVENING_DECIDE);
+// FLAT, FILTERED COLLECTION READS. A tabular client — including the server-driven
+// block screens this subsystem ships — addresses a collection with query
+// parameters and cannot build `/meetings/7/agenda` out of a selection. Each
+// REQUIRES `meeting_id`: an unfiltered tenant-wide list is not a question anybody
+// asks, and answering one would make a forgotten filter look like a working call.
+$router->register('GET',    '/api/agenda-items',                            [$meetingsHandler, 'agendaItems'], null, null, CorePermissions::CONVENING_READ);
+$router->register('GET',    '/api/meeting-decisions',                       [$meetingsHandler, 'decisions'],   null, null, CorePermissions::CONVENING_READ);
+$router->register('GET',    '/api/meeting-invitations',                     [$meetingsHandler, 'invitations'], null, null, CorePermissions::CONVENING_READ);
+// `convening:read` and NOT `convening:manage`, deliberately. Migration 131 grants
+// the read gate to `settings:read` AND `documents:route` and the manage gate only
+// to `settings:write`; gating this one on manage would 403 somebody who can
+// already see this meeting's invitations and decisions — strictly more sensitive
+// — and leave the meeting-record screen showing one empty table among five.
+$router->register('GET',    '/api/meeting-attendees',                       [$meetingsHandler, 'attendance'],  null, null, CorePermissions::CONVENING_READ);
+// THE REVERSE READ. Without it this subsystem is invisible from the document
+// side: somebody looking at a document that is sitting still has no way to
+// discover it is waiting for a body that meets on the 14th.
+$router->register('GET',    '/api/documents/{id:\d+}/convening',            [$meetingsHandler, 'forDocument'], null, null, CorePermissions::CONVENING_READ);
+
+// The three convening screens in the sidebar. A SECOND `navigation.register`
+// listener rather than more entries in the core one above, for the reason
+// PluginNavigationBridge is a listener too: the items are DERIVED from the same
+// descriptors the features endpoint serves, so a renamed screen cannot end up
+// with one label in the menu and another on the page.
+$hookManager->listen('navigation.register', function ($data, $context) use ($router) {
+    $items = $data['items'] ?? [];
+    foreach (\Whity\Core\Convening\ConveningFeatures::navigationItems($router) as $item) {
+        $items[] = $item;
+    }
+
+    return ['items' => $items];
+});
 
 // In-app notification INBOX (WC-notifications, 6e10d9ea). Self-scoped to the
 // caller's (tenant, profile) — session-gated, no RBAC permission (like

@@ -347,6 +347,88 @@ final class TenantOwnedTables
         'time_window_types' => '126_create_time_windows.php',
         'time_windows' => '126_create_time_windows.php',
         'time_window_state_events' => '126_create_time_windows.php',
+
+        // Tenant-authored FORMS, their fields, and the submissions made against
+        // them (migration 127). All three carry `tenant_id` NOT NULL and
+        // denormalise it onto the children rather than reaching it through
+        // `form_id`, so the predicate guard polices a field read and a submission
+        // read DIRECTLY instead of trusting a join it cannot see — the same
+        // choice migration 120's three tables make.
+        //
+        // A submission is the sharpest case in the set. Its `data` column holds
+        // whatever a person typed into a form their employer wrote, which is as
+        // tenant-private as anything in this schema gets, and the row also points
+        // at a `documents` row that carries its own tenant scoping. Two scoping
+        // mechanisms that could disagree is exactly one too many, so the
+        // submission binds its own `tenant_id` on every read and never infers one
+        // from the document it names.
+        //
+        // ONE EXCEPTION, ADDED BY MIGRATION 132 AND WORTH READING BEFORE THE
+        // NEXT ONE IS PROPOSED. `forms` may carry an opt-in PUBLIC SLUG, and
+        // {@see \Whity\Core\Form\FormRepository::findByPublicSlug()} reads by
+        // that slug with NO tenant predicate. It is not a gap in the scoping —
+        // it is the read that ESTABLISHES the tenant, on a path where the caller
+        // has no account and therefore no tenant for the middleware to resolve.
+        // Every alternative source (an X-Tenant-Id header, a query parameter,
+        // the Host header) is a value the anonymous caller chooses, so reading
+        // one would let a stranger aim a public form at an organisation that
+        // never published a link.
+        //
+        // It is safe because the slug is 256 random bits under a GLOBAL partial
+        // unique index, so it names exactly one row; and it is bounded because
+        // it is the ONLY unpredicated statement in the subsystem — everything
+        // {@see \Whity\Api\PublicFormsApiHandler} does afterwards binds the
+        // tenant_id that lookup returned. It carries an explicit
+        // `@tenant-guard-ignore` annotation, exactly as
+        // `document_qr_tokens` and `invitations` do for the same shape.
+        //
+        // `form_fields` and `form_submissions` gain NO exception: the public
+        // handler reads fields and writes a submission with the resolved tenant
+        // bound like any other caller.
+        'forms' => '127_create_forms.php',
+        'form_fields' => '127_create_forms.php',
+        'form_submissions' => '127_create_forms.php',
+        // `form_uploads` (migration 133) — the staging record for a file attached
+        // to a `file` answer. Tenant-owned without qualification: the CLAIM that
+        // turns an upload into evidence binds `tenant_id`, `form_id`, the
+        // uploader and `claimed_at IS NULL` in ONE conditional UPDATE, and that
+        // predicate is the reason a storage key naming another tenant's object
+        // cannot become a `document_artifacts` row on this tenant's document.
+        //
+        // ONE EXCEPTION, and it is an operator job rather than a request path.
+        // {@see \Whity\Core\Form\FormUploadRepository::sweepUnclaimed()} deletes
+        // unclaimed uploads across every tenant, because it runs from cron with
+        // no session and therefore no tenant to bind; narrowing it would leave
+        // every tenant but one accumulating orphaned objects forever. Both of its
+        // statements carry `@tenant-guard-ignore` with that reason. What makes it
+        // safe is `claimed_at IS NULL AND created_at < cutoff`: a row in that
+        // state is unreachable by construction, since the only path that could
+        // ever reference it is the claim, which refuses a claimed row.
+        'form_uploads' => '133_create_form_uploads.php',
+        // Convening (migrations 130/131/134) — deliberative bodies, who sits on
+        // them, their meetings, the agenda each meeting carries, the decisions
+        // taken, who was invited, and who actually turned up. All seven are
+        // tenant-owned without exception, and none of them has a public or
+        // cross-tenant read anywhere: a body is a tenant's own governance
+        // structure, and even the invitation reply — the one act performed by
+        // somebody who may hold no permission at all — resolves the invitation
+        // through the caller's own bound tenant. No statement in the subsystem
+        // carries a guard annotation, which is the property to preserve rather
+        // than a coincidence to note.
+        'convening_bodies' => '130_create_convening.php',
+        'convening_body_members' => '130_create_convening.php',
+        'meetings' => '130_create_convening.php',
+        'meeting_agenda_items' => '130_create_convening.php',
+        'meeting_decisions' => '130_create_convening.php',
+        'meeting_invitations' => '130_create_convening.php',
+        // Attendance is a SEPARATE table from invitations rather than a column
+        // on one, because somebody attends who was never invited and an
+        // attendance expressed as an invitation's column has nowhere to put
+        // them. Migration 134 carries the full argument. Its one read joins the
+        // invitations, and that join binds the tenant on BOTH sides — a
+        // profile-only join condition would be satisfiable by another tenant's
+        // invitation row.
+        'meeting_attendees' => '134_create_meeting_attendance.php',
     ];
 
     /**

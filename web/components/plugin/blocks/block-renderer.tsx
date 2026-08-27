@@ -126,9 +126,11 @@ import {
   FormProvider,
   FormScopeProvider,
   useFormBlockContext,
+  collectFormInputs,
   IssuesReport,
   type FormBlockContextValue,
   type FieldArrayValue,
+  type FormValue,
 } from '@/components/plugin/blocks/form-context';
 import { resolveContextPath } from '@/components/plugin/blocks/context-path';
 import { submitPluginAction } from '@/lib/plugin-action-submit';
@@ -596,13 +598,57 @@ function StatRenderer({ block }: { block: StatBlock }) {
   );
 }
 
+/**
+ * A value somebody is meant to SEND somewhere else — a shareable link.
+ *
+ * Detected rather than declared: a URL shown in a key/value list is almost
+ * always one a person needs to put in an email, and requiring every descriptor
+ * to opt in would mean the one place it was forgotten is the one place someone
+ * retypes a 64-character slug by hand. Nothing is hidden or reformatted — the
+ * full value still reads exactly as before, with a control beside it.
+ */
+function isShareableUrl(value: unknown): value is string {
+  return typeof value === 'string' && /^https?:\/\//.test(value);
+}
+
+function CopyableValue({ value }: { value: string }) {
+  const t = useTranslation('plugin');
+  const { addToast } = useToast();
+
+  return (
+    <span className="inline-flex items-start gap-2">
+      <span className="break-all">{value}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="shrink-0"
+        onClick={() => {
+          // `?.` because clipboard access is absent on an insecure origin, and
+          // a control that throws is worse than one that says it could not.
+          void navigator.clipboard
+            ?.writeText(value)
+            .then(
+              () => addToast(t('blocks.keyValue.copied', 'Link copied'), 'success'),
+              () => addToast(t('blocks.keyValue.copyFailed', 'Could not copy — select the link and copy it'), 'error')
+            );
+        }}
+      >
+        {t('blocks.keyValue.copy', 'Copy')}
+      </Button>
+    </span>
+  );
+}
+
 function KeyValueRenderer({ block }: { block: KeyValueBlock }) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs/relaxed">
       {block.items.map((item, index) => (
         <React.Fragment key={index}>
           <dt className="font-medium text-muted-foreground">{item.label}</dt>
-          <dd className="text-foreground">{item.value}</dd>
+          <dd className="text-foreground">
+            {isShareableUrl(item.value) ? <CopyableValue value={item.value} /> : item.value}
+          </dd>
         </React.Fragment>
       ))}
     </dl>
@@ -761,6 +807,21 @@ interface MasterDetail {
   // `options.refresh` bumps `refreshSignal` (passed ONLY from a form's
   // submit-success path) so a plain dismiss/cancel never triggers a refetch.
   closeTarget: (id: string, options?: { refresh?: boolean }) => void;
+  // Bump `refreshSignal` WITHOUT closing anything — what an INLINE form calls
+  // when it has saved.
+  //
+  // This exists because retiring the dialogs took the refetch with them. A form
+  // used to reach `refreshSignal` only through `closeTarget`, since a modal was
+  // the only place a form ever lived; a form composed on the page therefore
+  // saved successfully and left every `dataTable` beside it showing the state
+  // before the save. That is the "second view that silently goes stale" this
+  // codebase treats as worse than no second view — and on a minute screen it is
+  // worse still, because the stale table is the list of decisions somebody is
+  // reading to decide what to record next.
+  //
+  // Closing is the OVERLAY's concern; refetching is the SAVE's. Splitting them
+  // is what lets an inline form have the second without the first.
+  refresh: () => void;
   refreshSignal: number;
 }
 
@@ -841,6 +902,7 @@ function MasterDetailProvider({
     setOpenTargets((prev) => ({ ...prev, [id]: true }));
     if (row !== undefined) setRows((prev) => ({ ...prev, [id]: row }));
   }, []);
+  const refresh = React.useCallback(() => setRefreshSignal((s) => s + 1), []);
   const closeTarget = React.useCallback((id: string, options?: { refresh?: boolean }) => {
     setOpenTargets((prev) => ({ ...prev, [id]: false }));
     if (options?.refresh === true) setRefreshSignal((s) => s + 1);
@@ -871,8 +933,8 @@ function MasterDetailProvider({
   }, [record]);
 
   const value = React.useMemo<MasterDetail>(
-    () => ({ selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, publishRecord, refreshSignal }),
-    [selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, publishRecord, refreshSignal]
+    () => ({ selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, refresh, publishRecord, refreshSignal }),
+    [selections, setSelection, rows, recordFacts, openTargets, openTarget, closeTarget, refresh, publishRecord, refreshSignal]
   );
   return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>;
 }
@@ -1486,11 +1548,15 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
   }
 
   // ready
-  const rows: Record<string, string>[] = state.data.map((row) =>
-    Object.fromEntries(
-      block.columns.map((col) => [col.key, String(row[col.key] ?? '')])
-    )
-  );
+  // EVERY key, not just the displayed ones. Row actions template `{field}`
+  // against this row, and the fields they need — `id` above all — are almost
+  // never columns somebody chose to SHOW. Keeping only `block.columns` meant
+  // `{id}` resolved to '' and `/forms/{id}/publish` was requested as
+  // `/forms/publish`, a 404 that looked like a missing route rather than a
+  // dropped value. The table still renders `columns` and nothing else, so the
+  // extra keys are invisible; they exist only for templating, which is exactly
+  // what `templateRowOf` is for and what the inbox path already does.
+  const rows: Record<string, string>[] = state.data.map((row) => templateRowOf(row));
 
   return (
     <div className="space-y-1" data-slot="block-data-refresh">
@@ -2806,8 +2872,16 @@ function FormRenderer({ block }: { block: FormBlock }) {
     (ref: string) => resolveContextRef(md, ref),
     [md]
   );
+  // A form inside an overlay closes it AND refetches. A form composed on the
+  // page has nothing to close, and still has to refetch — otherwise every
+  // `dataTable` beside it goes on showing the state before the save. See
+  // `MasterDetail.refresh`.
   const onSubmitSuccess = React.useCallback(() => {
-    if (scopeId !== null) md?.closeTarget(scopeId, { refresh: true });
+    if (scopeId !== null) {
+      md?.closeTarget(scopeId, { refresh: true });
+      return;
+    }
+    md?.refresh();
   }, [scopeId, md]);
   return (
     <FormProvider block={block} resolveRef={resolveRef} onSubmitSuccess={onSubmitSuccess}>
@@ -2816,15 +2890,185 @@ function FormRenderer({ block }: { block: FormBlock }) {
   );
 }
 
+/**
+ * Map ONE fetched row onto a `fieldArray`'s row-template inputs.
+ *
+ * Two halves, and the order matters. The row is copied WHOLE first, so every
+ * fact the source returned survives into the submit — including the ones the
+ * template draws no input for. Then each template input's name is overwritten
+ * with a value of the shape that input can actually edit, because an input
+ * handed a value it cannot read renders blank, and a blank rendered over a
+ * stored value is what gets saved.
+ *
+ * A template input whose kind is not one of the three shapes below (a
+ * `fileInput`, an `ouScopePicker`) is deliberately left as the passthrough
+ * copied it: coercing a value we do not know how to draw would be inventing one.
+ */
+function seedFieldArrayRow(
+  row: Record<string, unknown>,
+  template: Block[]
+): FieldArrayValue[number] {
+  // The cast is over `unknown` → `FieldArrayCell`, and it is sound for the only
+  // thing that reaches here: a row parsed from JSON, whose values can only be a
+  // string, number, boolean, null, array or object — every one of them a member
+  // of FieldArrayCell.
+  const seeded: FieldArrayValue[number] = { ...row } as FieldArrayValue[number];
+  for (const input of collectFormInputs(template)) {
+    if (!('name' in input) || typeof input.name !== 'string') continue;
+    const raw = row[input.name];
+    switch (input.type) {
+      case 'checkbox':
+        // The wire carries a boolean as any of these depending on the driver
+        // and the serialiser; a checkbox reads only `true`.
+        seeded[input.name] = raw === true || raw === 'true' || raw === 1 || raw === '1';
+        break;
+      case 'bilingualText':
+        seeded[input.name] =
+          raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+            ? (raw as Record<string, unknown>)
+            : {};
+        break;
+      case 'textInput':
+      case 'textArea':
+      case 'numberInput':
+      case 'select':
+      case 'slider':
+      case 'dateInput':
+      case 'colorInput':
+      case 'referenceSelect':
+      case 'richTextInput':
+        // `null` is how every one of these arrives when unset, and `String(null)`
+        // is the four-letter word 'null' shown to the author as if they typed it.
+        seeded[input.name] = raw === null || raw === undefined ? '' : String(raw);
+        break;
+      default:
+        break;
+    }
+  }
+  return seeded;
+}
+
 // WC-532 A2: a repeatable field-group. Owns an array of row-records under
 // block.name in the enclosing form; each row renders the template children
 // through a row-SCOPED FormScopeProvider so the ordinary input renderers work
 // unchanged (their names resolve against the row, not the outer form). The
 // user can add / remove / reorder rows within [min, max].
+//
+// WITH A `source` IT IS AN EDITOR, AND AN EDITOR THAT RENDERS EMPTY IS A DELETE
+// -----------------------------------------------------------------------------
+// A sourced array seeds its rows from what is stored and its form submits a
+// REPLACEMENT of that stored set. So every state in which this block has no rows
+// to show has to be told apart from the one state in which "no rows" is true:
+//
+//   nothing is selected yet  → do not fetch, hold the submit
+//   the fetch is in flight   → do not seed,  hold the submit
+//   the fetch failed         → do not seed,  hold the submit, offer a retry
+//   the fetch returned []    → seed [],      release — the record HAS no rows
+//
+// Only the last of those is a saveable empty. The other three look identical on
+// screen and would each submit "delete everything" if this block did the obvious
+// thing and rendered zero rows into a live form.
+//
+// NOT FETCHING UNTIL EVERY `param` RESOLVES is part of that and is stricter than
+// `dataTable`, deliberately. A table with a half-bound `params` shows a wider
+// list than it should — a display defect. This block's fetch decides which
+// record's rows are about to be overwritten, and `/api/v1/form-fields` with no
+// `form_id` answers 200 with an empty list. Seeding from that and saving would
+// wipe whichever form the SUBMIT endpoint's own token happened to name.
+//
+// SEEDING IS ONCE PER BOUND SOURCE, never on a refetch. `useRefetchOnSignal` is
+// deliberately not wired here: a sibling overlay saving something would re-seed
+// this array and silently discard every edit the author had not saved yet.
 function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
-  // Before the early return: a hook may not run conditionally.
+  // Every hook runs before the early return: a hook may not run conditionally.
   const t = useTranslation('plugin');
+  const md = useMasterDetail();
   const ctx = useFormBlockContext();
+
+  const sourced = isNonEmptyString(block.source);
+  // NOT-UNTIL-BOUND. `useEffectiveSource` appends only the params that resolve,
+  // which is right for a read and wrong for this: a partially-bound source names
+  // a different set of rows than the author is looking at.
+  const bound = (block.params ?? []).every(
+    (p) => resolveContextRef(md, p.from) !== undefined
+  );
+  const effectiveSource = useEffectiveSource(block.source ?? '', block.params);
+  // `''` is how usePluginData is told not to fetch at all; it stays `loading`,
+  // which is exactly the state a block with nothing to ask about is in.
+  const fetchSource = sourced && bound ? effectiveSource : '';
+  const state = usePluginData<Array<Record<string, unknown>>>(
+    fetchSource,
+    (body) => (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null)
+  );
+  const readyData = state.status === 'ready' ? state.data : null;
+
+  const setValue = ctx?.setValue;
+  const holdSubmit = ctx?.holdSubmit;
+  const name = block.name;
+  const hasValue = ctx !== null && Array.isArray(ctx.values[name]);
+
+  // READY means both halves at once, and neither is redundant:
+  //
+  //   readyData !== null — the hook is holding rows FOR THE CURRENT SOURCE.
+  //     It goes back to null the instant the source changes (see the
+  //     stale-source note in usePluginData), which is what makes moving the
+  //     selection un-seed this block in the SAME render rather than one commit
+  //     later. Without that, the previous record's rows would be editable
+  //     against the new record's save endpoint for a moment.
+  //   hasValue — the effect below has actually written them into the form.
+  //
+  // Deriving it from these rather than tracking a "seeded" flag is what keeps
+  // it honest: there is no second copy of the answer to go stale, no setState
+  // inside an effect, and no ref read during render.
+  const seeded = sourced ? readyData !== null && hasValue : true;
+
+  React.useEffect(() => {
+    if (!sourced || setValue === undefined) return;
+    if (readyData === null) {
+      // Nothing for this source (yet, or ever). Drop whatever a PREVIOUS source
+      // left in the value map, so the payload cannot carry one record's rows to
+      // another even if every other guard here were removed.
+      if (hasValue) setValue(name, undefined);
+      return;
+    }
+    // SEED ONCE. A value already present was written by this effect for this
+    // same source, and the user may have been editing it since — so a refetch
+    // (a retry, a refresh) re-renders with new rows and this deliberately
+    // ignores them. Re-seeding would silently discard unsaved work, which is
+    // the quieter cousin of the bug this whole block is written against.
+    if (hasValue) return;
+    setValue(name, readyData.map((row) => seedFieldArrayRow(row, block.children)));
+  }, [sourced, setValue, readyData, hasValue, name, block.children]);
+
+  // The hold, and its reason. Re-registering the same reason is a no-op, so this
+  // may run on every render.
+  const holdReason = !sourced
+    ? null
+    : !bound
+      ? t('blocks.fieldArray.heldUnbound', 'Nothing is selected, so there is nothing to save.')
+      : state.status === 'error'
+        ? t(
+            'blocks.fieldArray.heldError',
+            'What is already saved could not be loaded, so it cannot be replaced. Try again.'
+          )
+        : !seeded
+          ? t(
+              'blocks.fieldArray.heldLoading',
+              'Still loading what is already saved — saving now would replace it with nothing.'
+            )
+          : null;
+
+  React.useEffect(() => {
+    holdSubmit?.(name, holdReason);
+  }, [holdSubmit, name, holdReason]);
+
+  // Released on unmount as its own effect, so a `visibleWhen` that hides this
+  // block does not leave the form permanently unsaveable.
+  React.useEffect(() => {
+    if (holdSubmit === undefined) return;
+    return () => holdSubmit(name, null);
+  }, [holdSubmit, name]);
+
   if (ctx === null) return <UnsupportedBlock type="fieldArray" />;
 
   const raw = ctx.values[block.name];
@@ -2856,23 +3100,74 @@ function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
         )}
       </div>
 
-      {rows.map((row, i) => {
+      {!seeded || (sourced && state.status === 'error') ? (
+        // The three not-saveable states, said out loud. None of them renders an
+        // empty list of rows plus an "Add" button, because that is the shape
+        // that reads as "this record has no questions" — which is the one thing
+        // the block does not know here, and the thing the save would assert.
+        <div className="rounded-xl border border-border/60 bg-card p-3 text-sm text-muted-foreground shadow-2xs" data-slot="field-array-pending">
+          {!bound ? (
+            <span data-slot="field-array-unbound">{t('blocks.record.unbound', 'No record selected.')}</span>
+          ) : state.status === 'error' ? (
+            <span className="flex flex-wrap items-center gap-3">
+              <span className="text-destructive" data-slot="field-array-error" role="alert">
+                {t('blocks.fieldArray.loadError', 'Could not load what is already saved.')}
+              </span>
+              <Button type="button" variant="outline" size="sm" onClick={state.retry}>
+                {t('blocks.retry', 'Retry')}
+              </Button>
+            </span>
+          ) : (
+            <span data-slot="field-array-loading">
+              {t('blocks.fieldArray.loading', 'Loading what is already saved…')}
+            </span>
+          )}
+        </div>
+      ) : null}
+
+      {seeded && rows.map((row, i) => {
         const rowCtx: FormBlockContextValue = {
-          values: row,
+          // A row cell is WIDER than a form value: a seeded row carries the
+          // facts the template draws no input for (see FieldArrayCell). Every
+          // input renderer already narrows what it reads defensively — a
+          // `textInput` handed a number shows '' — so the extra shapes are
+          // unreachable from the template rather than mis-rendered by it.
+          values: row as Record<string, FormValue>,
           setValue: (childName, v) => {
             // A row holds only scalar/bilingual values — nested arrays (a
             // fieldArray inside a row) are out of scope and ignored.
             if (Array.isArray(v)) return;
             const next = rows.slice();
-            next[i] = { ...next[i], [childName]: v };
+            if (v === undefined) {
+              const cleared = { ...next[i] };
+              delete cleared[childName];
+              next[i] = cleared;
+            } else {
+              next[i] = { ...next[i], [childName]: v };
+            }
             write(next);
           },
           errors: {},
           isSubmitting: ctx.isSubmitting,
           submit: ctx.submit,
+          // Passed through rather than stubbed: a hold raised inside a row (a
+          // nested sourced array) has to reach the SAME form the submit button
+          // belongs to, or the block that knows the payload is wrong has no way
+          // to say so.
+          holdSubmit: ctx.holdSubmit,
+          submitHeld: ctx.submitHeld,
         };
         return (
-          <div key={i} className="space-y-2 rounded-md border border-border p-3" data-slot="field-array-row">
+          <div
+            key={i}
+            // The design system's `default` Card surface, token for token:
+            // bg-card is pure white against a grey --background in light,
+            // and a LIGHTER grey than the background in dark, so the card
+            // lifts in both themes. A bare border on no background read as
+            // a flat outline drawn on the page rather than an object on it.
+            className="space-y-2 rounded-xl border border-border/60 bg-card p-3 text-card-foreground shadow-2xs"
+            data-slot="field-array-row"
+          >
             <div className="flex items-center justify-between gap-2">
               {/* Not keyed: the visible text is the plugin's noun followed by
                   the row number — there is no English prose here to translate,
@@ -2897,9 +3192,11 @@ function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
         );
       })}
 
-      <Button type="button" variant="outline" size="sm" disabled={rows.length >= max} onClick={add}>
-        <IconPlus className="me-1 size-4" aria-hidden />{t('blocks.fieldArray.add', 'Add {item}', { item: itemLabel.toLowerCase() })}
-      </Button>
+      {seeded && (
+        <Button type="button" variant="outline" size="sm" disabled={rows.length >= max} onClick={add}>
+          <IconPlus className="me-1 size-4" aria-hidden />{t('blocks.fieldArray.add', 'Add {item}', { item: itemLabel.toLowerCase() })}
+        </Button>
+      )}
     </div>
   );
 }
@@ -3537,15 +3834,21 @@ function SubmitButtonRenderer({ block }: { block: SubmitButtonBlock }) {
   const variant = block.variant ? INTERACTIVE_BUTTON_VARIANT[block.variant] : "default";
   // The idle label is the plugin's; only the busy state is ours.
   const label = ctx.isSubmitting ? t('action.submit.pending', 'Working…') : block.label;
+  // A HELD form's save control is disabled rather than merely refusing on click:
+  // a descendant has said the payload would not describe what is on screen (a
+  // sourced `fieldArray` whose rows have not arrived), and the honest rendering
+  // of "this cannot be saved yet" is a control that is visibly not ready.
+  // `ctx.submit()` refuses independently — this is the affordance, not the gate.
+  const blocked = ctx.isSubmitting || ctx.submitHeld;
   if (isNonEmptyString(block.requiredPermission)) {
     return (
-      <PermissionButton permission={block.requiredPermission} variant={variant} disabled={ctx.isSubmitting} onClick={() => ctx.submit()}>
+      <PermissionButton permission={block.requiredPermission} variant={variant} disabled={blocked} onClick={() => ctx.submit()}>
         {label}
       </PermissionButton>
     );
   }
   return (
-    <Button type="button" variant={variant} disabled={ctx.isSubmitting} onClick={() => ctx.submit()}>
+    <Button type="button" variant={variant} disabled={blocked} onClick={() => ctx.submit()}>
       {label}
     </Button>
   );

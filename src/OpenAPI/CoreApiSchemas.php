@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 namespace Whity\OpenAPI;
 
+use Whity\Core\Convening\AttendanceCapacity;
+use Whity\Core\Convening\AttendanceEntry;
+use Whity\Core\Convening\AttendanceRepository;
+use Whity\Core\Convening\DecisionNumbers;
+use Whity\Core\Convening\DecisionVerdict;
+use Whity\Core\Convening\InvitationStatus;
+use Whity\Core\Convening\MeetingStatus;
+use Whity\Core\Convening\MemberRole;
 use Whity\Core\Document\Organizer\DocumentSortField;
 use Whity\Core\Ou\OuTypeRegistry;
 use Whity\Core\RBAC\CorePermissions;
@@ -93,6 +101,8 @@ final class CoreApiSchemas
             self::ouRoutes(),
             self::ouTypeRoutes(),
             self::timeWindowRoutes(),
+            self::formRoutes(),
+            self::conveningRoutes(),
             self::delegationRoutes(),
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
@@ -1063,6 +1073,567 @@ final class CoreApiSchemas
     }
 
     /**
+     * FORMS (migrations 127/128) — tenant-authored forms, their fields, and the
+     * submissions made against them.
+     *
+     * THREE gates rather than the usual read/write pair, because there are three
+     * audiences and two of them barely overlap: `forms:manage` AUTHORS (an act of
+     * organisational policy), `forms:submit` FILLS IN (the everyday act of the
+     * largest audience in the tenant), `forms:read` READS WHAT CAME BACK (the
+     * approver's job). Folding `:submit` into `:read` is the tempting fold and the
+     * wrong one — it would mean letting somebody file a request also lets them
+     * read everybody else's.
+     *
+     * `/render` is gated on `forms:submit`, NOT `forms:read`, and that is the one
+     * assignment worth checking twice: its response carries the CALLER'S OWN
+     * prefilled details, so it is personalised, and gating it on the
+     * catalogue-reading permission would hand that payload to the wrong audience
+     * while denying it to the right one.
+     *
+     * There is deliberately no DELETE for a form (archive instead — a form is what
+     * a submission was an answer TO) and none for a submission (submit again — it
+     * is what somebody declared while other people acted on it).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function formRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/forms', 'forms:read', [
+                'summary' => "List the tenant's forms",
+                'description' => 'Newest first. `?status=` narrows to `draft`, `published` or '
+                    . '`archived`. Each row carries `available_transitions` and `accepts_submissions`, '
+                    . 'both DERIVED from the status, so a client rendering the lifecycle controls does '
+                    . 'not have to hold a second copy of the transition table.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('status', 'string', 'Restrict to one lifecycle state.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 100, max 500).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's forms", 'FormListResponse'),
+                    422 => self::errorResponse('An unrecognised status filter'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms', 'forms:manage', [
+                'summary' => 'Author a new form',
+                'description' => 'Always created as a `draft`: a form is never born live, because one '
+                    . 'with no fields yet that accepted submissions would collect empty ones. '
+                    . '`route_template_id` is what makes submissions CIRCULATE — pointed at a design '
+                    . 'from /api/v1/document-route-templates, every submission becomes a document routed '
+                    . 'through the existing engine. Omitted, the form collects and stops there.',
+                'tags' => ['forms'],
+                'request' => 'FormCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created form', 'FormResponse'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicate key, a name in no language, or a route template '
+                        . 'this tenant does not have'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}', 'forms:read', [
+                'summary' => 'Get one form, with its fields and its submission count',
+                'description' => 'The submission count travels with the form because an author about '
+                    . 'to change a published one needs to know that people have already answered it — '
+                    . 'and a count they have to go and fetch is a count they will not fetch.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, its fields and its counts', 'FormDetailResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/forms/{id:\d+}', 'forms:manage', [
+                'summary' => 'Rename a form, retitle it, or change where its submissions go',
+                'description' => '`form_key` is immutable and a body carrying one is REFUSED, not '
+                    . 'ignored: code and links bind to the key, so editing it in place would silently '
+                    . 'repoint every reference at a form that no longer exists. `status` is likewise '
+                    . 'refused — it moves through /publish and /archive, which are acts rather than '
+                    . 'attribute assignments.',
+                'tags' => ['forms'],
+                'request' => 'FormUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse('An immutable field, no updatable field, or an unknown route template'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/publish', 'forms:manage', [
+                'summary' => 'Make the form live, and mint a version',
+                'description' => 'A form with no fields is REFUSED: publishing one would produce a live '
+                    . 'form that collects nothing, renders as an empty page with a submit button, and '
+                    . 'reports every submission as successful. Publishing increments `version`, and '
+                    . 'every submission stamps the version it was answered against — which lets a '
+                    . 'reader SEE drift between an old answer set and today\'s fields, but does not by '
+                    . 'itself reconstruct the old field list. Idempotent: asking for the state the form '
+                    . 'is already in returns it rather than erroring.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The published form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form moved under this request — reload and retry'),
+                    422 => self::errorResponse('The transition is not allowed from here, or the form has no fields'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/archive', 'forms:manage', [
+                'summary' => 'Stop accepting submissions',
+                'description' => 'Everything already submitted stays exactly where it is; only the door '
+                    . 'closes. REVERSIBLE — republishing is allowed, because retiring a form at the end '
+                    . 'of a cycle and wanting it back at the start of the next one is the ordinary case. '
+                    . 'There is no DELETE at all: a form is what somebody\'s submission was an answer '
+                    . 'TO, and destroying it leaves every submission as a bag of keys with nothing to '
+                    . 'say what they meant.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The archived form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form moved under this request — reload and retry'),
+                    422 => self::errorResponse('The transition is not allowed from here'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}/render', 'forms:submit', [
+                'summary' => 'The form as it should be DRAWN for the caller, with their prefilled values',
+                'description' => 'Fields in order, grouped into derived `sections`, plus `prefill` — '
+                    . 'values resolved SERVER-SIDE from the CALLER\'S own saved details so they do not '
+                    . 'retype what the organisation already knows. Prefill is a suggestion, never an '
+                    . 'answer: nothing is recorded until the person submits. `unresolved_prefill` names '
+                    . 'any field whose declared source nothing in this install stores, so an empty box '
+                    . 'is distinguishable from a bug. A form that is not accepting submissions still '
+                    . 'renders — `accepts_submissions` says which — so a person following a link to an '
+                    . 'archived form learns it closed rather than that it never existed.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, drawn for this caller', 'FormRenderResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/public-link', 'forms:manage', [
+                'summary' => 'Open this form to people who have no account, minting its public address',
+                'description' =>
+                    'OPT-IN and OFF BY DEFAULT on every form: `public_enabled` is only ever true '
+                    . 'because of this call. It mints a 256-bit random slug and returns the absolute '
+                    . '`public_url` built from it — the ONLY credential the public endpoints have, '
+                    . 'which is why it is random rather than derived from the form id or key: a '
+                    . 'guessable address makes the whole catalogue of an install\'s forms walkable '
+                    . 'with curl. '
+                    . 'REFUSED (422) on a form that is not `published` (a link to one answers 404 to '
+                    . 'everybody who follows it), and on a form carrying a `profile_ref` or `ou_ref` '
+                    . 'field — the reference kinds would make the public submit a MEMBERSHIP ORACLE, '
+                    . 'since the existence check behind them reveals whether a given id belongs to '
+                    . 'this organisation. A `file` field is ACCEPTED (it was refused until migration '
+                    . '134 only because no anonymous upload route existed; a file input asks the '
+                    . 'tenant\'s data nothing, so it cannot answer anything about it). '
+                    . '`opens_at` / `closes_at` are optional; either may be null for "no boundary on '
+                    . 'this side". They are naive local date-times in the instance\'s own clock, and a '
+                    . 'UTC offset is REFUSED rather than silently applied. '
+                    . 'Re-opening after a close mints a DIFFERENT address: a withdrawn link stays '
+                    . 'withdrawn.',
+                'tags' => ['forms'],
+                'request' => 'FormPublicLinkRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The form, with its new public link', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form already has a public link, or it moved under this request'),
+                    422 => self::errorResponse(
+                        'The form is not published, carries a field a stranger could not answer, '
+                        . 'or the window is malformed'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/forms/{id:\d+}/public-link', 'forms:manage', [
+                'summary' => "Close this form's public link",
+                'description' =>
+                    'The slug is DESTROYED, not parked beside a disabled flag, so the old address is '
+                    . 'unresolvable by construction rather than by a check somebody could remove. The '
+                    . 'window dates go with it. IDEMPOTENT: closing a link that is already closed is a '
+                    . '200, because a client that lost a response must be able to retry; '
+                    . '`meta.closed` says whether this call was the one that changed anything. '
+                    . 'Submissions already received are untouched.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, with no public link', 'FormPublicLinkClosedResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/uploads', 'forms:submit', array_merge([
+                'summary' => 'Attach a file to a form you are filling in',
+                'description' =>
+                    'MULTIPART, one part named `file`. Returns the `reference` a `file` answer '
+                    . 'carries, plus the filename, the SNIFFED content type, the byte size and the '
+                    . 'server\'s SHA-256 of what it stored. '
+                    . 'Gated `forms:submit` — the same permission as the submit itself, because '
+                    . 'uploading is half of answering. '
+                    . 'ACCEPTS application/pdf, image/png and image/jpeg ONLY, decided by the LEADING '
+                    . 'BYTES: a declared Content-Type that contradicts the bytes is a 422, and a '
+                    . 'declared type is never what gets stored. Office formats are absent on purpose — '
+                    . 'a .docx is indistinguishable from any other ZIP by magic bytes. '
+                    . 'MAXIMUM 10 MiB. '
+                    . 'REFUSED (422) on a form that is not accepting submissions, and on a form with '
+                    . 'no `file` field — so a broad permission cannot be aimed at arbitrary form ids '
+                    . 'as a way into a tenant\'s storage. '
+                    . 'THROTTLED to 20 uploads per caller per hour. '
+                    . 'THE UPLOAD IS SINGLE-USE and expires: it is spent by the first submission that '
+                    . 'names it, and anything never submitted is deleted by the '
+                    . '`form-uploads:sweep` retention job (24 h by default).',
+                'tags' => ['forms'],
+                'responses' => [
+                    201 => self::jsonResponse('The stored file, and the reference to answer with', 'FormUploadResponse'),
+                    400 => self::errorResponse('No file part, or the multipart body could not be read'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse(
+                        'Too large, not an accepted kind, the form asks for no file, '
+                        . 'or the form is not accepting submissions'
+                    ),
+                    429 => self::errorResponse('Too many uploads from this caller'),
+                    503 => self::errorResponse('The file could not be stored'),
+                ] + self::authErrors(),
+            ], self::formUploadMultipartBody(
+                'The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by '
+                . 'filename or Content-Type. Maximum 10 MiB.'
+            ))),
+            [
+                'method' => 'POST',
+                'path' => '/api/public/forms/{slug}/uploads',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => array_merge([
+                    'summary' => 'Attach a file to a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'The anonymous half of the upload above, and the route that made `file` fields '
+                        . 'servable on a public form at all. '
+                        . 'A file input is NOT the membership oracle a person or unit picker is: it '
+                        . 'offers no list, resolves no id against this organisation, and returns one '
+                        . 'opaque reference to the caller\'s own bytes — so there is no question about '
+                        . 'the tenant it can be asked. '
+                        . 'THE TENANT IS RESOLVED FROM THE SLUG, and every reason there is no publicly '
+                        . 'served form behind it collapses to the SAME 404 as the render and the '
+                        . 'submit. '
+                        . 'BOUNDED, because what a stranger can spend here is storage: 10 uploads per '
+                        . 'IP per hour, 400 per form per hour across all addresses, and a size ceiling '
+                        . 'of 5 MiB — HALF the authenticated one, so bytes-per-address-per-hour is '
+                        . 'what is capped rather than just the count. Same three accepted kinds, same '
+                        . 'magic-byte check. '
+                        . 'Anything never submitted is deleted by the retention sweep, so an abandoned '
+                        . 'upload costs a day of storage rather than a permanent one.',
+                    'tags' => ['forms'],
+                    'responses' => [
+                        201 => self::jsonResponse('The stored file, and the reference to answer with', 'FormUploadResponse'),
+                        400 => self::errorResponse('No file part, or the multipart body could not be read'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        422 => self::errorResponse(
+                            'Too large, not an accepted kind, the form asks for no file, '
+                            . 'or the form is outside its submission window'
+                        ),
+                        429 => self::errorResponse('Too many uploads from this address, or for this form'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ], self::formUploadMultipartBody(
+                    'The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by '
+                    . 'filename or Content-Type. Maximum 5 MiB on this public surface.'
+                )),
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/public/forms/{slug}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Render a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'PUBLIC and unauthenticated by design: the caller is somebody outside the '
+                        . 'organisation — an applicant, a supplier, a member of the public — who has no '
+                        . 'account and does not need one. '
+                        . 'THE TENANT IS RESOLVED FROM THE SLUG, never from a header, a query parameter '
+                        . 'or the Host — all of which are values this caller chooses. '
+                        . 'A malformed slug, an unknown slug, a form whose link was closed, and a form '
+                        . 'that is not published all produce THE SAME 404 with the same sentence, so '
+                        . 'this endpoint cannot be asked which slugs name a real form or whether an '
+                        . 'organisation uses public forms at all. '
+                        . 'The response carries NO id, tenant id, form key, author, route template, '
+                        . 'submission count, status, version or prefill — an anonymous caller has no '
+                        . 'saved details for the platform to pre-fill, and nothing about how the '
+                        . 'organisation works is disclosed. '
+                        . 'Person and unit fields are omitted from the field list, for the reason '
+                        . 'POST /api/v1/forms/{id}/public-link refuses them. FILE fields ARE served: '
+                        . 'attach the bytes at POST /api/v1/public/forms/{slug}/uploads first and put '
+                        . 'the returned `reference` in the answer. '
+                        . 'A form OUTSIDE its submission window still renders, with '
+                        . '`accepts_submissions: false` and the window dates, so somebody holding a '
+                        . 'genuine link is told they are early or late rather than that the link is '
+                        . 'wrong.',
+                    'tags' => ['forms'],
+                    'responses' => [
+                        200 => self::jsonResponse('The form, as a stranger may see it', 'PublicFormResponse'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        429 => self::errorResponse('Too many attempts from this address'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/public/forms/{slug}/submissions',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Submit a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'The answers arrive under `data`, keyed by field key, and NOTHING ELSE in the '
+                        . 'body is read — a body that could also set `submitted_by_profile_id`, '
+                        . '`form_version` or a route template would let an anonymous stranger sign a '
+                        . 'declaration in somebody\'s name or aim it at a flow the organisation did not '
+                        . 'choose. '
+                        . 'The submission is recorded with NO SUBMITTER '
+                        . '(`form_submissions.submitted_by_profile_id` is NULL — no sentinel profile, '
+                        . 'because a fake person is something every membership and permission check '
+                        . 'would have to know to special-case). '
+                        . 'It BECOMES A DOCUMENT and circulates through the tenant\'s existing routing '
+                        . 'engine exactly as an internal submission does, which is safe because the '
+                        . 'caller cannot name a route template: it lives on the FORM, is set only by '
+                        . '`forms:manage`, and is never read from a request body. '
+                        . 'Throttled per IP and per form. '
+                        . 'The response is a receipt, not the submission row: no id, no document id, '
+                        . 'no tenant id.',
+                    'tags' => ['forms'],
+                    'request' => 'FormSubmissionCreateRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('Received', 'PublicFormSubmissionResponse'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        422 => self::errorResponse(
+                            'An answer failed validation, or the form is outside its submission window'
+                        ),
+                        429 => self::errorResponse('Too many attempts from this address, or for this form'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/form-fields', 'forms:read', [
+                'summary' => "One form's fields, addressed by query param",
+                'description' => 'The same list as GET /api/v1/forms/{id}/fields, reachable by '
+                    . '`?form_id=` so a master-detail picker can drive it — a data-bound block\'s '
+                    . 'params append QUERY params to a fixed source and cannot fill a PATH segment. '
+                    . 'This flat form exists for READS only; every write stays nested under the form, '
+                    . 'which is what makes a delete refuse when the field belongs to a different one. '
+                    . 'An absent or unknown `form_id` returns an empty list, not a 422: the picker '
+                    . 'renders before anybody has chosen.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'The form whose fields to return.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The fields, with the builder vocabularies', 'FormFieldListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}/fields', 'forms:read', [
+                'summary' => "A form's fields, in authoring order",
+                'description' => 'Ordered by `position`, then `id` — the id tie-break makes the sequence '
+                    . 'TOTAL, since `position` carries no unique index (a drag-reorderable ordinal must '
+                    . 'not, or a two-field swap becomes a three-statement dance). `meta` carries the '
+                    . 'vocabularies a builder renders its pickers from, so a client cannot hold a stale '
+                    . 'copy of the field kinds or the prefill sources.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The fields, with the builder vocabularies', 'FormFieldListResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/fields', 'forms:manage', [
+                'summary' => 'Add a field to a form',
+                'description' => 'Appended AFTER the current maximum position unless one is given: a '
+                    . 'builder that adds a field expects it at the end, where the author is looking. '
+                    . '`select` and `multiselect` require a non-empty `options` list; `profile_ref` and '
+                    . '`ou_ref` accept none, because their choices are RESOLVED from the tenant\'s live '
+                    . 'people and units rather than authored — a pasted roster is wrong by the end of '
+                    . 'the month, still renders, and still reports success. `prefill_source` names a '
+                    . 'rule for reaching the submitter\'s own details and is resolved at render time, '
+                    . 'never stored.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created field', 'FormFieldResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicate key, an unknown kind or prefill source, a '
+                        . 'choice-bearing field with no choices, or an invalid validation pattern'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/forms/{id:\d+}/fields', 'forms:manage', [
+                'summary' => "Save a form's whole field set at once",
+                'description' => 'Authoring a form is one act of composition, not a sequence of '
+                    . 'independent single-field decisions — an editor that adds, reorders and deletes '
+                    . 'question cards in place cannot rest on per-field calls without inventing a '
+                    . 'client-side transaction and hoping every leg lands. Reconciled by `field_key`, '
+                    . 'which is the stable identity a recorded ANSWER refers to and is deliberately not '
+                    . 'updatable: a key present in both the payload and the stored set is the SAME '
+                    . 'question, edited or moved, while a stored key absent from the payload is a '
+                    . 'question withdrawn — and its answers stay recorded but stop having a label. '
+                    . 'Matching on position instead would rename every question below an insertion and '
+                    . 'silently reattribute its answers. Position comes from the order sent, and the '
+                    . 'whole reconciliation is one transaction.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldSetRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The resulting field set, in order', 'FormFieldListResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicated key, an unknown kind or prefill source, a '
+                        . 'choice-bearing field with no choices, or an invalid validation pattern'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', 'forms:manage', [
+                'summary' => 'Edit a field, or move it in the order',
+                'description' => '`field_key` is immutable and a body carrying one is REFUSED: answers '
+                    . 'already submitted are keyed by it, so renaming a key in place does not rename '
+                    . 'the answers, it ORPHANS them, silently, while reporting success. `field_type` '
+                    . 'MAY change — fixing text to textarea is a real edit — and options are '
+                    . 're-validated against the new kind in the same request, so a select demoted to '
+                    . 'text cannot keep choices nothing will draw.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated field', 'FormFieldResponse'),
+                    404 => self::errorResponse('Form or field not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse('An immutable field, no updatable field, or an invalid value'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', 'forms:manage', [
+                'summary' => 'Take a field off a form',
+                'description' => 'Answers already given to it are NOT deleted — they stay in the '
+                    . 'submission and simply stop having a label. That is why an ARCHIVED form refuses '
+                    . 'this: its fields are the only remaining explanation of what its submissions '
+                    . 'answered. The field id is scoped to the form in the path, so a delete addressed '
+                    . 'through the wrong form is a 404 rather than a cross-form deletion.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                        ['deleted' => ['type' => 'boolean']],
+                        ['deleted']
+                    ))),
+                    404 => self::errorResponse('Form or field not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/submissions', 'forms:submit', [
+                'summary' => 'Submit a form',
+                'description' => 'Answers arrive under `data`, keyed by field key; everything else in '
+                    . 'the body is ignored, because a body that could also set `submitted_by_profile_id` '
+                    . 'would let a caller sign a declaration in somebody else\'s name. On success the '
+                    . 'submission ALSO becomes a core DOCUMENT, so it inherits routing, approvals, the '
+                    . 'inbox, QR verification, artifacts and row-level visibility — and when the form '
+                    . 'names a route template, that document starts circulating in the same '
+                    . 'transaction. `meta.routed` says whether it did, so a client never tells somebody '
+                    . 'their request is on its way when nothing is moving. `meta.ignored_keys` names '
+                    . 'answers that matched no field (a stale client): they are dropped rather than '
+                    . 'refused, so a race nobody caused does not discard everything the person typed.',
+                'tags' => ['forms'],
+                'request' => 'FormSubmissionCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The recorded submission', 'FormSubmissionCreateResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse(
+                        'The form is not accepting submissions, an answer failed validation, a '
+                        . 'reference names no record in this tenant, or the form\'s route template '
+                        . 'cannot be run as drawn'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/form-submissions', 'forms:read', [
+                'summary' => "List the tenant's submissions",
+                'description' => 'Newest first, optionally narrowed by `form_id` or `submitted_by`. '
+                    . 'Each row carries the form key and name so a list renders without a round trip '
+                    . 'per row. `document_id` is null for a submission to a form with no route template '
+                    . '(it collected, it did not circulate) and for one whose document was later '
+                    . 'deleted — both ordinary states, not failures.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'Restrict to one form.'),
+                    self::queryParam('submitted_by', 'integer', 'Restrict to one submitter.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 50, max 200).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The matching submissions', 'FormSubmissionListResponse'),
+                    422 => self::errorResponse('A form this tenant does not have'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/form-submissions/{id:\d+}', 'forms:read', [
+                'summary' => 'Get one submission, with the fields it was answering',
+                'description' => 'The fields travel with the submission because the two are useless '
+                    . 'apart — an answer of `41` means nothing without the field that says what was '
+                    . 'asked. They are TODAY\'s fields, and `form_version_now` is returned beside the '
+                    . 'submission\'s own `form_version` so a reader can SEE when the two do not line up '
+                    . 'and knows they are looking at drift rather than at a bug.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The submission and its fields', 'FormSubmissionDetailResponse'),
+                    404 => self::errorResponse('Submission not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/me/form-submissions', 'forms:submit', [
+                'summary' => 'The caller\'s own submissions',
+                'description' => 'Only ever the caller\'s rows — the ROUTE decides whose, not a query '
+                    . 'param, so nothing a client omits or changes can widen it. Gated on '
+                    . '`forms:submit` rather than `forms:read` because the rows already name exactly '
+                    . 'one person, so a tenant-wide permission has nothing left to decide; requiring '
+                    . 'the read permission would hide this from precisely the people whose submissions '
+                    . 'are in it. A caller with no profile (a service principal) gets an empty list, '
+                    . 'which is true rather than an authorization failure somebody has to investigate.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'Restrict to one form.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 50, max 200).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The caller\'s submissions', 'FormSubmissionListResponse'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * The `multipart/form-data` request body BOTH form-upload routes declare.
+     *
+     * Under the key `request`, not `requestBody`: #954 records the cost of
+     * getting that wrong — the branding uploads declared a body under the wrong
+     * key, {@see SchemaGenerator::addOperation()} never read it, and both
+     * operations published with no request body at all, so a generated client
+     * could see the endpoint and had no way to learn the part is called `file`.
+     *
+     * ONE helper for two routes because the authenticated and public uploads
+     * take the SAME part with the same name; only the size sentence differs, and
+     * that is the argument. Two copies would eventually disagree about the field
+     * name, which is the one thing a client cannot guess.
+     *
+     * @return array{request: array<string, mixed>}
+     */
+    private static function formUploadMultipartBody(string $description): array
+    {
+        return [
+            'request' => [
+                'required' => true,
+                'content' => [
+                    'multipart/form-data' => [
+                        'schema' => self::object([
+                            'file' => [
+                                'type' => 'string',
+                                'format' => 'binary',
+                                'description' => $description,
+                            ],
+                        ], ['file']),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * The tenant's OU TYPE vocabulary (#822) — the campus/faculty/department
      * levels its tree is built from.
      *
@@ -1140,6 +1711,424 @@ final class CoreApiSchemas
                     204 => ['description' => 'Deleted'],
                     404 => self::errorResponse('Organizational unit type not found'),
                     409 => self::errorResponse('Units still carry this type; retry with ?force=true'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * CONVENING (#convening, migrations 130/131): deliberative bodies, their
+     * meetings, and the decisions taken at them.
+     *
+     * THE ONE ROUTE WORTH READING FIRST is
+     * `POST /api/v1/meetings/{id}/agenda/{itemId}/decision`. It is the only
+     * endpoint in this subsystem that can move somebody ELSE's document: where
+     * the agenda item carries a document and that document's route has reached
+     * this body, the decision is applied through the existing routing engine —
+     * `DocumentRouter::act()`, with a verdict, as a person the route actually
+     * asked. Nothing here writes to a routing table.
+     *
+     * PERMISSIONS: `convening:read` for every read, `convening:manage` for the
+     * secretarial acts (agenda, dates, invitations), `convening:decide` for
+     * minuting a decision. Answering an INVITATION is unpermissioned — being
+     * invited is the authorization, the same posture migration 113 takes on
+     * acting on a route that reached you.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function conveningRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/convening-bodies', 'convening:read', [
+                'summary' => "List the tenant's convening bodies",
+                'description' => 'Active bodies first, then by key. A retired body stays readable — '
+                    . 'its minute-book outlives its usefulness — but takes no new meetings.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('active', 'string', 'Send `true` to list only active bodies.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's convening bodies", 'ConveningBodyListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/convening-bodies', 'convening:manage', [
+                'summary' => 'Constitute a convening body',
+                'description' => '`body_key` is immutable once set: every decision number the body '
+                    . 'mints quotes it. `name` may be a plain string or an object of language code '
+                    . 'to text — a body has as many real names as it has languages.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created body', 'ConveningBodyResponse'),
+                    422 => self::errorResponse('A malformed or already-taken key, or an empty name'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/convening-bodies/{id:\d+}', 'convening:read', [
+                'summary' => 'Get one body, with its current seats',
+                'description' => 'The membership travels with the body because the two are never '
+                    . 'wanted apart. `?history=true` includes PAST seats, which is how a decision '
+                    . 'taken last March is attributed to the body as it was constituted then.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('history', 'string', 'Send `true` to include seats that have ended.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The body and its members', 'ConveningBodyDetailResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/convening-bodies/{id:\d+}', 'convening:manage', [
+                'summary' => 'Rename a body, re-home it, retire it or revive it',
+                'description' => '`body_key` is refused: decision numbers already quote it, so '
+                    . 'editing it would leave them naming a body that no longer exists.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated body', 'ConveningBodyResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                    422 => self::errorResponse('No updatable field supplied, or an attempt to change body_key'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/convening-bodies/{id:\d+}', 'convening:manage', [
+                'summary' => 'Delete a convening body',
+                'description' => 'Refused, never forced, once the body has met: deleting it would '
+                    . 'destroy agendas and decisions, some of which have already approved documents. '
+                    . 'A body that has finished its work is deactivated.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                        ['deleted' => ['type' => 'boolean']],
+                        ['deleted']
+                    ))),
+                    404 => self::errorResponse('Convening body not found'),
+                    409 => self::errorResponse('The body has meetings on record'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/convening-bodies/{id:\d+}/members', 'convening:read', [
+                'summary' => "List a body's seats",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('history', 'string', 'Send `true` to include seats that have ended.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The seats', 'ConveningBodyMemberListResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/convening-bodies/{id:\d+}/members', 'convening:manage', [
+                'summary' => 'Seat somebody on a body, or move the seat they hold',
+                'description' => 'Appointing a current member to a different seat updates the seat '
+                    . 'they already hold rather than closing it and opening another — a chair who '
+                    . 'becomes secretary did not leave the body for an instant.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyMemberRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The body\'s current seats', 'ConveningBodyMemberListResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                    422 => self::errorResponse('A missing profile_id, or a seat outside the vocabulary'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute(
+                'DELETE',
+                '/api/convening-bodies/{id:\d+}/members/{profileId:\d+}',
+                'convening:manage',
+                [
+                    'summary' => 'End somebody\'s seat on a body',
+                    'description' => 'A DEPARTURE, not a deletion: the row is kept with an end date, '
+                        . 'so a decision taken while they sat remains attributable to the body as it '
+                        . 'was then.',
+                    'tags' => ['convening'],
+                    'responses' => [
+                        200 => self::jsonResponse('The remaining seats', 'ConveningBodyMemberListResponse'),
+                        404 => self::errorResponse('That person does not currently sit on this body'),
+                    ] + self::authErrors(),
+                ]
+            ),
+
+            self::permissionRoute('GET', '/api/meetings', 'convening:read', [
+                'summary' => 'List meetings, narrowed by body and status',
+                'description' => 'Most recent first, by id rather than by date: a draft has no date '
+                    . 'at all, and ordering on a nullable column heaps every draft at whichever end '
+                    . 'the engine sorts nulls.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('body_id', 'integer', 'Restrict to one convening body.'),
+                    self::queryParam('status', 'string', 'Comma-separated: draft, scheduled, held, cancelled.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The matching meetings', 'MeetingListResponse'),
+                    422 => self::errorResponse('A malformed filter'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings', 'convening:manage', [
+                'summary' => 'Open a meeting on a body, in draft',
+                'description' => 'Always `draft`, never straight to `scheduled`. Scheduling is its '
+                    . 'own act with its own meaning ("this is fixed, tell people"), and a sitting '
+                    . 'must not become scheduled as a side effect of somebody starting an agenda.',
+                'tags' => ['convening'],
+                'request' => 'MeetingCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('No such body, or the body is not active'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meetings/{id:\d+}', 'convening:read', [
+                'summary' => 'Get one meeting, with its agenda, decisions and invitations',
+                'description' => 'Everything behind one request, because nobody has ever wanted '
+                    . 'three of the four. A screen that fetched them separately would render an '
+                    . 'agenda before it knew which items had been decided.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The whole sitting', 'MeetingDetailResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/schedule', 'convening:manage', [
+                'summary' => 'Fix a date and a place; re-scheduling is the same call',
+                'description' => 'When the sitting had already been announced, EVERYBODY holding an '
+                    . 'invitation is told it moved — including the people who declined, because '
+                    . 'somebody who could not make the old date may well make the new one.',
+                'tags' => ['convening'],
+                'request' => 'MeetingScheduleRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The scheduled meeting', 'MeetingScheduleResponse'),
+                    422 => self::errorResponse('A meeting that is held or cancelled, or an unreadable date'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/hold', 'convening:manage', [
+                'summary' => 'Record that the meeting took place',
+                'description' => 'Terminal: nothing un-holds a meeting, because decisions minuted at '
+                    . 'it may already have advanced somebody\'s document. `held_at` is supplied '
+                    . 'rather than stamped by the server — a body routinely minutes yesterday\'s '
+                    . 'sitting, and the date chooses the year each decision number is minted under.',
+                'tags' => ['convening'],
+                'request' => 'MeetingHoldRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The held meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('A meeting that is already held or was cancelled'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/cancel', 'convening:manage', [
+                'summary' => 'Call off a meeting that has not happened',
+                'description' => 'A state rather than a deletion: a called-off sitting is a fact the '
+                    . 'minute-book needs, and deleting the row would take its agenda with it.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The cancelled meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('A meeting that has already been held'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/invitations', 'convening:manage', [
+                'summary' => "Invite the body's current members",
+                'description' => 'Membership is resolved NOW, not stored earlier — the same '
+                    . 'rule-not-roster principle the routing engine enforces on its steps. '
+                    . 'Idempotent: somebody already invited is not re-invited, not re-notified, and '
+                    . 'does not have their answer reset, so this is safe to call again after a '
+                    . 'person joins the body.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The meeting\'s invitations', 'MeetingInviteResponse'),
+                    422 => self::errorResponse('A draft, held or cancelled meeting, or a body with no members'),
+                ] + self::authErrors(),
+            ]),
+            // No helper: this is the one route in the subsystem with NO
+            // permission, and `permissionRoute()` cannot express that. Spelled
+            // out so the null is visible rather than defaulted.
+            [
+                'method' => 'POST',
+                'path' => '/api/meetings/{id:\d+}/invitations/respond',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Accept, decline, or answer tentatively',
+                    'description' => 'UNPERMISSIONED on purpose: being invited IS the authorization, '
+                        . 'the same posture `/api/me/notifications` takes. The answering person comes '
+                        . 'from the SESSION and never from the request body. `invited` is not among '
+                        . 'the answers — it is the state the system puts the row in, and '
+                        . '"un-answering" means nothing.',
+                    'tags' => ['convening'],
+                    'request' => 'MeetingInvitationRespondRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('Your answer', 'MeetingInvitationResponse'),
+                        403 => self::errorResponse('Answering an invitation requires a signed-in person'),
+                        422 => self::errorResponse('Not an answer, or you hold no invitation to this meeting'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/agenda', 'convening:manage', [
+                'summary' => 'Put an item — often a document — on a meeting\'s agenda',
+                'description' => 'A draft or scheduled meeting accumulates items freely. Attaching '
+                    . 'to a meeting that has ALREADY BEEN HELD is possible and must be asked for '
+                    . '(`allow_held: true`): it asserts the body considered the item at a sitting '
+                    . 'that is over, which is right for a paper tabled on the day and wrong if you '
+                    . 'meant the next meeting. A cancelled meeting is refused outright.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAgendaItemCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The agenda item', 'MeetingAgendaItemResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('A cancelled meeting, or a held meeting without allow_held'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/meetings/{id:\d+}/agenda/order', 'convening:manage', [
+                'summary' => "Rewrite the whole agenda's order",
+                'description' => 'The list must name every item on the agenda exactly once. A '
+                    . 'partial list describes an order that omits items, and both readings of that '
+                    . '— leave them where they are, or append them — are guesses.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAgendaReorderRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The reordered agenda', 'MeetingAgendaItemListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('The list is not a permutation of this meeting\'s items'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute(
+                'DELETE',
+                '/api/meetings/{id:\d+}/agenda/{itemId:\d+}',
+                'convening:manage',
+                [
+                    'summary' => 'Remove an agenda item, closing the gap it leaves',
+                    'description' => 'Refused once a decision has been recorded against the item: a '
+                        . 'decision may already have approved a document, and deleting what it was '
+                        . 'about would leave it quoting an item nobody can read.',
+                    'tags' => ['convening'],
+                    'responses' => [
+                        200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                            ['deleted' => ['type' => 'boolean']],
+                            ['deleted']
+                        ))),
+                        404 => self::errorResponse('Agenda item not found on this meeting'),
+                        409 => self::errorResponse('A decision has been recorded against this item'),
+                    ] + self::authErrors(),
+                ]
+            ),
+            self::permissionRoute(
+                'POST',
+                '/api/meetings/{id:\d+}/agenda/{itemId:\d+}/decision',
+                'convening:decide',
+                [
+                    'summary' => "Minute the body's decision, and drive the document's approval route",
+                    'description' => 'THE ONE ENDPOINT HERE THAT CAN MOVE SOMEBODY ELSE\'S DOCUMENT. '
+                        . 'One call allocates the decision number from the platform counter, applies '
+                        . 'the verdict through the existing routing engine, and writes the decision '
+                        . 'row — all three in one transaction, in that order, so a decision can never '
+                        . 'claim an approval the engine refused. Approved advances or fires the '
+                        . 'approve edge; rejected fires the reject edge or goes nowhere; a deferral '
+                        . 'is recorded and moves nothing. The `routing` object always says what '
+                        . 'actually happened, including the ordinary cases where nothing did.',
+                    'tags' => ['convening'],
+                    'request' => 'MeetingDecisionRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('The decision, and what it did', 'MeetingDecisionResponse'),
+                        404 => self::errorResponse('Agenda item not found on this meeting'),
+                        422 => self::errorResponse(
+                            'A meeting that has not been held, a verdict outside the vocabulary, or a '
+                            . 'refusal from the routing engine (returned in its own words)'
+                        ),
+                    ] + self::authErrors(),
+                ]
+            ),
+
+            self::permissionRoute('GET', '/api/agenda-items', 'convening:read', [
+                'summary' => "One meeting's agenda, in order",
+                'description' => 'A FLAT, FILTERED collection read: a tabular client addresses a '
+                    . 'collection with query parameters and cannot build a nested path out of a '
+                    . 'selection. `meeting_id` is required — an unfiltered tenant-wide list is not a '
+                    . 'question anybody asks, and answering one would make a forgotten filter look '
+                    . 'like a working call.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose agenda to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The agenda', 'MeetingAgendaItemListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-decisions', 'convening:read', [
+                'summary' => "One meeting's decisions",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose decisions to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The decisions', 'MeetingDecisionListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-invitations', 'convening:read', [
+                'summary' => "One meeting's invitations and answers",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose invitations to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The invitations', 'MeetingInvitationListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/meetings/{id:\d+}/attendance', 'convening:manage', [
+                'summary' => 'Record who actually attended a meeting that has been held',
+                'description' => 'A REPLACEMENT of the whole list, which is why it is a PUT: a '
+                    . 'secretary reads a sign-in sheet and asserts the entire set, not a stream of '
+                    . 'arrivals. Anybody omitted is removed from the record of who attended. '
+                    . 'ATTENDANCE IS NOT AN INVITATION ANSWER — an acceptance is a prediction made '
+                    . 'before the sitting and attendance is what happened at it, they disagree '
+                    . 'constantly, and neither overwrites the other. Somebody who was never invited '
+                    . 'can be recorded: give a `profile_id` for a person with an account or an '
+                    . '`attendee_name` for a guest without one. Refused unless the meeting has been '
+                    . 'HELD — attendance taken beforehand is a guess, and the platform already holds '
+                    . 'guesses as invitation answers.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAttendanceRequest',
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The recorded attendance, and what was counted',
+                        'MeetingAttendanceResponse'
+                    ),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse(
+                        'A meeting that has not been held, an attendee that identifies nobody, a '
+                        . 'duplicated profile, or a capacity outside the vocabulary'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-attendees', 'convening:read', [
+                'summary' => "One meeting's attendance, and what each attendee had answered",
+                'description' => 'Every row carries `was_invited` and `invitation_status` beside the '
+                    . 'attendance, because the interesting rows are the ones where the two disagree: '
+                    . 'somebody who declined and came anyway, somebody who holds no invitation at '
+                    . 'all. `convening:read` and not `convening:manage`, so that a caller who can '
+                    . "already see this meeting's invitations and decisions is not refused the "
+                    . 'less sensitive fact of who was in the room.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose attendance to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The attendance, and what was counted',
+                        'MeetingAttendanceResponse'
+                    ),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\d+}/convening', 'convening:read', [
+                'summary' => 'Which bodies has this document been in front of, and what did they decide?',
+                'description' => 'THE REVERSE READ. Without it the subsystem is invisible from the '
+                    . 'document side: somebody looking at a document that is sitting still has no '
+                    . 'way to discover it is waiting for a body that meets on the 14th.',
+                'tags' => ['convening', 'documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'Every agenda item naming this document, with its meeting, body and decisions',
+                        'DocumentConveningResponse'
+                    ),
                 ] + self::authErrors(),
             ]),
         ];
@@ -4572,6 +5561,396 @@ final class CoreApiSchemas
             // this kind sits inside. There is deliberately no rank column —
             // a kind's place is expressed by what contains it, which is a
             // structural fact, rather than by a sort order, which is an opinion.
+            // FORMS (migrations 127/128). `name` and `label` are the bilingual
+            // `{ar?, en?}` object, so Arabic and English are both first-class
+            // rather than one being the "real" value and the other a translation.
+            //
+            // `available_transitions` and `accepts_submissions` are DERIVED from
+            // `status` and are emitted so a client rendering the lifecycle
+            // controls does not carry a second copy of the transition table —
+            // which is how a client ends up offering a control the server refuses.
+            'Form' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_key' => self::str(),
+                'name' => self::localizedText(),
+                'description' => self::str(true),
+                'status' => ['type' => 'string', 'enum' => ['draft', 'published', 'archived']],
+                'version' => self::int(),
+                // Null means "collect only, do not circulate" — a legitimate
+                // configuration, not an unset field.
+                'route_template_id' => self::int(true),
+                'created_by_profile_id' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+                'available_transitions' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'accepts_submissions' => self::bool(),
+                // THE PUBLIC LINK (migration 132). Off by default on every form
+                // in every install: `public_enabled` is only ever true because
+                // somebody holding `forms:manage` called
+                // POST /api/v1/forms/{id}/public-link.
+                'public_enabled' => self::bool(),
+                // 64 hex characters — 256 bits from a CSPRNG. It is the ONLY
+                // credential the public endpoints have, so treat it as one: it is
+                // returned to tenant members (who must be able to hand the link
+                // out) and to nobody else. Null when the form has no link.
+                'public_slug' => self::str(true),
+                // The absolute address the form is served from, composed from the
+                // slug and this instance's own APP_URL rather than stored — an
+                // instance that moves domain must not serve a column pointing at
+                // where it used to live. Null when there is no link, and ALSO
+                // null when the instance has never been told its own address.
+                'public_url' => self::str(true),
+                // The submission window. Either may be null, meaning "no boundary
+                // on this side". Naive local date-times in the instance's own
+                // clock, like every other timestamp in this schema.
+                'public_opens_at' => self::str(true),
+                'public_closes_at' => self::str(true),
+                'public_enabled_at' => self::str(true),
+                'public_enabled_by_profile_id' => self::int(true),
+                // DERIVED, computed by the database against its own clock: is the
+                // form inside its window right now? Emitted so a client does not
+                // compare timestamps in a second timezone and disagree with the
+                // server about whether a link is live.
+                'public_window_open' => self::bool(),
+            ], [
+                'id', 'tenant_id', 'form_key', 'name', 'status', 'version',
+                'available_transitions', 'accepts_submissions', 'public_enabled',
+            ]),
+            'FormResponse' => self::dataEnvelope(SchemaBuilder::ref('Form')),
+            'FormListResponse' => self::listEnvelope('Form'),
+            'FormDetailResponse' => self::dataEnvelope([
+                'allOf' => [
+                    SchemaBuilder::ref('Form'),
+                    self::object([
+                        'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                        'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                        'submission_count' => self::int(),
+                    ], []),
+                ],
+            ]),
+            // `field_type` mirrors the CHECK constraint on `form_fields` and
+            // FieldType's whitelist; a unit test reads the migration and fails
+            // the moment the three disagree.
+            //
+            // `prefill_backed` is emitted BESIDE `prefill_source` rather than
+            // left for a client to derive: two of the declared sources have no
+            // column in this schema to read, and an author choosing one must see
+            // in the field editor that it will never produce a value — not
+            // discover it as an empty box after publishing.
+            'FormField' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_id' => self::int(),
+                'field_key' => self::str(),
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::str(true),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'prefill_backed' => self::bool(),
+                'section_key' => self::str(true),
+                'position' => self::int(),
+                'multi_valued' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'form_id', 'field_key', 'field_type', 'label', 'is_required', 'position']),
+            'FormFieldOption' => self::object([
+                'value' => self::name(nonEmpty: true),
+                'label' => self::localizedText(),
+            ], ['value', 'label']),
+            // Every rule is optional and unknown keys are DROPPED on write rather
+            // than stored: a rule nothing enforces is a promise on the row that no
+            // code keeps. `maxLength` may only TIGHTEN the platform ceiling.
+            'FormFieldValidation' => self::object([
+                'min' => ['type' => 'number'],
+                'max' => ['type' => 'number'],
+                'maxLength' => self::int(),
+                'pattern' => ['type' => 'string', 'maxLength' => 512],
+            ], []),
+            // DERIVED from the fields' `section_key`, never stored. There is no
+            // `form_sections` table, so a section cannot exist with no fields and
+            // a field cannot point at a section that was deleted.
+            'FormSection' => self::object([
+                'key' => self::str(true),
+                'field_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+            ], ['key', 'field_keys']),
+            'FormFieldResponse' => self::dataEnvelope(SchemaBuilder::ref('FormField')),
+            'FormFieldListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                'meta' => SchemaBuilder::ref('FormBuilderVocabularies'),
+            ], ['data']),
+            // Served by the server so a builder cannot hold a stale copy of the
+            // field kinds or of which prefill sources actually resolve here.
+            'FormBuilderVocabularies' => self::object([
+                'field_types' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'option_bearing_field_types' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'prefill_sources' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'source' => self::str(),
+                        // False means nothing in this install stores that detail,
+                        // so the field starts empty. Declared anyway — omitting it
+                        // would push authors into adding a plain text box and
+                        // making every submitter retype it.
+                        'backed' => self::bool(),
+                        'reason' => self::str(true),
+                    ], ['source', 'backed']),
+                ],
+            ], ['field_types', 'prefill_sources']),
+            'FormCreateRequest' => self::object([
+                'form_key' => [
+                    'type' => 'string',
+                    'minLength' => 1,
+                    'maxLength' => 128,
+                    'pattern' => '^[a-z][a-z0-9_-]*$',
+                ],
+                // A bare string is accepted and read as English: a form named in
+                // one language only is the ordinary case, and demanding the object
+                // shape would 422 a request that meant something perfectly clear.
+                'name' => self::localizedText(),
+                'description' => self::text(),
+                'route_template_id' => self::int(true),
+            ], ['form_key', 'name']),
+            // `form_key` and `status` are absent because both are REFUSED with a
+            // 422 rather than ignored — a caller who sent one meant something, and
+            // dropping it silently would leave them believing a change happened.
+            'FormUpdateRequest' => self::object([
+                'name' => self::localizedText(),
+                'description' => self::text(),
+                'route_template_id' => self::int(true),
+            ], []) + ['minProperties' => 1],
+            'FormFieldCreateRequest' => self::object([
+                'field_key' => [
+                    'type' => 'string',
+                    'minLength' => 1,
+                    'maxLength' => 128,
+                    'pattern' => '^[a-z][a-z0-9_]*$',
+                ],
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::text(),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'section_key' => self::name(),
+                // Absent means the server appends it after the current maximum.
+                'position' => self::int(),
+            ], ['field_key', 'field_type', 'label']),
+            // The WHOLE set, in order. Each entry is a create-shaped field; the
+            // list's order IS the position, so a caller that shows a sequence
+            // does not also have to maintain an integer that agrees with it.
+            'FormFieldSetRequest' => self::object([
+                'fields' => [
+                    'type' => 'array',
+                    'items' => SchemaBuilder::ref('FormFieldCreateRequest'),
+                    'description' => 'Every field the form should have after this call. A stored '
+                        . 'field_key absent from this list is withdrawn; answers already given to it '
+                        . 'stay recorded and stop having a label.',
+                ],
+            ], ['fields']),
+            'FormFieldUpdateRequest' => self::object([
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::text(),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'section_key' => self::name(),
+                'position' => self::int(),
+            ], []) + ['minProperties' => 1],
+            // `prefill` is keyed by FIELD KEY, not by source: two fields may name
+            // the same source and each wants its own entry. It is kept OUT of the
+            // field objects on purpose — a field is the same for everybody and a
+            // prefill value is not, and merging them would produce a payload that
+            // looks cacheable and is not.
+            'FormRenderResponse' => self::dataEnvelope(self::object([
+                'form' => SchemaBuilder::ref('Form'),
+                'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                'prefill' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                'unresolved_prefill' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'field_key' => self::str(),
+                        'source' => self::str(),
+                        'reason' => self::str(),
+                    ], ['field_key', 'source', 'reason']),
+                ],
+                'accepts_submissions' => self::bool(),
+            ], ['form', 'fields', 'sections', 'prefill', 'accepts_submissions'])),
+            'FormSubmissionCreateRequest' => self::object([
+                // Answers keyed by field key. Values are typed per the field's
+                // kind — a string, a number, a boolean, or a list of choices —
+                // which is why this is `additionalProperties: true` rather than a
+                // narrower map: one schema cannot express "shaped by another row".
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['data']),
+            // ---- the public link (migration 132) ----
+            // Both boundaries optional and either nullable: null means "no
+            // boundary on this side", which is the ordinary case and must not
+            // need a sentinel date. A UTC offset is REFUSED rather than applied —
+            // the column is a naive TIMESTAMP compared against the database's own
+            // clock, so accepting one would move the deadline somebody typed
+            // without saying so.
+            'FormPublicLinkRequest' => self::object([
+                'opens_at' => [
+                    'type' => 'string',
+                    'nullable' => true,
+                    'description' => 'YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS] in the instance\'s own '
+                        . 'time zone. A bare date means the START of that day.',
+                ],
+                'closes_at' => [
+                    'type' => 'string',
+                    'nullable' => true,
+                    'description' => 'Same format. A bare date closes at MIDNIGHT THAT MORNING, so '
+                        . '"all of the 30th" is written as the 31st or as an explicit time.',
+                ],
+            ], []),
+            // `meta.closed` is the honest way to be idempotent: the call always
+            // succeeds, and this says whether it was the one that changed
+            // anything.
+            'FormPublicLinkClosedResponse' => self::object([
+                'data' => SchemaBuilder::ref('Form'),
+                'meta' => self::object(['closed' => self::bool()], ['closed']),
+            ], ['data']),
+            // WHAT A STRANGER SEES. Deliberately NOT `Form` plus omissions — it is
+            // its own, much smaller shape, built key by key, so a column added to
+            // `forms` next year is invisible here unless somebody adds it. No id,
+            // no tenant id, no form key, no author, no route template, no
+            // submission count, no status, no version, and no prefill.
+            'PublicFormResponse' => self::dataEnvelope(self::object([
+                'slug' => self::str(),
+                'name' => self::localizedText(),
+                'description' => self::str(true),
+                'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('PublicFormField')],
+                'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                'accepts_submissions' => self::bool(),
+                'opens_at' => self::str(true),
+                'closes_at' => self::str(true),
+            ], ['slug', 'name', 'fields', 'sections', 'accepts_submissions'])),
+            // A field, reduced to what drawing it requires. `id`, `tenant_id` and
+            // `form_id` are internal identifiers a stranger has no use for and
+            // could try elsewhere; `prefill_source` is withheld even though it
+            // holds no value of this caller's, because naming `profile.ou` tells
+            // an outsider the platform models organisational units and that this
+            // form expects one — a free sentence about internals, for a field
+            // that renders identically without it.
+            //
+            // `validation` IS disclosed: the server enforces it either way, so
+            // withholding it only means the person discovers the rule by being
+            // refused.
+            'PublicFormField' => self::object([
+                'field_key' => self::str(),
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select', 'multiselect', 'checkbox',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::str(true),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'validation' => ['type' => 'object', 'additionalProperties' => true],
+                'section_key' => self::str(true),
+                'position' => self::int(),
+                'multi_valued' => self::bool(),
+            ], ['field_key', 'field_type', 'label', 'is_required', 'position']),
+            // A RECEIPT, not the submission row. An anonymous caller gets
+            // confirmation and the timestamp of their own act — never the
+            // submission id, the document id or the tenant id, which would hand
+            // them integers to try against every other surface.
+            // The reference a `file` answer carries, plus what the server saw.
+            // `reference` IS the storage key, and handing it over is safe because
+            // a key is not a capability anywhere in this platform: NO route
+            // accepts one as input. Bytes are read at
+            // GET /api/v1/documents/{id}/artifacts/{artifactId}/content, which
+            // resolves the document through the visibility policy, binds the
+            // artifact to that document AND tenant, and takes the key OFF THE
+            // ROW. And a key from elsewhere cannot become such a row: the submit
+            // path accepts a `file` answer only by CLAIMING an unspent
+            // `form_uploads` row bound to this tenant, this form and this
+            // uploader (migration 133).
+            //
+            // `checksum_sha256` is the server's own hash of the bytes it stored,
+            // returned so a client can verify the upload before committing to a
+            // submission — and recorded onto `document_artifacts` when the upload
+            // is claimed, so "is this the file that was sent" stays answerable.
+            'FormUploadResponse' => self::object([
+                'data' => self::object([
+                    'reference' => self::str(),
+                    'filename' => self::str(true),
+                    'content_type' => self::str(),
+                    'byte_size' => self::int(),
+                    'checksum_sha256' => self::str(),
+                ], ['reference', 'content_type', 'byte_size', 'checksum_sha256']),
+            ], ['data']),
+            'PublicFormSubmissionResponse' => self::object([
+                'data' => self::object([
+                    'received' => self::bool(),
+                    'submitted_at' => self::str(true),
+                ], ['received']),
+                'meta' => self::object([
+                    'routed' => self::bool(),
+                    'ignored_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ], ['routed', 'ignored_keys']),
+            ], ['data']),
+            'FormSubmission' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_id' => self::int(),
+                // The version the answers were given against. See the publish
+                // route for exactly what this stamp does and does not promise.
+                'form_version' => self::int(),
+                // NULL has two ordinary causes and neither is an error: a service
+                // principal has no profile, and a submission made through a
+                // PUBLIC LINK (migration 132) has no account behind it at all.
+                // There is no sentinel "anonymous" profile — a fake person is
+                // something every membership check and permission resolution
+                // would have to know to special-case, and the ones that did not
+                // would treat it as real.
+                'submitted_by_profile_id' => self::int(true),
+                // Null is ORDINARY: a form with no route template records the
+                // answers and mints no document, and a document deleted later
+                // leaves the answers untouched.
+                'document_id' => self::int(true),
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'submitted_at' => self::str(),
+                'created_at' => self::str(),
+                // Present only on the reads that join `forms`. Absent means "not
+                // fetched by this read", never "empty".
+                'form_key' => self::str(),
+                'form_name' => self::localizedText(),
+            ], ['id', 'tenant_id', 'form_id', 'form_version', 'data', 'submitted_at']),
+            'FormSubmissionListResponse' => self::listEnvelope('FormSubmission'),
+            'FormSubmissionDetailResponse' => self::dataEnvelope([
+                'allOf' => [
+                    SchemaBuilder::ref('FormSubmission'),
+                    self::object([
+                        'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                        'form_version_now' => self::int(true),
+                    ], []),
+                ],
+            ]),
+            'FormSubmissionCreateResponse' => self::object([
+                'data' => SchemaBuilder::ref('FormSubmission'),
+                'meta' => self::object([
+                    'routed' => self::bool(),
+                    'ignored_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ], ['routed', 'ignored_keys']),
+            ], ['data', 'meta']),
+
             'TimeWindowType' => self::object([
                 'id' => self::int(),
                 'tenant_id' => self::int(),
@@ -4734,6 +6113,363 @@ final class CoreApiSchemas
                 // is never whether it happened but why.
                 'reason' => self::text() + ['minLength' => 1],
             ], ['reason']),
+
+            // #convening (migrations 130/131). DELIBERATIVE BODIES that meet,
+            // minute numbered decisions, and drive a document's existing approval
+            // route with what they decided.
+            //
+            // `name` and `title` are OBJECTS of language code => text, not
+            // strings: this platform's Arabic/RTL support is not a display
+            // setting, and a body HAS two names of which both are the real one.
+            // `display_name` / `display_title` ride alongside for the surfaces
+            // that can carry only ONE string (a notification subject, a cell in a
+            // server-driven table); a localizing client reads the map and ignores
+            // them.
+            'LocalizedLabel' => [
+                'type' => 'object',
+                'additionalProperties' => self::str(),
+                'description' => 'Language code => text. At least one entry.',
+            ],
+            'ConveningBody' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_key' => self::str(),
+                'name' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_name' => self::str(),
+                'ou_id' => self::int(true),
+                'description' => self::str(true),
+                'is_active' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'body_key', 'name', 'display_name', 'ou_id',
+                'description', 'is_active', 'created_at', 'updated_at',
+            ]),
+            // A SEAT, never a permission: holding the chair grants nothing in
+            // RBAC. What it decides is whose name carries the body's decision to
+            // a routing step, among people the route already reached.
+            'ConveningBodyMember' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_id' => self::int(),
+                'profile_id' => self::int(),
+                'member_role' => ['type' => 'string', 'enum' => MemberRole::all()],
+                'joined_at' => self::str(),
+                // NULL means "still a member". A departure is recorded rather
+                // than deleted, so a decision taken in March remains attributable
+                // to the body as it was then.
+                'left_at' => self::str(true),
+            ], ['id', 'tenant_id', 'body_id', 'profile_id', 'member_role', 'joined_at', 'left_at']),
+            'ConveningBodyListResponse' => self::listEnvelope('ConveningBody'),
+            'ConveningBodyResponse' => self::dataEnvelope(SchemaBuilder::ref('ConveningBody')),
+            'ConveningBodyDetailResponse' => self::dataEnvelope(
+                ['allOf' => [
+                    SchemaBuilder::ref('ConveningBody'),
+                    self::object(
+                        ['members' => ['type' => 'array', 'items' => SchemaBuilder::ref('ConveningBodyMember')]],
+                        ['members']
+                    ),
+                ]]
+            ),
+            'ConveningBodyMemberListResponse' => self::listEnvelope('ConveningBodyMember'),
+            'ConveningBodyCreateRequest' => self::object([
+                // Lower-case letters, digits, '-' and '_'. Narrow because it is
+                // quoted inside every decision number the body mints, and a key
+                // with a slash or a space produces numbers nobody can quote
+                // unambiguously.
+                'body_key' => self::str() + ['pattern' => '^[a-z0-9][a-z0-9_-]{0,63}$'],
+                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'ou_id' => self::int(true),
+                'description' => self::text(),
+            ], ['body_key', 'name']),
+            // `body_key` is absent rather than declared-and-ignored: it is
+            // immutable, because decision numbers already quote it.
+            'ConveningBodyUpdateRequest' => self::object([
+                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'ou_id' => self::int(true),
+                'description' => self::text(),
+                'is_active' => self::bool(),
+            ], []) + ['minProperties' => 1],
+            'ConveningBodyMemberRequest' => self::object([
+                'profile_id' => self::int(),
+                'member_role' => ['type' => 'string', 'enum' => MemberRole::all()],
+            ], ['profile_id']),
+
+            // One SITTING. `scheduled_at` and `held_at` are both nullable and
+            // both real: a draft has neither, a scheduled meeting has the first,
+            // and only a meeting that actually took place has the second.
+            // Nothing derives one from the other.
+            'Meeting' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_id' => self::int(),
+                'meeting_number' => self::int(),
+                'title' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_title' => self::str(),
+                'scheduled_at' => self::str(true),
+                'held_at' => self::str(true),
+                'location' => self::str(true),
+                'status' => ['type' => 'string', 'enum' => MeetingStatus::all()],
+                'created_by_profile_id' => self::int(true),
+                'created_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'body_id', 'meeting_number', 'title', 'display_title',
+                'scheduled_at', 'held_at', 'location', 'status', 'created_by_profile_id', 'created_at',
+            ]),
+            'MeetingAgendaItem' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'position' => self::int(),
+                'title' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_title' => self::str(),
+                // THE JOIN to the rest of the platform. An item with a document
+                // is an item a decision can move.
+                'document_id' => self::int(true),
+                'notes' => self::str(true),
+                'created_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'position', 'title', 'display_title',
+                'document_id', 'notes', 'created_at',
+            ]),
+            // `verdict` carries a third value the routing engine does not have.
+            // A deferral IS a decision — numbered, minuted — and it is
+            // deliberately not mapped onto approve or reject, because forcing it
+            // onto either would advance a document nobody approved or reject one
+            // nobody refused.
+            //
+            // `route_id` / `route_event_id` are what separate "the body approved
+            // it and the document advanced" from "the body approved it and
+            // nothing moved". Without them those two render identically.
+            'MeetingDecision' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'agenda_item_id' => self::int(),
+                'decision_number' => self::str(),
+                'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all()],
+                'rationale' => self::str(true),
+                'decided_at' => self::str(),
+                'recorded_by_profile_id' => self::int(true),
+                'route_id' => self::int(true),
+                'route_event_id' => self::int(true),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'agenda_item_id', 'decision_number', 'verdict',
+                'rationale', 'decided_at', 'recorded_by_profile_id', 'route_id', 'route_event_id',
+            ]),
+            // `invited` means "has not answered", never "declined" — which is
+            // why `responded_at` is a separate nullable field.
+            'MeetingInvitation' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'profile_id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => InvitationStatus::all()],
+                'sent_at' => self::str(true),
+                'responded_at' => self::str(true),
+            ], ['id', 'tenant_id', 'meeting_id', 'profile_id', 'status', 'sent_at', 'responded_at']),
+            // WHO WAS IN THE ROOM. A separate record from the invitation, not a
+            // state on it: an acceptance is a PREDICTION made before the sitting
+            // and this is what happened at it, and the two disagree constantly.
+            //
+            // `profile_id` is nullable and `attendee_name` is why: a guest from
+            // outside the institution has no account, and requiring one would
+            // mean either refusing to record them or inventing a person in the
+            // identity system to satisfy a foreign key.
+            //
+            // `was_invited` / `invitation_status` are DERIVED at read time and
+            // are the fields that make the disagreement visible. `was_invited`
+            // false is somebody who came without being asked — the case this
+            // table exists for.
+            'MeetingAttendee' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'profile_id' => self::int(true),
+                'attendee_name' => self::attendeeName(),
+                'capacity' => ['type' => 'string', 'enum' => AttendanceCapacity::all()],
+                'note' => self::attendanceNote(),
+                'recorded_at' => self::str(),
+                'recorded_by_profile_id' => self::int(true),
+                'was_invited' => self::bool(),
+                'invitation_status' => self::str(true),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'profile_id', 'attendee_name', 'capacity', 'note',
+                'recorded_at', 'recorded_by_profile_id', 'was_invited', 'invitation_status',
+            ]),
+            // WHAT WAS COUNTED, named so it cannot be mistaken for a quorum
+            // check. `quorum_evaluated` is always false and always present:
+            // Whity holds no quorum rule for any body and evaluates none, and a
+            // bare attendee count on a meeting record reads as "the body was
+            // quorate" on every screen it reaches. A field that only appeared
+            // when something HAD been checked would be one consumers learn to
+            // ignore.
+            'MeetingAttendanceCount' => self::object([
+                'attendees' => self::int(),
+                'attendees_who_held_an_invitation' => self::int(),
+                'attendees_who_did_not' => self::int(),
+                'invitations_issued' => self::int(),
+                'invited_who_did_not_attend' => self::int(),
+                'quorum_evaluated' => self::bool(),
+                'basis' => self::str(),
+            ], [
+                'attendees', 'attendees_who_held_an_invitation', 'attendees_who_did_not',
+                'invitations_issued', 'invited_who_did_not_attend', 'quorum_evaluated', 'basis',
+            ]),
+            'MeetingAttendanceResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAttendee')],
+                'counted' => SchemaBuilder::ref('MeetingAttendanceCount'),
+            ], ['data', 'counted']),
+            'MeetingAttendanceEntryRequest' => self::object([
+                // ONE of these two identifies the attendee, and a row with
+                // neither is refused. `profile_id` for somebody with an account;
+                // `attendee_name` for a guest who has none.
+                'profile_id' => self::int(true),
+                'attendee_name' => self::attendeeName(),
+                // DESCRIPTIVE ONLY. Nothing branches on it: it is not a
+                // permission, not a vote weight, and not an input to any count
+                // that claims to be a quorum. It exists because an attendance
+                // list on which a substitute is indistinguishable from a member
+                // cannot answer the question anybody asks it afterwards.
+                'capacity' => ['type' => 'string', 'enum' => AttendanceCapacity::all()],
+                'note' => self::attendanceNote(),
+            ], []),
+            'MeetingAttendanceRequest' => self::object([
+                // REQUIRED, and its absence is not an empty list: a client that
+                // forgot the key means something different from one that sent
+                // `[]`, which records that nobody attended. Sending the whole
+                // set REPLACES the stored one.
+                'attendees' => [
+                    'type' => 'array',
+                    'items' => SchemaBuilder::ref('MeetingAttendanceEntryRequest'),
+                    'maxItems' => AttendanceEntry::MAX_ATTENDEES,
+                ],
+            ], ['attendees']),
+            'MeetingListResponse' => self::listEnvelope('Meeting'),
+            'MeetingResponse' => self::dataEnvelope(SchemaBuilder::ref('Meeting')),
+            'MeetingAgendaItemListResponse' => self::listEnvelope('MeetingAgendaItem'),
+            'MeetingAgendaItemResponse' => self::dataEnvelope(SchemaBuilder::ref('MeetingAgendaItem')),
+            'MeetingDecisionListResponse' => self::listEnvelope('MeetingDecision'),
+            'MeetingInvitationListResponse' => self::listEnvelope('MeetingInvitation'),
+            'MeetingInvitationResponse' => self::dataEnvelope(SchemaBuilder::ref('MeetingInvitation')),
+            'MeetingDetailResponse' => self::dataEnvelope(
+                ['allOf' => [
+                    SchemaBuilder::ref('Meeting'),
+                    self::object([
+                        'body' => SchemaBuilder::ref('ConveningBody'),
+                        'agenda' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAgendaItem')],
+                        'decisions' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingDecision')],
+                        'invitations' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingInvitation')],
+                        // BOTH, and neither derived from the other. Who was
+                        // asked and who came are separate facts recorded at
+                        // different times, and they disagree constantly.
+                        'attendance' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAttendee')],
+                    ], ['body', 'agenda', 'decisions', 'invitations', 'attendance']),
+                ]]
+            ),
+            'MeetingCreateRequest' => self::object([
+                'body_id' => self::int(),
+                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+            ], ['body_id', 'title']),
+            'MeetingScheduleRequest' => self::object([
+                'scheduled_at' => self::str(),
+                'location' => self::name(),
+            ], ['scheduled_at']),
+            'MeetingScheduleResponse' => self::object([
+                'data' => SchemaBuilder::ref('Meeting'),
+                // How many people were told the date moved. Zero is a real
+                // answer: the sitting had not been announced yet.
+                'notified' => self::int(),
+            ], ['data', 'notified']),
+            'MeetingHoldRequest' => self::object([
+                // Supplied rather than defaulted to now(): a body routinely
+                // minutes yesterday's sitting, and a server-stamped date would
+                // put every such meeting — and the YEAR each of its decision
+                // numbers is minted under — on the wrong day.
+                'held_at' => self::str(),
+            ], []),
+            'MeetingInviteResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingInvitation')],
+                // Two numbers, because they answer different questions: how many
+                // people were newly told, and how many already held an invitation
+                // and were deliberately left alone. One count would make a no-op
+                // re-send indistinguishable from a failure.
+                'invited' => self::int(),
+                'already_invited' => self::int(),
+            ], ['data', 'invited', 'already_invited']),
+            'MeetingInvitationRespondRequest' => self::object([
+                'status' => ['type' => 'string', 'enum' => InvitationStatus::responses()],
+            ], ['status']),
+            'MeetingAgendaItemCreateRequest' => self::object([
+                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'document_id' => self::int(true),
+                'notes' => self::text(),
+                // The EXPLICIT confirmation that an item is being attached to a
+                // sitting that already happened. Allowed, because a paper tabled
+                // on the day is minuted afterwards — and never silent, because
+                // the other reading is somebody on the wrong screen.
+                'allow_held' => self::bool(),
+            ], ['title']),
+            'MeetingAgendaReorderRequest' => self::object([
+                // EVERY item on the agenda, exactly once. A partial list
+                // describes an order that omits some items, and both readings of
+                // that — leave them, or append them — are guesses.
+                'item_ids' => ['type' => 'array', 'items' => self::int(), 'minItems' => 1],
+            ], ['item_ids']),
+            'MeetingDecisionRequest' => self::object([
+                'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all()],
+                'rationale' => self::text(),
+                // BOTH OF THESE ARE THE INSTITUTION'S TO ASSIGN, and they are
+                // the two halves of one fact: a minute book records that
+                // decision N was taken on date D. Both are written by hand, in
+                // the institution's own format, often weeks after the sitting.
+                //
+                // `decision_number` is a STRING and no shape is imposed —
+                // `CE-CM-2026-014` and `ق.ع/٢٠٢٦/١٤` are both real. What is
+                // bounded is the length and the refusal of characters that are
+                // not text. Omit it (or send an empty string) and one is
+                // allocated from the body's per-year counter exactly as before,
+                // so callers written before this field existed are unaffected.
+                //
+                // A supplied number that another decision in this tenant already
+                // holds is REFUSED, not silently accepted: two minutes under one
+                // number cannot be told apart afterwards, which is the whole
+                // reason a decision has a number.
+                'decision_number' => ['type' => 'string', 'maxLength' => DecisionNumbers::MAX_LENGTH],
+                'decided_at' => self::str(),
+            ], ['verdict']),
+            // WHAT THE DECISION DID, always present beside what it SAID.
+            // `applied` false with a `reason` is an ordinary outcome, not an
+            // error: the item carried no document, the document has no route, the
+            // route never reached this body, or the step it reached is a
+            // circulation rather than a gate.
+            'MeetingDecisionRouting' => self::object([
+                'applied' => self::bool(),
+                'reason' => self::str(),
+                'explanation' => self::str(),
+                'route_id' => self::int(true),
+                'step_id' => self::int(true),
+                'actor_profile_id' => self::int(true),
+                'event_id' => self::int(true),
+                // What the STEP concluded, which is not what this body said:
+                // under a quorum of `all`, the first of three approvals decides
+                // nothing and this is null.
+                'decided' => self::str(true),
+            ], [
+                'applied', 'reason', 'explanation', 'route_id', 'step_id',
+                'actor_profile_id', 'event_id', 'decided',
+            ]),
+            'MeetingDecisionResponse' => self::object([
+                'data' => SchemaBuilder::ref('MeetingDecision'),
+                'routing' => SchemaBuilder::ref('MeetingDecisionRouting'),
+            ], ['data', 'routing']),
+            'DocumentConveningEntry' => self::object([
+                'agenda_item' => SchemaBuilder::ref('MeetingAgendaItem'),
+                'meeting' => SchemaBuilder::ref('Meeting'),
+                'body' => SchemaBuilder::ref('ConveningBody'),
+                'decisions' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingDecision')],
+            ], ['agenda_item', 'meeting', 'body', 'decisions']),
+            'DocumentConveningResponse' => self::listEnvelope('DocumentConveningEntry'),
 
             'Delegation' => $delegation,
             'DelegationListResponse' => self::paginatedListEnvelope('Delegation'),
@@ -8300,6 +10036,49 @@ final class CoreApiSchemas
      * bound it through {@see InputLimits::NAME_MAX} — past it they answer 422.
      *
      * @param bool $nonEmpty Whether the handler also refuses an empty string.
+     * @return array<string, mixed>
+     */
+    /**
+     * An ATTENDEE'S typed name: nullable, and bounded by the same column shape
+     * every other VARCHAR(255) identifier is.
+     *
+     * Nullable and not merely optional, because null is the meaningful value —
+     * it is how a row says "this attendee is identified by their profile, not by
+     * a name I typed". {@see self::name()} cannot express that: its flag means
+     * NON-EMPTY, which is the opposite question.
+     *
+     * @return array<string, mixed>
+     */
+    private static function attendeeName(): array
+    {
+        return [
+            'type' => 'string',
+            'maxLength' => AttendanceRepository::NAME_MAX,
+            'nullable' => true,
+        ];
+    }
+
+    /**
+     * The free-text note on one attendance row.
+     *
+     * Bounded at {@see AttendanceEntry::NOTE_MAX} rather than
+     * {@see InputLimits::TEXT_MAX}, because that is what the handler actually
+     * refuses past. A declaration citing the larger bound would let a generated
+     * client build a request the schema calls valid and the API answers 422 to —
+     * the exact drift {@see self::password()} exists to record.
+     *
+     * @return array<string, mixed>
+     */
+    private static function attendanceNote(): array
+    {
+        return [
+            'type' => 'string',
+            'maxLength' => AttendanceEntry::NOTE_MAX,
+            'nullable' => true,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private static function name(bool $nonEmpty = false): array

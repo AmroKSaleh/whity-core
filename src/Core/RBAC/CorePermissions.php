@@ -322,6 +322,49 @@ final class CorePermissions
     public const TIME_WINDOWS_CLOSE = 'time_windows:close';
     public const TIME_WINDOWS_REOPEN = 'time_windows:reopen';
 
+    // FORMS (migrations 127/128). Tenant-authored forms, their fields, and the
+    // submissions people make against them.
+    //
+    // THREE slugs rather than the usual read/write pair, because there are three
+    // audiences and two of them barely overlap. AUTHORING a form is
+    // organisational policy — deciding what everyone must declare — while
+    // FILLING ONE IN is the everyday act performed by the largest audience in the
+    // tenant, and READING what came back is a third job done by approvers who
+    // will never author anything.
+    //
+    // `forms:submit` is deliberately not folded into `forms:read`, which is the
+    // tempting fold and the wrong one: it would mean that letting somebody file a
+    // request also lets them read every request everybody else filed. Each of the
+    // three is a permission somebody would revoke separately — the #987 test for
+    // whether a slug is a real capability or a second name for an existing one.
+    //
+    // Reading back one's OWN submissions is gated on `forms:submit`, not
+    // `forms:read`: the row already names exactly one person, so a tenant-wide
+    // permission has nothing left to decide. Same argument migration 113 makes
+    // about routing ("being a recipient IS the authorization").
+    public const FORMS_READ = 'forms:read';
+    public const FORMS_MANAGE = 'forms:manage';
+    public const FORMS_SUBMIT = 'forms:submit';
+    // CONVENING (migrations 130/131). Deliberative BODIES that meet, minute a
+    // numbered decision, and — where the agenda item carried a document — drive
+    // that document's existing approval route with the decision.
+    //
+    // THREE slugs rather than a read/write pair, and the third is the reason.
+    // Assembling an agenda, moving a date and sending invitations are
+    // secretarial acts an organisation hands to whoever runs the calendar.
+    // MINUTING WHAT THE BODY CONCLUDED is the act that reaches
+    // {@see \Whity\Core\Document\Routing\DocumentRouter::act()} with a
+    // verdict, so it can approve or reject somebody's document — the same
+    // consequence a recipient's own approval has, from a different chair. An
+    // institution will want that held by fewer people than the calendar, and one
+    // grant covering both would make the separation inexpressible.
+    //
+    // Responding to an INVITATION is under none of them: being invited is the
+    // authorization, exactly as being a recipient is (migration 113).
+    public const CONVENING_READ = 'convening:read';
+    public const CONVENING_MANAGE = 'convening:manage';
+    public const CONVENING_DECIDE = 'convening:decide';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -392,6 +435,12 @@ final class CorePermissions
             self::TIME_WINDOWS_WRITE,
             self::TIME_WINDOWS_CLOSE,
             self::TIME_WINDOWS_REOPEN,
+            self::FORMS_READ,
+            self::FORMS_MANAGE,
+            self::FORMS_SUBMIT,
+            self::CONVENING_READ,
+            self::CONVENING_MANAGE,
+            self::CONVENING_DECIDE,
         ];
     }
 }

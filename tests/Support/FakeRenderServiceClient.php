@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
+use Whity\Core\Document\Render\RenderedDocument;
 use Whity\Core\Document\Render\RenderServiceClientInterface;
 use Whity\Core\Document\Render\RenderServiceUnavailableException;
 
@@ -31,6 +32,9 @@ final class FakeRenderServiceClient implements RenderServiceClientInterface
      */
     public string $pdfBytes;
 
+    /** What the flowing mode reports as its page count. */
+    public int $flowPageCount = 1;
+
     public function __construct(string $pdfBytes = "%PDF-1.4\nfake\n%%EOF")
     {
         $this->pdfBytes = $pdfBytes;
@@ -49,5 +53,20 @@ final class FakeRenderServiceClient implements RenderServiceClientInterface
         }
 
         return $this->pdfBytes;
+    }
+
+    /**
+     * Recorded on the SAME `calls` list as the fixed-canvas mode, so a test
+     * asserting "the handler never called the render service" keeps holding
+     * when the thing under test switches modes.
+     */
+    public function renderFlow(array $payload): RenderedDocument
+    {
+        $this->calls[] = $payload;
+        if ($this->throwOnRender) {
+            throw new RenderServiceUnavailableException('simulated render-service failure');
+        }
+
+        return new RenderedDocument($this->pdfBytes, $this->flowPageCount);
     }
 }

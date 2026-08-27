@@ -270,6 +270,36 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
       if (isDate) {
         return (
+          <>
+            {/*
+              THE ELEMENT THE EVENT COMES FROM.
+
+              The picker below reports a choice by writing to `internalRef` and
+              dispatching a native event, which is how React's `onChange`
+              receives it. Every other branch of this component renders the
+              native input further down — these picker branches return early and
+              never reached it, so `internalRef.current` was null, the whole
+              dispatch body was skipped, and a chosen date never left the picker.
+              The caller saw an empty value and a "required" error on a field
+              they had just filled in.
+
+              Uncontrolled on purpose: the dispatch sets `.value` through the
+              native setter, and a React-controlled value would be reasserted
+              over it on the next render.
+
+              `type="date"` with the `hidden` ATTRIBUTE, not `type="hidden"`:
+              React only tracks value changes for text-like inputs, and
+              `hidden` is not one of them — the event would be dispatched onto
+              an element React never listens to, and the same silent nothing
+              would happen for a different reason.
+            */}
+            <input
+              ref={internalRef}
+              type="date"
+              hidden
+              name={props.name}
+              onChange={props.onChange}
+            />
           <DatePicker
             disabled={disabled}
             className={className}
@@ -290,6 +320,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
               }
             }}
           />
+          </>
         )
       }
 
