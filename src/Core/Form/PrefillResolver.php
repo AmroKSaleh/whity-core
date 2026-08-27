@@ -131,6 +131,7 @@ final class PrefillResolver
             PrefillSource::DISPLAY_NAME => $this->displayName($profileId),
             PrefillSource::EMAIL => $this->email($profileId),
             PrefillSource::OU => $this->ouName($tenantId, $profileId),
+            PrefillSource::OU_ID => $this->ouId($tenantId, $profileId),
             // PHONE and JOB_TITLE are declared but unbacked — no column in this
             // schema holds either. Returning null (rather than '') keeps
             // "the platform cannot know this" distinguishable from "this person
@@ -206,6 +207,37 @@ final class PrefillResolver
      * a prefilled text field wants something a person recognises; a form that
      * wants the id uses an `ou_ref` field instead.
      */
+    /**
+     * The same membership `ouName()` reads, as an id.
+     *
+     * Deliberately the SAME ordering — primary membership first, then oldest —
+     * so a person whose name-valued field says one department cannot have their
+     * reference-valued field point at another.
+     */
+    private function ouId(int $tenantId, int $profileId): ?string
+    {
+        $stmt = $this->db->prepare(
+            'SELECT m.ou_id
+               FROM memberships m
+               JOIN organizational_units ou
+                 ON ou.id = m.ou_id AND ou.tenant_id = m.tenant_id
+              WHERE m.profile_id = :profile_id
+                AND m.tenant_id = :tenant_id
+                AND m.status = :status
+                AND m.ou_id IS NOT NULL
+              ORDER BY m.is_primary DESC, m.id ASC
+              LIMIT 1'
+        );
+        $stmt->execute([
+            ':profile_id' => $profileId,
+            ':tenant_id' => $tenantId,
+            ':status' => 'active',
+        ]);
+        $id = $stmt->fetchColumn();
+
+        return $id === false || $id === null ? null : (string) $id;
+    }
+
     private function ouName(int $tenantId, int $profileId): ?string
     {
         $stmt = $this->db->prepare(

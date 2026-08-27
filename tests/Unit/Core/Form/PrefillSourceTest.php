@@ -20,15 +20,19 @@ use Whity\Core\Form\PrefillSource;
  */
 final class PrefillSourceTest extends TestCase
 {
-    public function testTheThreeBackedSourcesAreTheOnesWithColumnsBehindThem(): void
+    public function testTheBackedSourcesAreTheOnesWithColumnsBehindThem(): void
     {
-        // profiles.display_name (028), profile_emails.email (029),
-        // organizational_units.name reached through memberships.ou_id (005/030).
+        // profiles.display_name (028), profile_emails.email (029), and the
+        // membership's unit (005/030) in BOTH representations: `OU` is its name,
+        // for a text field; `OU_ID` is its id, for a field that stores a
+        // reference. Same column reached the same way, so the two can never
+        // disagree about which unit somebody is in.
         self::assertSame(
             [
                 PrefillSource::DISPLAY_NAME,
                 PrefillSource::EMAIL,
                 PrefillSource::OU,
+                PrefillSource::OU_ID,
             ],
             PrefillSource::backed()
         );

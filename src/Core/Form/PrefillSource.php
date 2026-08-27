@@ -62,6 +62,17 @@ final class PrefillSource
     public const EMAIL = 'profile.email';
     public const PHONE = 'profile.phone';
     public const OU = 'profile.ou';
+
+    /**
+     * The unit's ID, for a field that STORES a reference rather than prose.
+     *
+     * `profile.ou` resolves to a name, which is right for a text field and
+     * useless for an `ou_ref`: a picker seeded with 'Department of Civil
+     * Engineering' matches no option and silently selects nothing, so the
+     * person is shown an empty required field the system could have filled.
+     * Same fact, two representations, because two kinds of field need it.
+     */
+    public const OU_ID = 'profile.ou_id';
     public const JOB_TITLE = 'profile.job_title';
 
     /**
@@ -77,6 +88,7 @@ final class PrefillSource
         self::DISPLAY_NAME => true,
         self::EMAIL => true,
         self::OU => true,
+        self::OU_ID => true,
         // Declared, unbacked: no column in whity-core's schema holds either.
         self::PHONE => false,
         self::JOB_TITLE => false,
