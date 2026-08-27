@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Form;
 
 use PDO;
+use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\RouteTemplate\RouteTemplateInstantiation;
 use Whity\Core\Document\RouteTemplate\RouteTemplateRejectedException;
@@ -45,11 +46,13 @@ use Whity\Core\Document\Routing\RoutingRejectedException;
  *
  * ONE TRANSACTION, AND WHICH TORN STATE IS REFUSED
  * -------------------------------------------------
- * The document, the submission row and the route are written inside ONE
- * transaction, opened here unless a caller already holds one (the convention
- * {@see DocumentIssuer} and migration 105 both follow). Nothing in this path
- * touches object storage, so — unlike `DocumentIssuer::issue()` — there is no
- * unjoinable write to reason about and the transaction is total.
+ * The document, the submission row, the attachments and the route are written
+ * inside ONE transaction, opened here unless a caller already holds one (the
+ * convention {@see DocumentIssuer} and migration 105 both follow). Nothing in
+ * this path touches object storage — see the attachment section below for why
+ * that stays true now that submissions carry files — so, unlike
+ * `DocumentIssuer::issue()`, there is no unjoinable write to reason about and
+ * the transaction is total.
  *
  * The state being refused is a SUBMISSION WITH NO DOCUMENT on a form that has a
  * route template. That row would sit in a list looking submitted, reaching
@@ -57,23 +60,81 @@ use Whity\Core\Document\Routing\RoutingRejectedException;
  * writing against. If the route cannot be issued, nothing is written and the
  * person is told, so they still have what they typed.
  *
- * THE ORDER IS DOCUMENT → SUBMISSION → ROUTE
- * -------------------------------------------
- * The submission needs the document's id, and the route needs the document row.
- * Writing the submission LAST would leave a window in which a route exists
- * carrying a document that no submission explains — harmless inside a
- * transaction, but the ordering also decides what a partial failure looks like to
- * anyone reading the log, and "the route failed, so nothing exists" is the
- * sentence worth being able to write.
+ * THE ORDER IS DOCUMENT → SUBMISSION → ATTACHMENTS → ROUTE
+ * ---------------------------------------------------------
+ * The submission needs the document's id; the attachments need both (the
+ * artifact hangs off the document, the claim is recorded against the
+ * submission); and the route needs the document row. Writing the submission
+ * LAST would leave a window in which a route exists carrying a document that no
+ * submission explains — harmless inside a transaction, but the ordering also
+ * decides what a partial failure looks like to anyone reading the log, and "the
+ * route failed, so nothing exists" is the sentence worth being able to write.
+ *
+ * A `file` ANSWER BECOMES A `document_artifacts` ROW, AND THAT IS THE POINT
+ * -------------------------------------------------------------------------
+ * A form can ask "upload your paper", and the answer is the storage key of an
+ * object {@see FormUploadStore} already wrote (migration 134). Storing that
+ * string in `form_submissions.data` and stopping there would leave the file
+ * reachable only by somebody who knows to look inside a jsonb column and parse
+ * it — so every downstream reader that wants the EVIDENCE (an accreditation
+ * report that must produce twelve papers when it says twelve papers) would have
+ * to grow its own knowledge of how form answers are shaped.
+ *
+ * `document_artifacts` is the platform's existing answer to "the stored bytes
+ * belonging to this record", with a download route, tenant + document binding
+ * and an append-only guarantee already built. So each `file` answer gets a row
+ * there, and the evidence is reachable through the same address as every other
+ * artifact in the install.
+ *
+ * THE ANSWER IS NOT TRUSTED, IT IS CLAIMED
+ * -----------------------------------------
+ * {@see SubmissionValidator} checks a `file` answer for SHAPE and says so — it
+ * has no database handle and cannot check anything else. The real check is here,
+ * and it is not "does this key look right": it is
+ * {@see FormUploadRepository::claim()}, a conditional UPDATE binding this
+ * tenant, this form, this uploader and `claimed_at IS NULL`.
+ *
+ * Which means a `file` answer naming a key under ANOTHER TENANT'S prefix matches
+ * no row and is refused. Without that, a caller could submit their own form with
+ * `tenants/9/documents/…` as the answer, mint an artifact row on THEIR document
+ * pointing at tenant 9's object, and read it back through the ordinary
+ * artifact-download route — which would check the document (theirs), the tenant
+ * (theirs) and the permission (held) and correctly let them through. Every gate
+ * would report success. The claim is what makes the key not a capability.
+ *
+ * NO BYTES ARE MOVED, WHICH IS WHAT KEEPS THE TRANSACTION TOTAL
+ * --------------------------------------------------------------
+ * The artifact row keeps the key the upload already has, under
+ * `tenants/{t}/form-uploads/…` rather than `tenants/{t}/documents/{id}/…`.
+ * Copying the object to a tidier address would put an unjoinable write inside
+ * this transaction: roll back and the row is gone while the copy remains. A
+ * storage key is an opaque address by {@see \Whity\Storage\StorageDriverInterface}'s
+ * own contract, the read path takes it off the row rather than deriving it, and
+ * the tenant segment every reader actually reasons about is present either way.
+ * So the tidier address would buy nothing and cost the property this class
+ * advertises.
  */
 final class SubmissionIssuer
 {
+    /**
+     * `$uploads` and `$artifacts` are REQUIRED rather than optional, and the two
+     * travel together.
+     *
+     * An optional collaborator here would mean a construction in which a `file`
+     * answer is accepted by the validator, stored in `data`, and quietly
+     * attached to nothing — a submission that looks complete and carries no
+     * evidence. That is the failure this whole change exists to remove, so it
+     * must not be reachable by forgetting an argument. There are three call
+     * sites in the repository; all three pass both.
+     */
     public function __construct(
         private readonly PDO $db,
         private readonly FormSubmissionRepository $submissions,
         private readonly DocumentIssuer $documents,
         private readonly RouteTemplateRepository $routeTemplates,
         private readonly DocumentRouter $router,
+        private readonly FormUploadRepository $uploads,
+        private readonly DocumentArtifactRepository $artifacts,
     ) {
     }
 
@@ -155,6 +216,14 @@ final class SubmissionIssuer
                 $values,
             );
 
+            // Attachments BEFORE the route: an artifact that could not be
+            // claimed must stop the submission, and stopping it before anybody
+            // has been sent an inbox entry is the difference between "nothing
+            // happened" and "somebody was asked to approve a paper that is not
+            // there". Inside the transaction either way — this is about which
+            // sentence the log gets to write.
+            $this->attach($tenantId, $actorProfileId, $formId, (int) $document['id'], $submissionId, $fields, $values);
+
             $routed = false;
             if ($routeTemplateId !== null) {
                 $this->route($tenantId, $actorProfileId, $document, $title, $routeTemplateId);
@@ -181,6 +250,88 @@ final class SubmissionIssuer
         }
 
         return ['submission' => $submission, 'ignored' => $checked['ignored'], 'routed' => $routed];
+    }
+
+    /**
+     * Turn every `file` answer into a `document_artifacts` row on the new
+     * document.
+     *
+     * THE CLAIM IS THE AUTHORIZATION. Nothing here inspects the shape of the
+     * key, compares its tenant segment, or asks storage whether an object is
+     * there. It asks {@see FormUploadRepository::claim()} to spend an upload
+     * belonging to THIS tenant, on THIS form, made by THIS caller, and not yet
+     * spent — and a null is every one of those failing. Parsing the key instead
+     * would be a check written in this class about a format owned by another,
+     * and the day the format gains a segment the check would still pass.
+     *
+     * ONE REFUSAL SENTENCE, and it is about the file rather than about the
+     * system. "We could not find that file — please attach it again" is true for
+     * an expired upload, a re-submitted browser tab whose upload was already
+     * spent, and a fabricated key alike, and it tells the honest majority
+     * exactly what to do. It also declines to tell the dishonest minority which
+     * of those they hit.
+     *
+     * THE ARTIFACT'S NUMBERS COME FROM THE UPLOAD ROW, NEVER FROM THE REQUEST.
+     * `byte_size` and `checksum_sha256` were computed by the server over the
+     * bytes it stored ({@see FormUploadStore::put()}). A submission body cannot
+     * influence them, which is what makes the checksum worth recording at all.
+     *
+     * `rendered_by` is the SUBMITTER. The column names whoever caused the bytes
+     * to exist on this document, which for a render is the person who rendered
+     * and for an attachment is the person who attached — null on the public
+     * path, exactly as `documents.created_by` and
+     * `form_submissions.submitted_by_profile_id` are null there.
+     *
+     * @param list<array<string, mixed>> $fields
+     * @param array<string, mixed>       $values The NORMALIZED answers.
+     *
+     * @throws FormRejectedException On the first `file` answer that is not a
+     *         live, unspent upload of this caller's on this form.
+     */
+    private function attach(
+        int $tenantId,
+        ?int $actorProfileId,
+        int $formId,
+        int $documentId,
+        int $submissionId,
+        array $fields,
+        array $values,
+    ): void {
+        foreach ($fields as $field) {
+            if ((string) ($field['field_type'] ?? '') !== FieldType::FILE) {
+                continue;
+            }
+            $key = (string) ($field['field_key'] ?? '');
+            $answer = $values[$key] ?? null;
+            if (!is_string($answer) || $answer === '') {
+                // An optional `file` field nobody filled in. The validator has
+                // already refused a blank REQUIRED one, so there is nothing to
+                // decide here.
+                continue;
+            }
+
+            $upload = $this->uploads->claim($tenantId, $formId, $answer, $actorProfileId, $submissionId);
+            if ($upload === null) {
+                /** @var array<string, string> $label */
+                $label = is_array($field['label'] ?? null) ? $field['label'] : [];
+                $name = LocalizedLabel::preferred($label);
+                throw new FormRejectedException(
+                    'We could not find the file attached to '
+                        . ($name !== '' ? $name : $key)
+                        . ' — please attach it again.',
+                    'form upload claim failed on field ' . $key . ' in tenant ' . $tenantId,
+                );
+            }
+
+            $this->artifacts->create($tenantId, [
+                'document_id'     => $documentId,
+                'storage_key'     => $upload['storage_key'],
+                'content_type'    => $upload['content_type'],
+                'byte_size'       => $upload['byte_size'],
+                'checksum_sha256' => $upload['checksum_sha256'],
+                'rendered_by'     => $actorProfileId,
+            ]);
+        }
     }
 
     /**

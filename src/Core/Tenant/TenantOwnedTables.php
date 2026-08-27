@@ -388,6 +388,23 @@ final class TenantOwnedTables
         'forms' => '127_create_forms.php',
         'form_fields' => '127_create_forms.php',
         'form_submissions' => '127_create_forms.php',
+        // `form_uploads` (migration 134) — the staging record for a file attached
+        // to a `file` answer. Tenant-owned without qualification: the CLAIM that
+        // turns an upload into evidence binds `tenant_id`, `form_id`, the
+        // uploader and `claimed_at IS NULL` in ONE conditional UPDATE, and that
+        // predicate is the reason a storage key naming another tenant's object
+        // cannot become a `document_artifacts` row on this tenant's document.
+        //
+        // ONE EXCEPTION, and it is an operator job rather than a request path.
+        // {@see \Whity\Core\Form\FormUploadRepository::sweepUnclaimed()} deletes
+        // unclaimed uploads across every tenant, because it runs from cron with
+        // no session and therefore no tenant to bind; narrowing it would leave
+        // every tenant but one accumulating orphaned objects forever. Both of its
+        // statements carry `@tenant-guard-ignore` with that reason. What makes it
+        // safe is `claimed_at IS NULL AND created_at < cutoff`: a row in that
+        // state is unreachable by construction, since the only path that could
+        // ever reference it is the claim, which refuses a claimed row.
+        'form_uploads' => '134_create_form_uploads.php',
         // Convening (migrations 130/131) — deliberative bodies, who sits on
         // them, their meetings, the agenda each meeting carries, the decisions
         // taken, and who was invited. All six are tenant-owned without

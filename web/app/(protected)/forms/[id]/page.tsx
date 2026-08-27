@@ -29,6 +29,7 @@ import {
   type FormFieldSpec,
   type LocalizedText,
   type ReferenceOption,
+  type UploadedFileRef,
 } from '@/components/forms/form-fields';
 
 interface RenderedForm {
@@ -132,6 +133,44 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
     [rendered]
   );
 
+  /**
+   * Upload one file and hand back the reference the `file` answer will carry.
+   *
+   * MULTIPART via FormData, and the `Content-Type` header is deliberately NOT
+   * set: the browser has to write it itself so it can include the boundary it
+   * generated. Setting it by hand produces a body no parser can read, with a
+   * header that says it should be readable.
+   *
+   * `X-Requested-With` because this call carries the session cookie, and
+   * CsrfGuard requires the custom header on any state-changing request with an
+   * ambient credential. A cross-site page cannot set it without a preflight the
+   * origin allowlist refuses.
+   *
+   * THROWS the server's own sentence. It is the only party that knows the size
+   * ceiling and the accepted kinds, and it already writes them for a person —
+   * "That file is too large — the limit is 10 MB." beats anything this page
+   * could invent from a status code.
+   */
+  async function uploadAttachment(file: File): Promise<UploadedFileRef> {
+    const body = new FormData();
+    body.append('file', file);
+
+    const response = await fetch(`/api/v1/forms/${encodeURIComponent(id)}/uploads`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body,
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      data?: UploadedFileRef;
+      error?: string;
+    };
+    if (!response.ok || payload.data === undefined) {
+      throw new Error(payload.error ?? 'That file could not be uploaded. Please try again.');
+    }
+
+    return payload.data;
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (submitting || rendered === null) return;
@@ -216,6 +255,7 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
                   value={answers[field.field_key]}
                   preferArabic={preferArabic}
                   references={{ ou_ref: units }}
+                  upload={uploadAttachment}
                   onChange={(v) => setAnswers((prev) => ({ ...prev, [field.field_key]: v }))}
                 />
               ))}

@@ -30,6 +30,8 @@ use Whity\Core\Form\FormFieldRepository;
 use Whity\Core\Form\FormRenderer;
 use Whity\Core\Form\FormRepository;
 use Whity\Core\Form\FormSubmissionRepository;
+use Whity\Core\Form\FormUploadRepository;
+use Whity\Core\Form\FormUploadStore;
 use Whity\Core\Form\PrefillResolver;
 use Whity\Core\Form\PublicFormLink;
 use Whity\Core\Form\SubmissionIssuer;
@@ -115,14 +117,22 @@ final class PublicFormsApiRealEngineTest extends TestCase
 
         $this->recipients = new RouteRecipientRepository($this->pdo);
 
+        // Migration 134's two collaborators. Wired here rather than stubbed
+        // because the whole suite is about a handler behaving as it does in
+        // production, and a SubmissionIssuer that could not attach a file is a
+        // different object from the one public/index.php builds.
+        $artifacts = new DocumentArtifactRepository($this->pdo);
+        $storage = new LocalStorageDriver($this->storageRoot);
+        $uploadRows = new FormUploadRepository($this->pdo);
+
         $issuer = new SubmissionIssuer(
             $this->pdo,
             $submissions,
             new DocumentIssuer(
                 $this->pdo,
                 new DocumentRepository($this->pdo),
-                new DocumentArtifactRepository($this->pdo),
-                new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot)),
+                $artifacts,
+                new DocumentArtifactStore($storage),
             ),
             new RouteTemplateRepository($this->pdo),
             new DocumentRouter(
@@ -136,6 +146,8 @@ final class PublicFormsApiRealEngineTest extends TestCase
                 $settings,
                 null
             ),
+            $uploadRows,
+            $artifacts,
         );
 
         $this->manage = new FormsApiHandler(
@@ -151,6 +163,7 @@ final class PublicFormsApiRealEngineTest extends TestCase
             $this->fields,
             $issuer,
             new DatabaseSharedStore($this->pdo),
+            new FormUploadStore($storage, $uploadRows),
         );
     }
 
@@ -484,19 +497,43 @@ final class PublicFormsApiRealEngineTest extends TestCase
         self::assertSame(0, $this->submissionCount());
     }
 
-    /** Opening a link on a form carrying one is refused, naming the field. */
-    public function testOpeningALinkIsRefusedOnAFormThatAsksForAPersonOrAFile(): void
+    /** Opening a link on a form carrying a person field is refused, naming it. */
+    public function testOpeningALinkIsRefusedOnAFormThatAsksForAPerson(): void
     {
         $formId = $this->publishedForm();
         $this->addField($formId, 'sponsor', 'profile_ref');
-        $this->addField($formId, 'passport', 'file');
 
         $response = $this->manage->enablePublicLink($this->request('POST', '/x'), ['id' => (string) $formId]);
 
         self::assertSame(422, $response->getStatusCode());
         self::assertStringContainsString('sponsor', (string) $response->getBody());
-        self::assertStringContainsString('passport', (string) $response->getBody());
         self::assertNull($this->formRow($formId)['public_slug']);
+    }
+
+    /**
+     * A `file` FIELD NO LONGER BLOCKS THE DOOR (migration 134).
+     *
+     * It used to, and the reason it did was never that a file input is unsafe on
+     * a public form — it was that no anonymous upload route existed, so the
+     * field would have rendered above a submit button that refused. That premise
+     * died with `POST /api/v1/public/forms/{slug}/uploads`, and this asserts the
+     * exclusion died with it: an external applicant attaching their published
+     * paper is the case public forms exist for, and it was the one case they
+     * could not serve.
+     *
+     * The person field beside it is UNCHANGED and still refused — the two were
+     * never the same case. A picker of real people is a read of the tenant's
+     * data; a file input is a write of the caller's own.
+     */
+    public function testOpeningALinkIsAllowedOnAFormThatAsksForAFile(): void
+    {
+        $formId = $this->publishedForm();
+        $this->addField($formId, 'passport', 'file');
+
+        $response = $this->manage->enablePublicLink($this->request('POST', '/x'), ['id' => (string) $formId]);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertIsString($this->formRow($formId)['public_slug']);
     }
 
     /** And on a form that is not published, because such a link answers 404. */

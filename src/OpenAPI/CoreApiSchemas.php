@@ -1214,11 +1214,12 @@ final class CoreApiSchemas
                     . 'guessable address makes the whole catalogue of an install\'s forms walkable '
                     . 'with curl. '
                     . 'REFUSED (422) on a form that is not `published` (a link to one answers 404 to '
-                    . 'everybody who follows it), and on a form carrying a `profile_ref`, `ou_ref` or '
-                    . '`file` field — the reference kinds would make the public submit a MEMBERSHIP '
-                    . 'ORACLE, since the existence check behind them reveals whether a given id '
-                    . 'belongs to this organisation, and a file field needs an upload an anonymous '
-                    . 'caller cannot perform. '
+                    . 'everybody who follows it), and on a form carrying a `profile_ref` or `ou_ref` '
+                    . 'field — the reference kinds would make the public submit a MEMBERSHIP ORACLE, '
+                    . 'since the existence check behind them reveals whether a given id belongs to '
+                    . 'this organisation. A `file` field is ACCEPTED (it was refused until migration '
+                    . '134 only because no anonymous upload route existed; a file input asks the '
+                    . 'tenant\'s data nothing, so it cannot answer anything about it). '
                     . '`opens_at` / `closes_at` are optional; either may be null for "no boundary on '
                     . 'this side". They are naive local date-times in the instance\'s own clock, and a '
                     . 'UTC offset is REFUSED rather than silently applied. '
@@ -1251,6 +1252,83 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Form not found'),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/uploads', 'forms:submit', array_merge([
+                'summary' => 'Attach a file to a form you are filling in',
+                'description' =>
+                    'MULTIPART, one part named `file`. Returns the `reference` a `file` answer '
+                    . 'carries, plus the filename, the SNIFFED content type, the byte size and the '
+                    . 'server\'s SHA-256 of what it stored. '
+                    . 'Gated `forms:submit` — the same permission as the submit itself, because '
+                    . 'uploading is half of answering. '
+                    . 'ACCEPTS application/pdf, image/png and image/jpeg ONLY, decided by the LEADING '
+                    . 'BYTES: a declared Content-Type that contradicts the bytes is a 422, and a '
+                    . 'declared type is never what gets stored. Office formats are absent on purpose — '
+                    . 'a .docx is indistinguishable from any other ZIP by magic bytes. '
+                    . 'MAXIMUM 10 MiB. '
+                    . 'REFUSED (422) on a form that is not accepting submissions, and on a form with '
+                    . 'no `file` field — so a broad permission cannot be aimed at arbitrary form ids '
+                    . 'as a way into a tenant\'s storage. '
+                    . 'THROTTLED to 20 uploads per caller per hour. '
+                    . 'THE UPLOAD IS SINGLE-USE and expires: it is spent by the first submission that '
+                    . 'names it, and anything never submitted is deleted by the '
+                    . '`form-uploads:sweep` retention job (24 h by default).',
+                'tags' => ['forms'],
+                'responses' => [
+                    201 => self::jsonResponse('The stored file, and the reference to answer with', 'FormUploadResponse'),
+                    400 => self::errorResponse('No file part, or the multipart body could not be read'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse(
+                        'Too large, not an accepted kind, the form asks for no file, '
+                        . 'or the form is not accepting submissions'
+                    ),
+                    429 => self::errorResponse('Too many uploads from this caller'),
+                    503 => self::errorResponse('The file could not be stored'),
+                ] + self::authErrors(),
+            ], self::formUploadMultipartBody(
+                'The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by '
+                . 'filename or Content-Type. Maximum 10 MiB.'
+            ))),
+            [
+                'method' => 'POST',
+                'path' => '/api/public/forms/{slug}/uploads',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => array_merge([
+                    'summary' => 'Attach a file to a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'The anonymous half of the upload above, and the route that made `file` fields '
+                        . 'servable on a public form at all. '
+                        . 'A file input is NOT the membership oracle a person or unit picker is: it '
+                        . 'offers no list, resolves no id against this organisation, and returns one '
+                        . 'opaque reference to the caller\'s own bytes — so there is no question about '
+                        . 'the tenant it can be asked. '
+                        . 'THE TENANT IS RESOLVED FROM THE SLUG, and every reason there is no publicly '
+                        . 'served form behind it collapses to the SAME 404 as the render and the '
+                        . 'submit. '
+                        . 'BOUNDED, because what a stranger can spend here is storage: 10 uploads per '
+                        . 'IP per hour, 400 per form per hour across all addresses, and a size ceiling '
+                        . 'of 5 MiB — HALF the authenticated one, so bytes-per-address-per-hour is '
+                        . 'what is capped rather than just the count. Same three accepted kinds, same '
+                        . 'magic-byte check. '
+                        . 'Anything never submitted is deleted by the retention sweep, so an abandoned '
+                        . 'upload costs a day of storage rather than a permanent one.',
+                    'tags' => ['forms'],
+                    'responses' => [
+                        201 => self::jsonResponse('The stored file, and the reference to answer with', 'FormUploadResponse'),
+                        400 => self::errorResponse('No file part, or the multipart body could not be read'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        422 => self::errorResponse(
+                            'Too large, not an accepted kind, the form asks for no file, '
+                            . 'or the form is outside its submission window'
+                        ),
+                        429 => self::errorResponse('Too many uploads from this address, or for this form'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ], self::formUploadMultipartBody(
+                    'The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by '
+                    . 'filename or Content-Type. Maximum 5 MiB on this public surface.'
+                )),
+            ],
             [
                 'method' => 'GET',
                 'path' => '/api/public/forms/{slug}',
@@ -1272,8 +1350,10 @@ final class CoreApiSchemas
                         . 'submission count, status, version or prefill — an anonymous caller has no '
                         . 'saved details for the platform to pre-fill, and nothing about how the '
                         . 'organisation works is disclosed. '
-                        . 'Person, unit and file fields are omitted from the field list, for the reason '
-                        . 'POST /api/v1/forms/{id}/public-link refuses them. '
+                        . 'Person and unit fields are omitted from the field list, for the reason '
+                        . 'POST /api/v1/forms/{id}/public-link refuses them. FILE fields ARE served: '
+                        . 'attach the bytes at POST /api/v1/public/forms/{slug}/uploads first and put '
+                        . 'the returned `reference` in the answer. '
                         . 'A form OUTSIDE its submission window still renders, with '
                         . '`accepts_submissions: false` and the window dates, so somebody holding a '
                         . 'genuine link is told they are early or late rather than that the link is '
@@ -1485,6 +1565,42 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('The caller\'s submissions', 'FormSubmissionListResponse'),
                 ] + self::authErrors(),
             ]),
+        ];
+    }
+
+    /**
+     * The `multipart/form-data` request body BOTH form-upload routes declare.
+     *
+     * Under the key `request`, not `requestBody`: #954 records the cost of
+     * getting that wrong — the branding uploads declared a body under the wrong
+     * key, {@see SchemaGenerator::addOperation()} never read it, and both
+     * operations published with no request body at all, so a generated client
+     * could see the endpoint and had no way to learn the part is called `file`.
+     *
+     * ONE helper for two routes because the authenticated and public uploads
+     * take the SAME part with the same name; only the size sentence differs, and
+     * that is the argument. Two copies would eventually disagree about the field
+     * name, which is the one thing a client cannot guess.
+     *
+     * @return array{request: array<string, mixed>}
+     */
+    private static function formUploadMultipartBody(string $description): array
+    {
+        return [
+            'request' => [
+                'required' => true,
+                'content' => [
+                    'multipart/form-data' => [
+                        'schema' => self::object([
+                            'file' => [
+                                'type' => 'string',
+                                'format' => 'binary',
+                                'description' => $description,
+                            ],
+                        ], ['file']),
+                    ],
+                ],
+            ],
         ];
     }
 
@@ -5667,6 +5783,31 @@ final class CoreApiSchemas
             // confirmation and the timestamp of their own act — never the
             // submission id, the document id or the tenant id, which would hand
             // them integers to try against every other surface.
+            // The reference a `file` answer carries, plus what the server saw.
+            // `reference` IS the storage key, and handing it over is safe because
+            // a key is not a capability anywhere in this platform: NO route
+            // accepts one as input. Bytes are read at
+            // GET /api/v1/documents/{id}/artifacts/{artifactId}/content, which
+            // resolves the document through the visibility policy, binds the
+            // artifact to that document AND tenant, and takes the key OFF THE
+            // ROW. And a key from elsewhere cannot become such a row: the submit
+            // path accepts a `file` answer only by CLAIMING an unspent
+            // `form_uploads` row bound to this tenant, this form and this
+            // uploader (migration 134).
+            //
+            // `checksum_sha256` is the server's own hash of the bytes it stored,
+            // returned so a client can verify the upload before committing to a
+            // submission — and recorded onto `document_artifacts` when the upload
+            // is claimed, so "is this the file that was sent" stays answerable.
+            'FormUploadResponse' => self::object([
+                'data' => self::object([
+                    'reference' => self::str(),
+                    'filename' => self::str(true),
+                    'content_type' => self::str(),
+                    'byte_size' => self::int(),
+                    'checksum_sha256' => self::str(),
+                ], ['reference', 'content_type', 'byte_size', 'checksum_sha256']),
+            ], ['data']),
             'PublicFormSubmissionResponse' => self::object([
                 'data' => self::object([
                     'received' => self::bool(),

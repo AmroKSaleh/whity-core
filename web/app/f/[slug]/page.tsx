@@ -34,6 +34,7 @@ import {
   type Answer,
   type FormFieldSpec,
   type LocalizedText,
+  type UploadedFileRef,
 } from '@/components/forms/form-fields';
 
 interface PublicForm {
@@ -89,6 +90,44 @@ export default function PublicFormPage({ params }: { params: Promise<{ slug: str
     () => (form?.fields ?? []).slice().sort((a, b) => a.position - b.position),
     [form]
   );
+
+  /**
+   * Upload one file against the PUBLIC form, and hand back the reference the
+   * `file` answer will carry.
+   *
+   * A `file` field used to be stripped from this surface entirely, on the
+   * grounds that every upload route was gated and a stranger could not produce
+   * a reference — true about the platform, not about the field. The server now
+   * serves an anonymous upload route, because unlike the person and unit
+   * pickers this page still never shows, a file input asks the organisation
+   * NOTHING: no list, no id resolved against their records, and one opaque
+   * reference to the visitor's own bytes coming back.
+   *
+   * Same multipart shape as the authenticated page, and the same reason for not
+   * setting `Content-Type` by hand (the boundary is the browser's to write).
+   * The limits differ — the server refuses at half the size on this surface and
+   * throttles more tightly — and the server's own sentence is what gets shown,
+   * so this page needs to know neither number.
+   */
+  async function uploadAttachment(file: File): Promise<UploadedFileRef> {
+    const body = new FormData();
+    body.append('file', file);
+
+    const response = await fetch(`/api/v1/public/forms/${encodeURIComponent(slug)}/uploads`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body,
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      data?: UploadedFileRef;
+      error?: string;
+    };
+    if (!response.ok || payload.data === undefined) {
+      throw new Error(payload.error ?? 'That file could not be uploaded. Please try again.');
+    }
+
+    return payload.data;
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -177,6 +216,7 @@ export default function PublicFormPage({ params }: { params: Promise<{ slug: str
                 field={field}
                 value={answers[field.field_key]}
                 preferArabic={preferArabic}
+                upload={uploadAttachment}
                 onChange={(v) => setAnswers((prev) => ({ ...prev, [field.field_key]: v }))}
               />
             ))}

@@ -52,6 +52,55 @@ truth the tenant-predicate guard consults. See
 > the supporting indexes + UNIQUE `jti` constraint are pinned against regression
 > by `tests/Database/MigrationSchemaTest.php`.
 
+### Form Upload Sweep
+
+**Command**: `php /var/www/whity/public/index.php form-uploads:sweep [--ttl=86400] [--limit=500]`
+
+**Purpose**: Deletes form attachments that nobody ever submitted — both the
+`form_uploads` row and the object in storage.
+
+**Why**: a `file` answer's bytes are written **before** the submission exists.
+They have to be: a person attaches the file while they are still filling the form
+in. So every abandoned form — a closed tab, a passed deadline, a wrong file
+picked and replaced — leaves an object in a tenant's storage that no row will
+ever reference. On a form opened to the public, the party abandoning the most
+forms is a stranger, so "just accept the cost" is a bill with an
+attacker-controlled magnitude. This job is the other half of the upload feature,
+not an optimisation.
+
+**Recommended Schedule**: `30 3 * * * php /var/www/whity/public/index.php form-uploads:sweep`
+
+**Expected Output**:
+`Swept {n} unclaimed form uploads (TTL 86400s); {m} objects could not be deleted`
+
+**Retention policy**: an upload is deleted when `claimed_at IS NULL` **and**
+`created_at` is older than the TTL (24 hours by default). A row in that state is
+unreachable by construction: the only path that could ever reference it is
+`FormUploadRepository::claim()`, which refuses an already-claimed row, and a
+submission claims its uploads inside the same transaction that writes the
+`document_artifacts` row. So a swept upload can never be one a document depends
+on. The TTL is generous on purpose — it has to outlast somebody who attaches a
+paper, goes to find the co-author list, and comes back after lunch.
+
+**Read the second number.** `objects could not be deleted` counts files whose
+row was removed but whose bytes the storage backend refused to delete. Those
+bytes are now costing money and **no later sweep will find them**, because the
+row that named them is gone. A non-zero value there is a storage-backend problem
+to investigate, not noise. The exit code stays 0 so a scheduler does not alert on
+every run; the number is the signal.
+
+**Ordering is deliberate**: rows are deleted first, objects second. The reverse
+would leave a claimable row pointing at bytes that are gone — a
+`document_artifacts` row minted over an empty address, reporting success and
+404ing the first time anybody opens the evidence. A leaked object costs money; a
+claimable row with no bytes costs the truth of the record.
+
+**It builds the same storage driver the uploads used** — the per-tenant routing
+driver, not the platform default. A sweep holding only the default would delete
+the rows of an entitled tenant's uploads and then fail to find the objects in
+that tenant's own bucket, reporting a successful sweep while storage kept
+growing.
+
 ## How it is scheduled
 
 The cleanup is **genuinely wired into the running stack**, not just documented:
@@ -95,6 +144,9 @@ Add the revoked tokens cleanup job:
 
 # Clean expired revoked tokens daily at 2:00 AM UTC
 0 2 * * * php /var/www/whity/public/index.php revoked-tokens:cleanup >> /var/log/whity-cleanup.log 2>&1
+
+# Delete form attachments nobody ever submitted, daily at 3:30 AM UTC
+30 3 * * * php /var/www/whity/public/index.php form-uploads:sweep >> /var/log/whity-cleanup.log 2>&1
 ```
 
 ### 3. Verify Cron Setup

@@ -69,9 +69,18 @@ namespace Whity\Core\Form;
  *
  * WHICH QUESTIONS A STRANGER MAY BE ASKED
  * ----------------------------------------
- * Three of the ten {@see FieldType}s are UNANSWERABLE BY AN OUTSIDER, and two of
- * those three are worse than unanswerable — they are an oracle. See
+ * Two of the ten {@see FieldType}s are UNANSWERABLE BY AN OUTSIDER, and both are
+ * worse than unanswerable — they are an oracle. See
  * {@see isPubliclyAnswerable()}.
+ *
+ * `file` USED TO BE A THIRD, AND IS NOT ANY MORE. It was excluded on the
+ * grounds that "every upload route in this platform is gated — so an anonymous
+ * caller has no way to produce one", which was a true statement about the
+ * platform rather than about the field. Migration 134 added
+ * `POST /api/v1/public/forms/{slug}/uploads`, so the premise is gone. The
+ * argument for excluding it never survived the premise: unlike a person picker,
+ * a file input asks the tenant's data NOTHING and so cannot answer anything
+ * about it. See {@see isPubliclyAnswerable()} for what replaced the exclusion.
  *
  * Stateless — worker-safe.
  */
@@ -100,13 +109,33 @@ final class PublicFormView
      * itself is the oracle, so the fields that reach it must not exist on this
      * surface.
      *
-     * `file` is the ordinary-unfillable case rather than the dangerous one. A
-     * `file` answer is a REFERENCE to an already-stored object
-     * ({@see SubmissionValidator}), and every upload route in this platform is
-     * gated — so an anonymous caller has no way to produce one. A file input
-     * they cannot fill, above a submit button that then refuses them, is the
-     * "renders fine, behaves wrongly" failure this codebase keeps writing
-     * against, so it is omitted instead.
+     * `file` IS SERVED, AND THE DIFFERENCE FROM THE TWO ABOVE IS THE WHOLE
+     * ARGUMENT. The oracle above is a READ of the tenant's data dressed up as an
+     * input: the picker is a directory, and the existence check behind it
+     * answers "is 41 one of yours" one integer at a time. A file input reads
+     * nothing. It offers no list, resolves no id, and the endpoint behind it
+     * ({@see \Whity\Api\PublicFormsApiHandler::upload()}) returns one opaque
+     * reference to the caller's OWN bytes. There is no question about the
+     * organisation it can be asked, so there is no answer it can leak.
+     *
+     * It was excluded until migration 134 for a different and then-correct
+     * reason — no gated caller meant no anonymous upload route, so the field
+     * would have rendered above a submit button that refused. That is the
+     * "renders fine, behaves wrongly" failure, and it was the right call while
+     * it was true. It stopped being true when the public upload route landed,
+     * and the exclusion has to go with its premise: a form that asks an external
+     * applicant to attach their published paper is the case this whole feature
+     * exists for, and stripping the field would leave that form unopenable to
+     * exactly the people meant to fill it in.
+     *
+     * WHAT AN ANONYMOUS UPLOAD IS EXPOSED TO IS VOLUME, not disclosure, and it
+     * is bounded rather than argued away — a per-IP hourly ceiling, a per-form
+     * hourly ceiling that holds across many addresses, a size limit HALF the
+     * authenticated one, a three-entry content-type allow-list checked against
+     * the bytes, the 256-bit slug required to reach the route at all, the opt-in
+     * that minted it, the submission window, and a retention sweep that deletes
+     * anything never submitted. See {@see FormUploadPolicy} and
+     * {@see FormUploadSweeper}.
      *
      * Everything else — text, textarea, number, date, select, multiselect,
      * checkbox — is a value a stranger types or picks, with no reference into
@@ -114,7 +143,7 @@ final class PublicFormView
      */
     public static function isPubliclyAnswerable(string $fieldType): bool
     {
-        return !FieldType::isReference($fieldType) && $fieldType !== FieldType::FILE;
+        return !FieldType::isReference($fieldType);
     }
 
     /**
