@@ -28,6 +28,7 @@ import {
   type Answer,
   type FormFieldSpec,
   type LocalizedText,
+  type ReferenceOption,
 } from '@/components/forms/form-fields';
 
 interface RenderedForm {
@@ -57,6 +58,38 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [units, setUnits] = useState<ReferenceOption[]>([]);
+
+  // The unit list for any `ou_ref` field. Fetched by the PAGE rather than by the
+  // field, because whether this reader may see a list of the tenant's units is a
+  // question about the reader, not about the field — and the public page
+  // deliberately never asks it.
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/api/v1/ous', { headers: { Accept: 'application/json' } })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const body = (await response.json().catch(() => ({}))) as {
+          data?: Array<{ id?: number; name?: string }>;
+        };
+        if (cancelled) return;
+        setUnits(
+          (body.data ?? [])
+            .filter((ou): ou is { id: number; name: string } =>
+              typeof ou.id === 'number' && typeof ou.name === 'string')
+            .map((ou) => ({ value: String(ou.id), label: ou.name }))
+        );
+      })
+      .catch(() => {
+        // A missing list leaves the picker empty and the field refusable by the
+        // server; it must not take the whole form down with it.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,6 +215,7 @@ export default function FillFormPage({ params }: { params: Promise<{ id: string 
                   field={field}
                   value={answers[field.field_key]}
                   preferArabic={preferArabic}
+                  references={{ ou_ref: units }}
                   onChange={(v) => setAnswers((prev) => ({ ...prev, [field.field_key]: v }))}
                 />
               ))}

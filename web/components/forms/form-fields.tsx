@@ -74,16 +74,30 @@ function optionLabel(option: FormFieldSpec['options'][number], preferArabic: boo
   return localized(option.label, preferArabic) || String(option.value ?? '');
 }
 
+export interface ReferenceOption {
+  value: string;
+  label: string;
+}
+
 export function FormField({
   field,
   value,
   preferArabic,
   onChange,
+  references,
 }: {
   field: FormFieldSpec;
   value: Answer | undefined;
   preferArabic: boolean;
   onChange: (value: Answer) => void;
+  /**
+   * Choices for reference fields (`ou_ref`, `profile_ref`), keyed by field type.
+   * Supplied by the page, because only the page knows whether the reader is
+   * entitled to see the list at all — the PUBLIC page never supplies any, and
+   * the API strips reference fields from a public form for the same reason: a
+   * picker of real units or real people is a directory, handed to a stranger.
+   */
+  references?: Partial<Record<string, ReferenceOption[]>>;
 }) {
   const label = localized(field.label, preferArabic) || field.field_key;
   const id = `field-${field.field_key}`;
@@ -160,6 +174,25 @@ export function FormField({
             );
           })}
         </div>
+      ) : field.field_type === 'ou_ref' || field.field_type === 'profile_ref' ? (
+        // A REFERENCE, so the stored value is an id rather than whatever the
+        // person typed. Free text here produced "Civil Eng.", "civil", and
+        // "Dept of Civil Engineering" for one department, none of which a
+        // report can group by.
+        <select
+          id={id}
+          required={field.is_required}
+          className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={typeof value === 'string' ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">—</option>
+          {(references?.[field.field_type] ?? []).map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       ) : field.field_type === 'select' ? (
         // A NATIVE select for the single-choice case. This page is opened by
         // strangers on devices nobody chose, and a custom picker assumes a
