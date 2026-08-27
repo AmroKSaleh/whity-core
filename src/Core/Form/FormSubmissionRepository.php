@@ -267,6 +267,16 @@ final class FormSubmissionRepository
             'created_at' => (string) $row['created_at'],
         ];
 
+        // Same posture for the routing state: present only on the reads that
+        // derive it. `current_step` is genuinely null once nothing holds the
+        // document any more, which is why it is not folded into `state`.
+        if (array_key_exists('state', $row)) {
+            $normalized['state'] = (string) $row['state'];
+            $normalized['current_step'] = $row['current_step'] === null
+                ? null
+                : (string) $row['current_step'];
+        }
+
         // Present only on the reads that join `forms`. Absent means "not fetched
         // by this read", never "empty" — the same posture DocumentPresenter takes
         // toward `sections` and DocumentRepository toward `variable_data`.
