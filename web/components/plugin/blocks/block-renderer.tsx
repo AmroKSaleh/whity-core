@@ -3037,7 +3037,7 @@ function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
         // empty list of rows plus an "Add" button, because that is the shape
         // that reads as "this record has no questions" — which is the one thing
         // the block does not know here, and the thing the save would assert.
-        <div className="rounded-md border border-border p-3 text-sm text-muted-foreground" data-slot="field-array-pending">
+        <div className="rounded-xl border border-border/60 bg-card p-3 text-sm text-muted-foreground shadow-2xs" data-slot="field-array-pending">
           {!bound ? (
             <span data-slot="field-array-unbound">{t('blocks.record.unbound', 'No record selected.')}</span>
           ) : state.status === 'error' ? (
@@ -3090,7 +3090,16 @@ function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
           submitHeld: ctx.submitHeld,
         };
         return (
-          <div key={i} className="space-y-2 rounded-md border border-border p-3" data-slot="field-array-row">
+          <div
+            key={i}
+            // The design system's `default` Card surface, token for token:
+            // bg-card is pure white against a grey --background in light,
+            // and a LIGHTER grey than the background in dark, so the card
+            // lifts in both themes. A bare border on no background read as
+            // a flat outline drawn on the page rather than an object on it.
+            className="space-y-2 rounded-xl border border-border/60 bg-card p-3 text-card-foreground shadow-2xs"
+            data-slot="field-array-row"
+          >
             <div className="flex items-center justify-between gap-2">
               {/* Not keyed: the visible text is the plugin's noun followed by
                   the row number — there is no English prose here to translate,
