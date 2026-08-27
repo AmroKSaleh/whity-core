@@ -400,10 +400,31 @@ export function FormField({
             </option>
           ))}
         </select>
+      ) : field.field_type === 'date' ? (
+        // A PLAIN native date input, not the shared one.
+        //
+        // `Input type="date"` swaps in a DatePicker that reports its choice by
+        // writing to an internal ref and dispatching a native event. That is a
+        // lot of moving parts between a person picking a date and this form
+        // holding it, and when one of them does not connect the failure is
+        // silent in the worst way: the field looks filled, submits empty, and
+        // the server says the date is required.
+        //
+        // A form that somebody outside the organisation may be filling in is
+        // the wrong place to depend on that. The browser's own control is
+        // plain, works on every device, and hands the value straight back.
+        <input
+          id={id}
+          type="date"
+          required={field.is_required}
+          className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={typeof value === 'string' ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+        />
       ) : (
         <Input
           id={id}
-          type={field.field_type === 'number' ? 'number' : field.field_type === 'date' ? 'date' : 'text'}
+          type={field.field_type === 'number' ? 'number' : 'text'}
           required={field.is_required}
           value={typeof value === 'string' ? value : ''}
           onChange={(e) => onChange(e.target.value)}
