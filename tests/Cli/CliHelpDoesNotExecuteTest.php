@@ -106,6 +106,36 @@ final class CliHelpDoesNotExecuteTest extends TestCase
         self::assertStringContainsString('No detailed help', $result['output']);
     }
 
+    /**
+     * A command whose CONSTRUCTOR needs infrastructure still answers `--help`.
+     *
+     * `queue:work` and `schedule:run` connect to the database in theirs, so they
+     * failed with a connection error before `printHelp()` could be reached —
+     * asking what a command does required the thing it operates on, on exactly
+     * the machine where somebody is reading the help because nothing is
+     * configured yet.
+     */
+    public function testACommandThatCannotBeConstructedStillAnswersHelp(): void
+    {
+        $result = $this->invoke(['probe', '--help'], UnconstructableProbeCommand::class);
+
+        self::assertSame(0, $result['code']);
+        self::assertStringContainsString('No detailed help is available', $result['output']);
+        self::assertStringContainsString('needs a database', $result['output'], 'the cause should be named');
+    }
+
+    /**
+     * And the catch-all must not become a place errors go to die: without
+     * `--help`, the same failure still surfaces.
+     */
+    public function testAConstructionFailureStillSurfacesWithoutHelp(): void
+    {
+        $result = $this->invoke(['probe'], UnconstructableProbeCommand::class);
+
+        self::assertSame(1, $result['code']);
+        self::assertStringContainsString('needs a database', $result['output']);
+    }
+
     // ── unknown options ──────────────────────────────────────────────────────
 
     /**
@@ -187,6 +217,25 @@ final class HelpProbeCommand implements CliCommand, CommandHelp
     public function knownFlags(): ?array
     {
         return ['--known', '--help', '-h'];
+    }
+}
+
+/**
+ * Cannot be built without its environment — the state `queue:work` and
+ * `schedule:run` are in, both of which connect to the database in their
+ * constructors.
+ */
+final class UnconstructableProbeCommand implements CliCommand
+{
+    public function __construct()
+    {
+        throw new \RuntimeException('needs a database');
+    }
+
+    /** @param list<string> $argv */
+    public function execute(array $argv): int
+    {
+        return 0;
     }
 }
 

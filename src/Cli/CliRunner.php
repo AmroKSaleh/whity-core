@@ -29,6 +29,10 @@ class CliRunner
         'i18n:extract' => 'Whity\Cli\Commands\I18nCommand',
         'i18n:sync' => 'Whity\Cli\Commands\I18nCommand',
         'i18n:coverage' => 'Whity\Cli\Commands\I18nCommand',
+        // Without this running, `HookManager::dispatchAsync()` records events
+        // that are never delivered and `event_outbox` grows without bound
+        // (#1063). Run it alongside `queue:work`.
+        'events:relay' => 'Whity\Cli\Commands\EventRelayCommand',
     ];
 
     /**
@@ -79,10 +83,36 @@ class CliRunner
         $commandClass = $this->commands[$commandName];
 
         try {
+            $helpRequested = in_array('--help', $argv, true) || in_array('-h', $argv, true);
+
             // Deliberately NOT typed as BaseCommand: only three of the twelve
             // commands extend it, so any method assumed here is a fatal on the
             // other nine. Capability is asked for by interface instead.
-            $command = new $commandClass();
+            try {
+                $command = new $commandClass();
+            } catch (\Throwable $e) {
+                // A command whose CONSTRUCTOR needs infrastructure — `queue:work`
+                // and `schedule:run` connect to the database in theirs — fails
+                // here before `printHelp()` can be reached. Asking what a command
+                // does should not require the thing it operates on, and least of
+                // all on the machine where somebody is reading the help because
+                // nothing is configured yet.
+                //
+                // A usage line is worse than the command's own help and far
+                // better than a connection error in answer to `--help`. The real
+                // fix is for those two constructors to defer their wiring the way
+                // EventRelayCommand does; until then this stops the question
+                // being punished.
+                if (!$helpRequested) {
+                    throw $e;
+                }
+
+                echo "No detailed help is available for '{$commandName}' — it could not be constructed "
+                    . "without its environment ({$e->getMessage()}).\n";
+                echo "Usage: whity-cli {$commandName} [options] [arguments]\n";
+
+                return 0;
+            }
 
             // ASKING A COMMAND ABOUT ITSELF MUST NEVER RUN IT.
             //
@@ -98,7 +128,7 @@ class CliRunner
             // as their ACTION, which meant `migrate --help` printed help while
             // `migrate run --help` ran the migrations. `tenant delete --help` is
             // that same shape with consequences that do not undo.
-            if (in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
+            if ($helpRequested) {
                 $printed = $command instanceof \Whity\Cli\Commands\CommandHelp
                     && $command->printHelp($commandName);
 
@@ -213,7 +243,8 @@ class CliRunner
         echo "  health:watch Sample service health for the public /status page (runs outside the app)\n";
         echo "  i18n:extract Rebuild the English translation catalogue from the t() calls in the source\n";
         echo "  i18n:sync    Seed catalogue keys missing from the translations table (never overwrites)\n";
-        echo "  i18n:coverage Per-domain translated/missing counts for every committed language\n\n";
+        echo "  i18n:coverage Per-domain translated/missing counts for every committed language\n";
+        echo "  events:relay Deliver durable domain events to their listeners (run alongside queue:work)\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }
