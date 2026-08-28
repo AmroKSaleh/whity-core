@@ -5265,8 +5265,14 @@ export interface components {
             available: boolean;
             unavailable_reason?: string | null;
         };
+        DocumentViewGroup: {
+            key: string;
+            label: string;
+            order: number;
+        };
         DocumentViewListResponse: {
             data: components["schemas"]["DocumentView"][];
+            groups: components["schemas"]["DocumentViewGroup"][];
             unavailable_substrates: components["schemas"]["DocumentSubstrate"][];
         };
         DomainVerificationChallenge: {

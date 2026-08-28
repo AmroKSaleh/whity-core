@@ -13,6 +13,7 @@ use Whity\Core\Document\Organizer\DocumentSubstrate;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentView;
 use Whity\Core\Document\Organizer\DocumentViewContext;
+use Whity\Core\Document\Organizer\DocumentViewGroup;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Organizer\DocumentViewResolution;
 use Whity\Core\Document\Organizer\PdoSchemaPresence;
@@ -973,5 +974,144 @@ final class DocumentViewRegistryTest extends TestCase
             (1, 1, NULL), (2, 1, 1), (3, 1, 2), (4, 1, 2), (5, 1, 4), (9, 2, NULL)');
 
         return $pdo;
+    }
+
+    // ── #998: which sections exist is the registry's answer, not a client's ──
+
+    /**
+     * A view registered under a group nobody declared still gets a section.
+     *
+     * This is the invariant the whole fix turns on. The rail used to filter
+     * views to two known group names and drop the rest, so a folder in a third
+     * group was computed here, returned by the API, and discarded on the way to
+     * the screen — behind a rail that still looked complete. The registry must
+     * never be the place that decides a view's group is not real.
+     */
+    public function testAGroupNobodyDeclaredStillBecomesASection(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $views = new DocumentViewRegistry($substrates);
+        $views->registerGroup(new DocumentViewGroup(CoreDocumentViews::GROUP_DERIVED, 'Folders', 10));
+        $views->register($this->view('created-by-me', []));
+        $views->register($this->viewInGroup('in-transit', 'routing'));
+
+        $keys = array_map(static fn (DocumentViewGroup $g): string => $g->key, $views->groups());
+
+        self::assertContains('routing', $keys, 'an undeclared group must still reach the rail');
+    }
+
+    /** Its label falls back to the key: visibly a fallback, not a name somebody chose. */
+    public function testAnUndeclaredGroupIsLabelledWithItsKey(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $views = new DocumentViewRegistry($substrates);
+        $views->register($this->viewInGroup('in-transit', 'routing'));
+
+        $groups = $views->groups();
+
+        self::assertCount(1, $groups);
+        self::assertSame('routing', $groups[0]->key);
+        self::assertSame('routing', $groups[0]->label);
+    }
+
+    public function testADeclaredGroupUsesItsDeclaredLabelAndOrder(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $views = new DocumentViewRegistry($substrates);
+        $views->registerGroup(new DocumentViewGroup('routing', 'Routing', 30));
+        $views->registerGroup(new DocumentViewGroup(CoreDocumentViews::GROUP_DERIVED, 'Folders', 10));
+        $views->register($this->view('created-by-me', []));
+        $views->register($this->viewInGroup('in-transit', 'routing'));
+
+        $groups = $views->groups();
+
+        self::assertSame([CoreDocumentViews::GROUP_DERIVED, 'routing'], array_map(
+            static fn (DocumentViewGroup $g): string => $g->key,
+            $groups
+        ));
+        self::assertSame('Routing', $groups[1]->label);
+    }
+
+    /** A declared group with no available views is an empty heading, not a section. */
+    public function testAGroupWithNoAvailableViewsIsNotASection(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $views = new DocumentViewRegistry($substrates);
+        $views->registerGroup(new DocumentViewGroup(CoreDocumentViews::GROUP_DERIVED, 'Folders', 10));
+        $views->registerGroup(new DocumentViewGroup('empty-one', 'Nothing Here', 20));
+        $views->register($this->view('created-by-me', []));
+
+        $keys = array_map(static fn (DocumentViewGroup $g): string => $g->key, $views->groups());
+
+        self::assertNotContains('empty-one', $keys);
+    }
+
+    /**
+     * A group whose only views are unavailable here disappears WITH them. The
+     * section would otherwise be a heading over nothing, which is the same
+     * false statement an empty "Awaiting me" makes.
+     */
+    public function testAGroupDisappearsWhenItsOnlyViewsSubstrateIsAbsent(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $substrates->register(new DocumentSubstrate(
+            'acme.escalations',
+            'Escalation rows a plugin records against a document.',
+            ['acme_escalations'],
+            'a plugin that is not installed here',
+        ));
+
+        $views = new DocumentViewRegistry($substrates);
+        $views->registerGroup(new DocumentViewGroup('plugin-stuff', 'Plugin stuff', 40));
+        $views->register($this->view('created-by-me', []));
+        $views->register(new DocumentView(
+            'escalated-to-me',
+            'Escalated to me',
+            'A folder registered by a test.',
+            'plugin-stuff',
+            ['acme.escalations'],
+            [],
+            static fn (DocumentViewContext $ctx): DocumentViewResolution
+                => DocumentViewResolution::of(DocumentCriteria::unfiltered()),
+        ));
+
+        $keys = array_map(static fn (DocumentViewGroup $g): string => $g->key, $views->groups());
+
+        self::assertNotContains('plugin-stuff', $keys);
+    }
+
+    /** Core declares both of its own sections, so neither relies on the fallback. */
+    public function testCoreDeclaresItsOwnGroups(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema([
+            'documents' => ['id', 'created_by', 'tenant_id'],
+        ]));
+        CoreDocumentSubstrates::registerInto($substrates);
+
+        $views = new DocumentViewRegistry($substrates);
+        CoreDocumentViews::registerInto($views);
+
+        foreach ($views->groups() as $group) {
+            self::assertNotSame(
+                $group->key,
+                $group->label,
+                "core group '{$group->key}' is falling back to its key instead of declaring a label"
+            );
+        }
+    }
+
+    /** A view in an arbitrary group, for the section tests above. */
+    private function viewInGroup(string $key, string $group): DocumentView
+    {
+        return new DocumentView(
+            $key,
+            ucfirst(str_replace('-', ' ', $key)),
+            'A folder registered by a test.',
+            $group,
+            [],
+            [],
+            static fn (DocumentViewContext $ctx): DocumentViewResolution
+                => DocumentViewResolution::of(DocumentCriteria::unfiltered()),
+        );
     }
 }

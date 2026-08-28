@@ -36130,6 +36130,25 @@
                     "available"
                 ]
             },
+            "DocumentViewGroup": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "order": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "key",
+                    "label",
+                    "order"
+                ]
+            },
             "DocumentViewListResponse": {
                 "type": "object",
                 "properties": {
@@ -36137,6 +36156,12 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/DocumentView"
+                        }
+                    },
+                    "groups": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentViewGroup"
                         }
                     },
                     "unavailable_substrates": {
@@ -36148,6 +36173,7 @@
                 },
                 "required": [
                     "data",
+                    "groups",
                     "unavailable_substrates"
                 ]
             },
