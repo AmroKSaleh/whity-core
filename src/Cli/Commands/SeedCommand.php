@@ -113,7 +113,7 @@ use Whity\Storage\StorageDriverFactory;
  *   php public/index.php seed --with-document-demo  - …including the document demo dataset
  *   php bin/whity-cli seed                          - Same, via the CLI tool
  */
-class SeedCommand
+class SeedCommand implements CommandHelp, CliCommand
 {
     /**
      * The flag that turns the document demo dataset on.
@@ -123,10 +123,44 @@ class SeedCommand
      */
     public const DOCUMENT_DEMO_FLAG = '--with-document-demo';
 
+    /** The flag that forces the demo accounts on outside development. */
+    public const FIXTURES_FLAG = '--with-fixtures';
+
+    /**
+     * This is the command the defect was found on: `seed --help` seeded.
+     *
+     * Writing the help is the smaller half of the fix — the runner now refuses
+     * to execute ANY command when help is asked for — but this is the one whose
+     * flags somebody was trying to check when it wrote to their database.
+     */
+    public function printHelp(string $commandName): bool
+    {
+        echo "Seed the database with the default tenant, roles and bootstrap administrator.\n\n";
+        echo "Usage:\n";
+        echo "  whity-cli seed [options]\n\n";
+        echo "Options:\n";
+        echo "  " . self::FIXTURES_FLAG . "        Also seed the demo logins (admin@/user@/superuser@example.com).\n";
+        echo "                          Seeded automatically when APP_ENV=development; this forces\n";
+        echo "                          them on anywhere else.\n";
+        echo "  " . self::DOCUMENT_DEMO_FLAG . "  Also seed the document demo dataset (templates, blocks and\n";
+        echo "                          rendered documents). Off by default everywhere, including\n";
+        echo "                          development: it writes real bytes through a storage driver.\n";
+        echo "  --help, -h              Show this help and do nothing else.\n\n";
+        echo "The base seed is idempotent: running it twice does not duplicate anything.\n";
+
+        return true;
+    }
+
+    /** @return list<string> */
+    public function knownFlags(): ?array
+    {
+        return [self::FIXTURES_FLAG, self::DOCUMENT_DEMO_FLAG, '--help', '-h'];
+    }
+
     public function execute(array $argv): int
     {
         try {
-            $withFixtures = in_array('--with-fixtures', $argv, true) ? true : null;
+            $withFixtures = in_array(self::FIXTURES_FLAG, $argv, true) ? true : null;
             $withDocumentDemo = self::wantsDocumentDemo($argv);
 
             $db = Database::connect();

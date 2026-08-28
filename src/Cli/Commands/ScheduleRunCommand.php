@@ -39,7 +39,7 @@ use Whity\Database\Database;
  * No-arg constructable (Database::connect) so CliRunner + public/index.php can
  * dispatch it; deps are injectable for tests.
  */
-final class ScheduleRunCommand
+final class ScheduleRunCommand implements CliCommand
 {
     private ScheduledJobRepository $schedules;
     private QueueService $queue;

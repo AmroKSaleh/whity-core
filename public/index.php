@@ -1377,7 +1377,8 @@ $router->register('POST', '/api/register', [$registerHandler, 'register'], null)
 // having to remember to.
 $emailDomainPolicy = new TenantEmailDomainPolicyService(
     new TenantEmailDomainsRepository($db->getPdo()),
-    new MembershipRepository($db->getPdo(), $hookManager)
+    new MembershipRepository($db->getPdo(), $hookManager),
+    new \Whity\Core\Identity\AssignableRole($db->getPdo())
 );
 $emailVerificationHandler = new EmailVerificationHandler(
     $emailVerificationService,
@@ -3520,6 +3521,7 @@ $emailDomainHandler = new TenantEmailDomainApiHandler(
 );
 $router->register('GET',    '/api/email-domains',              [$emailDomainHandler, 'list'],   'admin');
 $router->register('POST',   '/api/email-domains',              [$emailDomainHandler, 'create'], 'admin');
+$router->register('PATCH',  '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'update'], 'admin');
 $router->register('POST',   '/api/email-domains/{id:\d+}/verify', [$emailDomainHandler, 'verify'], 'admin');
 $router->register('DELETE', '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'delete'], 'admin');
 
