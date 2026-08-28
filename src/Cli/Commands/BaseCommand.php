@@ -31,7 +31,7 @@ use Whity\Core\Deployment\DeploymentManager;
 /**
  * Base Command class for CLI commands
  */
-abstract class BaseCommand
+abstract class BaseCommand implements CliCommand, CommandHelp
 {
     /**
      * @var HttpKernel
@@ -50,6 +50,52 @@ abstract class BaseCommand
      * @return int Exit code
      */
     abstract public function execute(array $argv): int;
+
+    /**
+     * Print this command's own help. Return false when it has none written.
+     *
+     * ASKING A COMMAND ABOUT ITSELF MUST NEVER RUN IT. `whity-cli seed --help`
+     * seeded the database: unrecognised options were ignored rather than
+     * rejected and nothing handled `--help`, so a help request executed the
+     * default action. The base seed happens to be idempotent, so that instance
+     * came to no harm — luck, not design.
+     *
+     * The commands that DID handle it only matched `--help` in the first
+     * position, where it reads as the ACTION. So `migrate --help` printed help
+     * and `migrate run --help` ran the migrations; `tenant delete --help` is the
+     * same shape with worse consequences. {@see \Whity\Cli\CliRunner} now
+     * intercepts the flag anywhere in the arguments, before the command is
+     * asked to do anything, and calls this.
+     *
+     * Returning false is honest rather than fatal: the caller prints a generic
+     * usage line. What it must never do is fall through to executing.
+     *
+     * @param string $commandName The name as typed, for a class serving several.
+     */
+    public function printHelp(string $commandName): bool
+    {
+        return false;
+    }
+
+    /**
+     * The options this command accepts, or null when it has not declared them.
+     *
+     * Null means "do not validate", NOT "accepts nothing" — the difference
+     * matters, because a command that has not been audited must keep working
+     * exactly as it does today rather than start rejecting flags somebody
+     * relies on.
+     *
+     * Where a command DOES declare them, {@see \Whity\Cli\CliRunner} refuses an
+     * option outside the list instead of ignoring it. A silently-ignored flag is
+     * the other half of the same defect: `seed --with-fixture` (singular) seeds
+     * without fixtures and reports success.
+     *
+     * @return list<string>|null
+     */
+    public function knownFlags(): ?array
+    {
+        return null;
+    }
 
     /**
      * Setup the application kernel for simulated API calls
