@@ -34,7 +34,7 @@ use Whity\Database\ScaleSeeder\ScaleSeederResult;
  *   whity-cli scale:seed --scale=4               Quadruple the per-tenant volume
  *   whity-cli scale:seed --reset                 Wipe this seed's prior data first
  */
-class ScaleSeedCommand
+class ScaleSeedCommand implements CommandHelp, CliCommand
 {
     /** U+2713 CHECK MARK, expressed as a byte escape to avoid file-encoding ambiguity. */
     private const CHECK_MARK = "\xE2\x9C\x93";
@@ -44,6 +44,31 @@ class ScaleSeedCommand
 
     public function __construct(private ?Database $injectedDb = null)
     {
+    }
+
+    /**
+     * The help this command already wrote, routed through the interface.
+     *
+     * `showHelp()` used to be reached as an ACTION — `ScaleSeedCommand --help` matched it
+     * in the first position. That is why `ScaleSeedCommand <action> --help` ran the
+     * action instead: the flag was never in the position that matched. The runner
+     * now intercepts it anywhere, so this is how the text still gets printed.
+     */
+    public function printHelp(string $commandName): bool
+    {
+        $this->showHelp();
+
+        return true;
+    }
+
+    /** @return list<string>|null */
+    public function knownFlags(): ?array
+    {
+        // Not declared yet: this command has not been audited for the full set
+        // of options it accepts, and null means "do not validate" rather than
+        // "accepts nothing". Declaring an incomplete list here would reject
+        // flags that currently work.
+        return null;
     }
 
     /**

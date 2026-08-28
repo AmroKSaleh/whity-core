@@ -1427,7 +1427,8 @@ export interface paths {
         delete: operations["delete_api_v1_email_domains_id"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Change a domain's default role or whether it auto-provisions */
+        patch: operations["patch_api_v1_email_domains_id"];
         trace?: never;
     };
     "/api/v1/email-domains/{id}/verify": {
@@ -7073,6 +7074,10 @@ export interface components {
         };
         TenantEmailDomainResponse: {
             data: components["schemas"]["TenantEmailDomain"];
+        };
+        TenantEmailDomainUpdateRequest: {
+            default_role_id?: number;
+            auto_provision?: boolean;
         };
         TenantEmailDomainVerifyPendingResponse: {
             error: string;
@@ -15795,6 +15800,95 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_email_domains_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantEmailDomainUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated domain registration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantEmailDomainResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Domain registration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No changes given, or default_role_id is not a role this tenant may assign */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
