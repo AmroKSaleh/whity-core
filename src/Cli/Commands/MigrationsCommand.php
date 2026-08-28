@@ -55,7 +55,7 @@ use PDO;
  *   php public/index.php migrate run     - Run pending migrations
  *   php public/index.php migrate rollback - Rollback last migration
  */
-class MigrationsCommand
+class MigrationsCommand implements CommandHelp, CliCommand
 {
     /** Tracking-name prefix for plugin-declared migrations (WC-164). */
     private const PLUGIN_PREFIX = 'plugin:';
@@ -85,6 +85,31 @@ class MigrationsCommand
         private ?string $injectedMigrationDir = null
     ) {
         $this->pluginLoader = $pluginLoader;
+    }
+
+    /**
+     * The help this command already wrote, routed through the interface.
+     *
+     * `showHelp()` used to be reached as an ACTION — `MigrationsCommand --help` matched it
+     * in the first position. That is why `MigrationsCommand <action> --help` ran the
+     * action instead: the flag was never in the position that matched. The runner
+     * now intercepts it anywhere, so this is how the text still gets printed.
+     */
+    public function printHelp(string $commandName): bool
+    {
+        $this->showHelp();
+
+        return true;
+    }
+
+    /** @return list<string>|null */
+    public function knownFlags(): ?array
+    {
+        // Not declared yet: this command has not been audited for the full set
+        // of options it accepts, and null means "do not validate" rather than
+        // "accepts nothing". Declaring an incomplete list here would reject
+        // flags that currently work.
+        return null;
     }
 
     public function execute(array $argv): int
