@@ -3801,6 +3801,16 @@ final class CoreApiSchemas
                 'auto_provision' => self::bool(),
             ], ['domain', 'default_role_id']),
 
+            // A PATCH, so BOTH fields are optional and neither is required: a
+            // caller flipping `auto_provision` must not have to restate a role it
+            // never meant to touch. `domain` is deliberately absent — renaming a
+            // domain is registering a different one, and would silently carry the
+            // old domain's ownership proof to a hostname nobody verified.
+            'TenantEmailDomainUpdateRequest' => self::object([
+                'default_role_id' => self::int(),
+                'auto_provision' => self::bool(),
+            ], []),
+
             // ── Operator per-tenant entitlements (WC-ent) ─────────────────────
             // One catalogue entry: how to render + interpret an entitlement.
             'EntitlementCatalogueEntry' => self::object([
@@ -7855,6 +7865,25 @@ final class CoreApiSchemas
                         400 => self::errorResponse('Tenant context is required or invalid id'),
                         404 => self::errorResponse('Domain registration not found'),
                         422 => self::jsonResponse('Ownership not yet verified — publish the returned TXT record and retry', 'TenantEmailDomainVerifyPendingResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'PATCH',
+                'path' => '/api/email-domains/{id:\d+}',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => "Change a domain's default role or whether it auto-provisions",
+                    'tags' => ['email-domains'],
+                    'request' => 'TenantEmailDomainUpdateRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('The updated domain registration', 'TenantEmailDomainResponse'),
+                        400 => self::errorResponse('Tenant context is required'),
+                        404 => self::errorResponse('Domain registration not found'),
+                        422 => self::errorResponse(
+                            'No changes given, or default_role_id is not a role this tenant may assign'
+                        ),
                     ] + self::authErrors(),
                 ],
             ],
