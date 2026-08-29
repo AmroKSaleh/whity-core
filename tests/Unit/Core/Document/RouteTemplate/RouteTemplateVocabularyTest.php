@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Unit\Core\Document\RouteTemplate;
 
 use PHPUnit\Framework\TestCase;
-use Whity\Core\Document\RouteTemplate\RouteTemplateContract;
+use Whity\Core\Document\Routing\RouteQuorum;
+use Whity\Core\Document\Routing\RouteVerdict;
+use Whity\Core\Settings\SettingsRegistry;
 
 /**
  * The template vocabulary must agree with the ENGINE's (#1027 / #1014).
@@ -18,10 +20,18 @@ use Whity\Core\Document\RouteTemplate\RouteTemplateContract;
  * different from what it draws when it is finally run — months later, on somebody
  * else's document. Nothing errors at any point.
  *
- * {@see RouteTemplateContract} exists only because #1014 and #1027 were built on
- * separate branches and an authoring surface cannot reference classes that are
- * not on its branch. That makes it a MIRROR, and an unchecked mirror is just a
- * second opinion waiting to differ.
+ * THERE IS ONE VOCABULARY NOW. `RouteTemplateContract` used to mirror the
+ * engine's constants, because #1014 and #1027 were built on separate branches
+ * and an authoring surface cannot reference classes that are not on its branch.
+ * #1033 deleted it: authoring and the engine both read {@see RouteVerdict} and
+ * {@see RouteQuorum}, so there is no longer a second opinion to differ.
+ *
+ * That removed one of this file's three tests rather than fixing it — comparing
+ * the template vocabulary against the engine's became comparing a thing with
+ * itself, which is a test that cannot fail. What survives is the comparison that
+ * was never about the mirror: PHP constants against the DATABASE's CHECK
+ * constraints, on both the template tables and the engine tables. Those are two
+ * independent statements of the vocabulary and can still drift.
  *
  * WHY IT READS MIGRATION SOURCE RATHER THAN CLASSES
  * -------------------------------------------------
@@ -47,60 +57,61 @@ use Whity\Core\Document\RouteTemplate\RouteTemplateContract;
  * So: both halves run unconditionally, and anything that stops them finding what
  * they compare is a red build.
  *
- * PROVEN TO COMPARE, NOT MERELY TO RUN. Mutating one member of the mirrored
- * vocabulary on BOTH template sides at once — the constant and this feature's own
- * migration CHECK together, so they still agree with each other — leaves
- * {@see testTemplateMigrationMatchesTheContractConstants()} passing and fails
- * {@see testTemplateVocabularyMirrorsTheEngineVocabulary()} alone. That is the
- * isolation worth having: the second test is reading the ENGINE, not a copy of
- * this feature's own input.
+ * PROVEN TO COMPARE, NOT MERELY TO RUN. Adding a member to `RouteVerdict::all()`
+ * fails BOTH surviving tests — the template CHECK and the engine CHECK each stop
+ * agreeing with the constants. Re-checked after #1033 removed the third test,
+ * because dropping a test is exactly when the remaining ones need to be shown to
+ * still bite rather than assumed to.
  */
 final class RouteTemplateVocabularyTest extends TestCase
 {
     private const MIGRATIONS = __DIR__ . '/../../../../../database/migrations';
 
     /**
-     * The template migration's own CHECK constraints must match the constants.
+     * The template migration's own CHECK constraints must match the ENGINE constants.
      *
      * This half never skips: both sides ship in this change, so a disagreement
      * here is always a real bug on this branch.
      */
-    public function testTemplateMigrationMatchesTheContractConstants(): void
+    public function testTemplateMigrationMatchesTheEngineConstants(): void
     {
         $sql = $this->templateMigrationSource();
 
         self::assertSame(
-            RouteTemplateContract::verdicts(),
+            RouteVerdict::all(),
             $this->checkValues($sql, 'verdict'),
-            "The template edges CHECK and RouteTemplateContract::verdicts() disagree. A verdict the class "
+            "The template edges CHECK and RouteVerdict::all() disagree. A verdict the class "
             . 'admits and the database refuses is a save that fails at insert; the reverse is a stored row '
             . 'no reader can interpret.'
         );
 
         self::assertSame(
-            RouteTemplateContract::quorums(),
+            RouteQuorum::all(),
             $this->checkValues($sql, 'decision_quorum'),
-            'The template steps CHECK and RouteTemplateContract::quorums() disagree.'
+            'The template steps CHECK and RouteQuorum::all() disagree.'
         );
     }
 
     /**
-     * The template vocabulary must equal the ENGINE's, once both are present.
+     * The ENGINE's own migration CHECKs must match the same constants.
      *
-     * A MISSING ENGINE MIGRATION IS A FAILURE, NOT A SKIP. It used to skip, while
-     * #1014 was unmerged and there was genuinely nothing to compare against. That
-     * is no longer true, and leaving the skip in would be the more dangerous of
-     * the two options: a test that skips is indistinguishable from one that
-     * passes in every summary anybody reads, so a rename that moved the engine
-     * migration out of reach of the finder would silently retire the only check
-     * comparing the two vocabularies — while CI stayed green.
+     * WHAT THIS USED TO BE. It compared the template vocabulary against the
+     * engine's, because `RouteTemplateContract` mirrored the engine's constants
+     * while #1014 and #1027 sat on separate branches. #1033 deleted that mirror,
+     * so there are no longer two vocabularies to disagree — both sides now read
+     * `RouteVerdict` / `RouteQuorum`, and a comparison of a thing with itself is
+     * a test that cannot fail.
+     *
+     * What is still worth asserting is the half that was never about the mirror:
+     * the DATABASE's engine-side CHECK constraints and the PHP constants are
+     * independent statements of one vocabulary, and they can still drift.
      */
-    public function testTemplateVocabularyMirrorsTheEngineVocabulary(): void
+    public function testEngineMigrationMatchesTheEngineConstants(): void
     {
         $engine = $this->engineMigrationSource();
         if ($engine === null) {
             self::fail(
-                'No migration creates `document_route_edges`, so the template vocabulary has nothing to be '
+                'No migration creates `document_route_edges`, so the engine vocabulary has nothing to be '
                 . 'compared against. That is a FAILURE rather than a skip: the engine side is on develop, so '
                 . 'its absence means the finder no longer locates it — and a check that quietly stops '
                 . 'comparing is the exact failure this test exists to prevent, one layer up.'
@@ -109,16 +120,17 @@ final class RouteTemplateVocabularyTest extends TestCase
 
         self::assertSame(
             $this->checkValues($engine, 'verdict'),
-            RouteTemplateContract::verdicts(),
-            'The route TEMPLATE verdicts and the ENGINE verdicts have diverged. A template that names a '
-            . 'verdict the engine cannot route on saves cleanly and does nothing when it is run.'
+            RouteVerdict::all(),
+            'The engine edges CHECK and RouteVerdict::all() disagree. A verdict the class admits and the '
+            . 'database refuses is a route that fails at insert; the reverse is a stored row no reader can '
+            . 'interpret.'
         );
 
         self::assertSame(
             $this->checkValues($engine, 'decision_quorum'),
-            RouteTemplateContract::quorums(),
-            'The route TEMPLATE quorums and the ENGINE quorums have diverged. A quorum the engine cannot '
-            . 'count is an approval rule that silently falls back to something else.'
+            RouteQuorum::all(),
+            'The engine steps CHECK and RouteQuorum::all() disagree. A quorum the engine cannot count is an '
+            . 'approval rule that silently falls back to something else.'
         );
     }
 
@@ -126,10 +138,11 @@ final class RouteTemplateVocabularyTest extends TestCase
      * The setting a step with no explicit quorum defers to must be the one the
      * engine reads.
      *
-     * Mirrored as a literal string on this branch because the key is #1014's and
-     * `SettingsRegistry` does not know it here. Two different literals would mean
-     * the editor drawing one default while the engine applied another — and the
-     * editor's whole claim is that what it draws is what will happen.
+     * Read from `SettingsRegistry` now rather than mirrored as a literal: the key
+     * was duplicated on this branch only while #1014's registry entry was out of
+     * reach (#1033). Two different literals would mean the editor drawing one
+     * default while the engine applied another — and the editor's whole claim is
+     * that what it draws is what will happen.
      */
     public function testTheDeferredSettingKeyIsTheOneTheEngineNames(): void
     {
@@ -142,9 +155,9 @@ final class RouteTemplateVocabularyTest extends TestCase
         }
 
         self::assertStringContainsString(
-            RouteTemplateContract::SETTING_APPROVAL_QUORUM,
+            SettingsRegistry::DOCUMENTS_ROUTING_APPROVAL_QUORUM,
             (string) file_get_contents($quorum),
-            'RouteTemplateContract::SETTING_APPROVAL_QUORUM names a settings key RouteQuorum does not. '
+            'SettingsRegistry::DOCUMENTS_ROUTING_APPROVAL_QUORUM names a settings key RouteQuorum does not. '
             . 'The editor would draw a default the engine never reads.'
         );
     }
