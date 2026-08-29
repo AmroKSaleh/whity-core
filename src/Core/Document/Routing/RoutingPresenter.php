@@ -66,10 +66,19 @@ final class RoutingPresenter
      * @param list<array<string, mixed>> $edges
      * @param string $defaultQuorum What a step with a NULL `decision_quorum`
      *        actually does, already resolved through the tenant's settings chain.
+     * @param array<int, int> $rejectionsByStep step id => rejections recorded at
+     *        it (#1037). Defaults to empty, which publishes every step as zero —
+     *        the honest answer for a caller that did not ask the trail, and the
+     *        same one a route with no rejections yet produces.
      * @return array<string, mixed>
      */
-    public static function route(array $route, array $steps, array $edges = [], string $defaultQuorum = RouteQuorum::ALL): array
-    {
+    public static function route(
+        array $route,
+        array $steps,
+        array $edges = [],
+        string $defaultQuorum = RouteQuorum::ALL,
+        array $rejectionsByStep = [],
+    ): array {
         return [
             'id' => (int) $route['id'],
             'document_id' => (int) $route['document_id'],
@@ -78,7 +87,13 @@ final class RoutingPresenter
             'template_id' => $route['template_id'] ?? null,
             'template_name' => $route['template_name'] ?? null,
             'created_at' => (string) $route['created_at'],
-            'steps' => array_map(self::step(...), $steps),
+            'steps' => array_map(
+                static fn (array $step): array => self::step(
+                    $step,
+                    $rejectionsByStep[(int) $step['id']] ?? 0,
+                ),
+                $steps,
+            ),
             'edges' => array_map(self::edge(...), $edges),
             'default_quorum' => $defaultQuorum,
         ];
@@ -111,10 +126,19 @@ final class RoutingPresenter
      * @param array<string, mixed> $step
      * @return array<string, mixed>
      */
-    public static function step(array $step): array
+    public static function step(array $step, int $rejections = 0): array
     {
         return [
             'id' => (int) $step['id'],
+            // #1037: how many times a rejection has sent the document back from
+            // here. Derived from the trail's verdict rows, never stored — a
+            // counter beside the trail is a second source of truth that can
+            // disagree with it, and the trail is the auditable one.
+            //
+            // Published even when zero, so a client can render "1st time"
+            // rather than having to treat an absent field as either "never" or
+            // "this server is too old to say".
+            'rejection_count' => $rejections,
             'position' => (int) $step['position'],
             'rule_kind' => (string) $step['rule_kind'],
             'rule_config' => is_array($step['rule_config']) ? $step['rule_config'] : [],

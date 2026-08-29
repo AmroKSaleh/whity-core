@@ -355,6 +355,11 @@ final class DocumentRoutingApiHandler
                 $this->steps->listForRoute((int) $route['id'], $tenantId),
                 $this->edges->listForRoute((int) $route['id'], $tenantId),
                 $defaultQuorum,
+                // #1037: how many times each step has sent the document back.
+                // Only here — the two issuing paths above publish a route that
+                // was created moments ago, where zero is not a default but the
+                // fact.
+                $this->events->rejectionCountsByStep((int) $route['id'], $tenantId),
             ),
             $this->routes->listForDocument($documentId, $tenantId)
         );

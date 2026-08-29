@@ -336,6 +336,26 @@ export function RouteFanout({
                       )}
                     </>
                   )}
+
+                  {/*
+                    #1037: how many times a rejection sent the document BACK from
+                    here. Outside the `rows.length === 0` branch on purpose — a
+                    stage can have been round the loop and hold no rows right now,
+                    which is exactly the state that was invisible.
+
+                    Rendered only when non-zero. The server publishes 0 as a real
+                    answer, but a "sent back 0 times" badge on every stage is
+                    noise that would bury the one stage where it is not zero —
+                    and absence is unambiguous here, because a stage that HAD
+                    been round would be carrying the badge.
+                  */}
+                  {step.rejection_count > 0 && (
+                    <Badge variant="warning" data-slot="route-fanout-step-rejections">
+                      {t('routing.fanout.step.sentBack', 'sent back {count}x', {
+                        count: step.rejection_count,
+                      })}
+                    </Badge>
+                  )}
                 </div>
 
                 {sample.length > 0 && (

@@ -466,7 +466,20 @@ final class DocumentRouterRealEngineTest extends TestCase
         sort($methods);
 
         self::assertSame(
-            ['__construct', 'append', 'countForDocument', 'findById', 'listForDocument'],
+            [
+                '__construct',
+                'append',
+                'countForDocument',
+                'findById',
+                'listForDocument',
+                // #1037. A READ: `SELECT … GROUP BY step_id`, deriving the lap
+                // count from the verdict rows already in the trail. Listed here
+                // deliberately rather than the assertion being loosened to
+                // "nothing matching /^(update|delete)/" — an exact list is what
+                // makes a new method a decision somebody makes on purpose, and a
+                // pattern match would have admitted `markCorrected()` silently.
+                'rejectionCountsByStep',
+            ],
             $methods,
             'RouteEventRepository must expose exactly one write (append) and reads. A store that '
             . 'offers an UPDATE is a store where somebody eventually calls it.'

@@ -370,6 +370,20 @@ final class RouteTemplateInstantiationRealEngineTest extends TestCase
             . 'this path would end the chain here instead, and the trail would look identical'
         );
 
+        // #1037: THE LAP IS NOW COUNTABLE. Before this, a document on its ninth
+        // rejection looked exactly like one on its first in every surface — one
+        // open item, a long trail nobody reads to the end, and no number saying
+        // it had been round. The count is derived from the trail's verdict rows
+        // rather than stored, so it cannot disagree with the trail it summarises.
+        $steps = $this->steps->listForRoute((int) $route['id'], self::TENANT);
+        $gateId = (int) $steps[1]['id'];
+        self::assertSame(
+            [$gateId => 1],
+            $this->events->rejectionCountsByStep((int) $route['id'], self::TENANT),
+            'one lap so far, attributed to the GATE that rejected — not to the stage the document '
+            . 'was sent back to, which never rejected anything'
+        );
+
         // Lap two: the same person holds stage 1 again, in a NEW row.
         self::assertCount(
             2,
@@ -385,6 +399,15 @@ final class RouteTemplateInstantiationRealEngineTest extends TestCase
 
         $this->act(self::HEAD_A, $route, RouteAction::FORWARDED);
         $this->act(self::REGISTRAR, $route, RouteAction::ACKNOWLEDGED, RouteVerdict::APPROVED);
+
+        // An APPROVAL moves the document on, so it is not a lap. The count still
+        // reads one — which is what makes the number mean "times sent back"
+        // rather than "times acted on".
+        self::assertSame(
+            [$gateId => 1],
+            $this->events->rejectionCountsByStep((int) $route['id'], self::TENANT),
+            'the approving act must not increment the rejection count'
+        );
 
         // Approved on the second lap: stage 2 is the last, so the chain ends.
         $actions = array_map(

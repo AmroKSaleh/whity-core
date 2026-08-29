@@ -177,6 +177,58 @@ final class RouteEventRepository
     }
 
     /**
+     * How many times each step has been REJECTED on this route (#1037).
+     *
+     * WHAT THIS MAKES VISIBLE. A rejection is what sends a document backwards —
+     * "to the author, to fix" is the most common approval design there is, and
+     * it produces a cycle the engine fully supports. Nothing counted the laps,
+     * so a document on its ninth rejection looked, in every surface, exactly
+     * like one on its first: one open inbox item, a long trail nobody reads to
+     * the end, and no number anywhere saying it had been round nine times. The
+     * failure is not a runaway — `act()` performs one traversal per human act —
+     * it is a document quietly ping-ponging for six weeks with nobody able to
+     * see why.
+     *
+     * DERIVED, NOT STORED. The trail already holds this: #1014's `verdict`
+     * column records every settled answer, so the count is a GROUP BY over rows
+     * that exist. A stored counter would be a second source of truth that can
+     * disagree with the trail, and the trail is the auditable one.
+     *
+     * ONLY REJECTIONS COUNT. An approval moves the document ON; a rejection is
+     * the verdict that can send it back, so a step's rejection count IS the
+     * number of times it has been round from there. Steps with no rejection are
+     * absent from the map rather than present as zero — the caller defaults, and
+     * a route that has never been rejected produces an empty array instead of a
+     * row per step.
+     *
+     * @return array<int, int> step id => rejections recorded at it
+     */
+    public function rejectionCountsByStep(int $routeId, int $tenantId): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT step_id, COUNT(*) AS rejections
+               FROM document_route_events
+              WHERE tenant_id = :tenant_id
+                AND route_id = :route_id
+                AND verdict = :verdict
+                AND step_id IS NOT NULL
+              GROUP BY step_id'
+        );
+        $stmt->execute([
+            ':tenant_id' => $tenantId,
+            ':route_id' => $routeId,
+            ':verdict' => RouteVerdict::REJECTED,
+        ]);
+
+        $counts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $counts[(int) $row['step_id']] = (int) $row['rejections'];
+        }
+
+        return $counts;
+    }
+
+    /**
      * Map a raw row to the typed shape the presenter serialises.
      *
      * @param array<string, mixed> $row

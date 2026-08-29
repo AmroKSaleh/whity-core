@@ -4457,7 +4457,19 @@ final class CoreApiSchemas
                 // straight on. A client needs this before it renders anything —
                 // on such a step Forward, Acknowledge and Return are all 422s.
                 'satisfied_by' => ['type' => 'string', 'enum' => ['act', 'delivery']],
-            ], ['id', 'position', 'rule_kind', 'rule_config', 'decision', 'satisfied_by']),
+                // #1037. HOW MANY TIMES A REJECTION HAS SENT THE DOCUMENT BACK
+                // FROM HERE. A backwards reject edge - "to the author, to fix" -
+                // is the most common approval design there is, and nothing
+                // counted the laps: a document on its ninth rejection looked
+                // exactly like one on its first in every surface.
+                //
+                // Derived from the trail's verdict rows rather than stored, so it
+                // cannot disagree with the history it summarises. Always present,
+                // never null: 0 is a real answer, and an absent field would be
+                // ambiguous between "never rejected" and "this server does not
+                // say".
+                'rejection_count' => self::int(),
+            ], ['id', 'position', 'rule_kind', 'rule_config', 'decision', 'satisfied_by', 'rejection_count']),
             // Where a settled VERDICT sends the document (#1014, migration 119).
             // A flat list on the route rather than fields on a step, because an
             // edge is a relationship between two steps and belongs to neither -

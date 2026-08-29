@@ -713,6 +713,7 @@
         "routing.fanout.step.ordinal": "Step {position}",
         "routing.fanout.step.reached": "{count} reached",
         "routing.fanout.step.sent": "{count} sent",
+        "routing.fanout.step.sentBack": "sent back {count}x",
         "routing.fanout.step.unreached": "Not reached yet",
         "routing.fanout.steps.heading": "Steps, and who each one reached",
         "routing.gate.denied": "Requires {slug}",
