@@ -205,11 +205,17 @@ describe('resolveTransitions — convergence', () => {
     // position. Two arrivals at stage 4.
     //
     // It is asserted HERE so the PHP side is not testing a claim about a canvas
-    // it cannot see: the note that stage carries is "Paths merge here — settles
-    // once", and the two PHP tests over this graph show it settling once for one
-    // rule kind and TWICE for another. What the note is short of is the
-    // distinction its own docblock draws — once per COHORT, and a cohort is a
-    // chain only while both arrivals reach the same people.
+    // it cannot see: the note that stage carries is "Paths merge — 1 item per
+    // person", and the two PHP tests over this graph show it settling once for
+    // one rule kind and TWICE for another.
+    //
+    // The note used to read "settles once", which is what those two tests were
+    // written to measure and which held for only one of them (#1058). It now
+    // states the DE-DUPLICATION RULE rather than one of its outcomes, so both
+    // results are instances of it: same people at stage 4 -> one item -> one
+    // settlement; different people -> one item each -> two. That is the
+    // distinction `RouteFlowResolution.merges` draws as "once per COHORT",
+    // said in words an author of a route already has.
     const { merges } = resolveTransitions(
       graphOf(
         [step(1), step(2, { decision: true }), step(3), step(4, { decision: true })],

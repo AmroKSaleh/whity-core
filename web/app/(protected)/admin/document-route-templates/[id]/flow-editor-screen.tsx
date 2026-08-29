@@ -479,7 +479,7 @@ function RouteFlowBody({
             ends: t('routeTemplates.canvas.ends', 'Ends here'),
             arrivalsMerge: t(
               'routeTemplates.canvas.arrivalsMerge',
-              'Paths merge here — settles once'
+              'Paths merge — 1 item per person'
             ),
             inCycle: t('routeTemplates.canvas.inCycle', 'Can come back round — loops'),
             deleteStep: t('routeTemplates.canvas.deleteStep', 'Delete stage'),
