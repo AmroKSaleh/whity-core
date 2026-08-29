@@ -260,10 +260,6 @@ parameters:
 			count: 1
 			path: src/Cli/Commands/MigrationsCommand.php
 
-		-
-			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: src/Cli/Commands/MigrationsCommand.php
 
 		-
 			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:getExecutedMigrations\\(\\) return type has no value type specified in iterable type array\\.$#"
@@ -310,10 +306,6 @@ parameters:
 			count: 1
 			path: src/Cli/Commands/PluginsCommand.php
 
-		-
-			message: "#^Method Whity\\\\Cli\\\\Commands\\\\SeedCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: src/Cli/Commands/SeedCommand.php
 
 		-
 			message: "#^Method Whity\\\\Cli\\\\Commands\\\\TenantsCommand\\:\\:create\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
