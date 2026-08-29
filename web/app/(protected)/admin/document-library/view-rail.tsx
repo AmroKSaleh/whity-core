@@ -189,7 +189,15 @@ export function ViewRail({
   const personal = views.filter((v) => v.group === 'personal' && !isTemplate(v));
 
   return (
-    <nav aria-label={t('organizer.rail.label', 'Document folders')} className="w-64 shrink-0 space-y-6">
+    // `data-testid` as well as the label, because the label is TRANSLATED. A
+    // test that switches to Arabic and then looks for a navigation named
+    // "Document folders" is waiting for something that no longer exists — see
+    // the rtl case in document-library.spec.ts, which is what this is for.
+    <nav
+      data-testid="document-rail"
+      aria-label={t('organizer.rail.label', 'Document folders')}
+      className="w-64 shrink-0 space-y-6"
+    >
       <RailSection title={t('organizer.rail.folders', 'Folders')}>
         {derived.map((view) => (
           <RailButton

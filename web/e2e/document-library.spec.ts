@@ -322,10 +322,20 @@ test.describe('the document library', () => {
     const html = page.locator('html');
     const switcher = page.getByTestId('language-switcher').locator('select');
 
+    // BY TEST ID, NOT BY ACCESSIBLE NAME — this is the test that changes the
+    // language, and the rail's `aria-label` is translated with everything else.
+    // `getByRole('navigation', { name: 'Document folders' })` matches nothing
+    // once the page is Arabic, so the second measurement below sat waiting for
+    // a name that no longer existed until the 45-second timeout fired.
+    //
+    // It was INTERMITTENT because it is a race: right after the switch the rail
+    // may still carry its English label for a beat, so the lookup sometimes won.
+    // A test that passes or fails on which of two loads finishes first is worse
+    // than one that always fails, because it gets believed.
+    const rail = page.getByTestId('document-rail');
+
     await expect(html).toHaveAttribute('dir', 'ltr');
-    const railBoxLtr = await page
-      .getByRole('navigation', { name: 'Document folders' })
-      .boundingBox();
+    const railBoxLtr = await rail.boundingBox();
 
     await switcher.selectOption('ar');
     await expect(html).toHaveAttribute('dir', 'rtl');
@@ -333,9 +343,7 @@ test.describe('the document library', () => {
     // The rail is a layout-heavy pane and it must MOVE, not merely re-label: a
     // screen built with physical margins keeps its sidebar on the left under
     // rtl and looks almost right, which is how mirroring bugs survive review.
-    const railBoxRtl = await page
-      .getByRole('navigation', { name: 'Document folders' })
-      .boundingBox();
+    const railBoxRtl = await rail.boundingBox();
     expect(railBoxRtl!.x).toBeGreaterThan(railBoxLtr!.x);
 
     // Leave the shared account in English, as rtl-direction.spec.ts does.
