@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { SSO_ERROR_KEYS } from '@/app/login/page';
+import { SSO_ERROR_KEYS } from '@/app/login/sso-error-keys';
 
 const CATALOGUE = path.join(__dirname, '..', '..', 'database', 'i18n', 'auth.json');
 
