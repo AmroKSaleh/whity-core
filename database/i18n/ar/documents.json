@@ -714,6 +714,7 @@
         "routing.fanout.step.ordinal": "الخطوة {position}",
         "routing.fanout.step.reached": "وصلت إلى: {count}",
         "routing.fanout.step.sent": "أُرسل إلى {count}",
+        "routing.fanout.step.sentBack": "أُعيد {count} مرة",
         "routing.fanout.step.unreached": "لم تصل بعد",
         "routing.fanout.steps.heading": "الخطوات، ومن وصلت إليه كل خطوة",
         "routing.gate.denied": "يتطلّب {slug}",

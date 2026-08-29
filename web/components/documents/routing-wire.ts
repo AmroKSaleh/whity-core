@@ -159,6 +159,24 @@ export interface RouteStep {
    * the second person, to the people it was untrue about.
    */
   satisfied_by: RouteSatisfactionName;
+  /**
+   * How many times a rejection has sent the document BACK from this stage
+   * (#1037).
+   *
+   * A backwards reject edge — "to the author, to fix" — is the most common
+   * approval design there is, and nothing counted the laps: a document on its
+   * ninth rejection read exactly like one on its first, because the inbox shows
+   * one open item and the trail is a long list nobody reads to the end.
+   *
+   * Derived on the server from the trail's verdict rows, so it cannot disagree
+   * with the history it summarises. Counted against the stage that REJECTED,
+   * not the one the document was sent back to — which never rejected anything.
+   *
+   * Always a number, never absent: `0` is a real answer. It is the LISTING that
+   * carries a non-zero value; a route published at the moment it was issued
+   * reports 0 because that is the fact, not a default.
+   */
+  rejection_count: number;
 }
 
 /**
