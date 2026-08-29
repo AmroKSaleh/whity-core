@@ -421,7 +421,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'preloadSpec', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -450,7 +450,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'preloadSpec', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -665,6 +665,13 @@ final class BlockValidator
                 // #883: `dataRecord.source` — an owned apiPath that may carry
                 // `{token}` segments in the master-detail addressing.
                 self::validateRecordPath($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'preloadSpec':
+                // `form.dataSource` — the GET a form issues on mount to
+                // pre-populate its fields.
+                self::validatePreloadSpec($value, $type, $prop, $path, $errors);
 
                 break;
 
@@ -1186,6 +1193,61 @@ final class BlockValidator
             $errors[] = "{$path}.endpoint: '{$type}.{$prop}.endpoint' must be a relative API path starting with '/api/' "
                 . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($endpoint);
         }
+    }
+
+    /**
+     * `form.dataSource`: the GET a form issues on mount to pre-populate itself.
+     *
+     * WHY IT IS DECLARED AT ALL. It was not, and that is the defect this closes.
+     * `web/lib/plugin-features.ts` has carried `dataSource?: { method: 'GET';
+     * path: string }` on `FormBlock` all along, and the renderer fetches it —
+     * but nothing in the contract mentioned it, so nothing validated its shape
+     * and, worse, the host's plugin loader never ownership-checked the path.
+     * (Named in prose rather than with a `@see`: the SDK is standalone and may
+     * not reference core namespaces — `SdkPackageContractTest` enforces it, and
+     * caught this docblock doing exactly that.)
+     *
+     * That gap is a property of how validation works here rather than an
+     * oversight in one rule: {@see validateProps} iterates the DECLARED prop
+     * rules, never the node's own keys, and the loader's walk returns the node
+     * it was handed. So an undeclared prop is neither rejected nor stripped —
+     * it travels to the client untouched. `submit.endpoint`, every `source`,
+     * `inbox.actions` and every `rowActionList` are checked against the routes
+     * the plugin registered; this one was not, and it is the only endpoint a
+     * block can name that was not.
+     *
+     * `method` is GET and only GET. A preload that could POST would be a write
+     * performed by rendering a screen.
+     *
+     * The path is validated as a {@see validateRecordPath} — an `/api/` path
+     * that may carry `{token}` segments — because #949 established that
+     * `dataSource.path` takes the same master-detail tokens a `dataRecord`
+     * source does, and the renderer substitutes them the same way.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validatePreloadSpec(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be an object with 'method' and 'path', got "
+                . get_debug_type($value);
+
+            return;
+        }
+
+        $method = $value['method'] ?? null;
+        if ($method !== 'GET') {
+            $errors[] = "{$path}.method: '{$type}.{$prop}.method' must be 'GET', got "
+                . self::describeScalar($method);
+        }
+
+        self::validateRecordPath($value['path'] ?? null, $type, "{$prop}.path", "{$path}.path", $errors);
     }
 
     /**

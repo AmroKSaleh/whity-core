@@ -157,6 +157,24 @@ final class PluginLoaderDataBoundBlocksTest extends TestCase
                     ],
                 ]],
             ],
+            // A `form` whose PRELOAD names an owned GET: ownership-checked and
+            // version-rewritten like every other endpoint a block can name.
+            [
+                'id' => 'x-form-preload',
+                'label' => 'X Form Preload',
+                'screen' => 'blocks',
+                'requiredPermission' => 'x:view',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/x/rows'],
+                    'dataSource' => ['method' => 'GET', 'path' => '/api/x/rows'],
+                    'requiredPermission' => 'x:view',
+                    'children' => [
+                        ['type' => 'textInput', 'name' => 'title', 'label' => 'Title'],
+                        ['type' => 'submitButton', 'label' => 'Save'],
+                    ],
+                ]],
+            ],
             // Sibling static feature: must be unaffected by data-bound logic.
             [
                 'id' => 'x-static',
@@ -225,6 +243,25 @@ PHP);
                 ]],
             ],
             // Same ownership check, reached through a `fieldArray.source`.
+            [
+                'id' => 'y-foreign-preload',
+                'label' => 'Y Foreign Preload',
+                'screen' => 'blocks',
+                'requiredPermission' => 'y:view',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'POST', 'endpoint' => '/api/y/write'],
+                    // The gap this fixture exists for: a GET at a route this
+                    // plugin never registered, reaching the browser with the
+                    // user's session and landing in the form's own values.
+                    'dataSource' => ['method' => 'GET', 'path' => '/api/other/thing'],
+                    'requiredPermission' => 'y:view',
+                    'children' => [
+                        ['type' => 'textInput', 'name' => 'title', 'label' => 'Title'],
+                        ['type' => 'submitButton', 'label' => 'Save'],
+                    ],
+                ]],
+            ],
             [
                 'id' => 'y-foreign-array',
                 'label' => 'Y Foreign Array',
@@ -393,6 +430,74 @@ PHP);
             '/api/v1/x/rows',
             $array['source'],
             'A fieldArray source must be rewritten to the versioned URL like any other'
+        );
+    }
+
+    /**
+     * A `form`'s PRELOAD endpoint is ownership-checked and version-rewritten.
+     *
+     * `dataSource` was absent from BlockContract, and neither of the two things
+     * that could have caught that does: `BlockValidator::validateProps()`
+     * iterates the DECLARED prop rules rather than the node's own keys, and the
+     * loader's walk returns the node it was handed. An undeclared prop is
+     * therefore neither refused nor stripped — it reaches the renderer exactly
+     * as written.
+     *
+     * So this was the only endpoint a block could name that nothing checked,
+     * while `submit`, every `source`, `inbox.actions` and every `rowActionList`
+     * were all compared against the routes the plugin registered.
+     */
+    public function testFormPreloadOwnedSourceIsServedAndVersioned(): void
+    {
+        [$loader] = $this->loadDir(self::$ownedSourceDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('x-form-preload', $byId);
+
+        $form = $byId['x-form-preload']['blocks'][0];
+        $this->assertSame('form', $form['type']);
+        $this->assertSame(
+            '/api/v1/x/rows',
+            $form['dataSource']['path'],
+            'a form preload must be rewritten to the versioned URL like every other endpoint — '
+            . 'an unversioned path matches no route, and a preload that fails hands the author '
+            . 'an enabled, EMPTY form that overwrites the record on save (#957)'
+        );
+        $this->assertSame('GET', $form['dataSource']['method']);
+    }
+
+    /**
+     * And a `form` preloading somebody else's route drops the feature
+     * fail-closed.
+     *
+     * This is the case that made the missing gate matter. The response body of
+     * whatever it names is spread into the form's own values, and the form then
+     * submits those values to an endpoint the plugin DOES own — so an unchecked
+     * preload is a read of arbitrary data followed by a write of it to the
+     * plugin, through two props that each look ordinary. Bounded by the viewing
+     * user's own permissions, and still exactly the ownership rule every other
+     * endpoint obeys.
+     */
+    public function testForeignFormPreloadDropsTheFeatureFailClosed(): void
+    {
+        [$loader] = $this->loadDir(self::$foreignSourceDir, new Router('/v1'));
+
+        $ids = array_column($loader->getFrontendFeatures(), 'id');
+        $this->assertNotContains(
+            'y-foreign-preload',
+            $ids,
+            'a form preloading a route the plugin does not own must drop the feature'
+        );
+        $this->assertContains('y-static', $ids, 'and must not take its siblings with it');
+
+        // The REASON, for what the neighbouring test learned the hard way: a
+        // feature refused for an unrelated defect in its own fixture would make
+        // this pass without the preload ever being reached.
+        $dropped = array_column($loader->getDroppedFrontendFeatures(), null, 'featureId');
+        $this->assertArrayHasKey('y-foreign-preload', $dropped);
+        $this->assertStringContainsString(
+            "form.dataSource path '/api/other/thing' is not a GET route this plugin registered",
+            $dropped['y-foreign-preload']['reason']
         );
     }
 

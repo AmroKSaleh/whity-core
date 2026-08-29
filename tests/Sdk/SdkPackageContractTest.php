@@ -242,9 +242,21 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.39.0',
+            '1.40.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.39 ADDS TIME-WINDOW TYPES: PluginWindowTypesInterface, the contribution point '
+            'SDK 1.40 BRINGS THE FORM PRELOAD INTO THE CONTRACT: form.dataSource, the '
+            . '{method: GET, path} spec the renderer has honoured since #949 and which the '
+            . 'contract never declared. An undeclared prop is neither validated nor stripped — '
+            . 'BlockValidator::validateProps() walks the DECLARED rules rather than the node keys, '
+            . 'and PluginLoader returns the node it was handed — so this path reached the client '
+            . 'exactly as written and was never checked against the routes the plugin registered. '
+            . 'It was the only endpoint a block can name that was not: submit, every source, '
+            . 'inbox.actions and every rowActionList were all ownership-checked. A tree that '
+            . 'validated under 1.39 can therefore be REFUSED under 1.40, but only if its form '
+            . 'preloaded a route the plugin does not own or wrote a dataSource of the wrong shape; '
+            . 'a declaration naming its own GET is unaffected and now gets the version rewrite '
+            . 'every other endpoint already got. '
+            . 'SDK 1.39 ADDS TIME-WINDOW TYPES: PluginWindowTypesInterface, the contribution point '
             . 'for the KINDS of named period a deployment slices time into. #1070 puts a named, '
             . 'non-overlapping period that records can be scoped to and rolled up by — and that can '
             . 'be CLOSED, the way a set of books is closed — into core, because it is a primitive '

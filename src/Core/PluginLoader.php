@@ -3901,6 +3901,61 @@ class PluginLoader
                         }
                     }
 
+                    // (c3-g) A `form`'s PRELOAD endpoint. Same gate as `source`
+                    // directly above, because it is the same kind of thing: a
+                    // GET the client issues with the user's session, whose body
+                    // lands on the screen.
+                    //
+                    // It had no gate at all. `dataSource` was absent from
+                    // BlockContract, and an undeclared prop is neither validated
+                    // (validateProps iterates the DECLARED rules, never the
+                    // node's keys) nor stripped (this walk returns the node it
+                    // was handed) — so it reached the renderer untouched. Every
+                    // other endpoint a block can name is checked against the
+                    // routes THIS plugin registered: `submit` below, every
+                    // `source` above, `inbox.actions`, every `rowActionList`.
+                    // This was the one that was not, which made it the way
+                    // around all of them.
+                    //
+                    // Compared with route parameters normalized, like a
+                    // `recordPath`: `dataSource.path` carries the same `{token}`
+                    // segments (#949) and a declared `{record}` names the same
+                    // segment as a registered `{id}`.
+                    //
+                    // Version-rewritten for the reason (c3-d) gives: an
+                    // unversioned path matches no route, so the preload would
+                    // fail and hand the author an enabled, EMPTY form — which
+                    // against an update endpoint that replaces rather than
+                    // merges writes blanks over every field and reports success
+                    // (#957). Fixing ownership without the rewrite would have
+                    // traded a security gap for a data-loss one.
+                    if ($type === 'form' && array_key_exists('dataSource', $node)) {
+                        $preload = $node['dataSource'];
+                        $preloadPath = is_array($preload) ? ($preload['path'] ?? null) : null;
+
+                        // Fail closed on a shape BlockValidator would have
+                        // refused. It runs before this walk, so reaching here
+                        // with a malformed spec means it was not validated at
+                        // all — the state this block exists to end.
+                        if (!is_string($preloadPath) || $preloadPath === '') {
+                            $dropReason = 'form.dataSource must be an object with a GET path';
+                            return null;
+                        }
+
+                        if (!self::matchesRegisteredGetRoute($preloadPath, $registeredGetRoutes)) {
+                            $dropSource = $preloadPath;
+                            $dropReason = "form.dataSource path '{$preloadPath}' is not a GET route this plugin registered";
+                            return null;
+                        }
+
+                        if ($vp !== '') {
+                            $pos = strpos($preloadPath, '/', 1);
+                            $node['dataSource']['path'] = $pos === false
+                                ? $preloadPath . $vp
+                                : substr($preloadPath, 0, $pos) . $vp . substr($preloadPath, $pos);
+                        }
+                    }
+
                     // (c3-c) Interactive endpoint ownership + versioning (WC-234).
                     // A `form` node's `submit` spec and an `actionButton` node's
                     // `action` spec declare a POST/PUT/PATCH endpoint the block

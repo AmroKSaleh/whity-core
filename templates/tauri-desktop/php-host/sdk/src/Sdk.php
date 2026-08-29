@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.39).
+ * SDK identity (v1.40).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -628,13 +628,33 @@ namespace Whity\Sdk;
  * question this release does not answer — what happens to a record mid-flight
  * when its period closes — and publishing a vendored, version-pinned contract
  * before that is publishing one that then has to break.
- * Additive; every tree that validated under 1.38 still validates)
+ * Additive; every tree that validated under 1.38 still validates) ->
+ * 1.40 (THE FORM PRELOAD JOINS THE CONTRACT: `form.dataSource`, a
+ * `{method: 'GET', path}` spec the renderer has honoured since #949 and which
+ * the contract never declared.
+ *
+ * NOT PURELY ADDITIVE, and the exception is the point. An undeclared prop is
+ * neither validated nor stripped — `BlockValidator::validateProps()` walks the
+ * DECLARED rules rather than the node's keys, and the loader's walk returns the
+ * node it was handed — so `dataSource` reached the client exactly as written,
+ * and its path was never checked against the routes the plugin registered.
+ * Alone among every endpoint a block can name: `submit`, every `source`,
+ * `inbox.actions` and every `rowActionList` were all ownership-checked.
+ *
+ * So a tree that validated under 1.39 can be REFUSED under 1.40 — but only if
+ * its form preloaded a route the plugin does not own, or wrote a `dataSource`
+ * of the wrong shape. A declaration naming the plugin's own GET is unaffected,
+ * and now gets the version rewrite every other endpoint already got, which
+ * fixes the class of preload failure #957 traced to an unversioned path.
+ *
+ * A minor rather than a major: nothing legitimate stops working, and the trees
+ * this refuses are the ones the ownership rule always claimed to cover.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.39.0';
+    public const VERSION = '1.40.0';
 
     /**
      * Static identity only — never instantiated.
