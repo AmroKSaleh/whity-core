@@ -251,4 +251,94 @@ describe('the document organizer rail', () => {
 
     expect(onCreateCollection).toHaveBeenCalled();
   });
+
+  // ── #998: which sections exist is the SERVER's decision ──────────────────
+  //
+  // The rail used to filter views to the two group names it knew and drop the
+  // rest, so a folder registered under a third group was computed by the
+  // registry, returned by the API, and discarded on the way to the screen —
+  // with no entry, no error and no log, behind a rail that still looked
+  // complete. That is worse than a visible failure: nothing suggests anything
+  // is missing.
+
+  it('renders a view whose group this build has never heard of', () => {
+    renderRail({
+      views: [
+        ...CORE_VIEWS,
+        view({ key: 'in-transit', label: 'In transit', group: 'routing' }),
+      ],
+      groups: [
+        { key: 'derived', label: 'Folders', order: 10 },
+        { key: 'personal', label: 'My organization', order: 20 },
+        { key: 'routing', label: 'Routing', order: 30 },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: 'In transit' })).toBeInTheDocument();
+  });
+
+  it('titles an unfamiliar section with the label the server sent', () => {
+    renderRail({
+      views: [...CORE_VIEWS, view({ key: 'in-transit', label: 'In transit', group: 'routing' })],
+      groups: [
+        { key: 'derived', label: 'Folders', order: 10 },
+        { key: 'routing', label: 'Routing', order: 30 },
+      ],
+    });
+
+    // The heading is the server's, not one this file holds a name for.
+    expect(screen.getByText('Routing')).toBeInTheDocument();
+  });
+
+  it('renders sections in the order the server states, not the order it received them', () => {
+    renderRail({
+      views: [
+        view({ key: 'zeta', label: 'Zeta', group: 'second' }),
+        view({ key: 'alpha', label: 'Alpha', group: 'first' }),
+      ],
+      collections: [],
+      groups: [
+        { key: 'second', label: 'Second', order: 20 },
+        { key: 'first', label: 'First', order: 10 },
+      ],
+    });
+
+    const headings = screen.getAllByText(/^(First|Second)$/).map((el) => el.textContent);
+    expect(headings).toEqual(['First', 'Second']);
+  });
+
+  it('still renders every group when the server sends no group metadata at all', () => {
+    // A server older than this client. The fallback must NOT be "the two names
+    // I know" — that is the defect. It derives the sections from the views.
+    renderRail({
+      views: [...CORE_VIEWS, view({ key: 'in-transit', label: 'In transit', group: 'routing' })],
+      groups: [],
+    });
+
+    expect(screen.getByRole('button', { name: 'In transit' })).toBeInTheDocument();
+  });
+
+  it('keeps the collections section when the personal group contributes no views', () => {
+    // Collections are not views, so the section that holds them has to survive
+    // a server that reports no personal folders.
+    renderRail({
+      views: [view({ key: 'all', label: 'All documents' })],
+      groups: [{ key: 'derived', label: 'Folders', order: 10 }],
+    });
+
+    expect(screen.getByRole('button', { name: /New collection/ })).toBeInTheDocument();
+  });
+
+  it('does not render a heading for a group with no folders in it', () => {
+    renderRail({
+      views: [view({ key: 'all', label: 'All documents' })],
+      collections: [],
+      groups: [
+        { key: 'derived', label: 'Folders', order: 10 },
+        { key: 'empty-one', label: 'Nothing Here', order: 30 },
+      ],
+    });
+
+    expect(screen.queryByText('Nothing Here')).not.toBeInTheDocument();
+  });
 });
