@@ -12,7 +12,7 @@ use Whity\Core\RBAC\CorePermissions;
 use Whity\Database\Database;
 
 /**
- * Migration 136 (#1040), asserted against a database built the way a real one is.
+ * Migration 137 (#1040), asserted against a database built the way a real one is.
  *
  * THE DEFECT WAS EMPIRICAL, so the check has to be too. Migration 116 grants
  * `groups:read` to every role holding `documents:route` — evaluated AT MIGRATION
@@ -43,6 +43,7 @@ final class GroupPermissionAudienceRegrantRealEngineTest extends TestCase
 {
     private PDO $pdo;
     private Database $db;
+    private int $tenantId;
 
     protected function setUp(): void
     {
@@ -51,6 +52,25 @@ final class GroupPermissionAudienceRegrantRealEngineTest extends TestCase
         // the first place — the constructor is private, and wrapping the live
         // handle is how a test drives a migration against it.
         $this->db = Database::withFactory(fn (): PDO => $this->pdo, 86400, 86400);
+        $this->tenantId = $this->makeTenant();
+    }
+
+    /**
+     * A tenant of this test's own, rather than an assumed `tenant_id = 1`.
+     *
+     * `roles.tenant_id` has a foreign key, and which tenants exist after the
+     * migrations differs BY ENGINE: the SQLite path this suite takes by default
+     * leaves a row with id 1 behind, and the real PostgreSQL path CI runs
+     * (`PHPUNIT_PG_DSN`) does not. A hardcoded 1 therefore passes locally and
+     * fails every PG shard with a foreign-key violation — which is exactly how
+     * it did fail, after passing here.
+     */
+    private function makeTenant(): int
+    {
+        $stmt = $this->pdo->prepare('INSERT INTO tenants (name, created_at) VALUES (:name, NOW())');
+        $stmt->execute([':name' => 'regrant-fixture']);
+
+        return (int) $this->pdo->lastInsertId();
     }
 
     /**
@@ -60,9 +80,9 @@ final class GroupPermissionAudienceRegrantRealEngineTest extends TestCase
     private function roleHolding(string $name, string $permission): int
     {
         $stmt = $this->pdo->prepare(
-            "INSERT INTO roles (name, description, tenant_id, created_at) VALUES (?, '', 1, NOW())"
+            "INSERT INTO roles (name, description, tenant_id, created_at) VALUES (?, '', ?, NOW())"
         );
-        $stmt->execute([$name]);
+        $stmt->execute([$name, $this->tenantId]);
         $roleId = (int) $this->pdo->lastInsertId();
 
         $grant = $this->pdo->prepare(
@@ -133,9 +153,9 @@ final class GroupPermissionAudienceRegrantRealEngineTest extends TestCase
     public function testLeavesAnUnrelatedRoleAlone(): void
     {
         $stmt = $this->pdo->prepare(
-            "INSERT INTO roles (name, description, tenant_id, created_at) VALUES (?, '', 1, NOW())"
+            "INSERT INTO roles (name, description, tenant_id, created_at) VALUES (?, '', ?, NOW())"
         );
-        $stmt->execute(['bystander']);
+        $stmt->execute(['bystander', $this->tenantId]);
         $roleId = (int) $this->pdo->lastInsertId();
 
         RegrantGroupPermissionsToCurrentAudiences::up($this->db);
