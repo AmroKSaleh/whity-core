@@ -144,7 +144,28 @@ export interface RouteStep {
    * {@link effectiveQuorum} rather than reading either alone.
    */
   decision_quorum: RouteQuorumName | null;
+  /**
+   * Whether this stage ASKS anybody to answer, or only tells them (#1054).
+   *
+   * `'act'` — recipients are asked, and their rows stay open until they answer.
+   * `'delivery'` — recipients are told. Their rows are closed at the instant
+   * they are created and nobody does anything.
+   *
+   * The server has published this since #1061 and this type did not declare it,
+   * so the routing screen could not tell the two apart and rendered every closed
+   * row as "Acted" — including rows nobody ever acted on. #1061 put
+   * `satisfied_by` on the STEP precisely so a person's act and a system's
+   * delivery would stay distinguishable, and then the screen said it anyway, in
+   * the second person, to the people it was untrue about.
+   */
+  satisfied_by: RouteSatisfactionName;
 }
+
+/**
+ * What settles a stage. Closed on the server by a CHECK constraint (migration
+ * 125), so a third value is not a case this client has to consider.
+ */
+export type RouteSatisfactionName = 'act' | 'delivery';
 
 /**
  * One verdict edge: where a SETTLED verdict sends this step's document.
@@ -220,6 +241,17 @@ export interface RouteRecipient {
   created_by_event_id: number;
   closed_by_event_id: number | null;
   open: boolean;
+  /**
+   * Closed because the document was DELIVERED to this person, not because they
+   * acted (#1061).
+   *
+   * The distinction `open` cannot carry: both a delivered row and an answered
+   * row are closed, and rendering them the same way tells somebody they acted
+   * when they were only told. Published by the server since #1061 and, like
+   * {@link RouteStep.satisfied_by}, not declared here until the screen was
+   * caught making that claim.
+   */
+  closed_by_delivery: boolean;
   created_at: string;
 }
 

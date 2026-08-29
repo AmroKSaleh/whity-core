@@ -211,6 +211,25 @@ export function RouteFanout({
     return steps.size;
   }, [forRoute]);
 
+  /**
+   * What the settled sentence may claim about how this route closed.
+   *
+   * "Every chain has been acted on" is false the moment ANY stage was a
+   * delivery — nobody acted on those, they were told. Rather than soften every
+   * route into one vague sentence, the three cases are distinguished: a route
+   * made only of deliveries was delivered, one made only of acts was acted on,
+   * and a mixed route says the one thing true of both.
+   */
+  const settledClaim: 'acted' | 'delivered' | 'closed' = useMemo(() => {
+    const touched = new Set(forRoute.map((r) => r.step_id));
+    const kinds = new Set(
+      route.steps.filter((s) => touched.has(s.id)).map((s) => s.satisfied_by ?? 'act')
+    );
+    if (kinds.size === 1 && kinds.has('delivery')) return 'delivered';
+    if (kinds.size === 1 && kinds.has('act')) return 'acted';
+    return 'closed';
+  }, [forRoute, route.steps]);
+
   const visibleChains = expandedChains ? chains : chains.slice(0, SAMPLE_LIMIT);
 
   return (
@@ -224,7 +243,20 @@ export function RouteFanout({
       <div className="rounded-md border border-border bg-muted/30 p-4">
         <p className="text-sm text-foreground">
           {openTotal === 0
-            ? t('routing.fanout.settled', 'Nobody has this open. Every chain of this route has been acted on.')
+            ? settledClaim === 'delivered'
+              ? t(
+                  'routing.fanout.settledDelivered',
+                  'Nobody has this open. Every chain of this route has been delivered.'
+                )
+              : settledClaim === 'closed'
+                ? t(
+                    'routing.fanout.settledMixed',
+                    'Nobody has this open. Every chain of this route is closed.'
+                  )
+                : t(
+                    'routing.fanout.settled',
+                    'Nobody has this open. Every chain of this route has been acted on.'
+                  )
             : t('routing.fanout.open', '{people} awaiting action, across {steps} of this route’s steps.', {
                 people: openTotal,
                 steps: liveSteps,
@@ -292,7 +324,14 @@ export function RouteFanout({
                       )}
                       {done > 0 && (
                         <Badge variant="success">
-                          {t('routing.fanout.step.done', '{count} acted', { count: done })}
+                          {/*
+                            A delivery stage never asked anybody, so counting its
+                            closed rows as people who "acted" overstates what the
+                            trail records. The count is the same; the verb is not.
+                          */}
+                          {step.satisfied_by === 'delivery'
+                            ? t('routing.fanout.step.sent', '{count} sent', { count: done })
+                            : t('routing.fanout.step.done', '{count} acted', { count: done })}
                         </Badge>
                       )}
                     </>
@@ -422,6 +461,12 @@ function ChainBranch({
         </span>
         {node.recipient.open ? (
           <Badge variant="warning">{t('routing.fanout.chain.open', 'Has it open')}</Badge>
+        ) : node.recipient.closed_by_delivery ? (
+          // A delivery row was closed the moment it was created. Saying "Acted"
+          // here told a technician who had merely been SENT a copy that they had
+          // acted on it — in the second person, on a screen about an audit trail
+          // that had deliberately kept the two apart.
+          <Badge variant="secondary">{t('routing.fanout.chain.sent', 'Sent')}</Badge>
         ) : (
           <Badge variant="secondary">{t('routing.fanout.chain.acted', 'Acted')}</Badge>
         )}
