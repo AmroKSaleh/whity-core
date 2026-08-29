@@ -2643,9 +2643,29 @@ $router->register('POST', '/api/documents/{id:\d+}/routes',                     
 // contains every stage of somebody's design and the router carries one permission
 // per route; migration 120 grants that slug to this same audience.
 $router->register('POST', '/api/documents/{id:\d+}/routes/from-template',              [$documentRoutingHandler, 'createFromTemplate'], null, null, CorePermissions::DOCUMENTS_ROUTE);
-$router->register('GET',  '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'list'],       null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('GET',  '/api/documents/{id:\d+}/trail',                             [$documentRoutingHandler, 'trail'],      null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('GET',  '/api/documents/{id:\d+}/recipients',                        [$documentRoutingHandler, 'recipients'], null, null, CorePermissions::DOCUMENTS_READ);
+// The three READ routes of a circulation, deliberately UNPERMISSIONED for the
+// same reason the action POST below is (#1001).
+//
+// They were gated on `documents:read` while acting was gated on nothing, so the
+// recipient the unpermissioned POST exists to serve could act on a document and
+// could not SEE that anything awaited them — no list of routes, no recipient
+// rows, no trail to confirm their action landed. They could act blindly given an
+// id from somewhere else, which is not a workflow. Reachability and authority
+// had been decided independently: the write path was reasoned about and the
+// read paths inherited a default.
+//
+// This does NOT widen who can read a circulation. Every one of these handlers
+// already resolves the document through
+// `DocumentRoutingApiHandler::resolveVisibleDocument()`, which applies
+// `DocumentVisibilityPolicy::canView()` — you raised it, OR you hold
+// `documents:read:all`, OR a route reached you, OR a role was granted to you on
+// it — and 404s otherwise. That predicate is STRICTLY STRONGER than the gate
+// being removed: `documents:read` alone never satisfied it (see migration 109 —
+// it means "may use the designer" and is held broadly). So a caller who could
+// reach these before still can, and a recipient who could not now can.
+$router->register('GET',  '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'list'],       null);
+$router->register('GET',  '/api/documents/{id:\d+}/trail',                             [$documentRoutingHandler, 'trail'],      null);
+$router->register('GET',  '/api/documents/{id:\d+}/recipients',                        [$documentRoutingHandler, 'recipients'], null);
 // Deliberately UNPERMISSIONED (null, null): being a recipient IS the
 // authorization — the route named a rule, the rule resolved to you, and the
 // engine wrote the row. Requiring a permission on top would let a route resolve
