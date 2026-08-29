@@ -453,6 +453,21 @@ jobs:
       - name: Tenant-predicate guard
         run: php scripts/ci-tenant-predicate-guard.php
 
+      # Grant-by-role-name guard (#1047): fail when a migration decides who holds
+      # a permission by looking a role up as `WHERE name = 'admin'`.
+      #
+      # STATIC on purpose, and that is the whole point of it. The
+      # permission-holder guard in `postgres-migrations` runs against a database
+      # that job migrated and SEEDED, whose administrative role IS named `admin`
+      # — so every by-name grant lands there and the slug looks held. On a
+      # deployment whose administrator is called something else the same
+      # migration grants nobody, silently, and the capability surfaces as a
+      # screen that answers 200 with no way to navigate to it (#1047). The defect
+      # is invisible on any database CI can build, so this reads the migrations
+      # instead.
+      - name: Grant-by-role-name guard
+        run: php scripts/ci-grant-by-role-name-guard.php
+
       # Plugin tenant-isolation conformance kit (WC-194): run the SDK migration
       # linter + tenant-predicate scanner over the in-tree HelloWorld reference
       # plugin, the way an out-of-repo plugin runs it in its own CI. Fails if a
@@ -736,6 +751,7 @@ jobs:
       # roles screen (#977). #990 queues fourteen more re-gates of the same shape.
       - name: Permission-holder guard
         run: php scripts/ci-permission-holder-guard.php
+
 
       # JWT_SECRET and ENCRYPTION_KEY must match the .env written above so that
       # any test that bootstraps the app via public/index.php sees the same values.

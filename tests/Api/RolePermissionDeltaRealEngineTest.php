@@ -8,6 +8,7 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\MockRequestFactory;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Api\RolesApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Hooks\HookManager;
@@ -179,6 +180,69 @@ final class RolePermissionDeltaRealEngineTest extends TestCase
     }
 
     // ── revoke ──────────────────────────────────────────────────────────────
+
+    /**
+     * #1040: granting `documents:route` also grants `groups:read`.
+     *
+     * This is the case migration 137 cannot reach. It repaired the roles holding
+     * `documents:route` at the moment it ran; a role granted the capability
+     * afterwards — through this very endpoint — would otherwise compose a route
+     * and then take a 403 listing the groups it needs to route to.
+     */
+    public function testGrantingDocumentsRouteAlsoGrantsGroupsRead(): void
+    {
+        $handler = $this->handler();
+        $roleId = $this->createRole($handler, 'Router', []);
+
+        $response = $handler->grantPermissions(
+            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", [
+                'permissions' => [CorePermissions::DOCUMENTS_ROUTE],
+            ]),
+            ['id' => (string) $roleId]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        $held = $this->linkedPermissionIds($roleId);
+        $this->assertContains($this->permIdFor(CorePermissions::DOCUMENTS_ROUTE), $held);
+        $this->assertContains(
+            $this->permIdFor(CorePermissions::GROUPS_READ),
+            $held,
+            'the companion must be a REAL grant row, visible in the picker and revocable — '
+            . 'not an implication resolved at check time'
+        );
+    }
+
+    /**
+     * And revoking the primary leaves the companion alone.
+     *
+     * By then the grant is a fact an administrator can see and may rely on for
+     * its own sake; retracting it as a side effect would be the same surprise
+     * from the other direction. Taking it back is a deliberate second act.
+     */
+    public function testRevokingDocumentsRouteDoesNotTakeGroupsReadWithIt(): void
+    {
+        $handler = $this->handler();
+        $roleId = $this->createRole($handler, 'Router', []);
+
+        $handler->grantPermissions(
+            $this->authedRequest('POST', "/api/roles/{$roleId}/permissions", [
+                'permissions' => [CorePermissions::DOCUMENTS_ROUTE],
+            ]),
+            ['id' => (string) $roleId]
+        );
+
+        $handler->revokePermissions(
+            $this->authedRequest('DELETE', "/api/roles/{$roleId}/permissions", [
+                'permissions' => [CorePermissions::DOCUMENTS_ROUTE],
+            ]),
+            ['id' => (string) $roleId]
+        );
+
+        $held = $this->linkedPermissionIds($roleId);
+        $this->assertNotContains($this->permIdFor(CorePermissions::DOCUMENTS_ROUTE), $held);
+        $this->assertContains($this->permIdFor(CorePermissions::GROUPS_READ), $held);
+    }
 
     public function testRevokeRemovesOnlyTheNamedGrants(): void
     {

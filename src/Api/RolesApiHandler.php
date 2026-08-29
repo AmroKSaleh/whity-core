@@ -10,6 +10,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\CorePermissions;
+use Whity\Core\RBAC\PermissionCompanions;
 use Whity\Core\RBAC\RecordSectionRequirement;
 use Whity\Core\RBAC\RecordSectionResolver;
 use Whity\Http\InputLimits;
@@ -1334,6 +1335,12 @@ class RolesApiHandler
             /** @var array<int, string|int> $refs */
             $refs = $this->normalizePermissionRefs($body['permissions']);
             $permissionIds = $this->resolvePermissionIds($refs);
+            // #1040: granting a capability grants what it cannot be used
+            // without. Revoke is deliberately untouched — see
+            // withCompanionPermissionIds().
+            if ($grant) {
+                $permissionIds = $this->withCompanionPermissionIds($permissionIds);
+            }
 
             // Filter hook before the write, mirroring update() so a plugin
             // observing role changes sees this one too.
@@ -1951,7 +1958,10 @@ class RolesApiHandler
             return 0;
         }
 
-        $ids = $this->resolvePermissionIds($permissions);
+        // #1040: a grant carries its companions. Replace paths included — a
+        // role rebuilt from a picker that included `documents:route` must come
+        // out able to read groups, exactly as an additive grant would.
+        $ids = $this->withCompanionPermissionIds($this->resolvePermissionIds($permissions));
         if ($ids === []) {
             return 0;
         }
@@ -1972,6 +1982,97 @@ class RolesApiHandler
         }
 
         return count($ids);
+    }
+
+    /**
+     * Resolve a mixed list of permission references to their `permissions.id`s.
+     *
+     * The web UI populates its checkboxes from `GET /api/permissions` (which
+     * returns `{id, name, ...}`) and therefore submits numeric permission ids,
+     * while the Edit-role contract submits `resource:action` name strings. To
+     * support both — including arrays that mix the two — each entry is classified:
+     *
+     *  - An integer or numeric string is treated as a permission id and kept ONLY
+     *    when that id actually exists in the `permissions` catalogue.
+     *  - Anything else is treated as a `resource:action` name and resolved through
+     *    the catalogue by `permissions.name`.
+     *
+     * Unknown ids and unknown names are dropped (never fabricated), so a role can
+     * never reference a permission the system does not enforce. The result is
+     * de-duplicated to respect the `(role_id, permission_id)` uniqueness
+     * constraint while preserving first-seen order.
+     *
+     * @param array<int, string|int> $permissions Permission ids and/or names.
+     * @return array<int, int> Resolved, validated, de-duplicated permission ids.
+     */
+    /**
+     * The resolved ids, plus the companion ids any of them pull in (#1040).
+     *
+     * GRANT PATHS ONLY. `resolvePermissionIds()` serves revoke as well, and
+     * expanding there would take `groups:read` away from a role because somebody
+     * revoked `documents:route` — a permission the administrator can see,
+     * disappearing for a reason the screen does not show. Companions are written
+     * as ordinary rows precisely so they can be revoked deliberately; see
+     * {@see PermissionCompanions} for why this is not an implication at check
+     * time.
+     *
+     * Compared by ID rather than by mapping ids back to slugs: the primary is
+     * resolved through the same catalogue lookup as everything else, so a slug
+     * missing from the catalogue simply resolves to nothing and adds nothing.
+     *
+     * @param list<int> $ids
+     * @return list<int>
+     */
+    private function withCompanionPermissionIds(array $ids): array
+    {
+        if ($ids === []) {
+            return $ids;
+        }
+
+        $wanted = [];
+        foreach (PermissionCompanions::primaries() as $primary) {
+            $wanted[$primary] = true;
+            foreach (PermissionCompanions::forSlug($primary) as $companion) {
+                $wanted[$companion] = true;
+            }
+        }
+        if ($wanted === []) {
+            return $ids;
+        }
+
+        // ONE statement for the whole map, rather than a lookup per primary.
+        // This runs on every grant, so its cost is the map's size and not the
+        // caller's — and a fixed number of queries is also what lets the mocked
+        // handler tests state the sequence they expect.
+        $names = array_keys($wanted);
+        $placeholders = implode(', ', array_fill(0, count($names), '?'));
+        $stmt = $this->db->prepare("SELECT id, name FROM permissions WHERE name IN ({$placeholders})");
+        $stmt->execute($names);
+
+        $idBySlug = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $idBySlug[(string) $row['name']] = (int) $row['id'];
+        }
+
+        $held = array_fill_keys($ids, true);
+        foreach (PermissionCompanions::primaries() as $primary) {
+            $primaryId = $idBySlug[$primary] ?? null;
+            if ($primaryId === null || !isset($held[$primaryId])) {
+                continue;
+            }
+
+            foreach (PermissionCompanions::forSlug($primary) as $companion) {
+                // A companion missing from the catalogue adds nothing rather
+                // than failing the grant: the caller asked for the primary, and
+                // refusing that because of a drifted catalogue would turn a
+                // widening into an outage.
+                if (isset($idBySlug[$companion])) {
+                    $held[$idBySlug[$companion]] = true;
+                }
+            }
+        }
+
+        return array_keys($held);
     }
 
     /**
