@@ -46,7 +46,7 @@ describe('DemoCatalogDetail', () => {
       <DemoCatalogDetail adapter={adapter} itemId={null} onSaved={jest.fn()} onCancel={jest.fn()} />
     );
 
-    expect(await screen.findByLabelText('demoCatalog.detail.nameLabel')).toHaveValue('');
+    expect(await screen.findByLabelText('Name')).toHaveValue('');
     expect(adapter.get).not.toHaveBeenCalled();
   });
 
@@ -73,7 +73,7 @@ describe('DemoCatalogDetail', () => {
       <DemoCatalogDetail adapter={adapter} itemId={999} onSaved={jest.fn()} onCancel={jest.fn()} />
     );
 
-    expect(await screen.findByText('demoCatalog.detail.notFound')).toBeInTheDocument();
+    expect(await screen.findByText('That item no longer exists.')).toBeInTheDocument();
   });
 
   it('calls onCancel when Cancel is clicked', async () => {
@@ -84,8 +84,8 @@ describe('DemoCatalogDetail', () => {
       <DemoCatalogDetail adapter={fakeAdapter()} itemId={null} onSaved={jest.fn()} onCancel={onCancel} />
     );
 
-    await screen.findByLabelText('demoCatalog.detail.nameLabel');
-    await user.click(screen.getByRole('button', { name: 'demoCatalog.detail.cancel' }));
+    await screen.findByLabelText('Name');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -99,11 +99,11 @@ describe('DemoCatalogDetail', () => {
       <DemoCatalogDetail adapter={fakeAdapter({ save })} itemId={null} onSaved={onSaved} onCancel={jest.fn()} />
     );
 
-    await user.type(await screen.findByLabelText('demoCatalog.detail.nameLabel'), 'Brand new');
-    await user.click(screen.getByRole('button', { name: 'demoCatalog.detail.save' }));
+    await user.type(await screen.findByLabelText('Name'), 'Brand new');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(save).toHaveBeenCalledWith({ name: 'Brand new', description: null, status: 'active' });
-    await screen.findByText('demoCatalog.detail.save'); // form still there until onSaved resolves in caller
+    await screen.findByText('Save'); // form still there until onSaved resolves in caller
     expect(onSaved).toHaveBeenCalledWith(saved);
   });
 
@@ -123,7 +123,7 @@ describe('DemoCatalogDetail', () => {
     const nameInput = await screen.findByDisplayValue('Existing item');
     await user.clear(nameInput);
     await user.type(nameInput, 'Renamed');
-    await user.click(screen.getByRole('button', { name: 'demoCatalog.detail.save' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(save).toHaveBeenCalledWith({ id: 1, name: 'Renamed', description: 'Existing description', status: 'active' });
   });
@@ -137,10 +137,10 @@ describe('DemoCatalogDetail', () => {
       <DemoCatalogDetail adapter={fakeAdapter({ save })} itemId={null} onSaved={onSaved} onCancel={jest.fn()} />
     );
 
-    await user.type(await screen.findByLabelText('demoCatalog.detail.nameLabel'), 'x');
-    await user.click(screen.getByRole('button', { name: 'demoCatalog.detail.save' }));
+    await user.type(await screen.findByLabelText('Name'), 'x');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(await screen.findByText('demoCatalog.detail.saveError')).toBeInTheDocument();
+    expect(await screen.findByText('Could not save your changes.')).toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
   });
 });
