@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Whity\Core\Document\RouteTemplate;
 
 use InvalidArgumentException;
+use Whity\Core\Document\Routing\RouteQuorum;
 use Whity\Core\Document\Routing\RouteSatisfaction;
+use Whity\Core\Document\Routing\RouteVerdict;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
 
 /**
@@ -50,11 +52,17 @@ use Whity\Core\Document\Routing\RoutingRuleRegistry;
  * at authoring time is what stops the canvas from being able to draw an approval
  * nobody can ever give.
  *
- * The vocabulary is read from {@see RouteSatisfaction} DIRECTLY rather than
- * mirrored into {@see RouteTemplateContract}. That class exists only because
- * #1014 and #1027 were built on separate branches and its own docblock says the
- * mirrors should go now that both are merged; adding a third one would be
- * creating the drift surface it is waiting to have removed.
+ * The vocabulary is read from {@see RouteSatisfaction} DIRECTLY — as verdicts
+ * and quorums now are from {@see RouteVerdict} and {@see RouteQuorum}. There was
+ * briefly a `RouteTemplateContract` mirroring those two, because #1014 and #1027
+ * were built on separate branches and an authoring surface cannot reference
+ * classes that are not on its branch. It said in its own docblock that the
+ * mirrors should go once both merged, and #1033 is that removal.
+ *
+ * Nothing replaces it, which is the point: a mirror is a second place for the
+ * vocabulary to be wrong, and an authoring surface that can express a verdict
+ * the engine cannot route on saves cleanly, renders cleanly, and does something
+ * else when it finally runs.
  *
  * WHY CYCLES ARE ALLOWED
  * ----------------------
@@ -246,10 +254,10 @@ final class RouteTemplateGraph
 
             $quorum = $step['decision_quorum'] ?? null;
             if ($quorum !== null) {
-                if (!is_string($quorum) || !RouteTemplateContract::isQuorum($quorum)) {
+                if (!is_string($quorum) || !RouteQuorum::isValid($quorum)) {
                     throw RouteTemplateRejectedException::because(
                         "Step {$position}: 'decision_quorum' must be one of "
-                        . implode(', ', RouteTemplateContract::quorums()) . ', or absent to follow the '
+                        . implode(', ', RouteQuorum::all()) . ', or absent to follow the '
                         . 'tenant setting.'
                     );
                 }
@@ -317,9 +325,9 @@ final class RouteTemplateGraph
                     "Edge {$nth}: 'from' and 'to' must be the POSITIONS of two steps in this template."
                 );
             }
-            if (!is_string($verdict) || !RouteTemplateContract::isVerdict($verdict)) {
+            if (!is_string($verdict) || !RouteVerdict::isValid($verdict)) {
                 throw RouteTemplateRejectedException::because(
-                    "Edge {$nth}: 'verdict' must be one of " . implode(', ', RouteTemplateContract::verdicts())
+                    "Edge {$nth}: 'verdict' must be one of " . implode(', ', RouteVerdict::all())
                     . '. There is no unconditional edge — a step with no edge for a verdict falls through to '
                     . 'the next position.'
                 );
