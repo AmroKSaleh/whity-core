@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
+use Whity\Core\Identity\AssignableRole;
 use Whity\Core\Identity\TenantEmailDomainPolicyService;
 
 /**
@@ -43,7 +44,7 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
         $this->pdo         = SchemaFromMigrations::make(true);
         $this->domains     = new TenantEmailDomainsRepository($this->pdo);
         $this->memberships = new MembershipRepository($this->pdo);
-        $this->service     = new TenantEmailDomainPolicyService($this->domains, $this->memberships);
+        $this->service     = new TenantEmailDomainPolicyService($this->domains, $this->memberships, new AssignableRole($this->pdo));
 
         $this->pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
         $this->pdo->exec(
@@ -170,7 +171,7 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
         // doubled directly — we inject the failure at the PDO seam instead.
         $this->domains->markVerified($this->domains->insert(self::TENANT_A, 'acme.com', 1, true), self::TENANT_A);
         $memberships = new MembershipRepository($this->pdoThatThrowsOnInsert('23505'));
-        $service     = new TenantEmailDomainPolicyService($this->domains, $memberships);
+        $service     = new TenantEmailDomainPolicyService($this->domains, $memberships, new AssignableRole($this->pdo));
 
         // Must NOT throw — the concurrent insert already achieved the end state.
         $service->applyToVerifiedEmail('alice@acme.com', self::ALICE_PROFILE_ID);
@@ -186,7 +187,7 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
         $this->domains->markVerified($this->domains->insert(self::TENANT_A, 'acme.com', 1, true), self::TENANT_A);
         // 23503 = foreign-key violation — NOT a benign duplicate.
         $memberships = new MembershipRepository($this->pdoThatThrowsOnInsert('23503'));
-        $service     = new TenantEmailDomainPolicyService($this->domains, $memberships);
+        $service     = new TenantEmailDomainPolicyService($this->domains, $memberships, new AssignableRole($this->pdo));
 
         $this->expectException(\PDOException::class);
         $service->applyToVerifiedEmail('alice@acme.com', self::ALICE_PROFILE_ID);
