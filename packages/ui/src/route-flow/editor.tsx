@@ -136,10 +136,34 @@ export interface RouteFlowEditorLabels {
   /**
    * Marker on a stage that more than one path reaches.
    *
-   * Says that arrivals MERGE — the engine de-duplicates two chains reaching the
-   * same person at the same stage into one item, so the stage settles once
-   * rather than once per arriving path. Without it, two arrows entering a box
+   * Says that arrivals MERGE, and states the RULE by which they do: the engine
+   * de-duplicates PER PERSON, so a stage holds one item per person no matter
+   * how many paths reached them. Without the marker, two arrows entering a box
    * read as two things carrying on through it, which is not what happens.
+   *
+   * IT USED TO SAY "settles once", WHICH WAS FALSE HALF THE TIME (#1058). That
+   * holds only while both arrivals reach the SAME people — then the second
+   * de-duplicates against an item they already hold and the stage settles once.
+   * When the stage's rule is actor-relative the arrivals reach DIFFERENT people,
+   * nothing de-duplicates, and the stage settles twice, each settlement opening
+   * its own continuation.
+   *
+   * And that is the likely case, not the exotic one: an actor-relative rule
+   * upstream is usually what put two chains there to begin with. So the canvas
+   * was most confident exactly where it was least accurate — the same failure
+   * as #1042, a picture becoming false by compression, in a shape a reviewer
+   * will not question because it looks authoritative.
+   *
+   * Per-person is true in BOTH cases and is the mechanism rather than one of its
+   * outcomes, so an author can work out which case they are in: if the two paths
+   * reach the same people it settles once, and if they do not it settles once
+   * each. `RouteFlowResolution.merges` says the same thing as "once per COHORT";
+   * this is that sentence in words an author of a route already has.
+   *
+   * LENGTH IS LOAD-BEARING. Notes are joined into one span clamped to
+   * {@link ROUTE_FLOW_MAX_NOTES} lines, so a longer string here pushes a later
+   * note off the card — which is #1042 exactly. The replacement is the same
+   * length as what it replaces.
    */
   arrivalsMerge: string;
   /**
@@ -173,7 +197,7 @@ const DEFAULT_LABELS: RouteFlowEditorLabels = {
   continues: 'Continues',
   implicit: 'implicit',
   ends: 'Ends here',
-  arrivalsMerge: 'Paths merge here — settles once',
+  arrivalsMerge: 'Paths merge — 1 item per person',
   inCycle: 'Can come back round — loops',
   quorumAll: 'all must approve',
   quorumAny: 'any one may approve',

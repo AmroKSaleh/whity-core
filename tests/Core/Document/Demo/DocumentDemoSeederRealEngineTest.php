@@ -1178,9 +1178,11 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
      * #1058 REPRODUCED IN THE FIXTURE: a merge whose rule is actor-relative
      * settles once per ARRIVING CHAIN, not once.
      *
-     * The flow editor draws "Paths merge here — settles once" on this stage. Two
+     * The flow editor marks this stage "Paths merge — 1 item per person". Two
      * chains reach it, resolve to two DIFFERENT people, nothing de-duplicates,
-     * and the stage ends up holding two independent cohorts.
+     * and the stage ends up holding two independent cohorts — so it settles
+     * twice. The note used to read "settles once", which is the claim this test
+     * falsified.
      *
      * This test asserts the WRONG behaviour on purpose, exactly as
      * {@see \Tests\Core\Document\RouteTemplate\RouteTemplateInstantiationRealEngineTest}
@@ -1205,7 +1207,12 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         );
 
         $rows = $this->recipientsAtStep($documentId, (int) $merge['id']);
-        self::assertCount(2, $rows, 'two inbox items at a stage the canvas marked "settles once"');
+        self::assertCount(
+            2,
+            $rows,
+            'two inbox items at one stage: "1 item per person", and the actor-relative rule '
+            . 'resolved the two arrivals to two different people'
+        );
         self::assertCount(
             2,
             array_unique(array_map(static fn (array $r): int => (int) $r['created_by_event_id'], $rows)),
