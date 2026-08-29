@@ -5181,6 +5181,7 @@ export interface components {
             decision_quorum?: "all" | "any" | "majority" | null;
             /** @enum {string} */
             satisfied_by: "act" | "delivery";
+            rejection_count: number;
         };
         DocumentStarResponse: {
             data: components["schemas"]["DocumentCollection"] | null;
