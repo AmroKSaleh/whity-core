@@ -54,7 +54,6 @@ final class ResourceDeriver
     {
         $resources         = [];
         $resourceTemplates = [];
-        $versionPrefix     = $this->router !== null ? $this->router->getVersionPrefix() : '';
 
         // Static declarations: unversioned paths — apply version prefix.
         foreach ($this->staticDeclarations as $decl) {
@@ -65,7 +64,7 @@ final class ResourceDeriver
             if (!is_array($schema) || $schema === []) {
                 continue;
             }
-            $path = $this->applyVersionPrefix((string) ($decl['path'] ?? ''), $versionPrefix);
+            $path = $this->versionedPath((string) ($decl['path'] ?? ''));
             $this->addToResources($path, $schema, $resources, $resourceTemplates);
         }
 
@@ -98,7 +97,6 @@ final class ResourceDeriver
     public function buildAccessMap(): array
     {
         $accessMap     = [];
-        $versionPrefix = $this->router !== null ? $this->router->getVersionPrefix() : '';
 
         // Static declarations: unversioned paths — apply version prefix.
         foreach ($this->staticDeclarations as $decl) {
@@ -109,7 +107,7 @@ final class ResourceDeriver
             if (!is_array($schema) || $schema === []) {
                 continue;
             }
-            $path = $this->applyVersionPrefix((string) ($decl['path'] ?? ''), $versionPrefix);
+            $path = $this->versionedPath((string) ($decl['path'] ?? ''));
             $uri  = self::URI_SCHEME . $this->cleanPathConstraints($path);
 
             $accessMap[$uri] = [
@@ -185,19 +183,27 @@ final class ResourceDeriver
     }
 
     /**
-     * Insert the version prefix after the first path segment.
+     * The version prefix applied by the ROUTER, or the bare path when there is
+     * no router.
      *
-     * Mirrors Router::versionPrefix(): /api/users + /v1 → /api/v1/users.
+     * This used to mirror `Router::versionPrefix()` with its own copy of the
+     * arithmetic, and said so in its docblock — a standing admission that two
+     * implementations of one rule existed with nothing comparing them (#1020).
+     * Drift would have produced an emitted path nothing serves, which is exactly
+     * the #1016 defect; and it would have been QUIETER here than there, because
+     * MCP resources are consumed by agents rather than looked at by a person, so
+     * there is no rendered surface for a 404 to appear on.
+     *
+     * THE NULL-ROUTER CASE IS DELIBERATE, not inherited. Without a router there
+     * is no version to apply and the bare path is returned, which is what this
+     * class already did. It is kept rather than made fatal because the parameter
+     * is optional by design — `$staticDeclarations` alone is a legitimate
+     * construction, used where nothing is being served — and a derivation that
+     * threw would turn a supported call into an outage. Where a router IS given,
+     * its answer is now the only answer.
      */
-    private function applyVersionPrefix(string $path, string $versionPrefix): string
+    private function versionedPath(string $path): string
     {
-        if ($versionPrefix === '') {
-            return $path;
-        }
-        $pos = strpos($path, '/', 1);
-        if ($pos === false) {
-            return $path . $versionPrefix;
-        }
-        return substr($path, 0, $pos) . $versionPrefix . substr($path, $pos);
+        return $this->router?->versionedPath($path) ?? $path;
     }
 }
