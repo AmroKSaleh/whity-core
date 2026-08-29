@@ -468,6 +468,19 @@ jobs:
       - name: Grant-by-role-name guard
         run: php scripts/ci-grant-by-role-name-guard.php
 
+      # Emitted-URL version guard (#1046): fail when a URL RETURNED to a client
+      # is missing the /v1 the router serves it at.
+      #
+      # `Router::versionPrefix()` adds the prefix at REGISTRATION, and
+      # web/lib/api-client.ts passes /api paths through verbatim — so a declared
+      # path is correct written bare and an emitted one is not. Both are
+      # '/api/...' literals, which is why the convention (documented in comments
+      # at four call sites) was not enough: seven emitters read their neighbours
+      # and got it right, one did not, and the document viewer showed an error
+      # box on every first click for a release.
+      - name: Emitted-URL version guard
+        run: php scripts/ci-emitted-url-version-guard.php
+
       # Plugin tenant-isolation conformance kit (WC-194): run the SDK migration
       # linter + tenant-predicate scanner over the in-tree HelloWorld reference
       # plugin, the way an out-of-repo plugin runs it in its own CI. Fails if a
