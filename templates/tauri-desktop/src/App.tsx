@@ -137,7 +137,6 @@ function AuthenticatedApp() {
         />
         <DemoCatalogList
           adapter={demoCatalogAdapter}
-          t={appT}
           onSelect={(id) => navigate(`/demo-catalog/${id}`)}
           onCreate={() => navigate("/demo-catalog/new")}
         />
@@ -151,7 +150,6 @@ function AuthenticatedApp() {
         <PageHeader title={itemId === null ? "New item" : `Item #${itemId}`} />
         <DemoCatalogDetail
           adapter={demoCatalogAdapter}
-          t={appT}
           itemId={itemId}
           onCancel={() => navigate("/demo-catalog")}
           onSaved={() => {
