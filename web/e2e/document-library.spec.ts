@@ -78,6 +78,34 @@ async function paneSettled(page: Page): Promise<'rows' | 'empty'> {
 
 test.describe('the document library', () => {
   test.afterEach(async ({ page }) => {
+    // PUT THE ACCOUNT BACK IN ENGLISH, unconditionally.
+    //
+    // The Arabic mirroring test below switches the language and switches back
+    // at the end — but only if it REACHES the end. Its middle is a
+    // `boundingBox()` on a layout-heavy pane, and when that times out the
+    // restore never runs. The language is a per-profile column, so it survives
+    // the test, the retry and every test after it in the same worker.
+    //
+    // That is how one flake became forty-seven failures on shard 2/4: the
+    // account stayed in Arabic, and every later locator that matches English
+    // text — `filter({ hasText: /\bDocuments$/ })` on the sidebar, most of
+    // document-record.spec.ts — waited 45 seconds for a link now labelled
+    // المستندات. The retry of the Arabic test then failed on its OPENING
+    // assertion, because the page was already rtl.
+    //
+    // Through the API rather than the switcher: this has to work when the page
+    // is in whatever state the failure left it in, and a UI control cannot be
+    // relied on then. Failures are swallowed — this is cleanup, and turning it
+    // into a second error would hide the first.
+    try {
+      await page.request.patch('/api/v1/settings/language', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        data: { language_code: 'en' },
+      });
+    } catch {
+      // Best effort: a worker whose session is already gone has nothing to reset.
+    }
+
     // Collections are per-user, so a leftover is invisible to everybody else —
     // but it still accumulates in this account's rail across runs, and a rail
     // with forty "E2E library …" entries makes the next failure unreadable.
