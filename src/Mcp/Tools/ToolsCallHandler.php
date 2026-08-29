@@ -157,8 +157,7 @@ final class ToolsCallHandler implements MethodHandler
         //    For plugin routes already stored with the version prefix, the first
         //    match attempt produces a double-prefixed path that the router rejects;
         //    the fallback retries with the path as-is.
-        $versionPrefix = $this->router->getVersionPrefix();
-        $versionedPath = $this->applyVersionPrefix($concretePath, $versionPrefix);
+        $versionedPath = $this->router->versionedPath($concretePath);
         $matched       = $this->router->match(new Request($method, $versionedPath));
 
         if ($matched === null && $versionedPath !== $concretePath) {
@@ -242,24 +241,6 @@ final class ToolsCallHandler implements MethodHandler
         );
 
         return [is_string($substituted) ? $substituted : $path, $pathParamNames];
-    }
-
-    /**
-     * Insert the version prefix after the first path segment, matching the
-     * logic in Router::versionPrefix().
-     *
-     * e.g. '/api/users' + '/v1' → '/api/v1/users'
-     */
-    private function applyVersionPrefix(string $path, string $versionPrefix): string
-    {
-        if ($versionPrefix === '') {
-            return $path;
-        }
-        $pos = strpos($path, '/', 1);
-        if ($pos === false) {
-            return $path . $versionPrefix;
-        }
-        return substr($path, 0, $pos) . $versionPrefix . substr($path, $pos);
     }
 
     /**

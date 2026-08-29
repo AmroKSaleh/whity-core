@@ -3635,13 +3635,7 @@ class PluginLoader
             // The plugin declared the unversioned path (e.g. /api/hello/greetings).
             // Rewrite it to the versioned URL the browser must actually call so the
             // normalized descriptor is ready to use without further transformation.
-            $vp = $this->router->getVersionPrefix();
-            if ($vp !== '') {
-                $pos = strpos($basePath, '/', 1);
-                $basePath = $pos === false
-                    ? $basePath . $vp
-                    : substr($basePath, 0, $pos) . $vp . substr($basePath, $pos);
-            }
+            $basePath = $this->router->versionedPath($basePath);
 
             $resource = ['basePath' => $basePath, 'titleField' => $titleField];
         }
@@ -3675,13 +3669,7 @@ class PluginLoader
             }
 
             // Same versioning rewrite as resource.basePath/action.path above.
-            $vp = $this->router->getVersionPrefix();
-            if ($vp !== '') {
-                $pos = strpos($embedPath, '/', 1);
-                $embedPath = $pos === false
-                    ? $embedPath . $vp
-                    : substr($embedPath, 0, $pos) . $vp . substr($embedPath, $pos);
-            }
+            $embedPath = $this->router->versionedPath($embedPath);
 
             $embed = ['path' => $embedPath];
         }
@@ -3776,13 +3764,7 @@ class PluginLoader
             }
 
             // Same versioning rewrite as for resource.basePath above.
-            $vp = $this->router->getVersionPrefix();
-            if ($vp !== '') {
-                $pos = strpos($path, '/', 1);
-                $path = $pos === false
-                    ? $path . $vp
-                    : substr($path, 0, $pos) . $vp . substr($path, $pos);
-            }
+            $path = $this->router->versionedPath($path);
 
             $action = [
                 'method' => $method,
@@ -3822,7 +3804,6 @@ class PluginLoader
             // drops the ENTIRE feature, mirroring how crud's basePath works),
             // then rewrite it to the versioned URL exactly as basePath/path are
             // rewritten for crud and action screens.
-            $vp = $this->router->getVersionPrefix();
 
             // $dropSource / $dropReason captures the violating path or reason
             // from any depth so the outer $drop() call can include it in the
@@ -3842,11 +3823,15 @@ class PluginLoader
              * @param array<string, mixed> $node
              * @return array<string, mixed>|null
              */
+            // Captured rather than reached through `$this`: the walk is a STATIC
+            // closure, so it has no `$this` to call `versionedPath()` on.
+            $router = $this->router;
+
             $walkNode = null;
             $walkNode = static function (array $node) use (
                 $registeredGetRoutes,
                 $registeredWriteRoutes,
-                $vp,
+                $router,
                 &$walkNode,
                 &$dropSource,
                 &$dropReason
@@ -3893,12 +3878,7 @@ class PluginLoader
                             $dropSource = $source;
                             return null;
                         }
-                        if ($vp !== '') {
-                            $pos = strpos($source, '/', 1);
-                            $node['source'] = $pos === false
-                                ? $source . $vp
-                                : substr($source, 0, $pos) . $vp . substr($source, $pos);
-                        }
+                        $node['source'] = $router->versionedPath($source);
                     }
 
                     // (c3-g) A `form`'s PRELOAD endpoint. Same gate as `source`
@@ -3948,12 +3928,7 @@ class PluginLoader
                             return null;
                         }
 
-                        if ($vp !== '') {
-                            $pos = strpos($preloadPath, '/', 1);
-                            $node['dataSource']['path'] = $pos === false
-                                ? $preloadPath . $vp
-                                : substr($preloadPath, 0, $pos) . $vp . substr($preloadPath, $pos);
-                        }
+                        $node['dataSource']['path'] = $router->versionedPath($preloadPath);
                     }
 
                     // (c3-c) Interactive endpoint ownership + versioning (WC-234).
@@ -4025,12 +4000,7 @@ class PluginLoader
                                 return null;
                             }
 
-                            if ($vp !== '') {
-                                $pos = strpos($actionEndpoint, '/', 1);
-                                $action['endpoint'] = $pos === false
-                                    ? $actionEndpoint . $vp
-                                    : substr($actionEndpoint, 0, $pos) . $vp . substr($actionEndpoint, $pos);
-                            }
+                            $action['endpoint'] = $router->versionedPath($actionEndpoint);
 
                             $rewrittenActions[] = $action;
                         }
@@ -4076,12 +4046,7 @@ class PluginLoader
                             return null;
                         }
 
-                        if ($vp !== '') {
-                            $pos = strpos($checkEndpoint, '/', 1);
-                            $node['check']['endpoint'] = $pos === false
-                                ? $checkEndpoint . $vp
-                                : substr($checkEndpoint, 0, $pos) . $vp . substr($checkEndpoint, $pos);
-                        }
+                        $node['check']['endpoint'] = $router->versionedPath($checkEndpoint);
                     }
 
                     // (c3-f) a `rowActionList` prop — `dataTable.rowActions`,
@@ -4139,12 +4104,7 @@ class PluginLoader
                                 return null;
                             }
 
-                            if ($vp !== '') {
-                                $pos = strpos($rowEndpoint, '/', 1);
-                                $entry['endpoint'] = $pos === false
-                                    ? $rowEndpoint . $vp
-                                    : substr($rowEndpoint, 0, $pos) . $vp . substr($rowEndpoint, $pos);
-                            }
+                            $entry['endpoint'] = $router->versionedPath($rowEndpoint);
 
                             $rewrittenEntries[] = $entry;
                         }
@@ -4184,15 +4144,10 @@ class PluginLoader
                         // Version-rewrite the endpoint in place — same insertion
                         // logic as $source above (keep the /api/ prefix so that
                         // FrontendFeaturesApiHandler re-validation still passes).
-                        if ($vp !== '') {
-                            $e   = (string) $endpointSpec['endpoint'];
-                            $pos = strpos($e, '/', 1);
-                            $versioned = $pos === false
-                                ? $e . $vp
-                                : substr($e, 0, $pos) . $vp . substr($e, $pos);
-                            $ref = (string) $endpointSpec['ref'];
-                            $node[$ref]['endpoint'] = $versioned;
-                        }
+                        $ref = (string) $endpointSpec['ref'];
+                        $node[$ref]['endpoint'] = $router->versionedPath(
+                            (string) $endpointSpec['endpoint']
+                        );
                     }
                 }
 

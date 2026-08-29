@@ -10321,11 +10321,6 @@ final class CoreApiSchemas
      */
     private static function apiPath(string $unversionedPath): string
     {
-        $prefix = (new Router())->getVersionPrefix();
-        $pos = strpos($unversionedPath, '/', 1);
-
-        return $pos === false
-            ? $unversionedPath . $prefix
-            : substr($unversionedPath, 0, $pos) . $prefix . substr($unversionedPath, $pos);
+        return (new Router())->versionedPath($unversionedPath);
     }
 }
