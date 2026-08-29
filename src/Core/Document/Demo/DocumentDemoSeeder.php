@@ -108,11 +108,11 @@ use Whity\Core\Settings\SettingsService;
  *   | Three ROUTE TEMPLATES, and four documents  | #1056's `template_id` / `template_name`  |
  *   | whose routes were applied from them        | provenance, and a flow editor that opens |
  *   |                                            | on a real design instead of blank canvas |
- *   | A merge stage whose rule is ACTOR-RELATIVE | #1058: "Paths merge here — settles once" |
- *   |                                            | is FALSE here. Two arrivals resolve to   |
- *   |                                            | two different people, nothing            |
- *   |                                            | de-duplicates, and the stage carries two |
- *   |                                            | independent cohorts                      |
+ *   | A merge stage whose rule is ACTOR-RELATIVE | #1058: two arrivals resolve to two       |
+ *   |                                            | different people, nothing de-duplicates, |
+ *   |                                            | and the stage carries two independent    |
+ *   |                                            | cohorts — so it settles TWICE. The label |
+ *   |                                            | said "settles once" and was false here   |
  *   | A stage SATISFIED BY DELIVERY (#1054)      | recipients who were TOLD and are not     |
  *   |                                            | asked to act: rows closed the instant    |
  *   |                                            | they were opened, an empty "Awaiting me" |
@@ -856,9 +856,15 @@ final class DocumentDemoSeeder
                     ], 'Back to the head to rework', 600, 180),
                     // THE MERGE. Two transitions arrive: stage 2's drawn approve
                     // edge and stage 3's positional fallthrough — which is what
-                    // the editor counts when it decides to draw "Paths merge
-                    // here — settles once" on a node. The rule is
-                    // actor-relative, so that label is false here.
+                    // the editor counts when it decides to draw its merge note
+                    // on a node. The rule is actor-relative, so the two arrivals
+                    // reach two DIFFERENT heads and the stage settles twice.
+                    //
+                    // The note used to read "Paths merge here — settles once",
+                    // which is false here and was the finding (#1058). It now
+                    // reads "Paths merge — 1 item per person", which is the
+                    // de-duplication rule itself and so holds either way: same
+                    // people, one item; different people, one item each.
                     self::stage(4, RoutingRuleRegistry::KIND_ROLE_BELOW_ACTOR, [
                         'role_id' => $head,
                     ], 'Signed off by the head above whoever sent it', 900, 0, decision: true),
@@ -1487,24 +1493,29 @@ final class DocumentDemoSeeder
                 'captions' => ['Rejected twice; back with the drafter for a third time.', 'Demo fixture.'],
             ],
 
-            // D13. THE MERGE THE CANVAS DESCRIBES WRONGLY (#1058).
+            // D13. THE MERGE THAT SETTLES TWICE (#1058).
             //
-            // `packages/ui`'s flow editor draws "Paths merge here — settles once"
-            // on any stage with more than one arriving transition. The claim is
-            // TRUE when the arrivals resolve to the same people — the second
-            // arrival de-duplicates against an item they already hold — and FALSE
-            // when the stage's rule is ACTOR-RELATIVE, which is the rule kind a
-            // merge is most likely to carry, because an actor-relative rule
-            // upstream is what put the two chains there in the first place.
+            // `packages/ui`'s flow editor marks any stage with more than one
+            // arriving transition. What that mark SAYS was the finding: it read
+            // "Paths merge here — settles once", which is TRUE when the arrivals
+            // resolve to the same people — the second de-duplicates against an
+            // item they already hold — and FALSE when the stage's rule is
+            // ACTOR-RELATIVE, which is the rule kind a merge is most likely to
+            // carry, because an actor-relative rule upstream is what put the two
+            // chains there in the first place.
             //
+            // The label now reads "Paths merge — 1 item per person": the
+            // de-duplication rule rather than one of its outcomes, so it holds in
+            // both cases and an author can tell which one they are in.
+            //
+            // THE BEHAVIOUR IS UNCHANGED and this document still demonstrates it.
             // Both cases are pinned by
             // {@see \Tests\Core\Document\RouteTemplate\RouteTemplateInstantiationRealEngineTest}
-            // and NEITHER was seeded, so a wrong label on a canvas was visible
-            // only to somebody reading a test. This document is the second case:
-            // two chains reach stage 4, resolve to two DIFFERENT heads, nothing
-            // de-duplicates, and the stage ends up holding two independent
-            // cohorts — two open items at a node the editor has just said settles
-            // once.
+            // and NEITHER was seeded, so it was visible only to somebody reading a
+            // test. This document is the second case: two chains reach stage 4,
+            // resolve to two DIFFERENT heads, nothing de-duplicates, and the stage
+            // ends up holding two independent cohorts — two open items at one
+            // node.
             //
             // Left with BOTH stage-4 items open. Answering them settles the stage
             // TWICE, which is the finding; seeding that instead would spend the

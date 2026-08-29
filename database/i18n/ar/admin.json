@@ -881,7 +881,7 @@
         "routeTemplates.audience.error": "تعذّر تحديد عدد من تصل إليهم هذه المرحلة.",
         "routeTemplates.audience.forbidden": "لا يمكنك معاينة من تصل إليهم المراحل هنا، لذا لا يُعرَض حجم هذه المرحلة.",
         "routeTemplates.canvas.approved": "مُعتمَد",
-        "routeTemplates.canvas.arrivalsMerge": "تلتقي المسارات هنا — وتُحسم مرة واحدة",
+        "routeTemplates.canvas.arrivalsMerge": "تلتقي المسارات — عنصر واحد لكل شخص",
         "routeTemplates.canvas.audienceUnavailable": "عدد من تصل إليهم غير متاح",
         "routeTemplates.canvas.continues": "يتابع",
         "routeTemplates.canvas.decision": "قرار",

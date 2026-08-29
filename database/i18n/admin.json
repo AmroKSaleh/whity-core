@@ -880,7 +880,7 @@
         "routeTemplates.audience.error": "Audience size could not be resolved.",
         "routeTemplates.audience.forbidden": "You cannot preview audiences here, so the size of this stage is not shown.",
         "routeTemplates.canvas.approved": "Approved",
-        "routeTemplates.canvas.arrivalsMerge": "Paths merge here — settles once",
+        "routeTemplates.canvas.arrivalsMerge": "Paths merge — 1 item per person",
         "routeTemplates.canvas.audienceUnavailable": "Audience size unavailable",
         "routeTemplates.canvas.continues": "Continues",
         "routeTemplates.canvas.decision": "Decision",
