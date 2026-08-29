@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
-use Whity\Core\Document\RouteTemplate\RouteTemplateContract;
+use Whity\Core\Document\Routing\RouteQuorum;
 use Whity\Core\Document\RouteTemplate\RouteTemplateGraph;
 use Whity\Core\Document\RouteTemplate\RouteTemplatePresenter;
 use Whity\Core\Document\RouteTemplate\RouteTemplateRejectedException;
@@ -438,7 +438,7 @@ final class DocumentRouteTemplatesApiHandler
      *
      * Read by KEY rather than through a registry constant, because the key is
      * #1014's and is not in `SettingsRegistry` on this branch — see
-     * {@see RouteTemplateContract::SETTING_APPROVAL_QUORUM}. Until it lands the
+     * {@see SettingsRegistry::DOCUMENTS_ROUTING_APPROVAL_QUORUM}. Until it lands the
      * lookup finds nothing and every tenant gets #1014's own default; the day it
      * lands, this starts honouring per-tenant overrides with no change here.
      *
@@ -450,10 +450,10 @@ final class DocumentRouteTemplatesApiHandler
     private function defaultQuorum(int $tenantId): string
     {
         $effective = $this->settings->effective($tenantId);
-        $raw = $effective[RouteTemplateContract::SETTING_APPROVAL_QUORUM] ?? null;
+        $raw = $effective[SettingsRegistry::DOCUMENTS_ROUTING_APPROVAL_QUORUM] ?? null;
 
-        return is_string($raw) && RouteTemplateContract::isQuorum($raw)
+        return is_string($raw) && RouteQuorum::isValid($raw)
             ? $raw
-            : RouteTemplateContract::DEFAULT_QUORUM;
+            : RouteQuorum::ALL;
     }
 }
