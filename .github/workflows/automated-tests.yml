@@ -126,6 +126,27 @@ jobs:
               # inside every consumer's build — yet a packages-only PR used to
               # skip this job entirely and ship unverified.
               - 'packages/**'
+              # #1050. `web/jest.config.mjs` roots ALREADY reach into this tree
+              # (added with #932), so its nine suites — 90 tests, all green —
+              # run under the `web` job below. But nothing in this filter
+              # matched the tree they live in, so a PR touching ONLY the
+              # desktop template skipped that job entirely and ran none of
+              # them. The tests were not missing; the trigger was, which is the
+              # worse of the two failures: the suite looks covered, and the
+              # commits least likely to be exercised elsewhere are exactly the
+              # ones that ran nothing.
+              #
+              # Listed file-by-file rather than as `templates/tauri-desktop/**`
+              # so php-host/ (which has its own `desktop_host` filter for the
+              # PHP parity guard) and src-tauri/ (Rust, built only on a release
+              # tag) do not drag a full Next build and two Storybook galleries
+              # along with them.
+              - 'templates/tauri-desktop/src/**'
+              - 'templates/tauri-desktop/index.html'
+              - 'templates/tauri-desktop/package.json'
+              - 'templates/tauri-desktop/tsconfig.json'
+              - 'templates/tauri-desktop/tsconfig.node.json'
+              - 'templates/tauri-desktop/vite.config.ts'
               - 'public/openapi.json'
               - '.github/workflows/automated-tests.yml'
             # ADR 0012: the render service bundles this exact source slice
@@ -1316,6 +1337,29 @@ jobs:
       - name: Type check @amroksaleh/ui
         working-directory: .
         run: npm run typecheck -w @amroksaleh/ui
+
+      # #1050. The `Type check` step above runs under web/'s tsconfig, which
+      # does not include this tree — so the desktop template's own compiler
+      # settings (strict, noUnusedLocals, noUnusedParameters) were enforced
+      # only by `npm run build` in tauri-desktop-release.yml, which fires on a
+      # `tauri-desktop-vX.Y.Z` TAG. Every type error between two releases was
+      # therefore discovered at release time, by whoever cut the release,
+      # rather than on the PR that introduced it.
+      - name: Type check templates/tauri-desktop
+        working-directory: .
+        run: npm run typecheck -w whity-tauri-desktop-template
+
+      # The Vite build, not just tsc, because it is the only check in the repo
+      # that resolves `@amroksaleh/*` through each package's real `exports` map.
+      # web/'s Jest maps those specifiers via tsconfig `paths` and packages/ui
+      # ships raw sources, so a subpath import that the package does not
+      # actually publish type-checks and tests clean everywhere else and breaks
+      # HERE — see the trade-off documented in web/jest.config.mjs.
+      # `vite build` rather than `npm run build -w`, which would re-run the tsc
+      # the previous step already did. ~6s.
+      - name: Build templates/tauri-desktop
+        working-directory: templates/tauri-desktop
+        run: npx vite build
 
       # ESLint gate (WC-122): zero errors required; warnings are tolerated.
       # Runs after the WC-195 debt clearance so the gate starts clean.
