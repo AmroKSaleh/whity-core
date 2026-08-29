@@ -332,6 +332,36 @@ function collectDefaults(
  *   - 422/issues → issues report rendered + error toast
  *   - other error → error toast
  */
+/**
+ * The record inside a preload response, or null when there is nothing to seed.
+ *
+ * THE ENVELOPE IS THE CONTRACT (#981). Core's handlers return
+ * `{ data: { … } }` throughout, and the desktop renderer REQUIRES it — its
+ * `fetchSource()` throws "malformed response" on a body with no `data` key. Web
+ * used to spread the whole parsed body, so against a conventional endpoint it
+ * seeded a single field called `data` and left every real field empty.
+ *
+ * A BARE BODY IS NO LONGER ACCEPTED, deliberately. Sniffing for a `data` key
+ * and falling back would leave the contract permanently undecided: an endpoint
+ * that legitimately returns a field named `data` becomes ambiguous, and the two
+ * renderers would go on disagreeing about what a preload response is — which is
+ * the drift this fix exists to end. A declaration whose endpoint returns a bare
+ * body now seeds nothing on web, exactly as it already fails on desktop.
+ *
+ * Seeding nothing is also the SAFE direction. `isLoading` stays true until this
+ * resolves and an unbound form is disabled (#957), so a response we cannot read
+ * leaves the form unsubmittable rather than blank-and-ready — the state that
+ * overwrites a record with empties.
+ */
+function unwrapEnvelope(body: unknown): Record<string, FormValue> | null {
+  if (body === null || typeof body !== 'object') return null;
+  const data = (body as { data?: unknown }).data;
+  if (data === null || data === undefined || typeof data !== 'object' || Array.isArray(data)) {
+    return null;
+  }
+  return data as Record<string, FormValue>;
+}
+
 export function FormProvider({
   block,
   children,
@@ -413,12 +443,28 @@ export function FormProvider({
     if (!dataSourcePath || !dataSourceMethod) return;
     apiClient(dataSourcePath, { method: dataSourceMethod })
       .then((response) => response.json())
-      .then((data: unknown) => {
-        if (data !== null && typeof data === 'object') {
-          setValues((prev) => ({
-            ...prev,
-            ...(data as Record<string, FormValue>),
-          }));
+      .then((body: unknown) => {
+        // THE `{ data: … }` ENVELOPE, which this used to spread whole (#981).
+        //
+        // Core's own handlers document that envelope throughout — `Response: {
+        // data: { id, code, name, … } }` appears across LanguagesApiHandler,
+        // UsersApiHandler and the rest — so a plugin endpoint following the
+        // platform convention was seeding ONE form field literally named
+        // `data`, and every real field stayed empty.
+        //
+        // That is #957's hazard reached by a second route: an enabled,
+        // un-prefilled form. Against an update endpoint that replaces rather
+        // than merges, submitting it writes blanks over every field the user
+        // did not retype, and reports success.
+        //
+        // The desktop renderer has always required the envelope — its
+        // `fetchSource()` throws "malformed response" without a `data` key —
+        // so the two renderers disagreed about what a preload response IS.
+        // This is the side that was wrong: one platform silently mis-seeded
+        // while the other failed loudly.
+        const record = unwrapEnvelope(body);
+        if (record !== null) {
+          setValues((prev) => ({ ...prev, ...record }));
         }
         setIsLoading(false);
       })
