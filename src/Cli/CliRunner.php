@@ -29,7 +29,27 @@ class CliRunner
         'i18n:extract' => 'Whity\Cli\Commands\I18nCommand',
         'i18n:sync' => 'Whity\Cli\Commands\I18nCommand',
         'i18n:coverage' => 'Whity\Cli\Commands\I18nCommand',
+        // Without this running, `HookManager::dispatchAsync()` records events
+        // that are never delivered and `event_outbox` grows without bound
+        // (#1063). Run it alongside `queue:work`.
+        'events:relay' => 'Whity\Cli\Commands\EventRelayCommand',
     ];
+
+    /**
+     * @param array<string, string>|null $commands Overrides the built-in map.
+     *
+     * Injectable so the argument handling can be tested against a probe rather
+     * than against `seed`. Proving that `--help` does not execute must not
+     * require executing anything — a test that seeded a database to check that
+     * it does not seed would be its own punchline, and running the real
+     * destructive commands to prove they are not run is not available at all.
+     */
+    public function __construct(?array $commands = null)
+    {
+        if ($commands !== null) {
+            $this->commands = $commands;
+        }
+    }
 
     /**
      * Run the CLI application
@@ -63,8 +83,77 @@ class CliRunner
         $commandClass = $this->commands[$commandName];
 
         try {
-            /** @var \Whity\Cli\Commands\BaseCommand $command */
-            $command = new $commandClass();
+            $helpRequested = in_array('--help', $argv, true) || in_array('-h', $argv, true);
+
+            // Deliberately NOT typed as BaseCommand: only three of the twelve
+            // commands extend it, so any method assumed here is a fatal on the
+            // other nine. Capability is asked for by interface instead.
+            try {
+                $command = new $commandClass();
+            } catch (\Throwable $e) {
+                // A command whose CONSTRUCTOR needs infrastructure — `queue:work`
+                // and `schedule:run` connect to the database in theirs — fails
+                // here before `printHelp()` can be reached. Asking what a command
+                // does should not require the thing it operates on, and least of
+                // all on the machine where somebody is reading the help because
+                // nothing is configured yet.
+                //
+                // A usage line is worse than the command's own help and far
+                // better than a connection error in answer to `--help`. The real
+                // fix is for those two constructors to defer their wiring the way
+                // EventRelayCommand does; until then this stops the question
+                // being punished.
+                if (!$helpRequested) {
+                    throw $e;
+                }
+
+                echo "No detailed help is available for '{$commandName}' — it could not be constructed "
+                    . "without its environment ({$e->getMessage()}).\n";
+                echo "Usage: whity-cli {$commandName} [options] [arguments]\n";
+
+                return 0;
+            }
+
+            // ASKING A COMMAND ABOUT ITSELF MUST NEVER RUN IT.
+            //
+            // `whity-cli seed --help` used to SEED. Unrecognised options were
+            // ignored rather than rejected and nothing handled `--help`, so the
+            // documented way to ask a command what its flags are was the way to
+            // make it run. That punishes exactly the reflex an operator should
+            // have — checking before writing to a live database.
+            //
+            // Intercepted HERE, before the command is constructed into any
+            // action, and matched ANYWHERE in the arguments rather than in the
+            // first position. The commands that already handled `--help` did so
+            // as their ACTION, which meant `migrate --help` printed help while
+            // `migrate run --help` ran the migrations. `tenant delete --help` is
+            // that same shape with consequences that do not undo.
+            if ($helpRequested) {
+                $printed = $command instanceof \Whity\Cli\Commands\CommandHelp
+                    && $command->printHelp($commandName);
+
+                if (!$printed) {
+                    echo "No detailed help is written for '{$commandName}'.\n";
+                    echo "Usage: whity-cli {$commandName} [options] [arguments]\n";
+                }
+
+                return 0;
+            }
+
+            $known = $command instanceof \Whity\Cli\Commands\CommandHelp
+                ? $command->knownFlags()
+                : null;
+
+            $rejected = self::unknownFlag($argv, $known);
+            if ($rejected !== null) {
+                // Refused rather than ignored: `seed --with-fixture` (singular)
+                // otherwise seeds WITHOUT fixtures and reports success, and the
+                // operator learns it from what is missing later.
+                echo "Unknown option for '{$commandName}': {$rejected}\n";
+                echo "Use 'whity-cli {$commandName} --help' to see the options it accepts.\n";
+
+                return 1;
+            }
 
             // A class that serves several command names is told which one was
             // typed; everything else keeps the one-class-one-command shape.
@@ -72,11 +161,66 @@ class CliRunner
                 return $command->execute($argv, $commandName);
             }
 
-            return $command->execute($argv);
+            if ($command instanceof \Whity\Cli\Commands\CliCommand) {
+                return $command->execute($argv);
+            }
+
+            // Refused with a sentence rather than a fatal on an undefined
+            // method. This branch is a wiring mistake — a class registered in
+            // the map above that implements neither contract — and the person
+            // who has to fix it is whoever just added it.
+            echo "Command '{$commandName}' is registered to {$commandClass}, which implements "
+                . "neither CliCommand nor NamedSubcommand.\n";
+
+            return 1;
         } catch (\Throwable $e) {
             echo "Error: " . $e->getMessage() . "\n";
             return 1;
         }
+    }
+
+    /**
+     * The first option in `$argv` the command did not declare, or null.
+     *
+     * Returns null unconditionally when `$known` is null — a command that has
+     * not declared its options keeps behaving exactly as it does today. The
+     * alternative, treating "undeclared" as "accepts nothing", would break every
+     * command that has not been audited yet, which is a worse bug than the one
+     * being fixed.
+     *
+     * Only tokens beginning `-` are considered. Positional arguments are a
+     * command's own business: `tenant delete 5` and `migrate rollback` are
+     * actions and ids, not options, and this has no way to judge them.
+     *
+     * A bare `--` ends option parsing by long convention, so everything after it
+     * is left alone.
+     *
+     * @param list<string>      $argv
+     * @param list<string>|null $known
+     */
+    private static function unknownFlag(array $argv, ?array $known): ?string
+    {
+        if ($known === null) {
+            return null;
+        }
+
+        foreach ($argv as $arg) {
+            if ($arg === '--') {
+                return null;
+            }
+            if ($arg === '' || $arg[0] !== '-') {
+                continue;
+            }
+
+            // `--flag=value` is the same option as `--flag`.
+            $name = str_contains($arg, '=') ? substr($arg, 0, (int) strpos($arg, '=')) : $arg;
+
+            if (!in_array($name, $known, true)) {
+                return $name;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -99,7 +243,8 @@ class CliRunner
         echo "  health:watch Sample service health for the public /status page (runs outside the app)\n";
         echo "  i18n:extract Rebuild the English translation catalogue from the t() calls in the source\n";
         echo "  i18n:sync    Seed catalogue keys missing from the translations table (never overwrites)\n";
-        echo "  i18n:coverage Per-domain translated/missing counts for every committed language\n\n";
+        echo "  i18n:coverage Per-domain translated/missing counts for every committed language\n";
+        echo "  events:relay Deliver durable domain events to their listeners (run alongside queue:work)\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }
