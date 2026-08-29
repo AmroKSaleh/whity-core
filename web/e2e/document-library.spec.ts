@@ -78,6 +78,34 @@ async function paneSettled(page: Page): Promise<'rows' | 'empty'> {
 
 test.describe('the document library', () => {
   test.afterEach(async ({ page }) => {
+    // PUT THE ACCOUNT BACK IN ENGLISH, unconditionally.
+    //
+    // The Arabic mirroring test below switches the language and switches back
+    // at the end — but only if it REACHES the end. Its middle is a
+    // `boundingBox()` on a layout-heavy pane, and when that times out the
+    // restore never runs. The language is a per-profile column, so it survives
+    // the test, the retry and every test after it in the same worker.
+    //
+    // That is how one flake became forty-seven failures on shard 2/4: the
+    // account stayed in Arabic, and every later locator that matches English
+    // text — `filter({ hasText: /\bDocuments$/ })` on the sidebar, most of
+    // document-record.spec.ts — waited 45 seconds for a link now labelled
+    // المستندات. The retry of the Arabic test then failed on its OPENING
+    // assertion, because the page was already rtl.
+    //
+    // Through the API rather than the switcher: this has to work when the page
+    // is in whatever state the failure left it in, and a UI control cannot be
+    // relied on then. Failures are swallowed — this is cleanup, and turning it
+    // into a second error would hide the first.
+    try {
+      await page.request.patch('/api/v1/settings/language', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        data: { language_code: 'en' },
+      });
+    } catch {
+      // Best effort: a worker whose session is already gone has nothing to reset.
+    }
+
     // Collections are per-user, so a leftover is invisible to everybody else —
     // but it still accumulates in this account's rail across runs, and a rail
     // with forty "E2E library …" entries makes the next failure unreadable.
@@ -294,10 +322,20 @@ test.describe('the document library', () => {
     const html = page.locator('html');
     const switcher = page.getByTestId('language-switcher').locator('select');
 
+    // BY TEST ID, NOT BY ACCESSIBLE NAME — this is the test that changes the
+    // language, and the rail's `aria-label` is translated with everything else.
+    // `getByRole('navigation', { name: 'Document folders' })` matches nothing
+    // once the page is Arabic, so the second measurement below sat waiting for
+    // a name that no longer existed until the 45-second timeout fired.
+    //
+    // It was INTERMITTENT because it is a race: right after the switch the rail
+    // may still carry its English label for a beat, so the lookup sometimes won.
+    // A test that passes or fails on which of two loads finishes first is worse
+    // than one that always fails, because it gets believed.
+    const rail = page.getByTestId('document-rail');
+
     await expect(html).toHaveAttribute('dir', 'ltr');
-    const railBoxLtr = await page
-      .getByRole('navigation', { name: 'Document folders' })
-      .boundingBox();
+    const railBoxLtr = await rail.boundingBox();
 
     await switcher.selectOption('ar');
     await expect(html).toHaveAttribute('dir', 'rtl');
@@ -305,9 +343,7 @@ test.describe('the document library', () => {
     // The rail is a layout-heavy pane and it must MOVE, not merely re-label: a
     // screen built with physical margins keeps its sidebar on the left under
     // rtl and looks almost right, which is how mirroring bugs survive review.
-    const railBoxRtl = await page
-      .getByRole('navigation', { name: 'Document folders' })
-      .boundingBox();
+    const railBoxRtl = await rail.boundingBox();
     expect(railBoxRtl!.x).toBeGreaterThan(railBoxLtr!.x);
 
     // Leave the shared account in English, as rtl-direction.spec.ts does.
