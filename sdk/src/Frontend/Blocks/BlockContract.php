@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry child blocks (see childSlots())
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'preloadSpec',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'preloadSpec',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -802,8 +802,18 @@ final class BlockContract
 
             // ---- interactive blocks (SP3, WC-233) ----
             'form' => ['container' => true, 'props' => [
-                'submit'             => ['type' => 'submitSpec', 'required' => true],
-                'requiredPermission' => ['type' => 'string',     'required' => false],
+                'submit'             => ['type' => 'submitSpec',  'required' => true],
+                // The GET a form issues on mount to pre-populate its fields.
+                //
+                // DECLARED HERE BECAUSE AN UNDECLARED PROP IS NOT VALIDATED AND
+                // NOT STRIPPED. `BlockValidator::validateProps()` iterates these
+                // rules, never the node's own keys, and `PluginLoader`'s walk
+                // returns the node it was handed — so a prop the contract does
+                // not mention travels to the client untouched. This one did, and
+                // the loader therefore never ownership-checked the path a form
+                // fetches, alone among every endpoint a block can name.
+                'dataSource'         => ['type' => 'preloadSpec', 'required' => false],
+                'requiredPermission' => ['type' => 'string',      'required' => false],
             ]],
             // WC-532 A2: a repeatable field-group. Its `children` are the
             // per-row sub-form template (input leaves); the web renderer lets
