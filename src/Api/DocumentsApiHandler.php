@@ -616,6 +616,14 @@ final class DocumentsApiHandler
 
         return Response::json([
             'data' => $data,
+            // The sections, in the order the rail should render them. Sent so a
+            // client stops deciding which groups exist and what they are called:
+            // it used to admit two names and silently drop everything else, so a
+            // folder in a third group reached the payload and never the screen.
+            'groups' => array_map(
+                static fn ($group): array => DocumentViewPresenter::group($group),
+                $this->views->groups()
+            ),
             'unavailable_substrates' => array_map(
                 static fn ($substrate): array => DocumentViewPresenter::substrate($substrate),
                 $this->substrates->unavailable()

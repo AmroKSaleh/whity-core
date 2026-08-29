@@ -4735,10 +4735,29 @@ final class CoreApiSchemas
                 'description' => self::str(),
                 'provenance' => self::str(true),
             ], ['key', 'description']),
+            // A rail SECTION: the heading a set of folders sits under, and where
+            // it goes. Sent because the client used to decide which groups
+            // existed — it admitted two names and silently dropped the rest, so
+            // a folder in a third group reached this payload and never the
+            // screen (#998).
+            'DocumentViewGroup' => self::object([
+                'key' => self::str(),
+                // English, translated by key where a client knows one — the same
+                // rule a view's label follows, and for the same reason: a client
+                // cannot have a translation for a group it has never heard of.
+                'label' => self::str(),
+                'order' => self::int(),
+            ], ['key', 'label', 'order']),
             'DocumentViewListResponse' => self::object([
                 'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentView')],
+                // One entry per group that has at least one available view, in
+                // render order. A group with no folders is not a section; a group
+                // with folders but no declaration still appears, labelled with
+                // its own key, because the one thing this must never do is
+                // decide a view's group is not real.
+                'groups' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentViewGroup')],
                 'unavailable_substrates' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentSubstrate')],
-            ], ['data', 'unavailable_substrates']),
+            ], ['data', 'groups', 'unavailable_substrates']),
 
             // ── Per-user collections (#978) ──────────────────────────────────
             // The one part of the organizer that is stored, because it is the

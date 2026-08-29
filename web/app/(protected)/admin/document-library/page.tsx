@@ -677,6 +677,7 @@ export default function DocumentLibraryPage() {
       <div className="flex gap-8">
         <ViewRail
           views={views.data?.data ?? []}
+          groups={views.data?.groups ?? []}
           collections={collectionList}
           unavailableSubstrates={views.data?.unavailable_substrates ?? []}
           selectedViewKey={viewKey}

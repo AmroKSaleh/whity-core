@@ -103,6 +103,15 @@ final class CoreDocumentViews
 
     public static function registerInto(DocumentViewRegistry $registry): void
     {
+        // The sections, declared rather than left for a client to name. The rail
+        // used to hold its own headings AND its own idea of which groups exist,
+        // which is how a third group came to be silently dropped (#998).
+        //
+        // 10 and 20 rather than 1 and 2: a group belonging between them is a
+        // registration, not a renumbering of these.
+        $registry->registerGroup(new DocumentViewGroup(self::GROUP_DERIVED, 'Folders', 10));
+        $registry->registerGroup(new DocumentViewGroup(self::GROUP_PERSONAL, 'My organization', 20));
+
         $registry->register(new DocumentView(
             self::ALL,
             'All documents',

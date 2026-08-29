@@ -46,8 +46,29 @@ export interface DocumentSubstrate {
   provenance: string | null;
 }
 
+/**
+ * A rail section, as the server states it.
+ *
+ * The client used to decide which groups existed — it admitted `derived` and
+ * `personal` and silently dropped anything else — and titled the sections
+ * itself. So a folder registered under a third group was computed by the
+ * registry, returned by the API, and discarded on the way to the screen.
+ */
+export interface DocumentViewGroup {
+  key: string;
+  /** English default from the server; translated by key where this client knows one. */
+  label: string;
+  order: number;
+}
+
 export interface DocumentViewsResponse {
   data: DocumentView[];
+  /**
+   * Optional so a client stays compatible with a server that predates it. When
+   * absent the rail derives its sections from the views themselves rather than
+   * falling back to the two hardcoded names, because that fallback IS the bug.
+   */
+  groups?: DocumentViewGroup[];
   unavailable_substrates: DocumentSubstrate[];
 }
 
