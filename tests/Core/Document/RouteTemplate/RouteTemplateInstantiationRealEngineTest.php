@@ -56,7 +56,7 @@ use Whity\Core\Settings\TenantSettingsRepository;
  * `packages/ui/src/route-flow/editor.tsx` draws exactly two semantic notes about
  * flow shape, and both are claims about an engine nothing had ever run:
  *
- *   "Paths merge here — settles once"   (`merges`)
+ *   "Paths merge — 1 item per person"   (`merges`)
  *   "Can come back round — loops"       (`inCycle`)
  *
  * {@see testAMergeWhoseArrivalsReachTheSamePersonSettlesExactlyOnce} and
@@ -209,7 +209,7 @@ final class RouteTemplateInstantiationRealEngineTest extends TestCase
         );
     }
 
-    // -- convergence: the "settles once" label --------------------------------
+    // -- convergence: the merge label -----------------------------------------
 
     public function testAMergeWhoseArrivalsReachTheSamePersonSettlesExactlyOnce(): void
     {
@@ -219,7 +219,11 @@ final class RouteTemplateInstantiationRealEngineTest extends TestCase
         // archive" and "reject → fix → archive", both ending at one archive
         // stage. Stage 4 has TWO arriving transitions (stage 2's drawn approve
         // edge, and stage 3's positional fallthrough), so the editor draws
-        // "Paths merge here — settles once" on it.
+        // "Paths merge — 1 item per person" on it.
+        //
+        // This is the case the old wording — "settles once" — got right, and it
+        // is only half of them: see the actor-relative sibling below, which is
+        // why the label now states the de-duplication rule instead (#1058).
         //
         // Two chains genuinely reach it, by different routes and at different
         // times, and this test asserts that the registrar sees ONE item and
@@ -254,7 +258,8 @@ final class RouteTemplateInstantiationRealEngineTest extends TestCase
             0,
             $second['delivered'],
             'and it opened no row, because the registrar already held one. That de-duplication IS '
-            . '"settles once": the second arrival gets no item and no cohort of its own'
+            . 'the "1 item per person" the canvas promises: the second arrival gets no item and no '
+            . 'cohort of its own, so this stage settles once'
         );
         self::assertCount(
             1,
@@ -267,8 +272,8 @@ final class RouteTemplateInstantiationRealEngineTest extends TestCase
         self::assertCount(
             1,
             $this->decisionsAtStep($documentId, $route, 4),
-            'the merge stage settled exactly once. "Paths merge here — settles once" is TRUE for a merge '
-            . 'whose arrivals resolve to the same people'
+            'the merge stage settled exactly once — which is what "1 item per person" produces when '
+            . 'both arrivals resolve to the SAME people'
         );
     }
 
@@ -324,7 +329,8 @@ final class RouteTemplateInstantiationRealEngineTest extends TestCase
         self::assertSame(
             [self::HEAD_A, self::HEAD_B],
             $this->profilesAtStep($documentId, $route, 4),
-            'two inbox items at a stage the canvas marked "settles once"'
+            'two inbox items at one stage: "1 item per person", and the actor-relative rule '
+            . 'resolved the two arrivals to two different people'
         );
 
         $this->act(self::HEAD_A, $route, RouteAction::ACKNOWLEDGED, RouteVerdict::APPROVED);
