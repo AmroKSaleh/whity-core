@@ -44,6 +44,14 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 use Whity\Core\i18n\TranslationCatalog;
+
+/**
+ * An interpolated placeholder: `{org}`, `{when}`, `{count}`.
+ *
+ * Deliberately the same shape the renderer substitutes, so this check and the
+ * runtime cannot disagree about what counts as one.
+ */
+const PLACEHOLDER_PATTERN = '/\{[a-zA-Z_][a-zA-Z0-9_]*\}/';
 use Whity\Core\i18n\TranslationDomain;
 use Whity\Core\i18n\TranslationKeyExtractor;
 
@@ -203,6 +211,47 @@ foreach ($localeCodes as $code) {
                     'detail' => "'{$key}' is empty. An empty translation renders as nothing — it does NOT fall "
                         . 'back to English. Delete the key instead.',
                 ];
+            }
+
+            // A PLACEHOLDER IS DATA, NOT DECORATION. `{org}` is an organisation's
+            // name and `{when}` a date; a translation that drops one renders a
+            // sentence with the fact missing, and nothing else notices — the
+            // string is present, non-empty, and in the right language. One that
+            // INVENTS a placeholder is worse: the token renders literally, so a
+            // reader sees `{count}` on screen.
+            //
+            // Checked here rather than trusted because the failure lands in a
+            // language the reviewer of a translation PR often cannot read.
+            $english = $catalogSource[$domain][$key] ?? null;
+            if (is_string($english)) {
+                preg_match_all(PLACEHOLDER_PATTERN, $english, $inEnglish);
+                preg_match_all(PLACEHOLDER_PATTERN, $text, $inTranslation);
+
+                $wanted = array_values(array_unique($inEnglish[0]));
+                $found = array_values(array_unique($inTranslation[0]));
+                sort($wanted);
+                sort($found);
+
+                if ($wanted !== $found) {
+                    $dropped = array_diff($wanted, $found);
+                    $invented = array_diff($found, $wanted);
+                    $detail = "'{$key}' does not carry the same placeholders as the English.";
+
+                    if ($dropped !== []) {
+                        $detail .= ' Missing: ' . implode(', ', $dropped)
+                            . ' — the sentence would render without that value.';
+                    }
+
+                    if ($invented !== []) {
+                        $detail .= ' Not in the English: ' . implode(', ', $invented)
+                            . ' — nothing will replace it, so it renders literally.';
+                    }
+
+                    $localeFailures[] = [
+                        'where' => TranslationCatalog::DIRECTORY . "/{$code}/{$entry}",
+                        'detail' => $detail,
+                    ];
+                }
             }
         }
     }
