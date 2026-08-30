@@ -76,7 +76,11 @@ final class ListQueryRealEngineTest extends TestCase
         );
     }
 
-    /** Run one page and return the ids it contains. */
+    /**
+     * Run one page and return the ids it contains.
+     *
+     * @return list<int>
+     */
     private function idsFor(string $path): array
     {
         $q = ListQuery::fromPath($path, $this->spec());
@@ -151,11 +155,10 @@ final class ListQueryRealEngineTest extends TestCase
         $attack = $this->idsFor('/api/probe?sort=' . rawurlencode('name; DROP TABLE list_query_probe--') . '&per_page=5');
 
         self::assertSame($this->idsFor('/api/probe?per_page=5'), $attack);
-        self::assertSame(
-            30,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM list_query_probe')->fetchColumn(),
-            'the table is still there'
-        );
+
+        $survivors = $this->pdo->query('SELECT COUNT(*) FROM list_query_probe');
+        self::assertNotFalse($survivors, 'the table is still there to be counted');
+        self::assertSame(30, (int) $survivors->fetchColumn(), 'and still holds every row');
     }
 
     /** Search matches case-insensitively on whichever engine is under the suite. */

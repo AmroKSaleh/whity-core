@@ -188,6 +188,8 @@ final class ListQuery
      *
      * Identical in shape to {@see PaginationParams::meta()}, so a client cannot
      * tell whether an endpoint moved from one to the other.
+     *
+     * @return array{page: int, perPage: int, total: int, totalPages: int}
      */
     public function meta(int $total): array
     {
