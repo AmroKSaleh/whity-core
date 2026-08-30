@@ -12,7 +12,8 @@ use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Core\PasswordPolicy;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
-use Whity\Http\PaginationParams;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Core\Tenant\TenantProvisioner;
 use Whity\Sdk\Hooks\HookVetoException;
@@ -80,7 +81,51 @@ class TenantsApiHandler
     }
 
     /**
-     * GET /api/tenants - List tenants visible to the current user (paginated).
+     * The sort keys and search columns this endpoint offers.
+     *
+     * The keys are the admin table's own `accessorKey`s (`name`, `slug`,
+     * `userCount`, `createdAt`), so the screen can send the column a reader
+     * clicked without translating anything. `userCount` maps to the COUNT
+     * aggregate rather than its `userCount` alias because the engine folds an
+     * unquoted alias to lowercase — the same fold that hid the count from the
+     * delete dialog in WC-122 (see {@see toPublicTenant()}).
+     *
+     * `slug` sorts through `COALESCE` because it is NULLABLE and the two engines
+     * this repository runs against disagree about NULLs: PostgreSQL puts them
+     * last ascending, SQLite first. Sorting the raw column would hand the same
+     * request two different answers depending on the deployment's database, so
+     * an un-slugged workspace is ordered as the empty string on both.
+     *
+     * Search covers `name` and `slug`: the two text columns a workspace is
+     * identified by. `userCount` is an aggregate and `created_at` a timestamp;
+     * neither is something a reader types into a search box.
+     *
+     * The default is `createdAt` descending, the `ORDER BY t.created_at DESC`
+     * this endpoint always used, so a caller that sends no `sort` sees the list
+     * it saw before. `t.id` is appended as the tiebreaker, which is the only
+     * difference: workspaces created in the same second used to be free to swap
+     * places between two requests for two different pages, so one could appear
+     * twice while another never appeared at all.
+     */
+    private function listSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'name'      => 't.name',
+                'slug'      => "COALESCE(t.slug, '')",
+                'userCount' => 'COUNT(DISTINCT m.profile_id)',
+                'createdAt' => 't.created_at',
+            ],
+            tiebreaker: 't.id',
+            searchable: ['t.name', 't.slug'],
+            defaultSort: 'createdAt',
+            defaultDirection: 'desc',
+        );
+    }
+
+    /**
+     * GET /api/tenants - List tenants visible to the current user (paginated,
+     * sortable and searchable).
      */
     public function list(Request $request): Response
     {
@@ -88,12 +133,21 @@ class TenantsApiHandler
             $currentTenantId = TenantContext::getTenantId();
 
             $isSystemUser = $currentTenantId === 0;
-            $p = PaginationParams::fromPath($request->getPath());
+            $q = ListQuery::fromPath($request->getPath(), $this->listSpec());
+
+            // The search narrows the rows the caller could ALREADY see: it is
+            // ANDed onto the branch's own predicate, never substituted for it,
+            // so neither branch can reach a tenant it did not already list.
+            $search = $q->andSearch($this->db);
 
             if ($isSystemUser) {
                 // System user: all tenants except the system tenant itself.
                 // @tenant-guard-ignore: system-tenant (isSystemUser) lists all tenants; scoped else-branch binds t.id = :tenant_id
-                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM tenants t WHERE t.id != 0');
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM tenants t WHERE t.id != 0' . $search);
+                // The COUNT carries the same search predicate as the SELECT —
+                // an unfiltered total would render page controls for pages that
+                // come back empty.
+                $q->bindSearch($countStmt);
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
@@ -107,19 +161,19 @@ class TenantsApiHandler
                            COUNT(DISTINCT m.profile_id) as userCount
                     FROM tenants t
                     LEFT JOIN memberships m ON t.id = m.tenant_id AND m.status = \'active\'
-                    WHERE t.id != 0
+                    WHERE t.id != 0' . $search . '
                     GROUP BY t.id
-                    ORDER BY t.created_at DESC
+                    ' . $q->orderBy() . '
                     LIMIT :limit OFFSET :offset
                 ');
-                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $q->bindAll($stmt);
                 $stmt->execute();
             } else {
                 // Regular user: only their own tenant (at most 1 row).
                 // @tenant-guard-ignore: caller's own tenant; WHERE t.id = :tenant_id on tenants constrains the memberships LEFT JOIN to one tenant's rows
-                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM tenants t WHERE t.id = :tenant_id AND t.id != 0');
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM tenants t WHERE t.id = :tenant_id AND t.id != 0' . $search);
                 $countStmt->bindValue(':tenant_id', $currentTenantId, PDO::PARAM_INT);
+                $q->bindSearch($countStmt);
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
@@ -133,20 +187,26 @@ class TenantsApiHandler
                            COUNT(DISTINCT m.profile_id) as userCount
                     FROM tenants t
                     LEFT JOIN memberships m ON t.id = m.tenant_id AND m.status = \'active\'
-                    WHERE t.id = :tenant_id
+                    WHERE t.id = :tenant_id' . $search . '
                     GROUP BY t.id
+                    ' . $q->orderBy() . '
                     LIMIT :limit OFFSET :offset
                 ');
                 $stmt->bindValue(':tenant_id', $currentTenantId, PDO::PARAM_INT);
-                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $q->bindAll($stmt);
                 $stmt->execute();
             }
 
             /** @var array<int, array<string, mixed>> $rows */
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            if (empty($rows) && !$isSystemUser) {
+            // A single-tenant caller whose row is missing still gets the 404 it
+            // always got. A SEARCH that simply matched nothing is a different
+            // thing and must not be reported as an absent tenant: that would be
+            // a screen saying the workspace does not exist because the reader
+            // mistyped a filter. `q` is new to this endpoint, so no request a
+            // client can make today takes this new branch.
+            if (empty($rows) && !$isSystemUser && $q->search === null) {
                 return Response::error('Tenant not found', 404);
             }
 
@@ -159,7 +219,7 @@ class TenantsApiHandler
             // regardless of the engine, mirroring {@see UsersApiHandler::toPublicUser()}.
             $tenants = array_map(fn (array $row): array => $this->toPublicTenant($row), $rows);
 
-            return Response::json(['data' => $tenants, 'pagination' => $p->meta($total)], 200);
+            return Response::json(['data' => $tenants, 'pagination' => $q->meta($total)], 200);
         } catch (\Exception $e) {
             error_log('[TenantsApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to fetch tenant', 500);

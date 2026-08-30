@@ -43,10 +43,15 @@ export default function AiPrincipalsPage() {
   const [isRevokeModalOpen, setIsRevokeModalOpen] = useState(false);
   const [selectedPrincipal, setSelectedPrincipal] = useState<AiPrincipal | null>(null);
 
-  // The backend supports page/per_page but not sort/filter query params, so
-  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
-  // the backend's own page-size ceiling (100) rather than its 25-row default
-  // fixes the previous silent page-1-only truncation for the common case.
+  // Sort/filter/pagination all still run CLIENT-side over a single fetch —
+  // fetching the backend's own page-size ceiling (100) rather than its 25-row
+  // default fixes the previous silent page-1-only truncation for the common
+  // case, and credentials beyond 100 rows remain out of reach.
+  //
+  // #1102: `GET /api/v1/admin/mcp/tokens` now accepts `sort`/`dir` (name,
+  // principalKind, userId, expiresAt, createdAt) and `q` (name, kind, jti) and
+  // reports a search-filtered total, so this screen can move to server-side
+  // sort and search whenever the table is wired for it.
   const { data, loading: isLoading, error, refetch } = useFetch(async () => {
     const response = await apiClient('/api/v1/admin/mcp/tokens?per_page=100');
     if (!response.ok) {

@@ -241,6 +241,357 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
         $this->assertSame(400, $response->getStatusCode());
     }
 
+    // ============ #1102: the shared list contract (sort + search) ============
+    //
+    // This is a SECURITY surface — every row is a permission somebody granted
+    // to somebody else — so these assert both halves: that sort and search
+    // work, and that neither widens the set. The search is appended to the same
+    // WHERE the tenant scope and the filters build, so it can only narrow.
+
+    /**
+     * Every key the endpoint offers actually reorders the list, and the default
+     * is the `granted_at DESC` this table has always been read with.
+     *
+     * @dataProvider delegationSortCases
+     * @param list<string> $expected Permissions in the order the endpoint must return them.
+     */
+    public function testEachSortKeyReordersTheList(string $query, array $expected): void
+    {
+        $this->seedSortableDelegations();
+
+        $this->assertSame($expected, $this->listedPermissions('/api/delegations?' . $query));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: list<string>}>
+     */
+    public static function delegationSortCases(): array
+    {
+        return [
+            'permission ascending'  => ['sort=permission&dir=asc', ['documents:read', 'documents:write', 'roles:read', 'users:read']],
+            'permission descending' => ['sort=permission&dir=desc', ['users:read', 'roles:read', 'documents:write', 'documents:read']],
+            // role, role, profile, profile — 'profile' sorts before 'role', and
+            // the pairs tie, broken by id (insertion order).
+            'granteeType ascending' => ['sort=granteeType&dir=asc', ['roles:read', 'documents:read', 'users:read', 'documents:write']],
+            // Grantee ids 5, 7, 3, 9 → 3, 5, 7, 9.
+            'granteeId ascending'   => ['sort=granteeId&dir=asc', ['roles:read', 'users:read', 'documents:write', 'documents:read']],
+            // Tenant-wide (NULL ou_id) sorts as 0, ahead of the OU-scoped row.
+            'scope ascending'       => ['sort=scope&dir=asc', ['users:read', 'documents:write', 'roles:read', 'documents:read']],
+            'grantedAt ascending'   => ['sort=grantedAt&dir=asc', ['roles:read', 'users:read', 'documents:read', 'documents:write']],
+            'no sort is grantedAt descending' => ['', ['documents:write', 'documents:read', 'users:read', 'roles:read']],
+        ];
+    }
+
+    /**
+     * `status` sorts live delegations ahead of revoked ones, in both directions.
+     *
+     * It does NOT sort on `revoked_at` itself: that column is NULL for every
+     * active row, and PostgreSQL orders NULLs last ascending while SQLite orders
+     * them first — the same request would put the live delegations at opposite
+     * ends of the table depending on the deployment's engine. The spec sorts a
+     * NULL-free CASE instead, which is why this assertion can hold at all.
+     */
+    public function testStatusSortsActiveBeforeRevokedOnBothEngines(): void
+    {
+        $this->seedSortableDelegations();
+        $this->pdo->exec("UPDATE permission_delegations SET revoked_at = NOW() WHERE permission = 'users:read'");
+
+        $_GET = ['includeRevoked' => '1'];
+        $ascending = $this->listedPermissions('/api/delegations?sort=status&dir=asc');
+        $descending = $this->listedPermissions('/api/delegations?sort=status&dir=desc');
+
+        $this->assertSame('users:read', end($ascending), 'the revoked row sorts last ascending');
+        $this->assertSame('users:read', $descending[0], 'and first descending');
+        $this->assertCount(4, $ascending);
+    }
+
+    /** An unrecognised sort key falls back to the default rather than erroring. */
+    public function testAnUnknownSortKeyFallsBackToTheDefault(): void
+    {
+        $this->seedSortableDelegations();
+
+        $bogus = $this->listedPermissions('/api/delegations?sort=not_a_column');
+
+        $this->assertSame($this->listedPermissions('/api/delegations'), $bogus);
+        $this->assertSame(
+            ['documents:write', 'documents:read', 'users:read', 'roles:read'],
+            $bogus
+        );
+    }
+
+    /**
+     * A sort key cannot carry SQL — it is only ever a key into the repository's
+     * own map. Asserting the rows, not the query text, is what proves it.
+     */
+    public function testASortKeyCannotInjectSql(): void
+    {
+        $this->seedSortableDelegations();
+
+        $attack = $this->listedPermissions(
+            '/api/delegations?sort=' . rawurlencode('permission; DROP TABLE permission_delegations--')
+        );
+
+        $this->assertSame($this->listedPermissions('/api/delegations'), $attack);
+        $this->assertSame(
+            5,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM permission_delegations')->fetchColumn(),
+            'the table is still there (four tenant-1 rows plus the tenant-2 decoy)'
+        );
+    }
+
+    /** The search narrows the reported TOTAL, not only the returned rows. */
+    public function testSearchNarrowsBothTheRowsAndTheTotal(): void
+    {
+        $this->seedSortableDelegations();
+
+        $this->assertSame(4, $this->listBody('/api/delegations')['pagination']['total']);
+
+        $filtered = $this->listBody('/api/delegations?q=documents');
+
+        $this->assertSame(
+            ['documents:write', 'documents:read'],
+            array_column($filtered['data'], 'permission')
+        );
+        $this->assertSame(2, $filtered['pagination']['total'], 'the COUNT must carry the search predicate');
+        $this->assertSame(1, $filtered['pagination']['totalPages']);
+    }
+
+    /** A filtered total does not advertise pages that come back empty. */
+    public function testSearchTotalIsFilteredEvenWhenPaged(): void
+    {
+        $this->seedSortableDelegations();
+
+        $body = $this->listBody('/api/delegations?q=documents&per_page=1');
+
+        $this->assertCount(1, $body['data']);
+        $this->assertSame(2, $body['pagination']['total']);
+        $this->assertSame(2, $body['pagination']['totalPages']);
+    }
+
+    /** Search is case-insensitive on whichever engine the suite is running. */
+    public function testSearchIsCaseInsensitive(): void
+    {
+        $this->seedSortableDelegations();
+
+        $this->assertSame(
+            $this->listedPermissions('/api/delegations?q=documents'),
+            $this->listedPermissions('/api/delegations?q=DOCUMENTS'),
+            'ILIKE on PostgreSQL, LIKE on SQLite — the same answer either way'
+        );
+    }
+
+    /** The search composes with the existing filters instead of replacing them. */
+    public function testSearchComposesWithTheGranteeTypeFilter(): void
+    {
+        $this->seedSortableDelegations();
+
+        $_GET = ['granteeType' => 'role'];
+        $body = $this->listBody('/api/delegations?q=documents');
+
+        // Two rows are role-granted and two are documents permissions, but only
+        // 'documents:write' is both — so neither condition swallowed the other.
+        $this->assertSame(['documents:write'], array_column($body['data'], 'permission'));
+        $this->assertSame(1, $body['pagination']['total']);
+    }
+
+    /** And a revoked row stays out of reach of a search unless it was asked for. */
+    public function testSearchDoesNotSurfaceRevokedRowsByDefault(): void
+    {
+        $this->seedSortableDelegations();
+        $this->pdo->exec("UPDATE permission_delegations SET revoked_at = NOW() WHERE permission = 'documents:read'");
+
+        $body = $this->listBody('/api/delegations?q=documents');
+
+        $this->assertSame(['documents:write'], array_column($body['data'], 'permission'));
+        $this->assertSame(1, $body['pagination']['total']);
+    }
+
+    /**
+     * THE SECURITY PROPERTY: no search term reaches another tenant's delegation.
+     *
+     * Tenant 2 holds a delegation of exactly the permission tenant 1 searches
+     * for. The term is appended to the same WHERE that carries
+     * `tenant_id = :tenant_id`, never substituted for it, so the row is
+     * unreachable — and, just as importantly, uncounted.
+     */
+    public function testSearchCannotSurfaceAnotherTenantsDelegation(): void
+    {
+        $this->seedSortableDelegations();
+
+        $body = $this->listBody('/api/delegations?q=secrets:read');
+
+        $this->assertSame([], $body['data'], 'tenant 2 must stay invisible to tenant 1');
+        $this->assertSame(0, $body['pagination']['total'], 'and must not be counted either');
+
+        // The row really is there — the search just cannot see it.
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query(
+                "SELECT COUNT(*) FROM permission_delegations WHERE permission = 'secrets:read'"
+            )->fetchColumn()
+        );
+    }
+
+    /**
+     * Paging over a TIED sort column returns every delegation exactly once.
+     *
+     * A single `delegate()` call writes one row per granted permission, all
+     * sharing one `granted_at` — so a tie here is the ORDINARY case, not an edge.
+     * Without the id tiebreaker `LIMIT/OFFSET` can show one row twice and never
+     * show another, and on this screen the row that vanishes is a permission
+     * somebody still holds.
+     */
+    public function testPagingOverATiedSortColumnSeesEveryDelegationExactlyOnce(): void
+    {
+        $expected = $this->seedTiedDelegations();
+
+        $seen = [];
+        for ($page = 1; $page <= 3; $page++) {
+            foreach ($this->listedPermissions("/api/delegations?sort=grantedAt&per_page=2&page={$page}") as $permission) {
+                $seen[] = $permission;
+            }
+        }
+
+        sort($seen);
+        $this->assertSame($expected, $seen, 'every delegation exactly once across the walk');
+    }
+
+    /** And two consecutive pages of a tied sort never overlap. */
+    public function testConsecutivePagesOfATiedSortDoNotOverlap(): void
+    {
+        $this->seedTiedDelegations();
+
+        $first  = $this->listedPermissions('/api/delegations?sort=grantedAt&per_page=2&page=1');
+        $second = $this->listedPermissions('/api/delegations?sort=grantedAt&per_page=2&page=2');
+
+        $this->assertCount(2, $first);
+        $this->assertCount(2, $second);
+        $this->assertSame([], array_intersect($first, $second));
+    }
+
+    /** The envelope is unchanged, so a client cannot tell the endpoint moved. */
+    public function testThePaginationEnvelopeKeepsItsShape(): void
+    {
+        $this->seedSortableDelegations();
+
+        $body = $this->listBody('/api/delegations?page=2&per_page=2&sort=permission');
+
+        $this->assertSame(
+            ['page' => 2, 'perPage' => 2, 'total' => 4, 'totalPages' => 2],
+            $body['pagination']
+        );
+    }
+
+    // ---- list-contract fixtures & helpers ----
+
+    /**
+     * @return array{data: list<array<string, mixed>>, pagination: array<string, int>}
+     */
+    private function listBody(string $path): array
+    {
+        $response = $this->handler()->list(new Request('GET', $path));
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        /** @var array{data: list<array<string, mixed>>, pagination: array<string, int>} $body */
+        $body = json_decode($response->getBody(), true);
+
+        return $body;
+    }
+
+    /**
+     * The permissions the endpoint returned, in the order it returned them.
+     *
+     * @return list<string>
+     */
+    private function listedPermissions(string $path): array
+    {
+        return array_map('strval', array_column($this->listBody($path)['data'], 'permission'));
+    }
+
+    /**
+     * Four tenant-1 delegations whose permission, grantee type, grantee id,
+     * scope and grant date each produce a DIFFERENT order, so a sort that used
+     * the wrong column cannot pass by coincidence — plus a tenant-2 delegation
+     * the isolation test searches for by name.
+     */
+    private function seedSortableDelegations(): void
+    {
+        $grantor = $this->seedUser('grantor@example.com', 'admin', 1);
+        $ouId    = $this->seedOu(1, 'Field Operations', 'field-ops');
+
+        // Inserted in this order, so ids run 1..4 and ties break predictably.
+        $rows = [
+            ['users:read',      'role',    5, null,  '-6 days'],
+            ['documents:write', 'role',    7, null,  '-2 days'],
+            ['roles:read',      'profile', 3, null,  '-8 days'],
+            ['documents:read',  'profile', 9, $ouId, '-4 days'],
+        ];
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO permission_delegations
+                (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, ou_id, granted_at)
+            VALUES (1, ?, ?, ?, ?, ?, ?)
+        ');
+        foreach ($rows as [$permission, $granteeType, $granteeId, $ou, $granted]) {
+            $stmt->execute([
+                $grantor,
+                $granteeType,
+                $granteeId,
+                $permission,
+                $ou,
+                date('Y-m-d H:i:s', (int) strtotime($granted)),
+            ]);
+        }
+
+        // The decoy: another tenant's delegation, of a permission tenant 1 will
+        // search for by its exact name.
+        $otherGrantor = $this->seedUser('grantor@tenant-b.example.com', 'admin', 2);
+        $this->pdo->prepare('
+            INSERT INTO permission_delegations
+                (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, ou_id, granted_at)
+            VALUES (2, ?, ?, ?, ?, NULL, NOW())
+        ')->execute([$otherGrantor, 'role', 5, 'secrets:read']);
+    }
+
+    /**
+     * Six delegations written as one grant — every row sharing one `granted_at`,
+     * which is exactly the state unstable paging misbehaves in.
+     *
+     * @return list<string> The permissions, sorted, for comparison against a page walk.
+     */
+    private function seedTiedDelegations(): array
+    {
+        $grantor = $this->seedUser('grantor@example.com', 'admin', 1);
+        $grantedAt = date('Y-m-d H:i:s', (int) strtotime('-1 day'));
+
+        $permissions = [
+            'tied:alpha', 'tied:bravo', 'tied:charlie',
+            'tied:delta', 'tied:echo', 'tied:foxtrot',
+        ];
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO permission_delegations
+                (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, ou_id, granted_at)
+            VALUES (1, ?, \'role\', 5, ?, NULL, ?)
+        ');
+        foreach ($permissions as $permission) {
+            $stmt->execute([$grantor, $permission, $grantedAt]);
+        }
+
+        return $permissions;
+    }
+
+    /** Seed one organizational unit so an OU-scoped delegation's FK holds. */
+    private function seedOu(int $tenantId, string $name, string $slug): int
+    {
+        $this->pdo->prepare(
+            'INSERT INTO organizational_units (tenant_id, parent_id, name, slug, created_at)
+             VALUES (?, NULL, ?, ?, NOW())'
+        )->execute([$tenantId, $name, $slug]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
     // ==================== Helpers ====================
 
     private function handler(): DelegationsApiHandler
