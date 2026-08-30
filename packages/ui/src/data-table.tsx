@@ -4,15 +4,32 @@ import * as React from "react"
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type ColumnVisibilityState,
   type PaginationState,
   type SortingState,
-  type VisibilityState,
+  columnFilteringFeature,
+  columnResizingFeature,
+  columnSizingFeature,
+  columnVisibilityFeature,
+  createCoreRowModel,
+  createFilteredRowModel,
+  createPaginatedRowModel,
+  createSortedRowModel,
+  filterFn_arrIncludes,
+  filterFn_equals,
+  filterFn_inDateRange,
+  filterFn_inNumberRange,
+  filterFn_includesString,
+  filterFn_weakEquals,
   flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
+  globalFilteringFeature,
+  rowPaginationFeature,
+  rowSortingFeature,
+  sortFn_alphanumeric,
+  sortFn_basic,
+  sortFn_datetime,
+  sortFn_text,
+  useTable,
 } from "@tanstack/react-table"
 import {
   IconArrowsSort,
@@ -155,6 +172,91 @@ function isServerPagination(
   return "onPaginationChange" in p
 }
 
+/**
+ * The TanStack v9 feature set this table runs on.
+ *
+ * v9 REPLACED THE v8 `getXRowModel()` OPTIONS WITH EXPLICIT REGISTRATION. In v8
+ * a table got sorting because you passed `getSortedRowModel()`; in v9 it gets
+ * sorting because `rowSortingFeature` is registered here and the matching
+ * `sortedRowModel` factory sits beside it. Nothing is implicit, and a feature
+ * left out of this object does not merely go unused — its options and its slice
+ * of table state stop existing, and TypeScript says so at the call site.
+ *
+ * DECLARED AT MODULE SCOPE because the identity is read on every render and a
+ * fresh object each time would rebuild the table's feature registry for no
+ * reason. It carries no per-table state, so one shared value is correct.
+ *
+ * `columnMeta` is a TYPE-ONLY slot: the value is stripped at runtime and only
+ * its type is used, which is how `meta: { className }` on a column definition
+ * type-checks again. In v8 `meta` was loosely typed and ours assigned by luck;
+ * v9 threads `ExtractColumnMeta<TFeatures>` through, so the shape has to be
+ * declared once — here — rather than asserted at each of the 26 call sites.
+ */
+/**
+ * The feature set's own type, and the row type v9 will accept.
+ *
+ * v9 constrains table data to `RowData` (`Record<string, any> | Array<any>`).
+ * {@link DataTableProps} deliberately does NOT constrain `TData` — 26 call sites
+ * pass plain interfaces, and adding the constraint to the public prop would push
+ * this migration out into every one of them, which is exactly what this rewrite
+ * exists to avoid. So the bridge is here, once, and the props contract is
+ * unchanged.
+ */
+type TableFeatureSet = typeof tableFeatures
+type TableRow<TData> = TData & Record<string, unknown>
+
+const tableFeatures = {
+  columnFilteringFeature,
+  columnResizingFeature,
+  columnSizingFeature,
+  columnVisibilityFeature,
+  globalFilteringFeature,
+  rowPaginationFeature,
+  rowSortingFeature,
+  coreRowModel: createCoreRowModel(),
+  filteredRowModel: createFilteredRowModel(),
+  sortedRowModel: createSortedRowModel(),
+  // Client-side paging is still a supported v9 row model — `createPaginatedRowModel`
+  // is the rename of v8's `getPaginationRowModel`, not a removal. Registering it
+  // unconditionally is safe: with `manualPagination` on, the server owns the
+  // slice and this model is never consulted.
+  paginatedRowModel: createPaginatedRowModel(),
+  /**
+   * THE FILTER AND SORT FUNCTIONS THE AUTO-RESOLVER CAN ASK FOR.
+   *
+   * v9 resolves an unconfigured column to a filter/sort function BY NAME and
+   * looks that name up here. The two halves fail differently, and both quietly:
+   *
+   *  - an unregistered FILTER function returns `undefined`, and the column
+   *    filter becomes a no-op. Typing in the filter box narrows nothing.
+   *  - an unregistered SORT function falls back to `sortFn_basic`, so the
+   *    column still sorts — just wrongly. `basic` compares with `<`, so
+   *    "item 10" lands before "item 2" and case is handled differently from
+   *    the `text`/`alphanumeric` functions v8 chose automatically.
+   *
+   * Neither raises anything outside a development console warning, which is why
+   * these are listed explicitly rather than left to a default that no longer
+   * exists. The six filter functions are exactly the ones the auto-resolver can
+   * pick (string / number / boolean / array / date / fallback); registering the
+   * whole exported registry instead would put every built-in in the bundle.
+   */
+  filterFns: {
+    arrIncludes: filterFn_arrIncludes,
+    equals: filterFn_equals,
+    inDateRange: filterFn_inDateRange,
+    inNumberRange: filterFn_inNumberRange,
+    includesString: filterFn_includesString,
+    weakEquals: filterFn_weakEquals,
+  },
+  sortFns: {
+    alphanumeric: sortFn_alphanumeric,
+    basic: sortFn_basic,
+    datetime: sortFn_datetime,
+    text: sortFn_text,
+  },
+  columnMeta: {} as { className?: string },
+}
+
 export function DataTable<TData>({
   columns,
   data,
@@ -180,7 +282,7 @@ export function DataTable<TData>({
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = React.useState("")
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibilityState>({})
 
   const serverMode = pagination != null && isServerPagination(pagination)
   const [clientPagination, setClientPagination] = React.useState<PaginationState>({
@@ -188,8 +290,8 @@ export function DataTable<TData>({
     pageSize: pagination && !serverMode ? pagination.pageSize : 10,
   })
 
-  const columnDefs = React.useMemo<ColumnDef<TData, unknown>[]>(() => {
-    const defs: ColumnDef<TData, unknown>[] = columns.map((column) => {
+  const columnDefs = React.useMemo<ColumnDef<TableFeatureSet, TableRow<TData>, unknown>[]>(() => {
+    const defs: ColumnDef<TableFeatureSet, TableRow<TData>, unknown>[] = columns.map((column) => {
       const id = column.id ?? column.accessorKey
       if (!id) {
         throw new Error("DataTable: every column needs an `id` or `accessorKey`")
@@ -230,8 +332,9 @@ export function DataTable<TData>({
     return defs
   }, [columns, rowActions, rowActionsLabel])
 
-  const table = useReactTable({
-    data,
+  const table = useTable<TableFeatureSet, TableRow<TData>>({
+    features: tableFeatures,
+    data: data as TableRow<TData>[],
     columns: columnDefs,
     getRowId: getRowId
       ? (row, index) => getRowId(row, index)
@@ -241,11 +344,22 @@ export function DataTable<TData>({
       columnFilters,
       globalFilter: enableGlobalFilter ? globalFilter : undefined,
       columnVisibility,
+      // NO PAGINATION MEANS ONE PAGE OF EVERYTHING, SAID EXPLICITLY.
+      //
+      // In v8 a table without pagination simply had no paginated row model, so
+      // `getRowModel()` returned every row. In v9 the row model is registered
+      // on the feature set for the whole component, so it applies here too and
+      // an omitted `pagination` state falls back to the library default of ten
+      // rows — silently hiding row 11 onward on every unpaginated table.
+      //
+      // `pageSize: Infinity` with `pageIndex: 0` is the documented escape:
+      // `createPaginatedRowModel` skips slicing entirely for exactly that pair.
+      // (`manualPagination` does NOT do this — that model never consults it.)
       pagination: serverMode
         ? { pageIndex: pagination.pageIndex, pageSize: pagination.pageSize }
         : pagination
           ? clientPagination
-          : undefined,
+          : { pageIndex: 0, pageSize: Number.POSITIVE_INFINITY },
     },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
@@ -264,10 +378,6 @@ export function DataTable<TData>({
     pageCount: serverMode ? pagination.pageCount : undefined,
     columnResizeMode: "onChange",
     enableColumnResizing,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: pagination && !serverMode ? getPaginationRowModel() : undefined,
   })
 
   if (overrideContent) {
@@ -471,8 +581,8 @@ export function DataTable<TData>({
 
       {pagination && rows.length > 0 && (
         <Pagination
-          page={table.getState().pagination.pageIndex + 1}
-          perPage={table.getState().pagination.pageSize}
+          page={table.state.pagination.pageIndex + 1}
+          perPage={table.state.pagination.pageSize}
           total={serverMode ? pagination.total : table.getFilteredRowModel().rows.length}
           onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
           {...paginationLabels}
