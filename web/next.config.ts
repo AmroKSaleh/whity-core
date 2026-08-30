@@ -109,7 +109,19 @@ const nextConfig: NextConfig = {
   // Extend Turbopack's filesystem boundary to the workspace root so that the
   // hoisted root node_modules and the ../packages/ui workspace are in scope.
   outputFileTracingRoot: path.join(__dirname, ".."),
-  transpilePackages: ["@amroksaleh/ui"],
+  // `@tanstack/react-table` v9 is ESM-ONLY — its package.json is
+  // `"type": "module"` with no CJS build, unlike v8 which shipped both.
+  // Listing it here is what puts it on the transform path for BOTH Next
+  // and Jest: next/jest derives its `transformIgnorePatterns` allowlist
+  // from this array, so a hand-written override in jest.config.mjs is
+  // silently useless (next/jest's own pattern ORs first and wins).
+  // `table-core` is listed because that is where the row models and
+  // features actually live; react-table only re-exports them.
+  transpilePackages: [
+    "@amroksaleh/ui",
+    "@tanstack/react-table",
+    "@tanstack/table-core",
+  ],
   /**
    * BUILD_ID *is* the commit (WHIT-587). Next's default is a random id, which
    * makes a build output impossible to trace back to a source revision —
