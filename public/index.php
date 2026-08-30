@@ -2055,6 +2055,23 @@ try {
     error_log("[whity] LanguageRegistry boot failed (continuing untranslated): {$e->getMessage()}");
 }
 
+// #1044: TELL THE SERVER WHICH LANGUAGE TO ANSWER IN.
+//
+// `LanguageRegistry` has carried a current language since it was written and
+// nothing ever set it — only tests — so `getTranslator()` returned English to
+// every caller in every tenant. Any server-side translation built on it would
+// have looked right in review and changed nothing a user sees.
+//
+// Registered HERE rather than beside the other middlewares because the registry
+// does not exist until this point. `$kernel->use()` order is execution order, so
+// this still runs after tenant isolation has resolved the caller — which it must,
+// since the preference is read from that caller's own profile. The payment wall
+// above is registered late for the same reason and documents the same property.
+$kernel->use(new \Whity\Http\Middleware\ResolveLanguage(
+    new \Whity\Core\i18n\RequestLanguageResolver($db->getPdo(), $languageRegistry, $settingsService),
+    $languageRegistry,
+));
+
 // Registered versioned (bare paths) so the router prepends /v1 itself —
 // writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
 // $settingsService (constructed earlier, near the register handler) supplies the
