@@ -33,6 +33,7 @@ class CliRunner
         // that are never delivered and `event_outbox` grows without bound
         // (#1063). Run it alongside `queue:work`.
         'events:relay' => 'Whity\Cli\Commands\EventRelayCommand',
+        'permissions:unheld' => 'Whity\Cli\Commands\PermissionsCommand',
     ];
 
     /**
