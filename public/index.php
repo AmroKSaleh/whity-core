@@ -2072,6 +2072,13 @@ $kernel->use(new \Whity\Http\Middleware\ResolveLanguage(
     $languageRegistry,
 ));
 
+// #1044: the serving-time translator for strings the SERVER declares — rule-kind
+// labels and the like, which reach the client already worded and so are never
+// touched by a screen's own `t()`. Built here rather than at each handler because
+// it reads the language the middleware above has just resolved, and there must be
+// exactly one answer per request about which language that is.
+$serverLabels = new \Whity\Core\i18n\ServerLabels($languageRegistry);
+
 // Registered versioned (bare paths) so the router prepends /v1 itself —
 // writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
 // $settingsService (constructed earlier, near the register handler) supplies the
@@ -2649,7 +2656,8 @@ $documentRoutingHandler = new \Whity\Api\DocumentRoutingApiHandler(
     $routingRuleRegistry,
     $documentVisibilityPolicy,
     $roleChecker,
-    $routeTemplateRepository
+    $routeTemplateRepository,
+    $serverLabels
 );
 $router->register('GET',  '/api/routing-rules',                                        [$documentRoutingHandler, 'rules'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST', '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'create'],     null, null, CorePermissions::DOCUMENTS_ROUTE);
@@ -2723,6 +2731,7 @@ $userGroupsHandler = new \Whity\Api\UserGroupsApiHandler(
     $routingRuleRegistry,
     $settingsService,
     $roleChecker,
+    $serverLabels,
     // Only the DELETE is audited, and only because its consequence surfaces
     // later and elsewhere — see the handler's `destroy()`.
     $auditLogger

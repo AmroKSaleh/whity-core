@@ -120,6 +120,16 @@ final class TranslationKeyExtractor
         'web/lib',
         'packages/ui/src',
         'packages/features/src',
+        // The SERVER's own user-facing strings (#1044). Some text a person reads
+        // is declared in PHP and never passes through a screen's `t()` — the
+        // rule-kind labels behind `GET /api/v1/routing-rules` are the case that
+        // forced this: an Arabic flow editor rendering "Everyone holding a role"
+        // in English, because no frontend file mentions that string at all.
+        //
+        // A PHP file joins the catalogue ONLY through an `@i18n-keys` block; see
+        // {@see self::scanSource()}. There is no `useTranslation` binding to read
+        // and no call site to scan, so the declaration is the whole contribution.
+        'src',
     ];
 
     /**
@@ -144,7 +154,7 @@ final class TranslationKeyExtractor
     ];
 
     /** @var list<string> */
-    private const SCANNED_EXTENSIONS = ['ts', 'tsx'];
+    private const SCANNED_EXTENSIONS = ['ts', 'tsx', 'php'];
 
     /**
      * A key is a dot-delimited path whose segments start lowercase:
@@ -295,6 +305,25 @@ final class TranslationKeyExtractor
         $entries = [];
         /** @var list<ExtractionProblem> $problems */
         $problems = [];
+
+        // PHP CONTRIBUTES DECLARATIONS ONLY (#1044).
+        //
+        // A server file has no `useTranslation` binding and no `t()` call sites,
+        // so its entire contribution is its `@i18n-keys` blocks. Running the
+        // rest of this method over PHP would find nothing and risk inventing
+        // problems out of syntax it was never written to read.
+        //
+        // And the comments come from PHP's OWN tokeniser rather than
+        // {@see self::splitComments()}, which is a hand-written scanner tuned for
+        // TS/TSX: it knows JSX and regex literals, and does not know heredocs,
+        // `#` comments, or a closing PHP tag. On PHP it would be guessing, and a
+        // comment scanner that guesses wrong silently drops a declaration — the
+        // string then stays English forever with nothing going red.
+        if (str_ends_with($file, '.php')) {
+            $declared = self::parseAnnotations(self::phpComments($source), $file, $problems);
+
+            return ['entries' => $declared['keys'], 'problems' => $problems];
+        }
 
         [$code, $comments] = self::splitComments($source);
 
@@ -472,6 +501,38 @@ final class TranslationKeyExtractor
     }
 
     /**
+     * Every comment in a PHP file, via PHP's own tokeniser.
+     *
+     * Same shape as {@see self::splitComments()}'s second return value — line
+     * number and raw text, delimiters included — so both feed the identical
+     * {@see self::parseAnnotations()} and an `@i18n-keys` block means exactly
+     * the same thing wherever it is written.
+     *
+     * No `$code` half is returned because nothing downstream wants one: PHP is
+     * scanned for declarations, never for call sites.
+     *
+     * @return list<array{line: int, text: string}>
+     */
+    private static function phpComments(string $src): array
+    {
+        $comments = [];
+
+        foreach (token_get_all($src) as $token) {
+            if (!is_array($token)) {
+                continue;
+            }
+
+            if ($token[0] !== T_COMMENT && $token[0] !== T_DOC_COMMENT) {
+                continue;
+            }
+
+            $comments[] = ['line' => $token[2], 'text' => $token[1]];
+        }
+
+        return $comments;
+    }
+
+    /**
      * Split source into (code with comments blanked out, the comments).
      *
      * Comments must come OUT before scanning: this repository's own reference
@@ -480,6 +541,8 @@ final class TranslationKeyExtractor
      * must also come out INTACT, because the @i18n-keys declarations live in
      * them. Blanking preserves byte offsets and newlines, so line numbers
      * reported against the stripped code still point at the real source.
+     *
+     * TS/TSX ONLY — see {@see self::phpComments()} for why PHP gets its own.
      *
      * @return array{0: string, 1: list<array{line: int, text: string}>}
      */
