@@ -73,6 +73,12 @@ final class ListQuery
         public readonly string $direction,
         /** The caller's search term, or null when absent or unsupported. */
         public readonly ?string $search,
+        /**
+         * Whether this request should come back as ONE PAGE rather than the
+         * whole list. See {@see fromPath()}'s `$alwaysPaginate` for why this is
+         * a decision and not a constant.
+         */
+        public readonly bool $paginated,
     ) {
     }
 
@@ -81,8 +87,26 @@ final class ListQuery
      *
      * Reads the same sources as {@see PaginationParams::fromPath()} so a handler
      * only has to learn one convention.
+     *
+     * ADDING PAGINATION TO AN ENDPOINT THAT HAD NONE CHANGES ITS ANSWER. An
+     * endpoint that returns every row today, paginated unconditionally, starts
+     * returning twenty-five — and the clients that fetch it to build a picker or
+     * an id→label map (and that are not updated in this repository: desktop,
+     * mobile) go on rendering, silently short. Nothing errors; the list is just
+     * incomplete. So `$paginated` defaults to "only when the caller asked", and
+     * an endpoint that ALREADY paged before adopting this contract opts back in
+     * with `$alwaysPaginate: true` rather than quietly losing its own default.
+     *
+     * SORT AND SEARCH ARE NOT CONDITIONAL. Only the LIMIT/OFFSET window is: a
+     * caller may sort or search the full list without asking for a page, which
+     * is what a picker wants and what the admin screens' "fetch a big slice and
+     * filter it in the browser" workaround was standing in for.
+     *
+     * @param bool $alwaysPaginate True for an endpoint whose CURRENT behaviour
+     *        is already "one page by default", so adopting this contract does
+     *        not silently un-paginate it.
      */
-    public static function fromPath(string $rawPath, ListSpec $spec): self
+    public static function fromPath(string $rawPath, ListSpec $spec, bool $alwaysPaginate = false): self
     {
         $params = self::queryFrom($rawPath);
 
@@ -107,7 +131,8 @@ final class ListQuery
             $spec,
             $sort,
             $direction,
-            $search
+            $search,
+            $alwaysPaginate || isset($params['page']) || isset($params['per_page'])
         );
     }
 
@@ -175,7 +200,14 @@ final class ListQuery
         $stmt->bindValue(self::SEARCH_PARAM, '%' . $escaped . '%', PDO::PARAM_STR);
     }
 
-    /** Bind the search term, the row limit and the offset. */
+    /**
+     * Bind the search term, the row limit and the offset.
+     *
+     * Only for a statement that actually carries `LIMIT :limit OFFSET :offset` —
+     * binding a placeholder a query does not contain is an error on a real
+     * prepare. When {@see $paginated} is false the statement has no window, so
+     * bind with {@see bindSearch()} instead.
+     */
     public function bindAll(PDOStatement $stmt): void
     {
         $this->bindSearch($stmt);

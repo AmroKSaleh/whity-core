@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Whity\Core\Taxonomy;
 
 use PDO;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 
 /**
  * Data-access layer for `tags` — an individual tag inside a tag group (WC-621).
@@ -26,32 +28,117 @@ final class TagRepository
     }
 
     /**
+     * The FROM that both the listing and its count share.
+     *
+     * The join exists so the caller can sort and search by the tag's GROUP,
+     * which is the second column the tags screen shows. It is a LEFT join, not
+     * an inner one: an inner join would make a tag whose group row is missing
+     * vanish from the list entirely, turning a referential oddity into
+     * apparently-deleted data. `g.tenant_id = t.tenant_id` is redundant with the
+     * FK and kept anyway — the join is the one place a tenant's rows could be
+     * widened by another tenant's, so it says so explicitly.
+     */
+    private const FROM = 'FROM tags t
+             LEFT JOIN tag_groups g ON g.id = t.group_id AND g.tenant_id = t.tenant_id
+             WHERE t.tenant_id = :tenant_id';
+
+    /**
+     * What `GET /api/tags` lets a caller sort and search by.
+     *
+     * DECLARED HERE, NOT IN THE HANDLER, because the values are SQL column
+     * expressions and this class is where the `tags` SQL lives. Only the KEYS
+     * are caller-facing; {@see ListQuery} never lets a request value reach SQL.
+     *
+     * WHAT THE SCREEN SHOWS is the sort menu: `web/app/(protected)/admin/tags`
+     * lists Name and Group, and its search box says "Search tags…". `group`
+     * sorts by the group's KEY — the group's stable, engine-neutral identity —
+     * for the reason {@see TagGroupRepository::listSpec()} records: its display
+     * label is JSON with no member extraction common to both engines. Search
+     * covers the label anyway via the standard `CAST(… AS TEXT)`, so typing a
+     * group's readable name finds its tags.
+     *
+     * `defaultSort` is null so an unsorted caller keeps today's `ORDER BY id
+     * ASC` — the tiebreaker alone — exactly as before this endpoint had a sort.
+     */
+    public static function listSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'name' => 't.name',
+                'group' => 'g.group_key',
+                'created' => 't.created_at',
+            ],
+            tiebreaker: 't.id',
+            searchable: ['t.name', 'g.group_key', 'CAST(g.display_name AS TEXT)'],
+        );
+    }
+
+    /**
      * Every tag for the tenant, optionally narrowed to one group. Oldest first.
+     *
+     * With a {@see ListQuery} the caller's sort and search apply, and the rows
+     * are narrowed to one page WHEN — and only when — that query is paginated;
+     * see {@see \Whity\Api\TagsApiHandler::list()} for why that is conditional.
      *
      * @return list<array<string, mixed>>
      */
-    public function listForTenant(int $tenantId, ?int $groupId = null): array
+    public function listForTenant(int $tenantId, ?int $groupId = null, ?ListQuery $query = null): array
     {
+        // No query at all is the internal caller's shape: every row, oldest
+        // first. It is NOT built from a default ListQuery, because ListQuery
+        // reads $_GET — a request's own `q` would leak into a call that never
+        // asked for one.
+        $sql = 'SELECT t.id, t.tenant_id, t.group_id, t.name, t.created_at, t.updated_at ' . self::FROM;
         if ($groupId !== null) {
-            $stmt = $this->db->prepare(
-                'SELECT id, tenant_id, group_id, name, created_at, updated_at
-                 FROM tags
-                 WHERE tenant_id = :tenant_id AND group_id = :group_id
-                 ORDER BY id ASC'
-            );
-            $stmt->execute([':tenant_id' => $tenantId, ':group_id' => $groupId]);
-        } else {
-            $stmt = $this->db->prepare(
-                'SELECT id, tenant_id, group_id, name, created_at, updated_at
-                 FROM tags
-                 WHERE tenant_id = :tenant_id
-                 ORDER BY id ASC'
-            );
-            $stmt->execute([':tenant_id' => $tenantId]);
+            $sql .= ' AND t.group_id = :group_id';
         }
+        $sql .= $query === null ? ' ORDER BY t.id ASC' : $query->andSearch($this->db) . ' ' . $query->orderBy();
+
+        $paginated = $query !== null && $query->paginated;
+        if ($paginated) {
+            $sql .= ' LIMIT :limit OFFSET :offset';
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        if ($groupId !== null) {
+            $stmt->bindValue(':group_id', $groupId, PDO::PARAM_INT);
+        }
+        if ($paginated) {
+            $query?->bindAll($stmt);
+        } else {
+            $query?->bindSearch($stmt);
+        }
+        $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map([self::class, 'normalizeRow'], $rows);
+    }
+
+    /**
+     * How many tags the same {@see listForTenant()} call would match.
+     *
+     * CARRIES THE SEARCH PREDICATE AND THE GROUP FILTER. A count that ignored
+     * either would report a total the page cannot fill, and the client would
+     * render page controls for pages that come back empty.
+     */
+    public function countForTenant(int $tenantId, ?int $groupId = null, ?ListQuery $query = null): int
+    {
+        $sql = 'SELECT COUNT(*) ' . self::FROM;
+        if ($groupId !== null) {
+            $sql .= ' AND t.group_id = :group_id';
+        }
+        $sql .= $query === null ? '' : $query->andSearch($this->db);
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        if ($groupId !== null) {
+            $stmt->bindValue(':group_id', $groupId, PDO::PARAM_INT);
+        }
+        $query?->bindSearch($stmt);
+        $stmt->execute();
+
+        return (int) $stmt->fetchColumn();
     }
 
     /**

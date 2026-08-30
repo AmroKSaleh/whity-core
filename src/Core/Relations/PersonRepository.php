@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Whity\Core\Relations;
 
 use PDO;
+use PDOStatement;
 use Whity\Core\Db\DbBool;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 
 /**
  * Data-access layer for the `persons` graph-node table (WC-65).
@@ -124,15 +127,59 @@ class PersonRepository
     }
 
     /**
-     * Count persons visible to the tenant, with an optional name filter.
+     * What `GET /api/persons` lets a caller sort and search by.
      *
-     * @param int         $tenantId The acting tenant (0 = system).
-     * @param string|null $search   Optional display-name substring filter.
+     * DECLARED HERE, NOT IN THE HANDLER, because the values are SQL column
+     * expressions and this class is where the `persons` SQL lives (the same
+     * convention that keeps raw queries out of handlers). Only the KEYS are
+     * caller-facing; {@see ListQuery} never lets a request value reach the SQL.
+     *
+     * WHAT THE SCREEN SHOWS is the sort menu: `web/app/(protected)/admin/
+     * relations` lists Name, Has account and Relations, and its search box says
+     * "Search by name…". `account` sorts on `profile_id`, which is exactly what
+     * the "Has account" column renders (a person with a linked profile vs one
+     * without) rather than a second, derived notion of the same thing.
+     *
+     * NO `relations` SORT KEY, deliberately. That column is a COUNT of
+     * reciprocal-derived edges assembled in PHP by the handler, not a column of
+     * this table; ordering by it in SQL would mean a correlated subquery over
+     * the relations table that has to reproduce the resolver's reciprocal rules,
+     * and a sort that disagreed with the number on screen would be worse than no
+     * sort at all.
+     *
+     * `defaultSort` is `name`, ascending — the `ORDER BY display_name ASC, id
+     * ASC` this listing has always used, now expressed as the contract's default
+     * plus its tiebreaker, so an unsorted caller sees no change.
+     */
+    public static function listSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'name' => 'display_name',
+                'account' => 'profile_id',
+                'created' => 'created_at',
+            ],
+            tiebreaker: 'id',
+            searchable: ['display_name'],
+            defaultSort: 'name',
+            defaultDirection: 'asc',
+        );
+    }
+
+    /**
+     * Count persons visible to the tenant, matching the same {@see list()} call.
+     *
+     * CARRIES THE SEARCH PREDICATE. A count that ignored it would report the
+     * tenant's whole total while the page showed the filtered rows, and the
+     * client would render page controls for pages that come back empty.
+     *
+     * @param int            $tenantId The acting tenant (0 = system).
+     * @param ListQuery|null $query    The caller's page/sort/search, or null for all rows.
      * @return int Total matching rows.
      */
-    public function count(int $tenantId, ?string $search = null): int
+    public function count(int $tenantId, ?ListQuery $query = null): int
     {
-        [$where, $params] = $this->buildWhereClause($tenantId, $search);
+        [$where, $params] = $this->buildWhereClause($tenantId, $query);
 
         // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants
         $sql = 'SELECT COUNT(*) AS cnt FROM persons';
@@ -141,43 +188,51 @@ class PersonRepository
         }
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
+        $this->bindWhere($stmt, $params);
+        $query?->bindSearch($stmt);
+        $stmt->execute();
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? (int)($row['cnt'] ?? 0) : 0;
     }
 
     /**
-     * List persons visible to the tenant, with an optional name search.
+     * List persons visible to the tenant, ordered, searched and paged by the
+     * caller's {@see ListQuery}.
      *
      * The system tenant (id 0) sees all tenants' persons; any other tenant sees
-     * only its own. The optional `$search` does a case-insensitive substring
-     * match on `display_name`.
+     * only its own — sort and search operate strictly within that set, never
+     * across it. Passing null returns every visible person in the listing's
+     * historical order (`display_name ASC, id ASC`), which is what the internal
+     * callers and the data-layer tests want.
      *
-     * @param int         $tenantId The acting tenant (0 = system).
-     * @param string|null $search   Optional display-name substring filter.
-     * @param int|null    $limit    Max rows to return, or null for all.
-     * @param int         $offset   Zero-based row offset (default 0).
-     * @return array<int, array<string, mixed>> Normalised rows, ordered by display name.
+     * @param int            $tenantId The acting tenant (0 = system).
+     * @param ListQuery|null $query    The caller's page/sort/search, or null for all rows.
+     * @return array<int, array<string, mixed>> Normalised rows.
      */
-    public function list(int $tenantId, ?string $search = null, ?int $limit = null, int $offset = 0): array
+    public function list(int $tenantId, ?ListQuery $query = null): array
     {
-        [$where, $params] = $this->buildWhereClause($tenantId, $search);
+        [$where, $params] = $this->buildWhereClause($tenantId, $query);
 
         // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants; system tenant (id 0) lists all persons by design
         $sql = 'SELECT * FROM persons';
         if ($where !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $where);
         }
-        $sql .= ' ORDER BY display_name ASC, id ASC';
+        $sql .= $query === null ? ' ORDER BY display_name ASC, id ASC' : ' ' . $query->orderBy();
 
-        if ($limit !== null) {
+        $paginated = $query !== null && $query->paginated;
+        if ($paginated) {
             $sql .= ' LIMIT :limit OFFSET :offset';
-            $params[':limit']  = $limit;
-            $params[':offset'] = $offset;
         }
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
+        $this->bindWhere($stmt, $params);
+        if ($paginated) {
+            $query?->bindAll($stmt);
+        } else {
+            $query?->bindSearch($stmt);
+        }
+        $stmt->execute();
 
         /** @var array<int, array<string, mixed>> $rows */
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -188,11 +243,15 @@ class PersonRepository
     /**
      * Build the shared WHERE clause and params array for count() and list().
      *
-     * @param int         $tenantId
-     * @param string|null $search
+     * The search half is the ListQuery's own predicate, so both statements
+     * carry the SAME filter — a count built without it would report an
+     * unfiltered total next to a filtered page.
+     *
+     * @param int            $tenantId
+     * @param ListQuery|null $query
      * @return array{array<int, string>, array<string, mixed>}
      */
-    private function buildWhereClause(int $tenantId, ?string $search): array
+    private function buildWhereClause(int $tenantId, ?ListQuery $query): array
     {
         $where = [];
         $params = [];
@@ -202,12 +261,22 @@ class PersonRepository
             $params[':tenant_id'] = $tenantId;
         }
 
-        if ($search !== null && trim($search) !== '') {
-            $where[] = 'LOWER(display_name) LIKE :search';
-            $params[':search'] = '%' . strtolower(trim($search)) . '%';
+        $search = $query?->searchPredicate($this->db) ?? '';
+        if ($search !== '') {
+            $where[] = $search;
         }
 
         return [$where, $params];
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function bindWhere(PDOStatement $stmt, array $params): void
+    {
+        foreach ($params as $name => $value) {
+            $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
     }
 
     /**

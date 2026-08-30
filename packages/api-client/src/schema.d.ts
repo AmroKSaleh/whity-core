@@ -3081,7 +3081,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List persons in the caller's tenant */
+        /**
+         * List persons in the caller's tenant
+         * @description Always paginated — this endpoint already returned one page before it gained sort and search, so its default is unchanged. A client that needs every person must follow the `pagination` envelope to the last page.
+         */
         get: operations["get_api_v1_persons"];
         put?: never;
         /** Create a person record */
@@ -3792,7 +3795,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List this tenant's tag groups */
+        /**
+         * List this tenant's tag groups
+         * @description Returns EVERY matching group unless `page` or `per_page` is sent, in which case one page comes back with a `pagination` envelope. Pagination is opt-in because this list also populates dropdowns and the tags screen's id-to-label map, which would silently truncate; `sort`, `dir` and `q` apply either way. There is no sort by display name: it is a bilingual JSON object with no member-extraction syntax common to both supported engines. Searching it works.
+         */
         get: operations["get_api_v1_tag_groups"];
         put?: never;
         /** Create a tag group */
@@ -3832,7 +3838,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List this tenant's tags, optionally within a group */
+        /**
+         * List this tenant's tags, optionally within a group
+         * @description Returns EVERY matching tag unless `page` or `per_page` is sent, in which case one page comes back with a `pagination` envelope. Pagination is opt-in because this list also populates pickers and id-to-label maps that would silently truncate; `sort`, `dir` and `q` apply either way.
+         */
         get: operations["get_api_v1_tags"];
         put?: never;
         /** Create a tag in a group */
@@ -7025,6 +7034,7 @@ export interface components {
         };
         TagGroupListResponse: {
             data: components["schemas"]["TagGroup"][];
+            pagination?: components["schemas"]["Pagination"];
         };
         TagGroupUpdateRequest: {
             key?: string;
@@ -7035,6 +7045,7 @@ export interface components {
         };
         TagListResponse: {
             data: components["schemas"]["Tag"][];
+            pagination?: components["schemas"]["Pagination"];
         };
         TagUpdateRequest: {
             name: string;
@@ -24700,7 +24711,20 @@ export interface operations {
     };
     get_api_v1_persons: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Case-insensitive substring match on the display name */
+                q?: string;
+                /** @description Deprecated spelling of q, kept for existing clients. An explicit q wins. */
+                search?: string;
+                /** @description One of name (default), account, created. An unrecognised key is ignored rather than refused. */
+                sort?: string;
+                /** @description asc (default) or desc */
+                dir?: string;
+                /** @description Page number (1-based) */
+                page?: number;
+                /** @description Page size (default 25, max 100) */
+                per_page?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29118,7 +29142,18 @@ export interface operations {
     };
     get_api_v1_tag_groups: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Case-insensitive substring match on the group key and its display names */
+                q?: string;
+                /** @description One of key, created, updated. An unrecognised key is ignored rather than refused. */
+                sort?: string;
+                /** @description asc (default) or desc */
+                dir?: string;
+                /** @description Page number (1-based). Sending it opts this list into pagination. */
+                page?: number;
+                /** @description Page size (default 25, max 100). Sending it opts this list into pagination. */
+                per_page?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -29524,6 +29559,16 @@ export interface operations {
             query?: {
                 /** @description Only tags in this group */
                 group_id?: number;
+                /** @description Case-insensitive substring match on the tag name and its group's key and display name */
+                q?: string;
+                /** @description One of name, group, created. An unrecognised key is ignored rather than refused. */
+                sort?: string;
+                /** @description asc (default) or desc */
+                dir?: string;
+                /** @description Page number (1-based). Sending it opts this list into pagination. */
+                page?: number;
+                /** @description Page size (default 25, max 100). Sending it opts this list into pagination. */
+                per_page?: number;
             };
             header?: never;
             path?: never;

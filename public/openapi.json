@@ -21539,6 +21539,63 @@
                 "tags": [
                     "relations"
                 ],
+                "description": "Always paginated \u2014 this endpoint already returned one page before it gained sort and search, so its default is unchanged. A client that needs every person must follow the `pagination` envelope to the last page.",
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": false,
+                        "description": "Case-insensitive substring match on the display name",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "required": false,
+                        "description": "Deprecated spelling of q, kept for existing clients. An explicit q wins.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "sort",
+                        "in": "query",
+                        "required": false,
+                        "description": "One of name (default), account, created. An unrecognised key is ignored rather than refused.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "dir",
+                        "in": "query",
+                        "required": false,
+                        "description": "asc (default) or desc",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page number (1-based)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 25, max 100)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "The persons",
@@ -27004,6 +27061,54 @@
                 "tags": [
                     "taxonomy"
                 ],
+                "description": "Returns EVERY matching group unless `page` or `per_page` is sent, in which case one page comes back with a `pagination` envelope. Pagination is opt-in because this list also populates dropdowns and the tags screen's id-to-label map, which would silently truncate; `sort`, `dir` and `q` apply either way. There is no sort by display name: it is a bilingual JSON object with no member-extraction syntax common to both supported engines. Searching it works.",
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": false,
+                        "description": "Case-insensitive substring match on the group key and its display names",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "sort",
+                        "in": "query",
+                        "required": false,
+                        "description": "One of key, created, updated. An unrecognised key is ignored rather than refused.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "dir",
+                        "in": "query",
+                        "required": false,
+                        "description": "asc (default) or desc",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page number (1-based). Sending it opts this list into pagination.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 25, max 100). Sending it opts this list into pagination.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "Every tag group for this tenant",
@@ -27501,12 +27606,58 @@
                 "tags": [
                     "taxonomy"
                 ],
+                "description": "Returns EVERY matching tag unless `page` or `per_page` is sent, in which case one page comes back with a `pagination` envelope. Pagination is opt-in because this list also populates pickers and id-to-label maps that would silently truncate; `sort`, `dir` and `q` apply either way.",
                 "parameters": [
                     {
                         "name": "group_id",
                         "in": "query",
                         "required": false,
                         "description": "Only tags in this group",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": false,
+                        "description": "Case-insensitive substring match on the tag name and its group's key and display name",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "sort",
+                        "in": "query",
+                        "required": false,
+                        "description": "One of name, group, created. An unrecognised key is ignored rather than refused.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "dir",
+                        "in": "query",
+                        "required": false,
+                        "description": "asc (default) or desc",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page number (1-based). Sending it opts this list into pagination.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "description": "Page size (default 25, max 100). Sending it opts this list into pagination.",
                         "schema": {
                             "type": "integer"
                         }
@@ -43295,6 +43446,9 @@
                         "items": {
                             "$ref": "#/components/schemas/TagGroup"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
@@ -43333,6 +43487,9 @@
                         "items": {
                             "$ref": "#/components/schemas/Tag"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [

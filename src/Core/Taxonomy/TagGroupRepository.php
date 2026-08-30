@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Whity\Core\Taxonomy;
 
 use PDO;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 
 /**
  * Data-access layer for `tag_groups` — a named bucket of tags scoped to one
@@ -27,22 +29,99 @@ final class TagGroupRepository
     }
 
     /**
+     * What `GET /api/tag-groups` lets a caller sort and search by.
+     *
+     * DECLARED HERE, NOT IN THE HANDLER, because the values are SQL column
+     * expressions and this class is where the `tag_groups` SQL lives (the same
+     * convention that keeps raw queries out of handlers). Only the KEYS are
+     * caller-facing; {@see ListQuery} never lets a request value reach the SQL.
+     *
+     * WHAT THE SCREEN SHOWS is the sort menu: `web/app/(protected)/admin/
+     * tag-groups` lists Key and Display name.
+     *
+     * NO `displayName` SORT KEY, deliberately. `display_name` is a bilingual
+     * {ar,en} object — JSONB on PostgreSQL, TEXT on the SQLite test engine — and
+     * there is no member-extraction syntax common to both (`->>'en'` vs
+     * `json_extract`), so a sort on the label would either be dialect-specific
+     * SQL in a static declaration or a sort on the raw serialization, which
+     * orders by `{"ar":…` and not by the label anyone can see. Searching it is
+     * fine and IS offered: `CAST(… AS TEXT)` is standard on both engines, so
+     * typing a label into the screen's search box finds the group.
+     *
+     * `defaultSort` is null so an unsorted caller keeps today's `ORDER BY id
+     * ASC` — the tiebreaker alone — exactly as before this endpoint had a sort.
+     */
+    public static function listSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'key' => 'group_key',
+                'created' => 'created_at',
+                'updated' => 'updated_at',
+            ],
+            tiebreaker: 'id',
+            searchable: ['group_key', 'CAST(display_name AS TEXT)'],
+        );
+    }
+
+    /**
      * Every tag group for the tenant, oldest first.
+     *
+     * With a {@see ListQuery} the caller's sort and search apply, and the rows
+     * are narrowed to one page WHEN — and only when — that query is paginated;
+     * see {@see \Whity\Api\TagGroupsApiHandler::list()} for why that is
+     * conditional rather than always.
      *
      * @return list<array<string, mixed>>
      */
-    public function listForTenant(int $tenantId): array
+    public function listForTenant(int $tenantId, ?ListQuery $query = null): array
     {
-        $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, group_key, display_name, created_at, updated_at
+        // No query at all is the internal caller's shape: every row, oldest
+        // first. It is NOT built from a default ListQuery, because ListQuery
+        // reads $_GET — a request's own `q` would leak into a call that never
+        // asked for one.
+        $sql = 'SELECT id, tenant_id, group_key, display_name, created_at, updated_at
              FROM tag_groups
-             WHERE tenant_id = :tenant_id
-             ORDER BY id ASC'
-        );
-        $stmt->execute([':tenant_id' => $tenantId]);
+             WHERE tenant_id = :tenant_id';
+        $sql .= $query === null ? ' ORDER BY id ASC' : $query->andSearch($this->db) . ' ' . $query->orderBy();
+
+        $paginated = $query !== null && $query->paginated;
+        if ($paginated) {
+            $sql .= ' LIMIT :limit OFFSET :offset';
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        if ($paginated) {
+            $query?->bindAll($stmt);
+        } else {
+            $query?->bindSearch($stmt);
+        }
+        $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map([self::class, 'normalizeRow'], $rows);
+    }
+
+    /**
+     * How many tag groups the same {@see listForTenant()} call would match.
+     *
+     * CARRIES THE SEARCH PREDICATE. A count that ignored it would report the
+     * tenant's whole total while the page showed the filtered rows, and the
+     * client would render page controls for pages that come back empty.
+     */
+    public function countForTenant(int $tenantId, ?ListQuery $query = null): int
+    {
+        $search = $query === null ? '' : $query->andSearch($this->db);
+
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) FROM tag_groups WHERE tenant_id = :tenant_id' . $search
+        );
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $query?->bindSearch($stmt);
+        $stmt->execute();
+
+        return (int) $stmt->fetchColumn();
     }
 
     /**

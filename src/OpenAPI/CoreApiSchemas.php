@@ -2758,7 +2758,18 @@ final class CoreApiSchemas
             ]),
             self::permissionRoute('GET', '/api/persons', 'relations:read', [
                 'summary' => 'List persons in the caller\'s tenant',
+                'description' => 'Always paginated — this endpoint already returned one page before it gained '
+                    . 'sort and search, so its default is unchanged. A client that needs every person must follow '
+                    . 'the `pagination` envelope to the last page.',
                 'tags' => ['relations'],
+                'parameters' => [
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on the display name'),
+                    self::queryParam('search', 'string', 'Deprecated spelling of q, kept for existing clients. An explicit q wins.'),
+                    self::queryParam('sort', 'string', 'One of name (default), account, created. An unrecognised key is ignored rather than refused.'),
+                    self::queryParam('dir', 'string', 'asc (default) or desc'),
+                    self::queryParam('page', 'integer', 'Page number (1-based)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
                 'responses' => [
                     200 => self::jsonResponse('The persons', 'PersonListResponse'),
                     400 => self::errorResponse('Bad request'),
@@ -4021,7 +4032,7 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'key', 'display_name', 'created_at', 'updated_at']),
-            'TagGroupListResponse' => self::listEnvelope('TagGroup'),
+            'TagGroupListResponse' => self::optionallyPaginatedListEnvelope('TagGroup'),
             'TagGroupDataResponse' => self::dataEnvelope(SchemaBuilder::ref('TagGroup')),
             // `key` is trimmed before validation and matched against
             // TagGroupsApiHandler::KEY_PATTERN; `RequestSchemaContractTest`
@@ -4049,7 +4060,7 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'group_id', 'name', 'created_at', 'updated_at']),
-            'TagListResponse' => self::listEnvelope('Tag'),
+            'TagListResponse' => self::optionallyPaginatedListEnvelope('Tag'),
             'TagDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Tag')),
             'TagCreateRequest' => self::object([
                 'group_id' => self::reference('/api/tag-groups', 'key') + ['minimum' => 1],
@@ -8352,7 +8363,20 @@ final class CoreApiSchemas
             // Tag groups ────────────────────────────────────────────────────
             self::permissionRoute('GET', '/api/tag-groups', 'tags:read', [
                 'summary' => 'List this tenant\'s tag groups',
+                'description' => 'Returns EVERY matching group unless `page` or `per_page` is sent, in which case '
+                    . 'one page comes back with a `pagination` envelope. Pagination is opt-in because this list '
+                    . 'also populates dropdowns and the tags screen\'s id-to-label map, which would silently '
+                    . 'truncate; `sort`, `dir` and `q` apply either way. There is no sort by display name: it is '
+                    . 'a bilingual JSON object with no member-extraction syntax common to both supported engines. '
+                    . 'Searching it works.',
                 'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on the group key and its display names'),
+                    self::queryParam('sort', 'string', 'One of key, created, updated. An unrecognised key is ignored rather than refused.'),
+                    self::queryParam('dir', 'string', 'asc (default) or desc'),
+                    self::queryParam('page', 'integer', 'Page number (1-based). Sending it opts this list into pagination.'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). Sending it opts this list into pagination.'),
+                ],
                 'responses' => [
                     200 => self::jsonResponse('Every tag group for this tenant', 'TagGroupListResponse'),
                 ] + self::authErrors(),
@@ -8406,9 +8430,18 @@ final class CoreApiSchemas
             // Tags ──────────────────────────────────────────────────────────
             self::permissionRoute('GET', '/api/tags', 'tags:read', [
                 'summary' => 'List this tenant\'s tags, optionally within a group',
+                'description' => 'Returns EVERY matching tag unless `page` or `per_page` is sent, in which case '
+                    . 'one page comes back with a `pagination` envelope. Pagination is opt-in because this list '
+                    . 'also populates pickers and id-to-label maps that would silently truncate; `sort`, `dir` '
+                    . 'and `q` apply either way.',
                 'tags' => ['taxonomy'],
                 'parameters' => [
                     self::queryParam('group_id', 'integer', 'Only tags in this group'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on the tag name and its group\'s key and display name'),
+                    self::queryParam('sort', 'string', 'One of name, group, created. An unrecognised key is ignored rather than refused.'),
+                    self::queryParam('dir', 'string', 'asc (default) or desc'),
+                    self::queryParam('page', 'integer', 'Page number (1-based). Sending it opts this list into pagination.'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). Sending it opts this list into pagination.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('Tags for this tenant', 'TagListResponse'),
@@ -10023,6 +10056,29 @@ final class CoreApiSchemas
                 'pagination' => SchemaBuilder::ref('Pagination'),
             ],
             ['data', 'pagination']
+        );
+    }
+
+    /**
+     * A list whose `pagination` block appears ONLY when the caller asked to page.
+     *
+     * For an endpoint that returned every row before it adopted the shared list
+     * contract and kept that default (see {@see \Whity\Api\TagsApiHandler::list()}):
+     * `data` is always there, `pagination` is present exactly when `page` or
+     * `per_page` was sent. Declaring it optional rather than required is what
+     * stops a generated client from insisting on a field the unpaginated
+     * response does not carry.
+     *
+     * @return array<string, mixed>
+     */
+    private static function optionallyPaginatedListEnvelope(string $component): array
+    {
+        return self::object(
+            [
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref($component)],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+            ],
+            ['data']
         );
     }
 
