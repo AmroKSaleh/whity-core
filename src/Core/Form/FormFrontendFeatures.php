@@ -51,6 +51,140 @@ use Whity\Core\RBAC\CorePermissions;
  * primary fetch will succeed.
  *
  * Stateless — worker-safe.
+ *
+ * THE ENGLISH THESE SCREENS ARE WRITTEN IN (#1044).
+ *
+ * Every string in the declarations below reaches the browser already worded,
+ * so no screen's own `t()` ever sees it. This block is how the catalogue does:
+ * the extractor reads text, not method bodies, so the wording is stated once
+ * here for it to seed and once in the declaration for a reader to see beside
+ * the field it belongs to.
+ *
+ * THE DUPLICATION IS GUARDED. `FormFeatureLabelsTest` walks the real
+ * declarations, reads this block back through the real extractor, and fails on
+ * any disagreement in either direction — including a key here that no node uses
+ * any more, and a node carrying text with no key at all.
+ *
+ * The two option lists are keyed from their own VALUES, so a new field type or
+ * prefill source arrives carrying its key. Their English is computed (a label
+ * map, plus an "unavailable" suffix), which is exactly the case `@i18n-keys`
+ * exists for.
+ *
+ * @i18n-keys admin
+ *   forms.builder.action.archive.confirm = Archiving stops new submissions. Everything already submitted is kept. Continue?
+ *   forms.builder.action.archive.label = Archive
+ *   forms.builder.action.closeLink.confirm = The public address stops working immediately and cannot be brought back — re-opening the form mints a different one. Submissions already received are kept. Close it?
+ *   forms.builder.action.closeLink.label = Close public link
+ *   forms.builder.action.create.label = Create form
+ *   forms.builder.action.fill.label = Fill in
+ *   forms.builder.action.openLink.label = Open public link
+ *   forms.builder.action.publicLink.label = Public link
+ *   forms.builder.action.publish.label = Publish
+ *   forms.builder.action.save.label = Save changes
+ *   forms.builder.action.saveQuestions.label = Save questions
+ *   forms.builder.column.key.label = Key
+ *   forms.builder.column.public.label = Public
+ *   forms.builder.column.status.label = Status
+ *   forms.builder.column.version.label = Version
+ *   forms.builder.create.title = New form
+ *   forms.builder.create.trigger = New form
+ *   forms.builder.detail.accepting.label = Accepting submissions
+ *   forms.builder.detail.description.label = Description
+ *   forms.builder.detail.empty.emptyText = Pick a form above to see and edit it.
+ *   forms.builder.detail.key.label = Key
+ *   forms.builder.detail.public.label = Open to the public
+ *   forms.builder.detail.publicCloses.label = Public link closes
+ *   forms.builder.detail.publicLink.label = Public link
+ *   forms.builder.detail.status.label = Status
+ *   forms.builder.detail.version.label = Version
+ *   forms.builder.edit.title = Edit this form
+ *   forms.builder.edit.trigger = Edit form
+ *   forms.builder.field.closes.label = Closes (optional)
+ *   forms.builder.field.description.label = Description
+ *   forms.builder.field.form.label = Form
+ *   forms.builder.field.form.placeholder = Pick a form to edit its fields
+ *   forms.builder.field.help.label = Help text
+ *   forms.builder.field.key.label = Key
+ *   forms.builder.field.key.placeholder = equipment-request
+ *   forms.builder.field.kind.label = Kind
+ *   forms.builder.field.label.arLabel = Arabic
+ *   forms.builder.field.label.enLabel = English
+ *   forms.builder.field.label.label = Label
+ *   forms.builder.field.name.arLabel = Arabic
+ *   forms.builder.field.name.enLabel = English
+ *   forms.builder.field.name.label = Name
+ *   forms.builder.field.opens.label = Opens (optional)
+ *   forms.builder.field.prefill.label = Prefill from the submitter
+ *   forms.builder.field.questionKey.label = Key
+ *   forms.builder.field.questionKey.placeholder = snake_case, unique within this form
+ *   forms.builder.field.questions.itemLabel = Question
+ *   forms.builder.field.questions.label = Questions
+ *   forms.builder.field.required.label = Required
+ *   forms.builder.field.route.label = Route submissions through
+ *   forms.builder.field.route.placeholder = Collect only — do not circulate
+ *   forms.builder.field.routeEdit.label = Route submissions through
+ *   forms.builder.field.routeEdit.placeholder = Do not route submissions
+ *   forms.builder.field.section.label = Section
+ *   forms.builder.field.section.placeholder = Groups questions under one heading
+ *   forms.builder.fieldType.checkbox.label = Yes / no
+ *   forms.builder.fieldType.date.label = Date
+ *   forms.builder.fieldType.file.label = File
+ *   forms.builder.fieldType.multiselect.label = Choose several
+ *   forms.builder.fieldType.number.label = Number
+ *   forms.builder.fieldType.ou_ref.label = An organizational unit
+ *   forms.builder.fieldType.profile_ref.label = A person
+ *   forms.builder.fieldType.select.label = Choose one
+ *   forms.builder.fieldType.text.label = Short text
+ *   forms.builder.fieldType.textarea.label = Long text
+ *   forms.builder.intro.value = Author a form, add its fields, then publish it. A published form accepts submissions; archiving one stops new submissions without touching what has already been submitted.
+ *   forms.builder.nav.label = Form Builder
+ *   forms.builder.prefill.display_name.label = Their name
+ *   forms.builder.prefill.email.label = Their email
+ *   forms.builder.prefill.job_title.label = Their job title — nothing in this install stores it yet
+ *   forms.builder.prefill.none.label = Do not prefill
+ *   forms.builder.prefill.note.body = A field can start filled in from the submitter's own saved details, so they do not retype what the organisation already knows. Sources that nothing in this install stores yet are shown in the field editor as unavailable, and simply leave the field empty.
+ *   forms.builder.prefill.note.title = Prefilled fields
+ *   forms.builder.prefill.ou.label = Their unit
+ *   forms.builder.prefill.ou_id.label = Their unit, for a unit field
+ *   forms.builder.prefill.phone.label = Their phone — nothing in this install stores it yet
+ *   forms.builder.public.note.body = A published form can be given a public web link that people with no account can fill in. Such a form may only ask for values a stranger can actually give, so person, unit and file fields are refused on it: a person or unit field would ask somebody outside to name one of your records, and a file field needs an upload they cannot perform. Public submissions carry no submitter name, and nothing is ever pre-filled for them.
+ *   forms.builder.public.note.title = Forms opened to the public
+ *   forms.builder.public.title = Open this form to the public
+ *   forms.builder.public.trigger = Open public link
+ *   forms.builder.public.warning.body = This creates a long, random, unguessable web address. Anybody who has it can fill this form in without signing in, and every submission is recorded and circulated exactly as one from a colleague would be — with no name attached, because there is no account behind it. Publish the address only where you mean to. Closing the link stops it immediately; re-opening mints a different one.
+ *   forms.builder.public.warning.title = Anyone with the link can submit
+ *   forms.builder.questions.intro.value = Add, edit and reorder this form's questions below, then save them together. Saving replaces the whole set: a question you remove here is withdrawn when you save, and answers already given to it stay recorded but stop having a label.
+ *   forms.builder.section.fields.title = Fields
+ *   forms.builder.section.forms.title = Forms
+ *   forms.builder.table.empty.emptyText = No forms yet. Create one to get started.
+ *   forms.catalog.action.fill.label = Fill in
+ *   forms.catalog.action.publicLink.label = Public link
+ *   forms.catalog.column.created.label = Created
+ *   forms.catalog.column.key.label = Key
+ *   forms.catalog.column.public.label = Open to the public
+ *   forms.catalog.column.publicLink.label = Public link
+ *   forms.catalog.column.version.label = Version
+ *   forms.catalog.field.form.label = Form
+ *   forms.catalog.field.form.placeholder = All forms
+ *   forms.catalog.nav.label = Forms
+ *   forms.catalog.published.empty.emptyText = No published forms yet.
+ *   forms.catalog.section.forms.title = Forms
+ *   forms.catalog.section.submissions.title = Submissions
+ *   forms.catalog.submissions.column.form.label = Form
+ *   forms.catalog.submissions.column.nowWith.label = Now with
+ *   forms.catalog.submissions.column.state.label = State
+ *   forms.catalog.submissions.column.submitted.label = Submitted
+ *   forms.catalog.submissions.column.version.label = Answered version
+ *   forms.catalog.submissions.empty.emptyText = Nothing has been submitted yet.
+ *   forms.catalog.submissions.note.value = A submission that was routed also exists as a document, so it carries the same approvals, trail and verification as anything else the organisation circulates.
+ *   forms.mine.column.form.label = Form
+ *   forms.mine.column.nowWith.label = Now with
+ *   forms.mine.column.state.label = State
+ *   forms.mine.column.submitted.label = Submitted
+ *   forms.mine.empty.emptyText = You have not submitted anything yet.
+ *   forms.mine.nav.label = My Submissions
+ *   forms.mine.note.value = A submission cannot be edited once it is made — people may already have acted on it. If something was wrong, submit again; both submissions are kept, with their times.
+ *   forms.mine.section.title = My submissions
  */
 final class FormFrontendFeatures
 {
@@ -111,6 +245,7 @@ final class FormFrontendFeatures
             'id' => self::BUILDER_ID,
             'plugin' => 'core',
             'label' => 'Form Builder',
+            'i18nKey' => 'forms.builder.nav',
             'icon' => 'forms',
             'group' => 'records',
             'order' => 4,
@@ -120,6 +255,7 @@ final class FormFrontendFeatures
                 [
                     'type' => 'section',
                     'title' => 'Forms',
+                    'i18nKey' => 'forms.builder.section.forms',
                     'children' => [
                         [
                             'type' => 'text',
@@ -127,16 +263,24 @@ final class FormFrontendFeatures
                                 . 'A published form accepts submissions; archiving one stops new '
                                 . 'submissions without touching what has already been submitted.',
                             'tone' => 'muted',
+                            'i18nKey' => 'forms.builder.intro',
                         ],
                         [
                             'type' => 'dataTable',
                             'source' => '/api/v1/forms',
                             'emptyText' => 'No forms yet. Create one to get started.',
+                            'i18nKey' => 'forms.builder.table.empty',
                             'pageSize' => 20,
                             'columns' => [
-                                ['key' => 'form_key', 'label' => 'Key', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'status', 'label' => 'Status', 'sortable' => true],
-                                ['key' => 'version', 'label' => 'Version'],
+                                [
+                                    'key' => 'form_key',
+                                    'label' => 'Key',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'forms.builder.column.key',
+                                ],
+                                ['key' => 'status', 'label' => 'Status', 'sortable' => true, 'i18nKey' => 'forms.builder.column.status'],
+                                ['key' => 'version', 'label' => 'Version', 'i18nKey' => 'forms.builder.column.version'],
                                 // Which forms this organisation has opened to
                                 // people with no account. In the LIST rather than
                                 // only on the detail pane, because "what have we
@@ -144,7 +288,7 @@ final class FormFrontendFeatures
                                 // catalogue at once, and an answer somebody has
                                 // to click through twelve forms to assemble is an
                                 // answer nobody assembles.
-                                ['key' => 'public_enabled', 'label' => 'Public', 'sortable' => true],
+                                ['key' => 'public_enabled', 'label' => 'Public', 'sortable' => true, 'i18nKey' => 'forms.builder.column.public'],
                             ],
                             'rowActions' => [
                                 // Publish and archive are POSTs with an empty
@@ -153,12 +297,13 @@ final class FormFrontendFeatures
                                 // because publishing is the last thing an author
                                 // does and making them navigate for it is how a
                                 // form stays in draft by accident.
-                                ['label' => 'Fill in', 'href' => '/forms/{id}'],
-                                ['label' => 'Public link', 'href' => '/f/{public_slug}'],
+                                ['label' => 'Fill in', 'href' => '/forms/{id}', 'i18nKey' => 'forms.builder.action.fill'],
+                                ['label' => 'Public link', 'href' => '/f/{public_slug}', 'i18nKey' => 'forms.builder.action.publicLink'],
                                 [
                                     'label' => 'Publish',
                                     'endpoint' => '/api/v1/forms/{id}/publish',
                                     'method' => 'POST',
+                                    'i18nKey' => 'forms.builder.action.publish',
                                 ],
                                 [
                                     'label' => 'Archive',
@@ -166,6 +311,7 @@ final class FormFrontendFeatures
                                     'method' => 'POST',
                                     'confirm' => 'Archiving stops new submissions. '
                                         . 'Everything already submitted is kept. Continue?',
+                                    'i18nKey' => 'forms.builder.action.archive',
                                 ],
                                 // THE SHUT-OFF, and it is here rather than only
                                 // in the modal below because of WHEN it gets
@@ -186,6 +332,7 @@ final class FormFrontendFeatures
                                         . 'cannot be brought back — re-opening the form mints a '
                                         . 'different one. Submissions already received are kept. '
                                         . 'Close it?',
+                                    'i18nKey' => 'forms.builder.action.closeLink',
                                 ],
                             ],
                         ],
@@ -194,6 +341,7 @@ final class FormFrontendFeatures
                             'id' => 'newForm',
                             'title' => 'New form',
                             'trigger' => 'New form',
+                            'i18nKey' => 'forms.builder.create',
                             'variant' => 'primary',
                             'children' => [
                                 [
@@ -206,6 +354,7 @@ final class FormFrontendFeatures
                                             'name' => 'form_key',
                                             'label' => 'Key',
                                             'placeholder' => 'equipment-request',
+                                            'i18nKey' => 'forms.builder.field.key',
                                             'required' => true,
                                         ],
                                         [
@@ -219,12 +368,14 @@ final class FormFrontendFeatures
                                             'name' => 'name',
                                             'label' => 'Name',
                                             'required' => true,
+                                            'i18nKey' => 'forms.builder.field.name',
                                         ],
                                         [
                                             'type' => 'textArea',
                                             'name' => 'description',
                                             'label' => 'Description',
                                             'rows' => 3,
+                                            'i18nKey' => 'forms.builder.field.description',
                                         ],
                                         [
                                             // Populated from the tenant's own route
@@ -239,11 +390,13 @@ final class FormFrontendFeatures
                                             'valueField' => 'id',
                                             'labelField' => 'name',
                                             'placeholder' => 'Collect only — do not circulate',
+                                            'i18nKey' => 'forms.builder.field.route',
                                         ],
                                         [
                                             'type' => 'submitButton',
                                             'label' => 'Create form',
                                             'variant' => 'primary',
+                                            'i18nKey' => 'forms.builder.action.create',
                                         ],
                                     ],
                                 ],
@@ -254,6 +407,7 @@ final class FormFrontendFeatures
                 [
                     'type' => 'section',
                     'title' => 'Fields',
+                    'i18nKey' => 'forms.builder.section.fields',
                     'children' => [
                         [
                             'type' => 'selector',
@@ -263,6 +417,7 @@ final class FormFrontendFeatures
                             'valueField' => 'id',
                             'labelField' => 'form_key',
                             'placeholder' => 'Pick a form to edit its fields',
+                            'i18nKey' => 'forms.builder.field.form',
                         ],
                         // WHAT THE BUILDER COULD NOT DO. Creating a form worked
                         // and removing a field worked, and nothing in between:
@@ -276,12 +431,13 @@ final class FormFrontendFeatures
                             'id' => 'builderFormDetail',
                             'source' => '/api/v1/forms/{builderForm}',
                             'emptyText' => 'Pick a form above to see and edit it.',
+                            'i18nKey' => 'forms.builder.detail.empty',
                             'fields' => [
-                                ['field' => 'form_key', 'label' => 'Key'],
-                                ['field' => 'status', 'label' => 'Status'],
-                                ['field' => 'version', 'label' => 'Version'],
-                                ['field' => 'description', 'label' => 'Description'],
-                                ['field' => 'accepts_submissions', 'label' => 'Accepting submissions'],
+                                ['field' => 'form_key', 'label' => 'Key', 'i18nKey' => 'forms.builder.detail.key'],
+                                ['field' => 'status', 'label' => 'Status', 'i18nKey' => 'forms.builder.detail.status'],
+                                ['field' => 'version', 'label' => 'Version', 'i18nKey' => 'forms.builder.detail.version'],
+                                ['field' => 'description', 'label' => 'Description', 'i18nKey' => 'forms.builder.detail.description'],
+                                ['field' => 'accepts_submissions', 'label' => 'Accepting submissions', 'i18nKey' => 'forms.builder.detail.accepting'],
                                 // THE LINK ITSELF. `public_url` is the whole
                                 // point of the control below — an address an
                                 // author copies onto a poster or into an email —
@@ -301,9 +457,9 @@ final class FormFrontendFeatures
                                 // needs the address, and a bare slug is a
                                 // credential in a place people copy from
                                 // carelessly.
-                                ['field' => 'public_enabled', 'label' => 'Open to the public'],
-                                ['field' => 'public_url', 'label' => 'Public link'],
-                                ['field' => 'public_closes_at', 'label' => 'Public link closes'],
+                                ['field' => 'public_enabled', 'label' => 'Open to the public', 'i18nKey' => 'forms.builder.detail.public'],
+                                ['field' => 'public_url', 'label' => 'Public link', 'i18nKey' => 'forms.builder.detail.publicLink'],
+                                ['field' => 'public_closes_at', 'label' => 'Public link closes', 'i18nKey' => 'forms.builder.detail.publicCloses'],
                             ],
                         ],
                         [
@@ -311,6 +467,7 @@ final class FormFrontendFeatures
                             'id' => 'editFormModal',
                             'title' => 'Edit this form',
                             'trigger' => 'Edit form',
+                            'i18nKey' => 'forms.builder.edit',
                             'variant' => 'secondary',
                             'children' => [
                                 [
@@ -329,12 +486,14 @@ final class FormFrontendFeatures
                                             'label' => 'Name',
                                             'arLabel' => 'Arabic',
                                             'enLabel' => 'English',
+                                            'i18nKey' => 'forms.builder.field.name',
                                         ],
                                         [
                                             'type' => 'textArea',
                                             'name' => 'description',
                                             'label' => 'Description',
                                             'rows' => 3,
+                                            'i18nKey' => 'forms.builder.field.description',
                                         ],
                                         [
                                             'type' => 'referenceSelect',
@@ -344,8 +503,13 @@ final class FormFrontendFeatures
                                             'valueField' => 'id',
                                             'labelField' => 'name',
                                             'placeholder' => 'Do not route submissions',
+                                            'i18nKey' => 'forms.builder.field.routeEdit',
                                         ],
-                                        ['type' => 'submitButton', 'label' => 'Save changes'],
+                                        [
+                                            'type' => 'submitButton',
+                                            'label' => 'Save changes',
+                                            'i18nKey' => 'forms.builder.action.save',
+                                        ],
                                     ],
                                 ],
                             ],
@@ -368,12 +532,14 @@ final class FormFrontendFeatures
                             'id' => 'publicLinkModal',
                             'title' => 'Open this form to the public',
                             'trigger' => 'Open public link',
+                            'i18nKey' => 'forms.builder.public',
                             'variant' => 'secondary',
                             'children' => [
                                 [
                                     'type' => 'alert',
                                     'variant' => 'warning',
                                     'title' => 'Anyone with the link can submit',
+                                    'i18nKey' => 'forms.builder.public.warning',
                                     'body' => 'This creates a long, random, unguessable web address. '
                                         . 'Anybody who has it can fill this form in without signing '
                                         . 'in, and every submission is recorded and circulated '
@@ -401,15 +567,18 @@ final class FormFrontendFeatures
                                             'type' => 'dateInput',
                                             'name' => 'opens_at',
                                             'label' => 'Opens (optional)',
+                                            'i18nKey' => 'forms.builder.field.opens',
                                         ],
                                         [
                                             'type' => 'dateInput',
                                             'name' => 'closes_at',
                                             'label' => 'Closes (optional)',
+                                            'i18nKey' => 'forms.builder.field.closes',
                                         ],
                                         [
                                             'type' => 'submitButton',
                                             'label' => 'Open public link',
+                                            'i18nKey' => 'forms.builder.action.openLink',
                                             'variant' => 'primary',
                                         ],
                                     ],
@@ -470,6 +639,7 @@ final class FormFrontendFeatures
                                 . 'remove here is withdrawn when you save, and answers already '
                                 . 'given to it stay recorded but stop having a label.',
                             'tone' => 'muted',
+                            'i18nKey' => 'forms.builder.questions.intro',
                         ],
                         [
                             'type' => 'form',
@@ -491,6 +661,7 @@ final class FormFrontendFeatures
                                     'name' => 'fields',
                                     'label' => 'Questions',
                                     'itemLabel' => 'Question',
+                                    'i18nKey' => 'forms.builder.field.questions',
                                     // The FLAT read, addressed by query param,
                                     // because `params` cannot fill a path
                                     // segment. The WRITE stays nested under the
@@ -511,12 +682,14 @@ final class FormFrontendFeatures
                                             'name' => 'field_key',
                                             'label' => 'Key',
                                             'placeholder' => 'snake_case, unique within this form',
+                                            'i18nKey' => 'forms.builder.field.questionKey',
                                             'required' => true,
                                         ],
                                         [
                                             'type' => 'select',
                                             'name' => 'field_type',
                                             'label' => 'Kind',
+                                            'i18nKey' => 'forms.builder.field.kind',
                                             'required' => true,
                                             // Derived from the vocabulary rather
                                             // than transcribed from it: a kind
@@ -530,6 +703,7 @@ final class FormFrontendFeatures
                                             'type' => 'bilingualText',
                                             'name' => 'label',
                                             'label' => 'Label',
+                                            'i18nKey' => 'forms.builder.field.label',
                                             'required' => true,
                                             'arLabel' => 'Arabic',
                                             'enLabel' => 'English',
@@ -538,23 +712,27 @@ final class FormFrontendFeatures
                                             'type' => 'textArea',
                                             'name' => 'help_text',
                                             'label' => 'Help text',
+                                            'i18nKey' => 'forms.builder.field.help',
                                             'rows' => 2,
                                         ],
                                         [
                                             'type' => 'checkbox',
                                             'name' => 'is_required',
                                             'label' => 'Required',
+                                            'i18nKey' => 'forms.builder.field.required',
                                         ],
                                         [
                                             'type' => 'textInput',
                                             'name' => 'section_key',
                                             'label' => 'Section',
                                             'placeholder' => 'Groups questions under one heading',
+                                            'i18nKey' => 'forms.builder.field.section',
                                         ],
                                         [
                                             'type' => 'select',
                                             'name' => 'prefill_source',
                                             'label' => 'Prefill from the submitter',
+                                            'i18nKey' => 'forms.builder.field.prefill',
                                             'options' => self::prefillSourceOptions(),
                                         ],
                                     ],
@@ -562,6 +740,7 @@ final class FormFrontendFeatures
                                 [
                                     'type' => 'submitButton',
                                     'label' => 'Save questions',
+                                    'i18nKey' => 'forms.builder.action.saveQuestions',
                                     'variant' => 'primary',
                                 ],
                             ],
@@ -570,6 +749,7 @@ final class FormFrontendFeatures
                             'type' => 'alert',
                             'variant' => 'info',
                             'title' => 'Prefilled fields',
+                            'i18nKey' => 'forms.builder.prefill.note',
                             'body' => 'A field can start filled in from the submitter\'s own saved '
                                 . 'details, so they do not retype what the organisation already knows. '
                                 . 'Sources that nothing in this install stores yet are shown in the '
@@ -585,6 +765,7 @@ final class FormFrontendFeatures
                             'type' => 'alert',
                             'variant' => 'info',
                             'title' => 'Forms opened to the public',
+                            'i18nKey' => 'forms.builder.public.note',
                             'body' => 'A published form can be given a public web link that people '
                                 . 'with no account can fill in. Such a form may only ask for values '
                                 . 'a stranger can actually give, so person, unit and file fields are '
@@ -636,7 +817,13 @@ final class FormFrontendFeatures
 
         $options = [];
         foreach (FieldType::all() as $type) {
-            $options[] = ['value' => $type, 'label' => $labels[$type] ?? $type];
+            $options[] = [
+                'value' => $type,
+                'label' => $labels[$type] ?? $type,
+                // The VALUE is the stable slug, so a new field type arrives
+                // carrying its own key (#1044).
+                'i18nKey' => 'forms.builder.fieldType.' . $type,
+            ];
         }
 
         return $options;
@@ -664,17 +851,36 @@ final class FormFrontendFeatures
             PrefillSource::DISPLAY_NAME => 'Their name',
             PrefillSource::EMAIL => 'Their email',
             PrefillSource::OU => 'Their unit',
+            // OU_ID was declared in PrefillSource and missing here, and the
+            // `?? $source` fallback below meant the picker offered a literal
+            // `profile.ou_id` as a choice rather than words. Same fact as
+            // `OU`, but the id rather than the name — see PrefillSource.
+            PrefillSource::OU_ID => 'Their unit, for a unit field',
+            // OU_ID was declared in PrefillSource and missing here, and the
+            // `?? $source` fallback below meant the picker offered a literal
+            // `profile.ou_id` as a choice rather than words. Same fact as
+            // `OU`, but the id rather than the name — see PrefillSource.
             PrefillSource::PHONE => 'Their phone',
             PrefillSource::JOB_TITLE => 'Their job title',
         ];
 
-        $options = [['value' => '', 'label' => 'Do not prefill']];
+        $options = [[
+            'value' => '',
+            'label' => 'Do not prefill',
+            'i18nKey' => 'forms.builder.prefill.none',
+        ]];
         foreach (PrefillSource::all() as $source) {
             $label = $labels[$source] ?? $source;
             if (!PrefillSource::isBacked($source)) {
                 $label .= ' — nothing in this install stores it yet';
             }
-            $options[] = ['value' => $source, 'label' => $label];
+            $options[] = [
+                'value' => $source,
+                'label' => $label,
+                // `profile.` is stripped so each key stays one segment: a
+                // dot in the value would otherwise nest the key silently.
+                'i18nKey' => 'forms.builder.prefill.' . str_replace('profile.', '', $source),
+            ];
         }
 
         return $options;
@@ -693,6 +899,7 @@ final class FormFrontendFeatures
             'id' => self::CATALOG_ID,
             'plugin' => 'core',
             'label' => 'Forms',
+            'i18nKey' => 'forms.catalog.nav',
             'icon' => 'clipboard-list',
             'group' => 'records',
             'order' => 5,
@@ -702,18 +909,26 @@ final class FormFrontendFeatures
                 [
                     'type' => 'section',
                     'title' => 'Forms',
+                    'i18nKey' => 'forms.catalog.section.forms',
                     'children' => [
                         [
                             'type' => 'dataTable',
                             'source' => '/api/v1/forms?status=published',
                             'emptyText' => 'No published forms yet.',
+                            'i18nKey' => 'forms.catalog.published.empty',
                             'pageSize' => 20,
                             'columns' => [
-                                ['key' => 'form_key', 'label' => 'Key', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'version', 'label' => 'Version'],
-                                ['key' => 'public_enabled', 'label' => 'Open to the public'],
-                                ['key' => 'public_url', 'label' => 'Public link'],
-                                ['key' => 'created_at', 'label' => 'Created', 'sortable' => true],
+                                [
+                                    'key' => 'form_key',
+                                    'label' => 'Key',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'forms.catalog.column.key',
+                                ],
+                                ['key' => 'version', 'label' => 'Version', 'i18nKey' => 'forms.catalog.column.version'],
+                                ['key' => 'public_enabled', 'label' => 'Open to the public', 'i18nKey' => 'forms.catalog.column.public'],
+                                ['key' => 'public_url', 'label' => 'Public link', 'i18nKey' => 'forms.catalog.column.publicLink'],
+                                ['key' => 'created_at', 'label' => 'Created', 'sortable' => true, 'i18nKey' => 'forms.catalog.column.created'],
                             ],
                             // WHERE THE LINKS LIVE. A form had two addresses and
                             // neither was reachable from a screen: the public URL
@@ -734,8 +949,8 @@ final class FormFrontendFeatures
                             // the slug is blank, and the `Open to the public`
                             // column beside it says why.
                             'rowActions' => [
-                                ['label' => 'Fill in', 'href' => '/forms/{id}'],
-                                ['label' => 'Public link', 'href' => '/f/{public_slug}'],
+                                ['label' => 'Fill in', 'href' => '/forms/{id}', 'i18nKey' => 'forms.catalog.action.fill'],
+                                ['label' => 'Public link', 'href' => '/f/{public_slug}', 'i18nKey' => 'forms.catalog.action.publicLink'],
                             ],
                         ],
                     ],
@@ -743,6 +958,7 @@ final class FormFrontendFeatures
                 [
                     'type' => 'section',
                     'title' => 'Submissions',
+                    'i18nKey' => 'forms.catalog.section.submissions',
                     'children' => [
                         [
                             'type' => 'selector',
@@ -752,23 +968,37 @@ final class FormFrontendFeatures
                             'valueField' => 'id',
                             'labelField' => 'form_key',
                             'placeholder' => 'All forms',
+                            'i18nKey' => 'forms.catalog.field.form',
                         ],
                         [
                             'type' => 'dataTable',
                             'source' => '/api/v1/form-submissions',
                             'emptyText' => 'Nothing has been submitted yet.',
+                            'i18nKey' => 'forms.catalog.submissions.empty',
                             'pageSize' => 25,
                             'columns' => [
-                                ['key' => 'form_key', 'label' => 'Form', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'submitted_at', 'label' => 'Submitted', 'sortable' => true],
+                                [
+                                    'key' => 'form_key',
+                                    'label' => 'Form',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'forms.catalog.submissions.column.form',
+                                ],
+                                ['key' => 'submitted_at', 'label' => 'Submitted', 'sortable' => true, 'i18nKey' => 'forms.catalog.submissions.column.submitted'],
                                 // WHERE IT IS NOW. Somebody who submitted a
                                 // request does not want to know that it was
                                 // received; they want to know whose desk it is
                                 // on. Both come from the routing trail rather
                                 // than a stored status, so neither can go stale.
-                                ['key' => 'state', 'label' => 'State', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'current_step', 'label' => 'Now with'],
-                                ['key' => 'form_version', 'label' => 'Answered version'],
+                                [
+                                    'key' => 'state',
+                                    'label' => 'State',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'forms.catalog.submissions.column.state',
+                                ],
+                                ['key' => 'current_step', 'label' => 'Now with', 'i18nKey' => 'forms.catalog.submissions.column.nowWith'],
+                                ['key' => 'form_version', 'label' => 'Answered version', 'i18nKey' => 'forms.catalog.submissions.column.version'],
                             ],
                             'params' => [
                                 ['param' => 'form_id', 'from' => 'catalogForm'],
@@ -780,6 +1010,7 @@ final class FormFrontendFeatures
                                 . 'so it carries the same approvals, trail and verification as '
                                 . 'anything else the organisation circulates.',
                             'tone' => 'muted',
+                            'i18nKey' => 'forms.catalog.submissions.note',
                         ],
                     ],
                 ],
@@ -803,6 +1034,7 @@ final class FormFrontendFeatures
             'id' => self::MY_SUBMISSIONS_ID,
             'plugin' => 'core',
             'label' => 'My Submissions',
+            'i18nKey' => 'forms.mine.nav',
             'icon' => 'file-check',
             'group' => 'overview',
             'order' => 3,
@@ -812,6 +1044,7 @@ final class FormFrontendFeatures
                 [
                     'type' => 'section',
                     'title' => 'My submissions',
+                    'i18nKey' => 'forms.mine.section',
                     'children' => [
                         [
                             'type' => 'dataTable',
@@ -821,15 +1054,28 @@ final class FormFrontendFeatures
                             // standing between a person and somebody else's data.
                             'source' => '/api/v1/me/form-submissions',
                             'emptyText' => 'You have not submitted anything yet.',
+                            'i18nKey' => 'forms.mine.empty',
                             'pageSize' => 25,
                             'columns' => [
-                                ['key' => 'form_key', 'label' => 'Form', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'submitted_at', 'label' => 'Submitted', 'sortable' => true],
+                                [
+                                    'key' => 'form_key',
+                                    'label' => 'Form',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'forms.mine.column.form',
+                                ],
+                                ['key' => 'submitted_at', 'label' => 'Submitted', 'sortable' => true, 'i18nKey' => 'forms.mine.column.submitted'],
                                 // WHERE IT IS NOW. Somebody who submitted a request does not
                                 // want to be told it was received; they want to know whose desk
                                 // it is on. Derived from the routing trail, so it cannot go stale.
-                                ['key' => 'state', 'label' => 'State', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'current_step', 'label' => 'Now with'],
+                                [
+                                    'key' => 'state',
+                                    'label' => 'State',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'forms.mine.column.state',
+                                ],
+                                ['key' => 'current_step', 'label' => 'Now with', 'i18nKey' => 'forms.mine.column.nowWith'],
                             ],
                         ],
                         [
@@ -838,6 +1084,7 @@ final class FormFrontendFeatures
                                 . 'already have acted on it. If something was wrong, submit again; '
                                 . 'both submissions are kept, with their times.',
                             'tone' => 'muted',
+                            'i18nKey' => 'forms.mine.note',
                         ],
                     ],
                 ],

@@ -48,8 +48,7 @@ use Whity\Core\Router;
  * authoritative RoleChecker). What the screen can actually read and write is
  * enforced by the RBAC on the routes behind it, exactly as it is for every other
  * caller. A descriptor grants nothing.
- */
-/**
+ *
  * THE ENGLISH THESE SCREENS ARE WRITTEN IN (#1044).
  *
  * Every string above reaches the browser already worded, so no screen's own
