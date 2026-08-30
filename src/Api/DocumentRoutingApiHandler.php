@@ -20,7 +20,9 @@ use Whity\Core\Document\Routing\RouteStepRepository;
 use Whity\Core\Document\Routing\RouteVerdict;
 use Whity\Core\Document\Routing\RoutingPresenter;
 use Whity\Core\Document\Routing\RoutingRejectedException;
+use Whity\Core\Document\Routing\RoutingRuleLabels;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
+use Whity\Core\i18n\ServerLabels;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Request;
@@ -114,6 +116,7 @@ final class DocumentRoutingApiHandler
         private readonly DocumentVisibilityPolicy $visibility,
         private readonly RoleChecker $roleChecker,
         private readonly RouteTemplateRepository $templates,
+        private readonly ServerLabels $labels,
     ) {
     }
 
@@ -133,7 +136,12 @@ final class DocumentRoutingApiHandler
             return $ctx;
         }
 
-        return Response::json(['data' => $this->rules->catalogue()]);
+        // Localised at SERVING time, not at declaration time (#1044): the wording
+        // depends on who is asking, and the registry is a process-wide singleton
+        // shared by every tenant and every language on the instance.
+        return Response::json([
+            'data' => RoutingRuleLabels::localise($this->rules->catalogue(), $this->labels),
+        ]);
     }
 
     /**

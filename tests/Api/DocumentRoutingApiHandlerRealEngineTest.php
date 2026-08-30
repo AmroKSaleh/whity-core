@@ -7,6 +7,11 @@ namespace Tests\Api;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Core\i18n\LanguageRegistry;
+use Whity\Core\i18n\LanguageRepository;
+use Whity\Core\i18n\ServerLabels;
+use Whity\Core\i18n\TranslationRepository;
+use Whity\Core\Tenant\StaticTenantContextAdapter;
 use Whity\Api\DocumentRoutingApiHandler;
 use Whity\Api\MeInboxApiHandler;
 use Whity\Auth\RoleChecker;
@@ -156,7 +161,15 @@ final class DocumentRoutingApiHandlerRealEngineTest extends TestCase
             // #1031. The same store the templates surface uses - a stub here
             // would let this file assert against a design production could not
             // have saved.
-            $this->templates = new RouteTemplateRepository($this->pdo)
+            $this->templates = new RouteTemplateRepository($this->pdo),
+            // #1044. A REAL registry over the same schema, not a stub: the rule
+            // catalogue is localised at serving time now, and a stub would agree
+            // with whatever this file assumed about that.
+            new ServerLabels(new LanguageRegistry(
+                new LanguageRepository($this->pdo),
+                new TranslationRepository($this->pdo),
+                new StaticTenantContextAdapter(),
+            ))
         );
         $this->templateGraph = new RouteTemplateGraph($rules);
 

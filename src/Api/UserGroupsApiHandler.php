@@ -7,7 +7,9 @@ namespace Whity\Api;
 use PDO;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Audit\AuditLoggerInterface;
+use Whity\Core\Document\Routing\RoutingRuleLabels;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
+use Whity\Core\i18n\ServerLabels;
 use Whity\Core\Group\GroupRejectedException;
 use Whity\Core\Group\GroupResolver;
 use Whity\Core\Group\UserGroupPresenter;
@@ -116,6 +118,7 @@ final class UserGroupsApiHandler
         private readonly RoutingRuleRegistry $rules,
         private readonly SettingsService $settings,
         private readonly RoleChecker $roleChecker,
+        private readonly ServerLabels $labels,
         private readonly ?AuditLoggerInterface $auditLogger = null,
     ) {
     }
@@ -136,7 +139,10 @@ final class UserGroupsApiHandler
             return $ctx;
         }
 
-        return Response::json(['data' => $this->rules->audienceCatalogue()]);
+        // Localised at SERVING time — see DocumentRoutingApiHandler for why.
+        return Response::json([
+            'data' => RoutingRuleLabels::localise($this->rules->audienceCatalogue(), $this->labels),
+        ]);
     }
 
     /**
