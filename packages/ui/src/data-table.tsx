@@ -92,6 +92,76 @@ export interface DataTableServerPagination {
   onPaginationChange: (pageIndex: number, pageSize: number) => void
 }
 
+/**
+ * Server-driven sorting: the caller owns the sort column and direction, we
+ * render the header affordances and call back. The same shape of bargain as
+ * {@link DataTableServerPagination}.
+ *
+ * WHY THIS HAS TO EXIST. Without it, a table in server-pagination mode still
+ * sorts CLIENT-side, and the registered `sortedRowModel` sorts THE ROWS IT WAS
+ * HANDED — the twenty five on screen. Clicking "Name" then reorders one page and
+ * presents the result as a sorted list; page 2 re-sorts a different twenty
+ * five. Nothing errors and nothing looks wrong, which is the whole problem:
+ * the reader has no way to tell a sorted list from a sorted page. Screens hit
+ * this already and worked around it by making their columns non-sortable and
+ * moving sort into their own toolbar (see the document library's
+ * `LibraryToolbar`), because the alternative was shipping the untruth.
+ */
+export interface DataTableServerSorting {
+  /** Column id currently sorted, or null for "no column chosen". */
+  sortKey: string | null
+  direction: "asc" | "desc"
+  /**
+   * Called with the NEXT sort when the user clicks a sortable header.
+   *
+   * `sortKey` is null when a column is cycled past descending back to
+   * unsorted (TanStack's default asc → desc → none cycle). `direction` is then
+   * not meaningful — send no `dir` upstream in that case, so the endpoint's own
+   * default ordering applies rather than one this component invented.
+   *
+   * Changing the sort invalidates the current page offset. Resetting to page 1
+   * is the caller's to do, since the caller owns the pagination state.
+   */
+  onSortingChange: (sortKey: string | null, direction: "asc" | "desc") => void
+}
+
+/**
+ * Quiet period before a keystroke becomes a request, in ms.
+ *
+ * Exported so a caller or a test can reach the default by name instead of
+ * re-stating the number, and overridable per table via
+ * {@link DataTableServerSearch.debounceMs} — typing "engineering" is twelve
+ * requests without it.
+ */
+export const DATA_TABLE_SEARCH_DEBOUNCE_MS = 300
+
+/**
+ * Server-driven global search: the caller owns the term, we own the input.
+ *
+ * Same hazard as {@link DataTableServerSorting}: a client-side global filter
+ * over a server-paginated table filters the current page, so a search that
+ * matches nothing on page 1 reports "no results" while the match sits on
+ * page 4.
+ */
+export interface DataTableServerSearch {
+  /**
+   * The term the caller has APPLIED. This is not necessarily what is in the
+   * box: the input keeps its own draft so typing stays responsive while the
+   * request is debounced. An external change to this value (a "clear search"
+   * button elsewhere on the page) is adopted into the box; the echo of our own
+   * callback is not, because adopting it would overwrite whatever was typed
+   * while the request was in flight.
+   */
+  value: string
+  onSearchChange: (value: string) => void
+  /**
+   * Quiet period after typing stops, in ms. Defaults to
+   * {@link DATA_TABLE_SEARCH_DEBOUNCE_MS}. Pass 0 to call back on every
+   * keystroke (the caller is debouncing, or a test wants determinism).
+   */
+  debounceMs?: number
+}
+
 export interface DataTableProps<TData> {
   columns: DataTableColumn<TData>[]
   data: TData[]
@@ -163,6 +233,23 @@ export interface DataTableProps<TData> {
    * controls and calls back, never re-slices `data` itself).
    */
   pagination?: DataTableServerPagination | { pageSize: number }
+  /**
+   * Omit to let this component sort the rows it holds (the default, and what
+   * every existing caller gets). Pass a {@link DataTableServerSorting} object
+   * when the SERVER sorts: the headers then reflect the caller's state and
+   * report clicks, and the rows are rendered in the order they arrived.
+   */
+  sorting?: DataTableServerSorting
+  /**
+   * Omit to let `enableGlobalFilter` filter the rows it holds. Pass a
+   * {@link DataTableServerSearch} object when the SERVER searches: the same
+   * search box renders (passing this implies it, `enableGlobalFilter` or not)
+   * and reports what is typed, and no row is filtered out locally.
+   *
+   * Per-column filters are deliberately LEFT ALONE by this — see the note on
+   * `manualFiltering` at the `useTable` call.
+   */
+  search?: DataTableServerSearch
   className?: string
 }
 
@@ -277,18 +364,89 @@ export function DataTable<TData>({
   enableColumnVisibility = false,
   enableColumnResizing = false,
   pagination,
+  sorting: serverSorting,
+  search: serverSearch,
   className,
 }: DataTableProps<TData>) {
-  const [sorting, setSorting] = React.useState<SortingState>([])
+  const [clientSorting, setClientSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = React.useState("")
   const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibilityState>({})
 
   const serverMode = pagination != null && isServerPagination(pagination)
+
+  /**
+   * The caller's sort, in the shape TanStack keeps it in. One column at a
+   * time: the server contract this pairs with takes a single `sort` key, so
+   * offering multi-sort in the UI would promise an ordering the request cannot
+   * express.
+   */
+  const sortingState: SortingState = serverSorting
+    ? serverSorting.sortKey
+      ? [{ id: serverSorting.sortKey, desc: serverSorting.direction === "desc" }]
+      : []
+    : clientSorting
   const [clientPagination, setClientPagination] = React.useState<PaginationState>({
     pageIndex: 0,
     pageSize: pagination && !serverMode ? pagination.pageSize : 10,
   })
+
+  // What is TYPED, which is not what has been SENT. The box must stay
+  // responsive while the request is debounced, so it renders this draft rather
+  // than `serverSearch.value`; a controlled input bound straight to a value
+  // that only updates after the round trip drops characters typed in between.
+  const appliedSearch = serverSearch?.value ?? ""
+  const [searchDraft, setSearchDraft] = React.useState(appliedSearch)
+  const searchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The last term we handed to `onSearchChange`. When the caller sets `value`
+  // to exactly this, it is the ECHO of our own callback, not somebody else
+  // changing the search, and adopting it would clobber the characters typed
+  // between the timer firing and the caller re-rendering.
+  const lastEmittedSearch = React.useRef<string | null>(null)
+
+  const clearSearchTimer = () => {
+    if (searchTimer.current !== null) {
+      clearTimeout(searchTimer.current)
+      searchTimer.current = null
+    }
+  }
+
+  React.useEffect(() => {
+    if (lastEmittedSearch.current === appliedSearch) return
+    lastEmittedSearch.current = null
+    // An external change wins over anything still pending — a "clear search"
+    // button elsewhere on the page must not be undone a moment later by a
+    // timer carrying the term it just cleared.
+    clearSearchTimer()
+    setSearchDraft(appliedSearch)
+  }, [appliedSearch])
+
+  // A pending timer outliving the component would call back into an unmounted
+  // caller. Cancelling on unmount is the whole of it.
+  React.useEffect(() => clearSearchTimer, [])
+
+  const handleSearchInput = (next: string) => {
+    if (!serverSearch) {
+      setGlobalFilter(next)
+      return
+    }
+    setSearchDraft(next)
+    clearSearchTimer()
+    const delay = serverSearch.debounceMs ?? DATA_TABLE_SEARCH_DEBOUNCE_MS
+    if (delay <= 0) {
+      lastEmittedSearch.current = next
+      serverSearch.onSearchChange(next)
+      return
+    }
+    searchTimer.current = setTimeout(() => {
+      searchTimer.current = null
+      lastEmittedSearch.current = next
+      serverSearch.onSearchChange(next)
+    }, delay)
+  }
+
+  /** Passing `search` implies the search box, whether or not the flag is set. */
+  const showSearchInput = enableGlobalFilter || serverSearch != null
 
   const columnDefs = React.useMemo<ColumnDef<TableFeatureSet, TableRow<TData>, unknown>[]>(() => {
     const defs: ColumnDef<TableFeatureSet, TableRow<TData>, unknown>[] = columns.map((column) => {
@@ -340,9 +498,11 @@ export function DataTable<TData>({
       ? (row, index) => getRowId(row, index)
       : undefined,
     state: {
-      sorting,
+      sorting: sortingState,
       columnFilters,
-      globalFilter: enableGlobalFilter ? globalFilter : undefined,
+      // In server-search mode the term never enters table state, so there is
+      // nothing here for TanStack to filter by. See `manualFiltering` below.
+      globalFilter: enableGlobalFilter && !serverSearch ? globalFilter : undefined,
       columnVisibility,
       // NO PAGINATION MEANS ONE PAGE OF EVERYTHING, SAID EXPLICITLY.
       //
@@ -361,7 +521,19 @@ export function DataTable<TData>({
           ? clientPagination
           : { pageIndex: 0, pageSize: Number.POSITIVE_INFINITY },
     },
-    onSortingChange: setSorting,
+    onSortingChange: serverSorting
+      ? (updater) => {
+          const next = typeof updater === "function" ? updater(sortingState) : updater
+          // Single-column, so the head of the list IS the sort. An empty list
+          // is the third click of asc → desc → none: no column chosen, and the
+          // direction that goes with it is not meaningful — see the prop docs.
+          const [next0] = next
+          serverSorting.onSortingChange(
+            next0 ? next0.id : null,
+            next0?.desc ? "desc" : "asc"
+          )
+        }
+      : setClientSorting,
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
     onColumnVisibilityChange: setColumnVisibility,
@@ -375,6 +547,45 @@ export function DataTable<TData>({
         }
       : setClientPagination,
     manualPagination: serverMode,
+    /**
+     * THIS is what stops the reordering, not the absence of a row model.
+     *
+     * `sortedRowModel` stays registered on the module-scope `tableFeatures` —
+     * it is shared by every table this component renders, so it cannot be
+     * withheld per-instance the way v8's per-call `getSortedRowModel()` could.
+     * The flag is the per-instance control: v9 gates the pipeline in
+     * `table_getSortedRowModel` (`core/row-models/coreRowModelsFeature.utils.js`,
+     * table-core 9.2.4), which returns the PRE-sorted model when
+     * `manualSorting` is set and never consults the comparator.
+     *
+     * Drop this flag and the headers keep working and the callback keeps
+     * firing, and the rows ALSO get re-sorted locally on top of the server's
+     * order — a sort that is nearly right, which is the hardest kind to notice.
+     */
+    manualSorting: serverSorting != null,
+    /*
+     * NO `manualFiltering`, deliberately, and it is not an oversight.
+     *
+     * Re-checked against v9, because v9 splits `columnFilteringFeature` and
+     * `globalFilteringFeature` into separate features and the split looks like
+     * it should have brought a global-only flag with it. It did not.
+     * `manualFiltering` is still the only one, it is still declared on
+     * `columnFilteringFeature`, and `globalFilteringFeature` has no manual
+     * option at all. The gate is one stage of the shared row-model pipeline —
+     * `table_getFilteredRowModel`, documented as "the row model after column
+     * AND global filtering" — so setting the flag would take the per-column
+     * filter inputs down with the global one, exactly as in v8. Those are used
+     * by around eighteen columns across the admin screens, the users table
+     * included — the first screen expected to adopt server search — and they
+     * would keep rendering and keep accepting text while filtering nothing.
+     *
+     * Keeping the search term out of `state.globalFilter` (above) achieves what
+     * the flag would have achieved for search, and nothing more:
+     * `createFilteredRowModel` treats `undefined` as "no global filter" and
+     * applies none, while column filters go on working client-side.
+     * Server-side column filters are a contract that does not exist yet; when
+     * it does, this is where it lands.
+     */
     pageCount: serverMode ? pagination.pageCount : undefined,
     columnResizeMode: "onChange",
     enableColumnResizing,
@@ -445,14 +656,14 @@ export function DataTable<TData>({
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {(enableGlobalFilter || enableColumnVisibility) && (
+      {(showSearchInput || enableColumnVisibility) && (
         <div className="flex items-center justify-between gap-2">
-          {enableGlobalFilter ? (
+          {showSearchInput ? (
             <div className="relative w-full max-w-xs">
               <IconSearch className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
-                value={globalFilter}
-                onChange={(event) => setGlobalFilter(event.target.value)}
+                value={serverSearch ? searchDraft : globalFilter}
+                onChange={(event) => handleSearchInput(event.target.value)}
                 placeholder={globalFilterPlaceholder}
                 className="ps-7"
               />
