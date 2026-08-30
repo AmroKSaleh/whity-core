@@ -6,6 +6,11 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Whity\Core\i18n\LanguageRegistry;
+use Whity\Core\i18n\LanguageRepository;
+use Whity\Core\i18n\ServerLabels;
+use Whity\Core\i18n\TranslationRepository;
+use Whity\Core\Tenant\StaticTenantContextAdapter;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\SettingsApiHandler;
 use Whity\Auth\RoleChecker;
@@ -45,7 +50,7 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
             new TenantSettingsRepository($this->pdo)
         );
         $roleChecker = new RoleChecker(self::wrapSqlite($this->pdo), new PermissionRegistry());
-        $this->handler = new SettingsApiHandler($settings, $roleChecker);
+        $this->handler = new SettingsApiHandler($settings, $roleChecker, $this->serverLabels());
     }
 
     private static function wrapSqlite(PDO $pdo): Database
@@ -300,5 +305,23 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
         $response = $this->handler->tabs($request);
 
         $this->assertSame(403, $response->getStatusCode());
+    }
+
+    /**
+     * A translator over an empty schema, so tab names stay as declared.
+     *
+     * `ServerLabels` is `final` and required here on purpose (#1044). Given a
+     * registry with no tables its lookup throws and the helper answers with the
+     * declared English, which is what these assertions expect.
+     */
+    private function serverLabels(): ServerLabels
+    {
+        $pdo = new \PDO('sqlite::memory:');
+
+        return new ServerLabels(new LanguageRegistry(
+            new LanguageRepository($pdo),
+            new TranslationRepository($pdo),
+            new StaticTenantContextAdapter(),
+        ));
     }
 }

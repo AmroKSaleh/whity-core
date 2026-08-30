@@ -8,6 +8,8 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\i18n\SchemaLabels;
+use Whity\Core\i18n\ServerLabels;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\SettingsValidationException;
 use Whity\Core\Tenant\TenantContext;
@@ -63,10 +65,19 @@ final class SettingsApiHandler
     private SettingsService $settings;
     private RoleChecker $roleChecker;
 
-    public function __construct(SettingsService $settings, RoleChecker $roleChecker)
-    {
+    /**
+     * @param ServerLabels $labels Serving-time translator for the tab names (#1044).
+     *        REQUIRED rather than optional: an optional one silently served English
+     *        from `public/index.php` once already, with every check green.
+     */
+    public function __construct(
+        SettingsService $settings,
+        RoleChecker $roleChecker,
+        ServerLabels $labels
+    ) {
         $this->settings = $settings;
         $this->roleChecker = $roleChecker;
+        $this->labels = $labels;
     }
 
     /**
@@ -79,6 +90,38 @@ final class SettingsApiHandler
      *
      * @var list<array{id: string, href: string, label: string, requiredPermission?: string, requiredRole?: string, systemTenantOnly?: bool}>
      */
+    /**
+     * Key prefix for a tab's name. The id completes it.
+     *
+     * @i18n-keys admin
+     *   settings.tab.general = General
+     *   settings.tab.branding = Branding
+     *   settings.tab.signup = Sign-up
+     *   settings.tab.sso = Single sign-on
+     *   settings.tab.email = Email
+     *   settings.tab.email_domains = Email domains
+     *   settings.tab.storage = Storage
+     *   settings.tab.feature_flags = Feature flags
+     *   settings.tab.security = Security
+     *   settings.tab.error_tracking = Error tracking
+     */
+    private ServerLabels $labels;
+
+    private const LABEL_KEY_PREFIX = 'settings.tab.';
+
+    /**
+     * The catalogue key for a tab.
+     *
+     * The id is the slug, with one adjustment: three ids are hyphenated
+     * (`email-domains`) and a translation key may not be — segments are
+     * `[a-z][a-zA-Z0-9_]*`. Underscored here rather than renaming the tabs,
+     * because the id is in URLs and in every client that filters on it.
+     */
+    private static function labelKey(string $id): string
+    {
+        return self::LABEL_KEY_PREFIX . str_replace('-', '_', $id);
+    }
+
     private const TABS = [
         ['id' => 'general', 'href' => '/admin/settings', 'label' => 'General', 'requiredPermission' => CorePermissions::SETTINGS_READ],
         ['id' => 'branding', 'href' => '/admin/settings/branding', 'label' => 'Branding', 'requiredPermission' => CorePermissions::SETTINGS_READ],
@@ -136,7 +179,19 @@ final class SettingsApiHandler
         ));
 
         $data = array_map(
-            static fn (array $tab): array => ['id' => $tab['id'], 'href' => $tab['href'], 'label' => $tab['label']],
+            fn (array $tab): array => [
+                'id' => $tab['id'],
+                'href' => $tab['href'],
+                // #1044. The id is already a stable slug, so the key derives from
+                // it and a new tab arrives carrying its own — no annotation on the
+                // declaration, unlike the schema-driven screens where there is
+                // often no identifier to derive from.
+                'label' => $this->labels->label(
+                    SchemaLabels::CORE_DOMAIN,
+                    self::labelKey($tab['id']),
+                    $tab['label']
+                ),
+            ],
             $visible
         );
 

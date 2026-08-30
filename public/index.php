@@ -2032,7 +2032,12 @@ $router->register('GET', '/api/me/audit-logs', [$auditLogHandler, 'listOwn'], nu
 // SettingsService and its repositories; the tenant always comes from
 // TenantContext, so a caller can only edit its own tenant's overrides.
 // ($settingsService is constructed once, earlier, near the register handler.)
-$settingsHandler = new \Whity\Api\SettingsApiHandler($settingsService, $roleChecker);
+$settingsHandler = new \Whity\Api\SettingsApiHandler(
+    $settingsService,
+    $roleChecker,
+    // #1044: the settings tab names answer in the caller's language.
+    $serverLabels
+);
 $router->register('GET',   '/api/settings',        [$settingsHandler, 'get'],         null, null, CorePermissions::SETTINGS_READ);
 $router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'],       null, null, CorePermissions::SETTINGS_WRITE);
 $router->register('GET',   '/api/settings/global', [$settingsHandler, 'getGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
