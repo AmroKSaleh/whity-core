@@ -49,6 +49,159 @@ use Whity\Core\Router;
  * enforced by the RBAC on the routes behind it, exactly as it is for every other
  * caller. A descriptor grants nothing.
  */
+/**
+ * THE ENGLISH THESE SCREENS ARE WRITTEN IN (#1044).
+ *
+ * Every string above reaches the browser already worded, so no screen's own
+ * `t()` ever sees it. This block is how the catalogue does: the extractor reads
+ * text, not method bodies, so the wording is stated once here for it to seed
+ * and once in the declaration for a reader to see beside the field it belongs
+ * to.
+ *
+ * THE DUPLICATION IS GUARDED, NOT TOLERATED. `ConveningFeatureLabelsTest`
+ * walks the real declarations, reads this block back through the real
+ * extractor, and fails if a single key or word disagrees — including a key
+ * declared here that no node uses any more. Without that, the catalogue would
+ * seed one wording while unseeded instances rendered another, and nothing
+ * would go red.
+ *
+ * Keys name the FIELD, never the English, so rewording a label cannot orphan
+ * its Arabic.
+ *
+ * @i18n-keys admin
+ *   convening.bodies.action.create.label = Create body
+ *   convening.bodies.action.delete.confirm = Meetings and decisions already minuted by this body stay on the record. Delete the body?
+ *   convening.bodies.action.delete.label = Delete
+ *   convening.bodies.action.edit.label = Edit
+ *   convening.bodies.action.save.label = Save changes
+ *   convening.bodies.column.description.label = Description
+ *   convening.bodies.column.key.label = Key
+ *   convening.bodies.column.name.label = Name
+ *   convening.bodies.create.title = New convening body
+ *   convening.bodies.create.trigger = New body
+ *   convening.bodies.edit.title = Edit this body
+ *   convening.bodies.field.description.label = Description
+ *   convening.bodies.field.key.label = Key
+ *   convening.bodies.field.key.placeholder = kebab-case, unique in this tenant
+ *   convening.bodies.field.name.arLabel = Arabic
+ *   convening.bodies.field.name.enLabel = English
+ *   convening.bodies.field.name.label = Name
+ *   convening.bodies.field.ou.label = Belongs to
+ *   convening.bodies.field.ou.placeholder = No particular unit
+ *   convening.bodies.intro.value = Standing bodies that meet, minute numbered decisions, and can approve or reject the documents put before them.
+ *   convening.bodies.nav.label = Convening Bodies
+ *   convening.bodies.section.title = Convening bodies
+ *   convening.bodies.table.empty.emptyText = No convening bodies yet. Create one to start recording meetings and decisions.
+ *   convening.meeting.action.addAgenda.label = Add to agenda
+ *   convening.meeting.action.hold.confirm = Mark this meeting as held? Decisions can be minuted afterwards.
+ *   convening.meeting.action.hold.label = Hold the meeting
+ *   convening.meeting.action.invite.confirm = Invite every current member of this body?
+ *   convening.meeting.action.invite.label = Send invitations
+ *   convening.meeting.action.minute.label = Minute a decision
+ *   convening.meeting.action.record.label = Record decision
+ *   convening.meeting.action.schedule.label = Schedule
+ *   convening.meeting.agenda.add.title = Put something on the agenda
+ *   convening.meeting.agenda.add.trigger = Add agenda item
+ *   convening.meeting.agenda.column.document.label = Document
+ *   convening.meeting.agenda.column.item.label = Item
+ *   convening.meeting.agenda.column.notes.label = Notes
+ *   convening.meeting.agenda.column.position.label = #
+ *   convening.meeting.agenda.empty.emptyText = Nothing on this agenda yet.
+ *   convening.meeting.attendance.action.save.label = Save attendance
+ *   convening.meeting.attendance.card.description = Saving replaces the whole list: anybody you remove here stops being on the record of who attended this sitting. Somebody who was never invited can be added — give a name instead of a profile if they have no account.
+ *   convening.meeting.attendance.card.title = Record who attended
+ *   convening.meeting.attendance.column.capacity.label = In what capacity
+ *   convening.meeting.attendance.column.hadAnswered.label = Had answered
+ *   convening.meeting.attendance.column.name.label = Name
+ *   convening.meeting.attendance.column.note.label = Note
+ *   convening.meeting.attendance.column.person.label = Person
+ *   convening.meeting.attendance.column.wasInvited.label = Was invited
+ *   convening.meeting.attendance.empty.emptyText = No attendance recorded for this meeting yet.
+ *   convening.meeting.attendance.field.capacity.label = In what capacity
+ *   convening.meeting.attendance.field.name.label = Name (for somebody with no account)
+ *   convening.meeting.attendance.field.name.placeholder = A guest, or an external member
+ *   convening.meeting.attendance.field.note.label = Note
+ *   convening.meeting.attendance.field.note.placeholder = e.g. standing in for a member, or left after item 3
+ *   convening.meeting.attendance.field.people.itemLabel = Attendee
+ *   convening.meeting.attendance.field.people.label = People present
+ *   convening.meeting.attendance.field.profile.label = Profile
+ *   convening.meeting.attendance.intro.value = Who was actually in the room. This is a separate record from the invitations above and the two disagree often: people accept and do not come, and people who declined turn up. Anybody may be recorded here, including somebody who was never invited — a substitute, a co-opted member, a guest.
+ *   convening.meeting.attendance.notQuorum.body = Whity does not hold any body's quorum rule and does not check one. What is below is the list of people recorded as present, and nothing more.
+ *   convening.meeting.attendance.notQuorum.title = This is a record, not a quorum check
+ *   convening.meeting.capacity.guest.label = Guest
+ *   convening.meeting.capacity.member.label = Member
+ *   convening.meeting.capacity.substitute.label = Substitute
+ *   convening.meeting.decisions.column.decided.label = Decided
+ *   convening.meeting.decisions.column.number.label = Number
+ *   convening.meeting.decisions.column.rationale.label = Rationale
+ *   convening.meeting.decisions.column.route.label = Drove route
+ *   convening.meeting.decisions.column.verdict.label = Verdict
+ *   convening.meeting.decisions.empty.emptyText = No decisions recorded for this meeting.
+ *   convening.meeting.field.allowHeld.label = This meeting has already been held — add it to that sitting anyway
+ *   convening.meeting.field.decidedAt.label = Date of the decision
+ *   convening.meeting.field.decisionNumber.label = Decision number (from the minute book)
+ *   convening.meeting.field.decisionNumber.placeholder = Leave blank to allocate one automatically
+ *   convening.meeting.field.document.label = Document under consideration
+ *   convening.meeting.field.document.placeholder = No document
+ *   convening.meeting.field.held.label = Held on
+ *   convening.meeting.field.item.arLabel = Arabic
+ *   convening.meeting.field.item.enLabel = English
+ *   convening.meeting.field.item.label = Item
+ *   convening.meeting.field.location.label = Location
+ *   convening.meeting.field.locationInput.label = Location
+ *   convening.meeting.field.notes.label = Notes
+ *   convening.meeting.field.number.label = Meeting number
+ *   convening.meeting.field.rationale.label = Rationale
+ *   convening.meeting.field.scheduled.label = Scheduled for
+ *   convening.meeting.field.scheduledAt.label = Date and time
+ *   convening.meeting.field.status.label = Status
+ *   convening.meeting.field.title.label = Title
+ *   convening.meeting.field.verdict.label = Verdict
+ *   convening.meeting.intro.value = Open a meeting from the Meetings list to see its record. The address carries the meeting, so this page can be refreshed, bookmarked and shared.
+ *   convening.meeting.invitations.column.answer.label = Answer
+ *   convening.meeting.invitations.column.answered.label = Answered
+ *   convening.meeting.invitations.column.invited.label = Invited
+ *   convening.meeting.invitations.column.person.label = Person
+ *   convening.meeting.invitations.empty.emptyText = Nobody has been invited to this meeting yet.
+ *   convening.meeting.invitations.intro.value = What people SAID before the sitting. An acceptance is a prediction; who actually came is recorded separately, below.
+ *   convening.meeting.minute.card.description = Choose an agenda item above, then record what the body concluded about it. A decision can only be minuted once the meeting has been held, and it cannot be edited afterwards — a body that changes its mind takes a new decision at a later sitting.
+ *   convening.meeting.minute.card.title = Minute a decision
+ *   convening.meeting.minute.note.value = Nothing is minuted until you press Record decision. If the item carries a document and this body is the one its approval route is waiting for, an approval here advances that document and a rejection stops it.
+ *   convening.meeting.minute.nothingChosen.value = No agenda item chosen yet — use "Minute a decision" on a row above.
+ *   convening.meeting.nav.label = Meeting Record
+ *   convening.meeting.record.empty.emptyText = Choose a meeting to see its record.
+ *   convening.meeting.running.intro.value = Set a date, invite the members, then hold it. A decision can only be minuted once the meeting has been held.
+ *   convening.meeting.schedule.title = Set a date
+ *   convening.meeting.schedule.trigger = Schedule
+ *   convening.meeting.section.agenda.title = Agenda
+ *   convening.meeting.section.attendance.title = Attendance
+ *   convening.meeting.section.decisions.title = Decisions
+ *   convening.meeting.section.invitations.title = Invitations
+ *   convening.meeting.section.record.title = Meeting record
+ *   convening.meeting.section.running.title = Running the meeting
+ *   convening.meeting.verdict.approved.label = Approved
+ *   convening.meeting.verdict.deferred.label = Deferred
+ *   convening.meeting.verdict.rejected.label = Rejected
+ *   convening.meetings.action.create.label = Create meeting
+ *   convening.meetings.action.open.label = Open
+ *   convening.meetings.column.held.label = Held
+ *   convening.meetings.column.location.label = Location
+ *   convening.meetings.column.number.label = No.
+ *   convening.meetings.column.scheduled.label = Scheduled
+ *   convening.meetings.column.status.label = Status
+ *   convening.meetings.column.title.label = Title
+ *   convening.meetings.create.title = Convene a meeting
+ *   convening.meetings.create.trigger = New meeting
+ *   convening.meetings.field.body.label = Body
+ *   convening.meetings.field.body.placeholder = Which body is meeting
+ *   convening.meetings.field.title.arLabel = Arabic
+ *   convening.meetings.field.title.enLabel = English
+ *   convening.meetings.field.title.label = Title
+ *   convening.meetings.intro.value = Sittings of the tenant's convening bodies. A meeting collects an agenda while it is a draft or scheduled; once it is held, the decisions taken at it can approve or reject the documents on that agenda.
+ *   convening.meetings.nav.label = Meetings
+ *   convening.meetings.section.title = Meetings
+ *   convening.meetings.table.empty.emptyText = No meetings yet.
+ */
 final class ConveningFeatures
 {
     /** The bodies list. */
@@ -119,6 +272,7 @@ final class ConveningFeatures
             // opens a support ticket about.
             'plugin' => 'core',
             'label' => 'Convening Bodies',
+            'i18nKey' => 'convening.bodies.nav',
             'icon' => 'users-group',
             'group' => self::NAV_GROUP,
             'order' => 6,
@@ -133,12 +287,14 @@ final class ConveningFeatures
                 [
                     'type' => 'section',
                     'title' => 'Convening bodies',
+                    'i18nKey' => 'convening.bodies.section',
                     'children' => [
                         [
                             'type' => 'text',
                             'tone' => 'muted',
                             'value' => 'Standing bodies that meet, minute numbered decisions, and can '
                                 . 'approve or reject the documents put before them.',
+                            'i18nKey' => 'convening.bodies.intro',
                         ],
                         // The `resource` declaration above does NOT produce
                         // Create/Edit controls on a `screen: 'blocks'` feature —
@@ -150,6 +306,7 @@ final class ConveningFeatures
                             'id' => 'newBodyModal',
                             'title' => 'New convening body',
                             'trigger' => 'New body',
+                            'i18nKey' => 'convening.bodies.create',
                             'children' => [
                                 [
                                     'type' => 'form',
@@ -161,6 +318,7 @@ final class ConveningFeatures
                                             'name' => 'body_key',
                                             'label' => 'Key',
                                             'placeholder' => 'kebab-case, unique in this tenant',
+                                            'i18nKey' => 'convening.bodies.field.key',
                                             'required' => true,
                                         ],
                                         [
@@ -170,11 +328,13 @@ final class ConveningFeatures
                                             'required' => true,
                                             'arLabel' => 'Arabic',
                                             'enLabel' => 'English',
+                                            'i18nKey' => 'convening.bodies.field.name',
                                         ],
                                         [
                                             'type' => 'referenceSelect',
                                             'name' => 'ou_id',
                                             'label' => 'Belongs to',
+                                            'i18nKey' => 'convening.bodies.field.ou',
                                             'source' => $ousPath,
                                             'valueField' => 'id',
                                             'labelField' => 'name',
@@ -185,8 +345,13 @@ final class ConveningFeatures
                                             'name' => 'description',
                                             'label' => 'Description',
                                             'rows' => 2,
+                                            'i18nKey' => 'convening.bodies.field.description',
                                         ],
-                                        ['type' => 'submitButton', 'label' => 'Create body'],
+                                        [
+                                            'type' => 'submitButton',
+                                            'label' => 'Create body',
+                                            'i18nKey' => 'convening.bodies.action.create',
+                                        ],
                                     ],
                                 ],
                             ],
@@ -196,28 +361,42 @@ final class ConveningFeatures
                             'source' => $bodiesPath,
                             'emptyText' => 'No convening bodies yet. Create one to start recording '
                                 . 'meetings and decisions.',
+                            'i18nKey' => 'convening.bodies.table.empty',
                             'pageSize' => 25,
                             'columns' => [
-                                ['key' => 'body_key', 'label' => 'Key', 'sortable' => true, 'filterable' => true],
+                                [
+                                    'key' => 'body_key',
+                                    'label' => 'Key',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'convening.bodies.column.key',
+                                ],
                                 // `display_name` and not `name`: `name` is a
                                 // locale MAP, and a table cell can only render a
                                 // string. Both are on the wire — a localizing
                                 // client reads the map. See LocalizedText.
-                                ['key' => 'display_name', 'label' => 'Name', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'description', 'label' => 'Description'],
+                                [
+                                    'key' => 'display_name',
+                                    'label' => 'Name',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'convening.bodies.column.name',
+                                ],
+                                ['key' => 'description', 'label' => 'Description', 'i18nKey' => 'convening.bodies.column.description'],
                             ],
                             // `open` publishes the row under the modal's id, so
                             // the edit form addresses it as {editBodyModal.…}
                             // without needing a second selector the API could
                             // not filter anyway.
                             'rowActions' => [
-                                ['label' => 'Edit', 'open' => 'editBodyModal'],
+                                ['label' => 'Edit', 'open' => 'editBodyModal', 'i18nKey' => 'convening.bodies.action.edit'],
                                 [
                                     'label' => 'Delete',
                                     'endpoint' => $bodiesPath . '/{id}',
                                     'method' => 'DELETE',
                                     'confirm' => 'Meetings and decisions already minuted by this body stay '
                                         . 'on the record. Delete the body?',
+                                    'i18nKey' => 'convening.bodies.action.delete',
                                 ],
                             ],
                         ],
@@ -225,6 +404,7 @@ final class ConveningFeatures
                             'type' => 'modal',
                             'id' => 'editBodyModal',
                             'title' => 'Edit this body',
+                            'i18nKey' => 'convening.bodies.edit',
                             'children' => [
                                 [
                                     'type' => 'form',
@@ -240,6 +420,7 @@ final class ConveningFeatures
                                             'label' => 'Name',
                                             'arLabel' => 'Arabic',
                                             'enLabel' => 'English',
+                                            'i18nKey' => 'convening.bodies.field.name',
                                         ],
                                         [
                                             'type' => 'textArea',
@@ -247,8 +428,13 @@ final class ConveningFeatures
                                             'label' => 'Description',
                                             'rows' => 2,
                                             'defaultFrom' => 'editBodyModal.description',
+                                            'i18nKey' => 'convening.bodies.field.description',
                                         ],
-                                        ['type' => 'submitButton', 'label' => 'Save changes'],
+                                        [
+                                            'type' => 'submitButton',
+                                            'label' => 'Save changes',
+                                            'i18nKey' => 'convening.bodies.action.save',
+                                        ],
                                     ],
                                 ],
                             ],
@@ -268,6 +454,7 @@ final class ConveningFeatures
             'id' => self::MEETINGS,
             'plugin' => 'core',
             'label' => 'Meetings',
+            'i18nKey' => 'convening.meetings.nav',
             'icon' => 'calendar',
             'group' => self::NAV_GROUP,
             'order' => 7,
@@ -278,6 +465,7 @@ final class ConveningFeatures
                 [
                     'type' => 'section',
                     'title' => 'Meetings',
+                    'i18nKey' => 'convening.meetings.section',
                     'children' => [
                         [
                             'type' => 'text',
@@ -286,12 +474,14 @@ final class ConveningFeatures
                                 . 'an agenda while it is a draft or scheduled; once it is held, the '
                                 . 'decisions taken at it can approve or reject the documents on that '
                                 . 'agenda.',
+                            'i18nKey' => 'convening.meetings.intro',
                         ],
                         [
                             'type' => 'modal',
                             'id' => 'newMeetingModal',
                             'title' => 'Convene a meeting',
                             'trigger' => 'New meeting',
+                            'i18nKey' => 'convening.meetings.create',
                             'children' => [
                                 [
                                     'type' => 'form',
@@ -307,6 +497,7 @@ final class ConveningFeatures
                                             'labelField' => 'display_name',
                                             'required' => true,
                                             'placeholder' => 'Which body is meeting',
+                                            'i18nKey' => 'convening.meetings.field.body',
                                         ],
                                         [
                                             'type' => 'bilingualText',
@@ -314,8 +505,13 @@ final class ConveningFeatures
                                             'label' => 'Title',
                                             'arLabel' => 'Arabic',
                                             'enLabel' => 'English',
+                                            'i18nKey' => 'convening.meetings.field.title',
                                         ],
-                                        ['type' => 'submitButton', 'label' => 'Create meeting'],
+                                        [
+                                            'type' => 'submitButton',
+                                            'label' => 'Create meeting',
+                                            'i18nKey' => 'convening.meetings.action.create',
+                                        ],
                                     ],
                                 ],
                             ],
@@ -324,18 +520,47 @@ final class ConveningFeatures
                             'type' => 'dataTable',
                             'source' => $meetingsPath,
                             'emptyText' => 'No meetings yet.',
+                            'i18nKey' => 'convening.meetings.table.empty',
                             'pageSize' => 25,
                             'columns' => [
-                                ['key' => 'meeting_number', 'label' => 'No.', 'sortable' => true],
-                                ['key' => 'display_title', 'label' => 'Title', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'status', 'label' => 'Status', 'sortable' => true, 'filterable' => true],
-                                ['key' => 'scheduled_at', 'label' => 'Scheduled', 'sortable' => true],
-                                ['key' => 'held_at', 'label' => 'Held', 'sortable' => true],
-                                ['key' => 'location', 'label' => 'Location'],
+                                [
+                                    'key' => 'meeting_number',
+                                    'label' => 'No.',
+                                    'sortable' => true,
+                                    'i18nKey' => 'convening.meetings.column.number',
+                                ],
+                                [
+                                    'key' => 'display_title',
+                                    'label' => 'Title',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'convening.meetings.column.title',
+                                ],
+                                [
+                                    'key' => 'status',
+                                    'label' => 'Status',
+                                    'sortable' => true,
+                                    'filterable' => true,
+                                    'i18nKey' => 'convening.meetings.column.status',
+                                ],
+                                [
+                                    'key' => 'scheduled_at',
+                                    'label' => 'Scheduled',
+                                    'sortable' => true,
+                                    'i18nKey' => 'convening.meetings.column.scheduled',
+                                ],
+                                [
+                                    'key' => 'held_at',
+                                    'label' => 'Held',
+                                    'sortable' => true,
+                                    'i18nKey' => 'convening.meetings.column.held',
+                                ],
+                                ['key' => 'location', 'label' => 'Location', 'i18nKey' => 'convening.meetings.column.location'],
                             ],
                             'rowActions' => [
                                 [
                                     'label' => 'Open',
+                                    'i18nKey' => 'convening.meetings.action.open',
                                     // Internal navigation to the detail screen,
                                     // which is a feature of its own rather than
                                     // a modal: an agenda, its decisions and its
@@ -377,6 +602,7 @@ final class ConveningFeatures
             'id' => self::MEETING_DETAIL,
             'plugin' => 'core',
             'label' => 'Meeting Record',
+            'i18nKey' => 'convening.meeting.nav',
             'icon' => 'clipboard-text',
             'group' => self::NAV_GROUP,
             'order' => 8,
@@ -386,6 +612,7 @@ final class ConveningFeatures
                 [
                     'type' => 'section',
                     'title' => 'Meeting record',
+                    'i18nKey' => 'convening.meeting.section.record',
                     'children' => [
                         // THE RECORD IS IN THE URL, not in a dropdown. This
                         // page used to pick its subject with a selector, which
@@ -406,6 +633,7 @@ final class ConveningFeatures
                             'value' => 'Open a meeting from the Meetings list to see its record. '
                                 . 'The address carries the meeting, so this page can be refreshed, '
                                 . 'bookmarked and shared.',
+                            'i18nKey' => 'convening.meeting.intro',
                         ],
                         [
                             'type' => 'dataRecord',
@@ -416,13 +644,14 @@ final class ConveningFeatures
                             // collection.
                             'source' => $meetingsPath . '/{record}',
                             'emptyText' => 'Choose a meeting to see its record.',
+                            'i18nKey' => 'convening.meeting.record.empty',
                             'fields' => [
-                                ['field' => 'display_title', 'label' => 'Title'],
-                                ['field' => 'meeting_number', 'label' => 'Meeting number'],
-                                ['field' => 'status', 'label' => 'Status'],
-                                ['field' => 'scheduled_at', 'label' => 'Scheduled for'],
-                                ['field' => 'held_at', 'label' => 'Held on'],
-                                ['field' => 'location', 'label' => 'Location'],
+                                ['field' => 'display_title', 'label' => 'Title', 'i18nKey' => 'convening.meeting.field.title'],
+                                ['field' => 'meeting_number', 'label' => 'Meeting number', 'i18nKey' => 'convening.meeting.field.number'],
+                                ['field' => 'status', 'label' => 'Status', 'i18nKey' => 'convening.meeting.field.status'],
+                                ['field' => 'scheduled_at', 'label' => 'Scheduled for', 'i18nKey' => 'convening.meeting.field.scheduled'],
+                                ['field' => 'held_at', 'label' => 'Held on', 'i18nKey' => 'convening.meeting.field.held'],
+                                ['field' => 'location', 'label' => 'Location', 'i18nKey' => 'convening.meeting.field.location'],
                             ],
                             'children' => [
                                 ['type' => 'recordFields', 'from' => 'meetingRecord'],
@@ -433,18 +662,21 @@ final class ConveningFeatures
                 [
                     'type' => 'section',
                     'title' => 'Running the meeting',
+                    'i18nKey' => 'convening.meeting.section.running',
                     'children' => [
                         [
                             'type' => 'text',
                             'tone' => 'muted',
                             'value' => 'Set a date, invite the members, then hold it. A decision can only '
                                 . 'be minuted once the meeting has been held.',
+                            'i18nKey' => 'convening.meeting.running.intro',
                         ],
                         [
                             'type' => 'modal',
                             'id' => 'scheduleModal',
                             'title' => 'Set a date',
                             'trigger' => 'Schedule',
+                            'i18nKey' => 'convening.meeting.schedule',
                             'children' => [
                                 [
                                     'type' => 'form',
@@ -461,14 +693,20 @@ final class ConveningFeatures
                                             'type' => 'dateInput',
                                             'name' => 'scheduled_at',
                                             'label' => 'Date and time',
+                                            'i18nKey' => 'convening.meeting.field.scheduledAt',
                                             'required' => true,
                                         ],
                                         [
                                             'type' => 'textInput',
                                             'name' => 'location',
                                             'label' => 'Location',
+                                            'i18nKey' => 'convening.meeting.field.locationInput',
                                         ],
-                                        ['type' => 'submitButton', 'label' => 'Schedule'],
+                                        [
+                                            'type' => 'submitButton',
+                                            'label' => 'Schedule',
+                                            'i18nKey' => 'convening.meeting.action.schedule',
+                                        ],
                                     ],
                                 ],
                             ],
@@ -482,6 +720,7 @@ final class ConveningFeatures
                                 'endpoint' => $meetingsPath . '/{record}/invitations',
                             ],
                             'confirm' => 'Invite every current member of this body?',
+                            'i18nKey' => 'convening.meeting.action.invite',
                         ],
                         [
                             'type' => 'actionButton',
@@ -493,12 +732,14 @@ final class ConveningFeatures
                                 'endpoint' => $meetingsPath . '/{record}/hold',
                             ],
                             'confirm' => 'Mark this meeting as held? Decisions can be minuted afterwards.',
+                            'i18nKey' => 'convening.meeting.action.hold',
                         ],
                         [
                             'type' => 'modal',
                             'id' => 'addAgendaModal',
                             'title' => 'Put something on the agenda',
                             'trigger' => 'Add agenda item',
+                            'i18nKey' => 'convening.meeting.agenda.add',
                             'children' => [
                                 [
                                     'type' => 'form',
@@ -515,6 +756,7 @@ final class ConveningFeatures
                                             'required' => true,
                                             'arLabel' => 'Arabic',
                                             'enLabel' => 'English',
+                                            'i18nKey' => 'convening.meeting.field.item',
                                         ],
                                         [
                                             // Carrying a document is what lets the
@@ -527,12 +769,14 @@ final class ConveningFeatures
                                             'valueField' => 'id',
                                             'labelField' => 'title',
                                             'placeholder' => 'No document',
+                                            'i18nKey' => 'convening.meeting.field.document',
                                         ],
                                         [
                                             'type' => 'textArea',
                                             'name' => 'notes',
                                             'label' => 'Notes',
                                             'rows' => 2,
+                                            'i18nKey' => 'convening.meeting.field.notes',
                                         ],
                                         [
                                             // The API refuses to add an item to a
@@ -548,8 +792,13 @@ final class ConveningFeatures
                                             'type' => 'checkbox',
                                             'name' => 'allow_held',
                                             'label' => 'This meeting has already been held — add it to that sitting anyway',
+                                            'i18nKey' => 'convening.meeting.field.allowHeld',
                                         ],
-                                        ['type' => 'submitButton', 'label' => 'Add to agenda'],
+                                        [
+                                            'type' => 'submitButton',
+                                            'label' => 'Add to agenda',
+                                            'i18nKey' => 'convening.meeting.action.addAgenda',
+                                        ],
                                     ],
                                 ],
                             ],
@@ -559,20 +808,22 @@ final class ConveningFeatures
                 [
                     'type' => 'section',
                     'title' => 'Agenda',
+                    'i18nKey' => 'convening.meeting.section.agenda',
                     'children' => [
                         [
                             'type' => 'dataTable',
                             'source' => $agendaItemsPath,
                             'params' => [['param' => 'meeting_id', 'from' => 'record']],
                             'emptyText' => 'Nothing on this agenda yet.',
+                            'i18nKey' => 'convening.meeting.agenda.empty',
                             'columns' => [
-                                ['key' => 'position', 'label' => '#'],
-                                ['key' => 'display_title', 'label' => 'Item'],
+                                ['key' => 'position', 'label' => '#', 'i18nKey' => 'convening.meeting.agenda.column.position'],
+                                ['key' => 'display_title', 'label' => 'Item', 'i18nKey' => 'convening.meeting.agenda.column.item'],
                                 // The join to the rest of the platform: an item
                                 // with a document id is an item a decision can
                                 // move.
-                                ['key' => 'document_id', 'label' => 'Document'],
-                                ['key' => 'notes', 'label' => 'Notes'],
+                                ['key' => 'document_id', 'label' => 'Document', 'i18nKey' => 'convening.meeting.agenda.column.document'],
+                                ['key' => 'notes', 'label' => 'Notes', 'i18nKey' => 'convening.meeting.agenda.column.notes'],
                             ],
                             'rowActions' => [
                                 // `open` still PUBLISHES the row under this id —
@@ -581,7 +832,7 @@ final class ConveningFeatures
                                 // longer opens is a dialog: the target is a
                                 // `card`, and the composing form lives on the
                                 // page. See the card's own note.
-                                ['label' => 'Minute a decision', 'open' => 'minutedItem'],
+                                ['label' => 'Minute a decision', 'open' => 'minutedItem', 'i18nKey' => 'convening.meeting.action.minute'],
                             ],
                         ],
                         [
@@ -612,6 +863,7 @@ final class ConveningFeatures
                             // decided — the case a dialog is actually for.
                             'type' => 'card',
                             'title' => 'Minute a decision',
+                            'i18nKey' => 'convening.meeting.minute.card',
                             'description' => 'Choose an agenda item above, then record what the body '
                                 . 'concluded about it. A decision can only be minuted once the meeting '
                                 . 'has been held, and it cannot be edited afterwards — a body that '
@@ -624,6 +876,7 @@ final class ConveningFeatures
                                         . 'If the item carries a document and this body is the one its '
                                         . 'approval route is waiting for, an approval here advances '
                                         . 'that document and a rejection stops it.',
+                                    'i18nKey' => 'convening.meeting.minute.note',
                                 ],
                                 [
                                     'type' => 'form',
@@ -659,12 +912,14 @@ final class ConveningFeatures
                                             'type' => 'text',
                                             'value' => 'No agenda item chosen yet — use "Minute a '
                                                 . 'decision" on a row above.',
+                                            'i18nKey' => 'convening.meeting.minute.nothingChosen',
                                             'valueFrom' => 'minutedItem.display_title',
                                         ],
                                         [
                                             'type' => 'select',
                                             'name' => 'verdict',
                                             'label' => 'Verdict',
+                                            'i18nKey' => 'convening.meeting.field.verdict',
                                             'required' => true,
                                             // Derived from the vocabulary rather
                                             // than transcribed, so a fourth
@@ -704,6 +959,7 @@ final class ConveningFeatures
                                             'name' => 'decision_number',
                                             'label' => 'Decision number (from the minute book)',
                                             'placeholder' => 'Leave blank to allocate one automatically',
+                                            'i18nKey' => 'convening.meeting.field.decisionNumber',
                                         ],
                                         [
                                             // THE DATE THE INSTITUTION MINUTED
@@ -715,14 +971,20 @@ final class ConveningFeatures
                                             'type' => 'dateInput',
                                             'name' => 'decided_at',
                                             'label' => 'Date of the decision',
+                                            'i18nKey' => 'convening.meeting.field.decidedAt',
                                         ],
                                         [
                                             'type' => 'textArea',
                                             'name' => 'rationale',
                                             'label' => 'Rationale',
                                             'rows' => 3,
+                                            'i18nKey' => 'convening.meeting.field.rationale',
                                         ],
-                                        ['type' => 'submitButton', 'label' => 'Record decision'],
+                                        [
+                                            'type' => 'submitButton',
+                                            'label' => 'Record decision',
+                                            'i18nKey' => 'convening.meeting.action.record',
+                                        ],
                                     ],
                                 ],
                             ],
@@ -732,23 +994,25 @@ final class ConveningFeatures
                 [
                     'type' => 'section',
                     'title' => 'Decisions',
+                    'i18nKey' => 'convening.meeting.section.decisions',
                     'children' => [
                         [
                             'type' => 'dataTable',
                             'source' => $decisionsPath,
                             'params' => [['param' => 'meeting_id', 'from' => 'record']],
                             'emptyText' => 'No decisions recorded for this meeting.',
+                            'i18nKey' => 'convening.meeting.decisions.empty',
                             'columns' => [
-                                ['key' => 'decision_number', 'label' => 'Number', 'sortable' => true],
-                                ['key' => 'verdict', 'label' => 'Verdict', 'filterable' => true],
-                                ['key' => 'rationale', 'label' => 'Rationale'],
-                                ['key' => 'decided_at', 'label' => 'Decided', 'sortable' => true],
+                                ['key' => 'decision_number', 'label' => 'Number', 'sortable' => true, 'i18nKey' => 'convening.meeting.decisions.column.number'],
+                                ['key' => 'verdict', 'label' => 'Verdict', 'filterable' => true, 'i18nKey' => 'convening.meeting.decisions.column.verdict'],
+                                ['key' => 'rationale', 'label' => 'Rationale', 'i18nKey' => 'convening.meeting.decisions.column.rationale'],
+                                ['key' => 'decided_at', 'label' => 'Decided', 'sortable' => true, 'i18nKey' => 'convening.meeting.decisions.column.decided'],
                                 // WHETHER THE DECISION MOVED ANYTHING. A
                                 // decision with a route id advanced a document
                                 // through its approval chain; one without did
                                 // not, and without this column the two are
                                 // indistinguishable on screen.
-                                ['key' => 'route_id', 'label' => 'Drove route'],
+                                ['key' => 'route_id', 'label' => 'Drove route', 'i18nKey' => 'convening.meeting.decisions.column.route'],
                             ],
                         ],
                     ],
@@ -756,23 +1020,26 @@ final class ConveningFeatures
                 [
                     'type' => 'section',
                     'title' => 'Invitations',
+                    'i18nKey' => 'convening.meeting.section.invitations',
                     'children' => [
                         [
                             'type' => 'text',
                             'tone' => 'muted',
                             'value' => 'What people SAID before the sitting. An acceptance is a '
                                 . 'prediction; who actually came is recorded separately, below.',
+                            'i18nKey' => 'convening.meeting.invitations.intro',
                         ],
                         [
                             'type' => 'dataTable',
                             'source' => $invitationsPath,
                             'params' => [['param' => 'meeting_id', 'from' => 'record']],
                             'emptyText' => 'Nobody has been invited to this meeting yet.',
+                            'i18nKey' => 'convening.meeting.invitations.empty',
                             'columns' => [
-                                ['key' => 'profile_id', 'label' => 'Person'],
-                                ['key' => 'status', 'label' => 'Answer', 'filterable' => true],
-                                ['key' => 'sent_at', 'label' => 'Invited'],
-                                ['key' => 'responded_at', 'label' => 'Answered'],
+                                ['key' => 'profile_id', 'label' => 'Person', 'i18nKey' => 'convening.meeting.invitations.column.person'],
+                                ['key' => 'status', 'label' => 'Answer', 'filterable' => true, 'i18nKey' => 'convening.meeting.invitations.column.answer'],
+                                ['key' => 'sent_at', 'label' => 'Invited', 'i18nKey' => 'convening.meeting.invitations.column.invited'],
+                                ['key' => 'responded_at', 'label' => 'Answered', 'i18nKey' => 'convening.meeting.invitations.column.answered'],
                             ],
                         ],
                     ],
@@ -823,6 +1090,7 @@ final class ConveningFeatures
         return [
             'type' => 'section',
             'title' => 'Attendance',
+            'i18nKey' => 'convening.meeting.section.attendance',
             'children' => [
                 [
                     'type' => 'text',
@@ -832,6 +1100,7 @@ final class ConveningFeatures
                         . 'come, and people who declined turn up. Anybody may be recorded here, '
                         . 'including somebody who was never invited — a substitute, a co-opted '
                         . 'member, a guest.',
+                    'i18nKey' => 'convening.meeting.attendance.intro',
                 ],
                 [
                     // THE HONEST SENTENCE ABOUT COUNTING. A list of names on a
@@ -843,6 +1112,7 @@ final class ConveningFeatures
                     'type' => 'alert',
                     'variant' => 'info',
                     'title' => 'This is a record, not a quorum check',
+                    'i18nKey' => 'convening.meeting.attendance.notQuorum',
                     'body' => 'Whity does not hold any body\'s quorum rule and does not check one. '
                         . 'What is below is the list of people recorded as present, and nothing '
                         . 'more.',
@@ -852,25 +1122,27 @@ final class ConveningFeatures
                     'source' => $attendeesPath,
                     'params' => [['param' => 'meeting_id', 'from' => 'record']],
                     'emptyText' => 'No attendance recorded for this meeting yet.',
+                    'i18nKey' => 'convening.meeting.attendance.empty',
                     'columns' => [
-                        ['key' => 'profile_id', 'label' => 'Person'],
+                        ['key' => 'profile_id', 'label' => 'Person', 'i18nKey' => 'convening.meeting.attendance.column.person'],
                         // The name is what carries somebody with no account, and
                         // it is the column that makes a guest legible at all.
-                        ['key' => 'attendee_name', 'label' => 'Name'],
-                        ['key' => 'capacity', 'label' => 'In what capacity', 'filterable' => true],
+                        ['key' => 'attendee_name', 'label' => 'Name', 'i18nKey' => 'convening.meeting.attendance.column.name'],
+                        ['key' => 'capacity', 'label' => 'In what capacity', 'filterable' => true, 'i18nKey' => 'convening.meeting.attendance.column.capacity'],
                         // THE DISAGREEMENT, made visible. `was_invited` false is
                         // somebody who came without being asked; an
                         // `invitation_status` of `declined` beside a row that
                         // EXISTS is somebody who said no and came anyway. Neither
                         // is visible at all without these two columns.
-                        ['key' => 'was_invited', 'label' => 'Was invited'],
-                        ['key' => 'invitation_status', 'label' => 'Had answered'],
-                        ['key' => 'note', 'label' => 'Note'],
+                        ['key' => 'was_invited', 'label' => 'Was invited', 'i18nKey' => 'convening.meeting.attendance.column.wasInvited'],
+                        ['key' => 'invitation_status', 'label' => 'Had answered', 'i18nKey' => 'convening.meeting.attendance.column.hadAnswered'],
+                        ['key' => 'note', 'label' => 'Note', 'i18nKey' => 'convening.meeting.attendance.column.note'],
                     ],
                 ],
                 [
                     'type' => 'card',
                     'title' => 'Record who attended',
+                    'i18nKey' => 'convening.meeting.attendance.card',
                     'description' => 'Saving replaces the whole list: anybody you remove here stops '
                         . 'being on the record of who attended this sitting. Somebody who was never '
                         . 'invited can be added — give a name instead of a profile if they have no '
@@ -898,6 +1170,7 @@ final class ConveningFeatures
                                     'name' => 'attendees',
                                     'label' => 'People present',
                                     'itemLabel' => 'Attendee',
+                                    'i18nKey' => 'convening.meeting.attendance.field.people',
                                     // The FLAT read, addressed by query param,
                                     // because `params` cannot fill a path
                                     // segment. The WRITE stays nested under the
@@ -925,6 +1198,7 @@ final class ConveningFeatures
                                             'type' => 'numberInput',
                                             'name' => 'profile_id',
                                             'label' => 'Profile',
+                                            'i18nKey' => 'convening.meeting.attendance.field.profile',
                                             'min' => 1,
                                         ],
                                         [
@@ -932,11 +1206,13 @@ final class ConveningFeatures
                                             'name' => 'attendee_name',
                                             'label' => 'Name (for somebody with no account)',
                                             'placeholder' => 'A guest, or an external member',
+                                            'i18nKey' => 'convening.meeting.attendance.field.name',
                                         ],
                                         [
                                             'type' => 'select',
                                             'name' => 'capacity',
                                             'label' => 'In what capacity',
+                                            'i18nKey' => 'convening.meeting.attendance.field.capacity',
                                             // Derived from the vocabulary, so a
                                             // capacity added to
                                             // AttendanceCapacity and not to a
@@ -950,10 +1226,15 @@ final class ConveningFeatures
                                             'name' => 'note',
                                             'label' => 'Note',
                                             'placeholder' => 'e.g. standing in for a member, or left after item 3',
+                                            'i18nKey' => 'convening.meeting.attendance.field.note',
                                         ],
                                     ],
                                 ],
-                                ['type' => 'submitButton', 'label' => 'Save attendance'],
+                                [
+                                    'type' => 'submitButton',
+                                    'label' => 'Save attendance',
+                                    'i18nKey' => 'convening.meeting.attendance.action.save',
+                                ],
                             ],
                         ],
                     ],
@@ -976,7 +1257,13 @@ final class ConveningFeatures
     private static function verdictOptions(): array
     {
         return array_map(
-            static fn (string $v): array => ['value' => $v, 'label' => ucfirst($v)],
+            static fn (string $v): array => [
+                'value' => $v,
+                'label' => ucfirst($v),
+                // The VALUE is the stable slug, so the key derives from it
+                // and a fourth verdict arrives carrying its own key.
+                'i18nKey' => 'convening.meeting.verdict.' . $v,
+            ],
             DecisionVerdict::all()
         );
     }
@@ -987,7 +1274,11 @@ final class ConveningFeatures
     private static function capacityOptions(): array
     {
         return array_map(
-            static fn (string $c): array => ['value' => $c, 'label' => ucfirst($c)],
+            static fn (string $c): array => [
+                'value' => $c,
+                'label' => ucfirst($c),
+                'i18nKey' => 'convening.meeting.capacity.' . $c,
+            ],
             AttendanceCapacity::all()
         );
     }

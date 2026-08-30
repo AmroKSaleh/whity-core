@@ -5,6 +5,11 @@ declare(strict_types=1);
 namespace Tests\Integration;
 
 use PHPUnit\Framework\TestCase;
+use Whity\Core\i18n\LanguageRegistry;
+use Whity\Core\i18n\LanguageRepository;
+use Whity\Core\i18n\ServerLabels;
+use Whity\Core\i18n\TranslationRepository;
+use Whity\Core\Tenant\StaticTenantContextAdapter;
 use Psr\Log\AbstractLogger;
 use Stringable;
 use Whity\Api\FrontendFeaturesApiHandler;
@@ -391,7 +396,26 @@ final class FrontendFeaturesBlocksTest extends TestCase
                 static fn (int $userId, string $permission, int $tenantId): bool => in_array($permission, $granted, true)
             );
 
-        return new FrontendFeaturesApiHandler($loader, $roleChecker, $this->router, $logger);
+        return new FrontendFeaturesApiHandler($loader, $roleChecker, $this->router, $this->serverLabels(), $logger);
+    }
+
+    /**
+     * A translator over an empty schema, so declarations serve as written.
+     *
+     * `ServerLabels` is `final` and required here on purpose (#1044): an
+     * optional one silently served English from `public/index.php` for an hour.
+     * Given a registry with no tables its lookup throws and the helper answers
+     * with the declared English, which is the behaviour these assertions expect.
+     */
+    private function serverLabels(): ServerLabels
+    {
+        $pdo = new \PDO('sqlite::memory:');
+
+        return new ServerLabels(new LanguageRegistry(
+            new LanguageRepository($pdo),
+            new TranslationRepository($pdo),
+            new StaticTenantContextAdapter(),
+        ));
     }
 
     private function authedRequest(int $userId): Request

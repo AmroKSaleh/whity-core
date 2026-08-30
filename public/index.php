@@ -1724,10 +1724,37 @@ $router->register('POST', '/api/me/permitted-actions', [$permittedActionsHandler
 // handler's docblock. Their API paths are emitted through
 // Router::versionedPath(), because a block `source` is a URL a browser fetches
 // rather than a route registration.
+$languageRepository = new \Whity\Core\i18n\LanguageRepository($db->getPdo());
+$translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo());
+$languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
+    $languageRepository,
+    $translationRepository,
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+);
+// A missing/unseeded languages table must not take the whole API down: the
+// registry falls back to returning the key itself, so boot failure degrades
+// translation only.
+try {
+    $languageRegistry->boot();
+} catch (\Throwable $e) {
+    error_log("[whity] LanguageRegistry boot failed (continuing untranslated): {$e->getMessage()}");
+}
+
+// #1044: the serving-time translator for strings the SERVER declares — rule-kind
+// labels, schema-driven screen text — which reach the client already worded and so
+// are never touched by a screen's own `t()`.
+//
+// Built HERE, above its first consumer. It was first written further down, beside
+// the language middleware, where it read better and was undefined at this line:
+// the handler took null and served English while every check stayed green.
+$serverLabels = new \Whity\Core\i18n\ServerLabels($languageRegistry);
+
 $frontendFeaturesHandler = new FrontendFeaturesApiHandler(
     $pluginLoader,
     $roleChecker,
     $router,
+    // #1044: core's own declarations answer in the caller's language.
+    $serverLabels,
     $logger,
     array_merge(
         \Whity\Core\Form\FormFrontendFeatures::all(),
@@ -2039,21 +2066,10 @@ $router->register('PUT',   '/api/settings/error-tracking/dsn', [$errorsHandler, 
 // PATCH /api/v1/settings/language — authenticated, updates user's language preference.
 // Language preference is stored per-profile (language_code column) and follows the user across
 // all tenant memberships. NULL = use tenant default, explicit code = user's choice.
-$languageRepository = new \Whity\Core\i18n\LanguageRepository($db->getPdo());
-$translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo());
-$languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
-    $languageRepository,
-    $translationRepository,
-    new \Whity\Core\Tenant\StaticTenantContextAdapter()
-);
-// A missing/unseeded languages table must not take the whole API down: the
-// registry falls back to returning the key itself, so boot failure degrades
-// translation only.
-try {
-    $languageRegistry->boot();
-} catch (\Throwable $e) {
-    error_log("[whity] LanguageRegistry boot failed (continuing untranslated): {$e->getMessage()}");
-}
+// The registry, its repositories and the boot above now live beside the
+// frontend-features handler, which needs the translator built from them and is
+// constructed earlier in this file. Moved rather than duplicated: two registries
+// would mean two caches and two answers about the current language.
 
 // #1044: TELL THE SERVER WHICH LANGUAGE TO ANSWER IN.
 //
@@ -2071,13 +2087,6 @@ $kernel->use(new \Whity\Http\Middleware\ResolveLanguage(
     new \Whity\Core\i18n\RequestLanguageResolver($db->getPdo(), $languageRegistry, $settingsService),
     $languageRegistry,
 ));
-
-// #1044: the serving-time translator for strings the SERVER declares — rule-kind
-// labels and the like, which reach the client already worded and so are never
-// touched by a screen's own `t()`. Built here rather than at each handler because
-// it reads the language the middleware above has just resolved, and there must be
-// exactly one answer per request about which language that is.
-$serverLabels = new \Whity\Core\i18n\ServerLabels($languageRegistry);
 
 // Registered versioned (bare paths) so the router prepends /v1 itself —
 // writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.

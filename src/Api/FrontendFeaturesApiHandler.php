@@ -11,6 +11,8 @@ use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Core\i18n\SchemaLabels;
+use Whity\Core\i18n\ServerLabels;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Sdk\Frontend\Blocks\BlockValidator;
 
@@ -171,9 +173,23 @@ final class FrontendFeaturesApiHandler
     private array $coreFeatures;
 
     /**
+     * Serving-time translator for core's own declarations (#1044).
+     *
+     * REQUIRED, and positioned before the optional parameters so it cannot be
+     * forgotten. It was optional for about an hour, and in that hour
+     * `public/index.php` constructed this handler ABOVE the line that builds
+     * the translator — so it silently received null and every convening screen
+     * served English while the catalogue, the tests and the guards were all
+     * green. An optional dependency whose absence is invisible is not a
+     * convenience, it is a way to ship the bug you were fixing.
+     */
+    private ServerLabels $labels;
+
+    /**
      * @param PluginLoader        $pluginLoader The live loader carrying the validated descriptors.
      * @param RoleChecker         $roleChecker  Authoritative RBAC resolver for per-caller filtering.
      * @param Router              $router       The live router whose routes back each feature's capabilities.
+     * @param ServerLabels        $labels       Serving-time translator for core's own declarations (#1044).
      * @param LoggerInterface|null $logger      Optional PSR-3 sink for fail-closed omit reasons (WC-226).
      * @param list<array<string, mixed>> $coreFeatures Descriptors contributed by CORE subsystems rather
      *        than by a plugin — see the note below. Defaults to none, so every existing construction of
@@ -183,6 +199,7 @@ final class FrontendFeaturesApiHandler
         PluginLoader $pluginLoader,
         RoleChecker $roleChecker,
         Router $router,
+        ServerLabels $labels,
         ?LoggerInterface $logger = null,
         array $coreFeatures = []
     ) {
@@ -191,6 +208,7 @@ final class FrontendFeaturesApiHandler
         $this->router = $router;
         $this->logger = $logger;
         $this->coreFeatures = $coreFeatures;
+        $this->labels = $labels;
     }
 
     /**
@@ -220,7 +238,25 @@ final class FrontendFeaturesApiHandler
      */
     private function allFeatures(): array
     {
-        return array_merge($this->coreFeatures, $this->pluginLoader->getFrontendFeatures());
+        $core = $this->coreFeatures;
+
+        // Localised HERE, before the permission filter and the block
+        // validation, so every gate downstream sees exactly what the caller
+        // will: a screen whose text was translated after it was validated
+        // would be a screen nothing had validated.
+        //
+        // Core only. A plugin's wording belongs to the plugin's own catalogue
+        // domain, which this handler has no business guessing at.
+        $core = array_map(
+            fn (array $feature): array => SchemaLabels::localise(
+                $feature,
+                SchemaLabels::CORE_DOMAIN,
+                $this->labels
+            ),
+            $core
+        );
+
+        return array_merge($core, $this->pluginLoader->getFrontendFeatures());
     }
 
     /**
