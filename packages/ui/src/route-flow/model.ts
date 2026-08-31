@@ -166,6 +166,25 @@ export interface RouteFlowResolution {
    * gets no continuation of its own: the stage settles ONCE per cohort, not once
    * per chain that reached it.
    *
+   * "ONCE PER COHORT" IS NOT "ONCE", AND THE DIFFERENCE IS WHY THE CARD NOTE
+   * STATES THE MECHANISM RATHER THAN AN OUTCOME (#1058). A second arrival is
+   * absorbed only where it reaches people who still hold an OPEN item here, so
+   * it opens a cohort of its own — and settles the stage again, and continues
+   * again — in two ordinary situations the canvas can see neither of:
+   *
+   *  - the arrivals reach DIFFERENT people, which is what an actor-relative rule
+   *    such as `role_below_actor` produces, since each chain resolves it from a
+   *    different actor; and
+   *  - the arrivals reach the SAME people but do not overlap in TIME, because
+   *    the index is partial over `closed_by_event_id IS NULL`. A fan-out where
+   *    one recipient approves straight into the merge and another rejects the
+   *    long way round can close the first cohort before the second gets there.
+   *
+   * Both are facts about a document in flight, not about a design, which is the
+   * whole reason the note names the de-duplication rule and leaves the outcome
+   * to be worked out from it. The host's inspector states the two cases in
+   * prose, where there is room to hedge them accurately.
+   *
    * That is pre-existing fan-out behaviour, not something verdicts introduced.
    * It never mattered before because a LINEAR composer cannot draw two paths
    * meeting. A canvas can, and will, the first time anybody uses one — and the

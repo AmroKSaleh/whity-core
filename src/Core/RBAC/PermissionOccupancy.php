@@ -130,10 +130,14 @@ final class PermissionOccupancy
      * Slugs in the catalogue that no role holds AND nothing gates on.
      *
      * Reported SEPARATELY from {@see unheld()} and never as a failure: a
-     * catalogue entry nothing consults yet is fine, and there is one in the tree
-     * on purpose (`tenants:read`, kept for a re-gate #990 has not made). Folding
-     * the two together would make an operator chase a slug that is doing exactly
-     * what it should.
+     * catalogue entry nothing consults yet is fine. Folding the two together
+     * would make an operator chase a slug that is doing exactly what it should.
+     *
+     * There is no such slug in core's own catalogue as of #990 — `tenants:read`
+     * was the last one and is now both gated and granted — but a plugin may
+     * seed a slug ahead of the route that will consult it, and an operator may
+     * define one for a role they have not built yet. Both are fine, and both
+     * land here rather than in the findings.
      *
      * @param list<string> $gated
      * @return list<string>
