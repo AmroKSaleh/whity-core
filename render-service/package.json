@@ -10,6 +10,7 @@
   "scripts": {
     "build:harness": "node scripts/build-harness.js",
     "build:info": "node scripts/write-build-info.js",
+    "build:browser-info": "node scripts/write-browser-info.js",
     "start": "npm run build:harness && npm run build:info && node src/server.js",
     "test": "jest",
     "flow:fixture": "node scripts/generate-flow-fixture.js",
