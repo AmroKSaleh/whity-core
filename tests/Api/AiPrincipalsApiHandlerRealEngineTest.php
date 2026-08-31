@@ -306,7 +306,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->assertSame($this->listedJtis('/api/admin/mcp/tokens'), $attack);
         $this->assertSame(
             5,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM mcp_tokens')->fetchColumn(),
+            $this->scalar('SELECT COUNT(*) FROM mcp_tokens'),
             'the table is still there (four tenant-1 fixtures plus the tenant-2 decoy)'
         );
     }
@@ -661,4 +661,20 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $expiresAt = date('Y-m-d H:i:s', strtotime('+90 days'));
         $stmt->execute([$jti, $expiresAt]);
     }
+
+    /**
+     * One integer out of a scalar query.
+     *
+     * `PDO::query()` can return false, and PHPStan says so. Routing the new
+     * assertions through here keeps the pinned baseline of grandfathered call
+     * sites from growing — the point of pinning it being that it stops.
+     */
+    private function scalar(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        $this->assertNotFalse($stmt, "query failed: {$sql}");
+
+        return (int) $stmt->fetchColumn();
+    }
+
 }
