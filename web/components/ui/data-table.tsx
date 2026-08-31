@@ -13,7 +13,14 @@
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { DataTable as BaseDataTable } from '@amroksaleh/ui/data-table';
 
-export type { DataTableColumn, DataTableServerPagination, DataTableProps } from '@amroksaleh/ui/data-table';
+export type {
+  DataTableColumn,
+  DataTableServerPagination,
+  DataTableServerSorting,
+  DataTableServerSearch,
+  DataTableProps,
+} from '@amroksaleh/ui/data-table';
+export { DATA_TABLE_SEARCH_DEBOUNCE_MS } from '@amroksaleh/ui/data-table';
 
 export function DataTable<TData>(props: React.ComponentProps<typeof BaseDataTable<TData>>) {
   const t = useTranslation('common');
