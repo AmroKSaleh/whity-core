@@ -723,7 +723,12 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not manageable by the tenant'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/permissions', [
+            // #990: the same slug `GET /api/roles/{id}/permissions` uses — what
+            // permissions exist and which a role holds are two halves of one
+            // question, and a caller who may see the second and not the first
+            // cannot read a role editor. Mirrors public/index.php; the spec and
+            // the live router must agree on the gate.
+            self::permissionRoute('GET', '/api/permissions', CorePermissions::PERMISSIONS_READ, [
                 'summary' => 'List the permission catalogue',
                 'tags' => ['roles'],
                 'parameters' => [
@@ -738,19 +743,27 @@ final class CoreApiSchemas
     }
 
     /**
+     * Tenant management, gated on the seeded `tenants:*` permissions rather than
+     * the bare `admin` role (#990) so a deployment that renamed or restructured
+     * its administrative role keeps its own tenants screen. Mirrors the wiring in
+     * public/index.php — the spec and the live router must agree on the gate.
+     *
+     * `tenants:read` was held by NOBODY until migration 138; that grant is what
+     * keeps `GET /api/tenants` reachable after the re-gate.
+     *
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
     private static function tenantRoutes(): array
     {
         return [
-            self::adminRoute('GET', '/api/tenants', [
+            self::permissionRoute('GET', '/api/tenants', CorePermissions::TENANTS_READ, [
                 'summary' => 'List tenants (system tenant sees all; others see their own)',
                 'tags' => ['tenants'],
                 'responses' => [
                     200 => self::jsonResponse('Visible tenants with user counts', 'TenantListResponse'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('POST', '/api/tenants', [
+            self::permissionRoute('POST', '/api/tenants', CorePermissions::TENANTS_WRITE, [
                 'summary' => 'Create a tenant (system tenant only)',
                 'tags' => ['tenants'],
                 'request' => 'TenantCreateRequest',
@@ -761,7 +774,7 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Tenant name or slug already exists'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('PATCH', '/api/tenants/{id:\d+}', [
+            self::permissionRoute('PATCH', '/api/tenants/{id:\d+}', CorePermissions::TENANTS_WRITE, [
                 'summary' => 'Update a tenant',
                 'tags' => ['tenants'],
                 'request' => 'TenantUpdateRequest',
@@ -772,7 +785,7 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Tenant name or slug already exists'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('DELETE', '/api/tenants/{id:\d+}', [
+            self::permissionRoute('DELETE', '/api/tenants/{id:\d+}', CorePermissions::TENANTS_DELETE, [
                 'summary' => 'Delete a tenant (the system tenant is protected)',
                 'tags' => ['tenants'],
                 'responses' => [

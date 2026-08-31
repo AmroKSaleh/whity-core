@@ -451,13 +451,20 @@ abstract class BaseCommand implements CliCommand, CommandHelp
         // documented commands that were never registered in this router, so
         // they answered 405 — a second, independent defect from the 401, and
         // one the 401 hid completely: nothing reached routing to find out.
-        $router->register('GET',    '/api/tenants',      [$tenantsHandler, 'list'],   'admin');
-        $router->register('POST',   '/api/tenants',      [$tenantsHandler, 'create'], 'admin');
-        $router->register('PATCH',  '/api/tenants/{id}', [$tenantsHandler, 'update'], 'admin');
-        $router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], 'admin');
+        // #990: gated on the `tenants:*` slugs, mirroring public/index.php. The
+        // mirroring is the point of this block — a route whose gate depends on
+        // which entry point reached it is two rules wearing one name, and the
+        // CLI is the entry point where nobody would notice the difference until
+        // a deployment with a renamed administrative role ran `tenant list`.
+        // The seeded CLI service principal holds the global `admin` role
+        // (migration 107), which migration 138 gives `tenants:read`.
+        $router->register('GET',    '/api/tenants',      [$tenantsHandler, 'list'],   null, null, \Whity\Core\RBAC\CorePermissions::TENANTS_READ);
+        $router->register('POST',   '/api/tenants',      [$tenantsHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::TENANTS_WRITE);
+        $router->register('PATCH',  '/api/tenants/{id}', [$tenantsHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::TENANTS_WRITE);
+        $router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::TENANTS_DELETE);
 
         $permissionsHandler = new PermissionsApiHandler($db->getPdo());
-        $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
+        $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::PERMISSIONS_READ);
 
         // The audit writer reaches this handler for the same reason it is
         // subscribed above: `plugin enable` from a shell installs code into the
