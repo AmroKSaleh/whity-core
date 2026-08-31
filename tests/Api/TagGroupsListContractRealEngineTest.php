@@ -173,7 +173,7 @@ final class TagGroupsListContractRealEngineTest extends TestCase
         $attack = '/api/tag-groups?sort=' . rawurlencode('group_key; DROP TABLE tag_groups--');
 
         self::assertSame($this->keys('/api/tag-groups'), $this->keys($attack));
-        self::assertSame(13, (int) $this->pdo->query('SELECT COUNT(*) FROM tag_groups')->fetchColumn());
+        self::assertSame(13, $this->scalar('SELECT COUNT(*) FROM tag_groups'));
     }
 
     // ── paging over ties ─────────────────────────────────────────────────────
@@ -334,9 +334,9 @@ final class TagGroupsListContractRealEngineTest extends TestCase
      */
     private function stampTimestamps(): void
     {
-        $ids = $this->pdo->query(
+        $ids = $this->column(
             'SELECT id FROM tag_groups WHERE tenant_id = ' . self::TENANT_A . ' ORDER BY id ASC'
-        )->fetchAll(PDO::FETCH_COLUMN);
+        );
 
         $stmt = $this->pdo->prepare(
             'UPDATE tag_groups SET created_at = :created, updated_at = :updated WHERE id = :id'
@@ -350,5 +350,36 @@ final class TagGroupsListContractRealEngineTest extends TestCase
                 ':id' => (int) $id,
             ]);
         }
+    }
+
+    /**
+     * One integer out of a scalar query.
+     *
+     * `PDO::query()` can return false, and PHPStan says so. Asserting it here
+     * keeps the fixture queries readable while giving a query that failed a
+     * message of its own instead of a silent zero.
+     */
+    private function scalar(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertNotFalse($stmt, "query failed: {$sql}");
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * The first column of every row a query returns. See {@see scalar()}.
+     *
+     * @return list<mixed>
+     */
+    private function column(string $sql): array
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertNotFalse($stmt, "query failed: {$sql}");
+
+        /** @var list<mixed> $values */
+        $values = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        return $values;
     }
 }

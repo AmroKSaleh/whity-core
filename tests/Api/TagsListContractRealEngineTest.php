@@ -201,7 +201,7 @@ final class TagsListContractRealEngineTest extends TestCase
         $attack = '/api/tags?sort=' . rawurlencode('name; DROP TABLE tags--');
 
         self::assertSame($this->names('/api/tags'), $this->names($attack));
-        self::assertSame(13, (int) $this->pdo->query('SELECT COUNT(*) FROM tags')->fetchColumn());
+        self::assertSame(13, $this->scalar('SELECT COUNT(*) FROM tags'));
     }
 
     // ── paging over ties ─────────────────────────────────────────────────────
@@ -383,7 +383,7 @@ final class TagsListContractRealEngineTest extends TestCase
      */
     private function stampCreatedAtInReverseIdOrder(): void
     {
-        $ids = $this->pdo->query('SELECT id FROM tags ORDER BY id ASC')->fetchAll(PDO::FETCH_COLUMN);
+        $ids = $this->column('SELECT id FROM tags ORDER BY id ASC');
         $stmt = $this->pdo->prepare('UPDATE tags SET created_at = :created WHERE id = :id');
 
         $offset = count($ids);
@@ -393,5 +393,36 @@ final class TagsListContractRealEngineTest extends TestCase
                 ':id' => (int) $id,
             ]);
         }
+    }
+
+    /**
+     * One integer out of a scalar query.
+     *
+     * `PDO::query()` can return false, and PHPStan says so. Asserting it here
+     * keeps the fixture queries readable while giving a query that failed a
+     * message of its own instead of a silent zero.
+     */
+    private function scalar(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertNotFalse($stmt, "query failed: {$sql}");
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * The first column of every row a query returns. See {@see scalar()}.
+     *
+     * @return list<mixed>
+     */
+    private function column(string $sql): array
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertNotFalse($stmt, "query failed: {$sql}");
+
+        /** @var list<mixed> $values */
+        $values = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        return $values;
     }
 }

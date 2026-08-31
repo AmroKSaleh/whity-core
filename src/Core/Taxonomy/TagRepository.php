@@ -104,8 +104,11 @@ final class TagRepository
         if ($groupId !== null) {
             $stmt->bindValue(':group_id', $groupId, PDO::PARAM_INT);
         }
+        // $paginated is only ever true when $query is non-null, so this branch
+        // needs no nullsafe call; the else branch is the one $query may reach as
+        // null, and that call stays nullsafe.
         if ($paginated) {
-            $query?->bindAll($stmt);
+            $query->bindAll($stmt);
         } else {
             $query?->bindSearch($stmt);
         }

@@ -227,8 +227,11 @@ class PersonRepository
 
         $stmt = $this->db->prepare($sql);
         $this->bindWhere($stmt, $params);
+        // $paginated is only ever true when $query is non-null, so this branch
+        // needs no nullsafe call; the else branch is the one $query may reach as
+        // null, and that call stays nullsafe.
         if ($paginated) {
-            $query?->bindAll($stmt);
+            $query->bindAll($stmt);
         } else {
             $query?->bindSearch($stmt);
         }
