@@ -110,12 +110,12 @@ final class ListContractEndpointsRealEngineTest extends TestCase
         $this->pdo = SchemaFromMigrations::make();
         $this->pdo->exec("INSERT INTO tenants (id, name) VALUES (1, 'Tenant One') ON CONFLICT DO NOTHING");
         $this->pdo->exec("INSERT INTO tenants (id, name) VALUES (2, 'Tenant Two') ON CONFLICT DO NOTHING");
-        $this->baseRoles = (int) $this->pdo
-            ->query('SELECT COUNT(*) FROM roles WHERE tenant_id = 1 OR tenant_id IS NULL')
-            ->fetchColumn();
-        $this->baseSystemUsers = (int) $this->pdo
-            ->query("SELECT COUNT(*) FROM memberships WHERE is_primary AND status = 'active'")
-            ->fetchColumn();
+        $this->baseRoles = $this->scalar(
+            'SELECT COUNT(*) FROM roles WHERE tenant_id = 1 OR tenant_id IS NULL'
+        );
+        $this->baseSystemUsers = $this->scalar(
+            "SELECT COUNT(*) FROM memberships WHERE is_primary AND status = 'active'"
+        );
         MockRequestFactory::setTestTenant(self::TENANT);
     }
 
@@ -945,12 +945,6 @@ final class ListContractEndpointsRealEngineTest extends TestCase
     }
 
     /** @return list<mixed> */
-    private function roleField(string $field, string $query): array
-    {
-        return array_column($this->json($this->roles($query))['data'], $field);
-    }
-
-    /** @return list<mixed> */
     private function holderField(int $roleId, string $field, string $query): array
     {
         return array_column($this->json($this->assignments($roleId, $query))['data'], $field);
@@ -1094,5 +1088,20 @@ final class ListContractEndpointsRealEngineTest extends TestCase
         $decoded = json_decode((string) $response->getBody(), true);
 
         return $decoded;
+    }
+
+    /**
+     * One integer out of a scalar query.
+     *
+     * `PDO::query()` can return false, and PHPStan says so. Asserting it here
+     * keeps the measured baselines above readable while giving a failed query a
+     * message of its own instead of a silent zero.
+     */
+    private function scalar(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertNotFalse($stmt, "query failed: {$sql}");
+
+        return (int) $stmt->fetchColumn();
     }
 }
