@@ -234,14 +234,26 @@ final class BuildApiHandler
     }
 
     /**
-     * Names recorded in `core_schema_migrations`, or null when the database
-     * could not be asked.
+     * CORE migration names recorded in `core_schema_migrations`, or null when
+     * the database could not be asked.
      *
      * A MISSING TABLE IS NOT AN ERROR, it is an answer: an instance whose
      * database has never been migrated has applied nothing, and reporting
      * `applied: 0, pending: <all of them>` describes it exactly. That is the
      * same reading {@see MigrationsApiHandler::getExecutedMigrations()} takes of
      * the same condition.
+     *
+     * PLUGIN ROWS SHARE THIS TABLE and are excluded here. {@see
+     * \Whity\Core\PluginMigrationRunner} records its own under
+     * `plugin:<Plugin>:<Class>`, which is not a filename in `database/
+     * migrations` and therefore has no pending side to compare against — so
+     * counting them would inflate `applied_migration_count` against a
+     * `pending_migration_count` computed from core files only, and (because
+     * `plugin:` sorts after every `NNN_`) would make
+     * `latest_applied_migration` name a plugin class instead of the core
+     * migration the schema is at. Reaching the plugin side properly means
+     * loading every plugin, which is exactly the dependency this endpoint must
+     * not take on to answer a question about the platform.
      *
      * @return list<string>|null
      */
@@ -257,7 +269,7 @@ final class BuildApiHandler
             $rows = $statement->fetchAll(PDO::FETCH_COLUMN);
 
             foreach ($rows as $row) {
-                if (is_string($row)) {
+                if (is_string($row) && !str_starts_with($row, 'plugin:')) {
                     $names[] = $row;
                 }
             }

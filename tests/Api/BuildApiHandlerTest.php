@@ -234,6 +234,35 @@ final class BuildApiHandlerTest extends TestCase
     }
 
     /**
+     * PLUGIN MIGRATIONS SHARE THE CORE LEDGER TABLE, and must not be counted.
+     *
+     * Found by booting the release image rather than by reading the code:
+     * `PluginMigrationRunner` records rows as `plugin:<Plugin>:<Class>` in
+     * `core_schema_migrations`, and because `plugin:` sorts after every `NNN_`
+     * the endpoint reported `latest_applied_migration:
+     * "plugin:HelloWorld:GrantGreetingsPermissionsToAdmin"` on a fully
+     * migrated instance — naming a plugin class instead of the core migration
+     * the schema is at, with a count inflated against a `pending` computed
+     * from core files only.
+     */
+    public function testPluginMigrationRowsAreNotCountedAsCoreMigrations(): void
+    {
+        $body = $this->decode(
+            $this->handler(applied: [
+                '001_create_users',
+                '002_create_tenants',
+                '003_add_documents',
+                'plugin:HelloWorld:CreateHelloGreetingsTable',
+                'plugin:HelloWorld:GrantGreetingsPermissionsToAdmin',
+            ])->handle(new Request('GET', '/api/build'))->getBody()
+        );
+
+        self::assertSame(3, $body['applied_migration_count']);
+        self::assertSame('003_add_documents', $body['latest_applied_migration']);
+        self::assertSame(0, $body['pending_migration_count']);
+    }
+
+    /**
      * A database that has never been migrated has no `core_schema_migrations`
      * table. That is an answer — applied 0, everything pending — not an error.
      */
