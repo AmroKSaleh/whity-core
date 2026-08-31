@@ -46,12 +46,18 @@ import type {
  *
  *  1. The grid has no headers. A sort that only exists in one of two layouts is
  *     a feature that disappears when you switch view.
- *  2. The shared `DataTable`'s sortable header is a `<th onClick>` with no
- *     `aria-sort` and no focusable control inside it — mouse-only. Making it the
- *     primary sort affordance would ship a document browser whose sorting a
- *     keyboard user cannot reach. Fixing that properly changes the header markup
- *     of the fourteen tables that use the component (and the e2e selectors
- *     aimed at them), which is its own change, not a rider on this one.
+ *  2. NO LONGER TRUE — FIXED IN #1129, and recorded here so the next reader
+ *     does not re-derive a solved problem. It used to read: the shared
+ *     `DataTable`'s sortable header is a `<th onClick>` with no `aria-sort` and
+ *     no focusable control inside it — mouse-only. It now renders a `<button>`
+ *     inside the `th` and carries `aria-sort` in both client- and server-sorted
+ *     modes, so header sorting is reachable by keyboard and announced.
+ *
+ * Reason 1 still stands on its own, so this toolbar is UNCHANGED: the grid
+ * layout has no headers, and a sort that vanishes when you switch view is worse
+ * than one that lives in the chrome of both. Wiring the table headers up would
+ * now be a real option rather than an accessibility regression — but it is a
+ * product decision about two layouts, not the a11y fix, and it is not made here.
  *
  * The column headers are therefore left NON-sortable rather than wired to
  * TanStack's client-side sorter, which would have been the easy mistake: the
