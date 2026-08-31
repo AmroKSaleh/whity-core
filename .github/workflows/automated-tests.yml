@@ -1188,6 +1188,40 @@ jobs:
               print(f"::warning::capability probe could not be measured: {probe}")
           PY
 
+      # The two paged-media facts the boot probe deliberately leaves alone
+      # (#1134): that an `@page` margin box draws at all, and that
+      # `counter(page)` / `counter(pages)` resolve inside one. Both manifest
+      # ONLY as printed glyphs, so reading them back honestly needs a PDF text
+      # extractor — and `pdfjs-dist` is a devDependency, absent from the runtime
+      # image on purpose. Shipping a parser into production to serve a
+      # diagnostic is a poor trade, and asking the CSSOM instead is the same
+      # class of answer as `CSS.supports('content', 'target-counter(…)')`, which
+      # says `true` for a declaration Chromium drops at computed-value time.
+      #
+      # The stages hold opposite halves: the image has the browser and no
+      # parser, this runner has the parser (from `npm ci` above) and no browser.
+      # So the container renders and the runner grades, and neither half can
+      # flatter the other.
+      #
+      # What this protects is the ARGUMENT rather than the product: the flowing
+      # mode draws its furniture in-document and does not use these features, so
+      # nothing breaks if they vanish. But the wiki records them as available
+      # and a future design may lean on them — and this repository has already
+      # had three architectural decisions defended on measurements that no
+      # longer reproduced.
+      - name: Paged-media facts that only exist as printed text
+        run: |
+          # COPIED IN rather than baked into the image. The runtime stage ships
+          # exactly one script (`write-browser-info.js`, which it must run at
+          # build time) and this is a diagnostic — putting it in the image would
+          # be the same trade refused above for the parser. It lands in /app/
+          # scripts because its `require('../src/renderer')` is relative to
+          # itself, and it needs the service's own launch configuration.
+          docker cp render-service/scripts/render-paged-media-probe.js             whity_render_ci:/app/scripts/render-paged-media-probe.js
+          docker exec whity_render_ci node scripts/render-paged-media-probe.js             --out /tmp/paged-media.pdf
+          docker cp whity_render_ci:/tmp/paged-media.pdf /tmp/paged-media.pdf
+          node render-service/scripts/verify-paged-media-text.js --pdf /tmp/paged-media.pdf
+
       # A real render round-trip: text + a math element (KaTeX) + a barcode +
       # Arabic text (the hard cross-cutting RTL requirement). Structural/smoke
       # checks only (per the task brief, exact golden-image pixel diffing is
