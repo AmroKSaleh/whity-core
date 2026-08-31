@@ -302,6 +302,47 @@ const PAGED_MEDIA_HTML = `<!doctype html>
 <div class="probe-box">1</div><div class="probe-box wide">2</div><div class="probe-box">3</div>
 </body></html>`;
 
+/**
+ * The two paged-media facts that manifest ONLY as printed text: a margin box,
+ * and `counter(page)` / `counter(pages)` inside one.
+ *
+ * Deliberately NOT probed at boot. Reading them back honestly needs a PDF text
+ * extractor, and `pdfjs-dist` is a devDependency absent from the runtime image
+ * — shipping a parser into production to serve a diagnostic is a poor trade.
+ * The CSSOM shortcut is not an option either: it is the same class of lie as
+ * `CSS.supports('content', 'target-counter(…)')`, which answers `true` for a
+ * declaration Chromium drops at computed-value time.
+ *
+ * So this fixture is rendered by the IMAGE's browser (which is the only thing
+ * that can) and verified on the CI runner (which is the only thing with a
+ * parser). See `scripts/render-paged-media-probe.js` and
+ * `scripts/verify-paged-media-text.js`.
+ *
+ * The margin is non-zero on purpose. `margin: 0` is right for the fixed-canvas
+ * mode and leaves nowhere to draw a margin box — which is the whole reason
+ * #1072 gives for why running headers and footers were unavailable.
+ *
+ * Three blocks, so the count is a number a mistake could not coincidentally
+ * produce: a footer reading "1 of 1" on every page is a failure this catches,
+ * and would look plausible with a single-page fixture.
+ */
+const PAGED_MEDIA_TEXT_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  html, body { margin: 0; padding: 0 }
+  @page {
+    size: 210mm 297mm;
+    margin: 20mm;
+    @bottom-center { content: counter(page) " of " counter(pages); }
+  }
+  .probe-block { height: 200mm; break-after: page; page-break-after: always }
+  .probe-block:last-child { break-after: auto; page-break-after: auto }
+</style></head><body>
+<div class="probe-block">A</div><div class="probe-block">B</div><div class="probe-block">C</div>
+</body></html>`;
+
+/** How many pages {@link PAGED_MEDIA_TEXT_HTML} must produce. */
+const PAGED_MEDIA_TEXT_PAGES = 3;
+
 /* ------------------------------------------------------- in-page measuring -- */
 
 /**
@@ -769,6 +810,8 @@ async function runCapabilityProbe(deps = {}) {
 
 module.exports = {
   runCapabilityProbe,
+  PAGED_MEDIA_TEXT_HTML,
+  PAGED_MEDIA_TEXT_PAGES,
   parsePdfPageBoxes,
   buildResults,
   summarise,
