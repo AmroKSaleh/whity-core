@@ -72,6 +72,7 @@ import { Switch } from '@amroksaleh/ui/switch';
 import { RouteFlowEditor, appendStep } from '@amroksaleh/ui/route-flow/editor';
 import {
   effectiveQuorum,
+  resolveTransitions,
   type RouteFlowAudience,
   type RouteFlowGraph,
   type RouteFlowOrientation,
@@ -578,11 +579,45 @@ function StageInspector({
   const isRoleKind = ROLE_KINDS.has(step.ruleKind);
   const isGroupKind = step.ruleKind === GROUP_KIND;
 
+  // THE MERGE, SAID IN FULL — the half of #1058 the card cannot hold.
+  //
+  // The canvas note on a converging stage is "Paths merge — 1 item per person":
+  // true in every case, and it has to be, because notes are joined into one span
+  // clamped to `ROUTE_FLOW_MAX_NOTES` lines and a longer one pushes a later note
+  // off the card (#1042). What it cannot do in thirty-one characters is tell an
+  // author WHICH case they are in — which is the actionable half, and the half
+  // #1058 asks for.
+  //
+  // This panel has room, and it is open at exactly the moment the question is
+  // live: the author has selected this stage and is choosing its rule. So the
+  // marker stays on the card and the CONSEQUENCE is stated here, next to the
+  // picker that decides it.
+  //
+  // Derived from the same `resolveTransitions` the canvas draws, over the LOCAL
+  // graph, so an edge drawn a second ago is already counted. A server-side
+  // annotation on the loaded steps would have gone stale the moment the author
+  // drew anything, which is precisely when they are reading this.
+  const mergesHere = useMemo(
+    () => resolveTransitions(graph).merges.includes(step.position),
+    [graph, step.position]
+  );
+
   return (
     <div className="space-y-3">
       <p className="text-xs uppercase tracking-wide text-muted-foreground">
         {t('routeTemplates.inspector.stage', 'Stage {n}', { n: String(step.position) })}
       </p>
+
+      {mergesHere && (
+        <Alert>
+          <AlertDescription className="text-xs">
+            {t(
+              'routeTemplates.inspector.merges',
+              'More than one path reaches this stage. The engine keeps one open item per person, so a second arrival is absorbed only where it reaches people who still hold an open item here; anyone else gets their own item, and the stage settles and continues a second time. A rule resolved against the acting person reaches different people on each path, which is the usual reason that happens.'
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <label className="block space-y-1">
         <span className="text-sm font-medium">{t('routeTemplates.inspector.label', 'Label')}</span>
