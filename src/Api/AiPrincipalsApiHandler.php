@@ -10,7 +10,8 @@ use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
-use Whity\Http\PaginationParams;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 
 /**
  * Admin handler for AI-principal (MCP token) management (WC-0208ce4d).
@@ -48,10 +49,48 @@ final class AiPrincipalsApiHandler
     ) {}
 
     /**
+     * The sort keys and search columns this endpoint offers.
+     *
+     * The keys are the admin table's own `accessorKey`s — `name`,
+     * `principalKind`, `userId`, `expiresAt`, `createdAt` — so the screen sends
+     * the column a reader clicked and nothing has to be translated. `userId`
+     * maps to `profile_id`, which is what the column has held since migration
+     * 040 and what {@see toPublicToken()} already emits under both names.
+     *
+     * Search covers `name`, `principal_kind` and `jti`. All three are ALREADY in
+     * every row this endpoint returns, so searching them discloses nothing a
+     * caller could not read by paging — and `jti` is the one identifier an
+     * admin holds when a log line or an incident points at a single credential.
+     * `scope` is deliberately not searchable: it is a JSON blob whose text form
+     * would match on punctuation as readily as on a scope name.
+     *
+     * The default is `createdAt` descending — the `ORDER BY t.created_at DESC`
+     * this endpoint always used — with `t.id` as the tiebreaker, so credentials
+     * issued in the same second can no longer swap places between pages.
+     */
+    private function listSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'name'          => 't.name',
+                'principalKind' => 't.principal_kind',
+                'userId'        => 't.profile_id',
+                'expiresAt'     => 't.expires_at',
+                'createdAt'     => 't.created_at',
+            ],
+            tiebreaker: 't.id',
+            searchable: ['t.name', 't.principal_kind', 't.jti'],
+            defaultSort: 'createdAt',
+            defaultDirection: 'desc',
+        );
+    }
+
+    /**
      * GET /api/v1/admin/mcp/tokens
      *
      * Lists all active (non-expired, non-revoked) MCP tokens for the caller's
-     * tenant. The SYSTEM tenant sees every tenant's tokens.
+     * tenant, paginated, sortable and searchable. The SYSTEM tenant sees every
+     * tenant's tokens.
      *
      * @param array<string, mixed> $params Route path parameters (unused).
      */
@@ -71,6 +110,10 @@ final class AiPrincipalsApiHandler
                 return Response::error('Insufficient permissions', 403, ['required' => CorePermissions::MCP_TOKENS_MANAGE]);
             }
 
+            // Page, sort and search, parsed before the COUNT because the COUNT
+            // has to carry the same search predicate the SELECT does.
+            $q = ListQuery::fromPath($request->getPath(), $this->listSpec());
+
             // Build the base WHERE clause — system tenant sees all rows.
             $conditions = [];
             /** @var array<string, int|string> $bindParams */
@@ -85,31 +128,41 @@ final class AiPrincipalsApiHandler
             $conditions[] = 't.expires_at > NOW()';
             $conditions[] = 'NOT EXISTS (SELECT 1 FROM revoked_tokens r WHERE r.jti = t.jti)';
 
+            // The caller's search is one more AND on top of the conditions
+            // above, never a replacement for them: it can only narrow the set
+            // this tenant already reads. A row belonging to another tenant, an
+            // expired credential, or a revoked one stays out of reach of any
+            // search term.
+            $searchPredicate = $q->searchPredicate($this->db);
+            if ($searchPredicate !== '') {
+                $conditions[] = $searchPredicate;
+            }
+
             // @tenant-guard-ignore: tenant_id predicate appended above for non-system tenants; system tenant (id 0) intentionally reads all rows
             $where = 'WHERE ' . implode(' AND ', $conditions);
 
-            // Total for pagination.
+            // Total for pagination — same $where, so a filtered list reports a
+            // filtered total instead of paging controls for empty pages.
             $countSql  = 'SELECT COUNT(*) AS cnt FROM mcp_tokens t ' . $where;
             $countStmt = $this->db->prepare($countSql);
-            $countStmt->execute($bindParams);
+            foreach ($bindParams as $key => $value) {
+                $countStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+            }
+            $q->bindSearch($countStmt);
+            $countStmt->execute();
             $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
             $total    = $countRow !== false ? (int) ($countRow['cnt'] ?? 0) : 0;
-
-            // Parse pagination from the query string.
-            $query = $this->parseQueryString($request);
-            $p     = PaginationParams::fromQuery($query);
 
             $listSql  = 'SELECT t.id, t.jti, t.profile_id, t.tenant_id, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
                  FROM   mcp_tokens t
                  ' . $where . '
-                 ORDER BY t.created_at DESC
+                 ' . $q->orderBy() . '
                  LIMIT :limit OFFSET :offset';
             $listStmt = $this->db->prepare($listSql);
             foreach ($bindParams as $key => $value) {
                 $listStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
             }
-            $listStmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-            $listStmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+            $q->bindAll($listStmt);
             $listStmt->execute();
 
             /** @var array<int, array<string, mixed>> $rows */
@@ -118,7 +171,7 @@ final class AiPrincipalsApiHandler
 
             return Response::json([
                 'data'       => $data,
-                'pagination' => $p->meta($total),
+                'pagination' => $q->meta($total),
             ], 200);
         } catch (\Exception $e) {
             error_log('[AiPrincipalsApiHandler] list failed: ' . $e->getMessage());
@@ -214,30 +267,5 @@ final class AiPrincipalsApiHandler
             'expiresAt'     => isset($row['expires_at']) ? (string) $row['expires_at'] : null,
             'createdAt'     => isset($row['created_at']) ? (string) $row['created_at'] : null,
         ];
-    }
-
-    /**
-     * Parse query string parameters from both $_GET and the request path.
-     *
-     * @return array<string, string>
-     */
-    private function parseQueryString(Request $request): array
-    {
-        $query = [];
-        foreach ($_GET as $k => $v) {
-            if (is_string($k) && is_string($v)) {
-                $query[$k] = $v;
-            }
-        }
-        $qs = parse_url($request->getPath(), PHP_URL_QUERY);
-        if (is_string($qs) && $qs !== '') {
-            parse_str($qs, $parsed);
-            foreach ($parsed as $k => $v) {
-                if (is_string($k) && is_string($v)) {
-                    $query[$k] = $v;
-                }
-            }
-        }
-        return $query;
     }
 }
