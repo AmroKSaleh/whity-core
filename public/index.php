@@ -770,8 +770,14 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'building',
         'group' => 'access',
         'order' => 5,
-        // WC-175 (#191): mirrors GET /api/tenants, gated on the 'admin' ROLE.
-        'requiredRole' => 'admin',
+        // #990: mirrors GET /api/tenants, now gated on tenants:read (migration
+        // 138 grants it to every role that may write or delete a tenant).
+        // requiredRole is cleared so the item follows the route it mirrors rather
+        // than drifting from it — a nav entry that gates on a role name while the
+        // route behind it gates on a slug is how a deployment with a renamed
+        // administrative role ends up holding the permission and never seeing the
+        // link, which is the "menu with a hole in it" failure #1047 describes.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TENANTS_READ,
     ];
     $items[] = [
         'id' => 'user-groups',
@@ -1656,13 +1662,35 @@ $router->register('DELETE', '/api/roles/{id:\d+}/permissions', [$rolesHandler, '
 $router->register('GET', '/api/roles/{id:\d+}/assignments', [$rolesHandler, 'assignments'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_READ);
 
 $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
-$router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
-$router->register('POST', '/api/tenants', [$tenantsHandler, 'create'], 'admin');
-$router->register('PATCH', '/api/tenants/{id:\d+}', [$tenantsHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/tenants/{id:\d+}', [$tenantsHandler, 'delete'], 'admin');
+// Tenants are gated on PERMISSION SLUGS, not on the `admin` role name (#990),
+// for the reason the roles block above states: a role is a row a deployment may
+// rename or replace, a slug is a contract. `tenants:read/write/delete` have been
+// in the catalogue since migration 002 and describe exactly these four routes,
+// so this is the mechanical half of #990 — no vocabulary is invented here.
+//
+// `tenants:read` was in the catalogue and held by NOBODY until migration 138,
+// which grants it to every role already holding `tenants:write` or
+// `tenants:delete`. Without that migration this block locks the seeded admin out
+// of the tenant list — the second instance of the `roles:read` orphan #977 hit,
+// one group over, and the one way this change goes badly.
+$router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], null, null, CorePermissions::TENANTS_READ);
+$router->register('POST', '/api/tenants', [$tenantsHandler, 'create'], null, null, CorePermissions::TENANTS_WRITE);
+$router->register('PATCH', '/api/tenants/{id:\d+}', [$tenantsHandler, 'update'], null, null, CorePermissions::TENANTS_WRITE);
+// Deletion keeps its own slug rather than folding into `tenants:write`: the
+// vocabulary already exists, `admin` already holds it, and `roles:*`/`users:*`
+// draw the same line.
+$router->register('DELETE', '/api/tenants/{id:\d+}', [$tenantsHandler, 'delete'], null, null, CorePermissions::TENANTS_DELETE);
 
 $permissionsHandler = new PermissionsApiHandler($db->getPdo());
-$router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
+// The permission CATALOGUE, gated on `permissions:read` (#990) — the same slug
+// `GET /api/roles/{id}/permissions` already uses, because they answer two halves
+// of one question: what permissions exist, and which of them a role holds. A
+// caller who may see the second and not the first cannot read a role editor.
+//
+// Held today by every role holding `roles:write` (migration 110), which includes
+// the seeded admin, so no grant migration is needed for this one — verified
+// against a freshly migrated database rather than assumed.
+$router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], null, null, CorePermissions::PERMISSIONS_READ);
 
 // Navigation menu items (WC-175, #191). Registered with NO required
 // role/permission — any authenticated caller may ask which menu items they may

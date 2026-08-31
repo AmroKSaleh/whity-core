@@ -128,11 +128,14 @@ final class PermissionsCommand implements CliCommand, CommandHelp
      * Catalogue entries nobody holds that nothing gates on — reported, never
      * failed on.
      *
-     * A slug nothing consults yet is FINE, and there is one in the tree on
-     * purpose: `tenants:read` exists, is held by nobody, and is what
-     * `GET /api/tenants` is to be re-gated onto (#990). Failing on it would be
-     * wrong, and folding it in with the real findings would send an operator
-     * chasing a slug that is doing exactly what it should.
+     * A slug nothing consults yet is FINE. Failing on one would be wrong, and
+     * folding it in with the real findings would send an operator chasing a slug
+     * that is doing exactly what it should.
+     *
+     * Core's own catalogue has none left as of #990 — `tenants:read` was the
+     * last, and `GET /api/tenants` now gates on it with migration 138 behind it
+     * — but a plugin may seed a slug ahead of the route that will consult it,
+     * and an operator may define one for a role they have not built yet.
      *
      * @param list<string> $gated
      */

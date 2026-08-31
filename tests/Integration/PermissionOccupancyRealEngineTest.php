@@ -164,24 +164,40 @@ final class PermissionOccupancyRealEngineTest extends TestCase
 
     /**
      * A catalogue entry nothing gates on is reported SEPARATELY and is not a
-     * finding.
+     * finding. Folding it in with the real findings would send an operator
+     * chasing a slug that is doing exactly what it should.
      *
-     * `tenants:read` is the live example: it exists, is held by nobody, and is
-     * the slug `GET /api/tenants` is to be re-gated onto (#990). Folding it in
-     * with the real findings would send an operator chasing a slug that is doing
-     * exactly what it should.
+     * BOTH PRECONDITIONS ARE ESTABLISHED HERE, and that is the point. Until #990
+     * this test named `tenants:read` as a live example: a slug that really was
+     * unheld and really was ungated on a freshly migrated database. #990 gated it
+     * on `GET /api/tenants` and granted it (migration 138), and the assertion
+     * went red — for the best possible reason, but it went red, because it had
+     * been leaning on a defect staying in the tree. A test about the SEPARATION
+     * of two categories should construct one member of each rather than borrow
+     * whichever slug happens to be neglected this month.
      */
     public function testAnUngatedOrphanIsSeparatedFromTheFindings(): void
     {
+        // Unheld and NOT gated — the harmless kind.
+        $this->revokeEverywhere(CorePermissions::TENANTS_READ);
+        // Unheld and gated — the lockout kind. Revoked too, so the assertion
+        // below turns on the gating and not on who happens to hold it.
+        $this->revokeEverywhere(CorePermissions::USERS_READ);
+
         $gated = [CorePermissions::USERS_READ];
 
         $ungated = $this->occupancy->unheldAndUngated($gated);
 
-        self::assertContains('tenants:read', $ungated);
+        self::assertContains(CorePermissions::TENANTS_READ, $ungated);
         self::assertNotContains(
             CorePermissions::USERS_READ,
             $ungated,
             'a slug that IS gated belongs in the findings, never in the harmless list'
+        );
+        self::assertContains(
+            CorePermissions::USERS_READ,
+            $this->occupancy->unheld($gated),
+            'and it belongs in the findings, since a gate nobody can pass is a lockout'
         );
     }
 }
