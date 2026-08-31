@@ -498,6 +498,9 @@ final class CoreApiSchemas
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). A client that needs every user must follow the `pagination` envelope to the last page; one request only ever describes page one.'),
+                    self::queryParam('sort', 'string', 'Sort key: `name`, `email`, `role`, `status`, `created` (default), plus `tenant` for a system-tenant caller. `name` and `email` order identically — the name IS the email\'s local part. An unrecognised key is not an error: it falls back to the default, because a client asking for a column it cannot see should get a list rather than a 400.'),
+                    self::queryParam('dir', 'string', 'Sort direction, `asc` or `desc`. Anything else is read as `asc`.'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on email or role name. It narrows `pagination.total` too, so the envelope always describes the filtered list.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The users visible to the caller\'s tenant', 'UserListResponse'),
@@ -619,6 +622,9 @@ final class CoreApiSchemas
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). A client that needs every role must follow the `pagination` envelope to the last page; one request only ever describes page one.'),
+                    self::queryParam('sort', 'string', 'Sort key: `name`, `description`, or `created` (default, newest first). `permissionCount` is not offered — it is an aggregate the roles screen deliberately does not sort by. An unrecognised key falls back to the default rather than erroring.'),
+                    self::queryParam('dir', 'string', 'Sort direction, `asc` or `desc`. Anything else is read as `asc`.'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on role name or description. It narrows `pagination.total` too.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('Visible roles with permission counts', 'RoleListResponse'),
@@ -676,6 +682,9 @@ final class CoreApiSchemas
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    self::queryParam('sort', 'string', 'Sort key: `name` (display name), `email`, or `assigned` (default, newest grant first). An unrecognised key falls back to the default rather than erroring.'),
+                    self::queryParam('dir', 'string', 'Sort direction, `asc` or `desc`. Anything else is read as `asc`.'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on a holder\'s display name or email. It narrows `pagination.total`, so a searched list\'s total is the number of MATCHING holders and no longer the role\'s headcount.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The role\'s holders with pagination', 'RoleAssignmentListResponse'),
@@ -9081,6 +9090,9 @@ final class CoreApiSchemas
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    self::queryParam('sort', 'string', 'Sort key: `name` (default) or `rule`. `rule` orders by the rule KIND slug, not by the localised label the screen renders — the server cannot order by a string the client computes, but the kind still groups every row that renders the same label together. An unrecognised key falls back to the default rather than erroring.'),
+                    self::queryParam('dir', 'string', 'Sort direction, `asc` or `desc`. Anything else is read as `asc`.'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on a group\'s name or description — the two fields rendered verbatim. The rule kind is a slug the screen never shows, so it is not searched. The term narrows `pagination.total` too.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The tenant\'s groups with pagination', 'UserGroupListResponse'),

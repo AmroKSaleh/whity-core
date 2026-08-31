@@ -14,7 +14,8 @@ use Whity\Core\Identity\AuthMethod;
 use Whity\Core\Identity\ProfileProvisioner;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
-use Whity\Http\PaginationParams;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
 use Whity\Core\Db\DbBool;
@@ -155,6 +156,60 @@ class UsersApiHandler
     }
 
     /**
+     * What `GET /api/users` lets a caller sort and search by.
+     *
+     * The keys are the columns the users screen actually RENDERS — name, email,
+     * role, tenant, status — because a sort key for a column nobody can see is a
+     * key nobody will send, and a rendered column with no key is the one the
+     * screen has to go back to sorting in the browser.
+     *
+     * `name` and `email` deliberately share an expression. There is no name
+     * column in the identity model: {@see self::toPublicUser()} derives `name`
+     * from the email's local part, so ordering by the address IS ordering by the
+     * name the screen shows. The key exists so a client can name the column it
+     * draws rather than knowing that fact.
+     *
+     * `status` is the ACCOUNT status (`profiles.status`), which is what the
+     * screen's Status column renders. The membership status is not offered: the
+     * list only ever returns active memberships, so sorting by it would order
+     * one value.
+     *
+     * TIEBREAKER `m.id`, not `m.profile_id`. The profile id is NOT unique across
+     * this result set: for the system tenant a person with a primary membership
+     * in two tenants is legitimately two rows, and a tiebreaker that ties is not
+     * a tiebreaker. The membership's own primary key is unique in both branches.
+     *
+     * @param bool $systemTenant Whether the caller spans every tenant, which is
+     *        the only case in which sorting by tenant orders anything.
+     */
+    private static function listSpec(bool $systemTenant): ListSpec
+    {
+        $sortable = [
+            'name' => 'pe.email',
+            'email' => 'pe.email',
+            'role' => 'r.name',
+            'status' => 'p.status',
+            'created' => 'm.created_at',
+        ];
+
+        if ($systemTenant) {
+            $sortable['tenant'] = 'm.tenant_id';
+        }
+
+        return new ListSpec(
+            sortable: $sortable,
+            tiebreaker: 'm.id',
+            // Email and role name: the two free-text things a row shows. A
+            // tenant id is a number a reader matches exactly rather than
+            // searches for a substring of, so it is a sort key and not a search
+            // column — `q=1` must not mean "every tenant whose id contains 1".
+            searchable: ['pe.email', 'r.name'],
+            defaultSort: 'created',
+            defaultDirection: 'desc',
+        );
+    }
+
+    /**
      * GET /api/users - List the users (ACTIVE memberships) of the current tenant.
      *
      * A row is a profile with an ACTIVE membership in the tenant (system tenant 0
@@ -163,62 +218,100 @@ class UsersApiHandler
      * {@see AdminApiHandler::stats()} (active-membership count). Each row carries
      * the canonical `profile_id` as `id`, the profile's PRIMARY email, the
      * membership role name / ou_id / tenant_id / created_at.
+     *
+     * SORT AND SEARCH (#1102). `sort` / `dir` / `q` are read through
+     * {@see ListQuery} against {@see self::listSpec()}; the envelope is
+     * unchanged, so a client that sends none of them cannot tell the endpoint
+     * moved. Until this, the screen fetched `per_page=100` and sorted and
+     * filtered THAT in the browser, with its own comment admitting that a tenant
+     * over a hundred people simply could not see the rest.
+     *
+     * The SYSTEM branch previously ordered by `m.tenant_id` first. It no longer
+     * does: the two branches now answer the same question the same way, and a
+     * caller who wants the tenant grouping asks for `sort=tenant` — which is
+     * only offered to the caller for whom it orders anything.
      */
     public function list(Request $request): Response
     {
         try {
             $tenantId = TenantContext::getTenantId();
-            $p = PaginationParams::fromPath($request->getPath());
+            $q = ListQuery::fromPath(
+                $request->getPath(),
+                self::listSpec($tenantId === self::SYSTEM_TENANT_ID)
+            );
 
+            // The search predicate is a plain fragment reused by the COUNT and
+            // the SELECT of whichever branch runs, so the two cannot disagree
+            // about what is being filtered. It is the empty string when no `q`
+            // was sent, which is why it can be concatenated unconditionally.
+            $search = $q->andSearch($this->db);
+
+            // The COUNT carries the SELECT's JOINs even though it needs none of
+            // their columns for itself, because the search predicate reads
+            // `pe.email` and `r.name`. A count over a narrower FROM than the
+            // SELECT is the specific bug this endpoint could most easily ship:
+            // the rows narrow, the total does not, and the client renders page
+            // controls for pages that come back empty. Neither join multiplies
+            // rows (`role_id` is a foreign key to exactly one role; a profile
+            // has at most one primary email), so the unsearched total is
+            // unchanged and still reconciles with AdminApiHandler::stats().
             if ($tenantId === self::SYSTEM_TENANT_ID) {
                 // @tenant-guard-ignore: system-tenant (id 0) counts active memberships across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
                 $countStmt = $this->db->prepare(
-                    "SELECT COUNT(*) AS cnt FROM memberships m WHERE m.is_primary AND m.status = 'active'"
+                    "SELECT COUNT(*) AS cnt
+                     FROM memberships m
+                     JOIN roles r ON m.role_id = r.id
+                     JOIN profiles p ON p.id = m.profile_id
+                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                     WHERE m.is_primary AND m.status = 'active'" . $search
                 );
+                $q->bindSearch($countStmt);
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
                 // @tenant-guard-ignore: system-tenant (id 0) lists active memberships across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
-                $stmt = $this->db->prepare("
-                    SELECT m.profile_id AS id, pe.email, r.name AS role,
-                           m.tenant_id, m.ou_id, m.created_at, m.status,
-                           p.status AS account_status, p.auth_method
-                    FROM memberships m
-                    JOIN roles r ON m.role_id = r.id
-                    JOIN profiles p ON p.id = m.profile_id
-                    LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
-                    WHERE m.is_primary AND m.status = 'active'
-                    ORDER BY m.tenant_id, m.created_at DESC, m.profile_id ASC
-                    LIMIT :limit OFFSET :offset
-                ");
-                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $stmt = $this->db->prepare(
+                    "SELECT m.profile_id AS id, pe.email, r.name AS role,
+                            m.tenant_id, m.ou_id, m.created_at, m.status,
+                            p.status AS account_status, p.auth_method
+                     FROM memberships m
+                     JOIN roles r ON m.role_id = r.id
+                     JOIN profiles p ON p.id = m.profile_id
+                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                     WHERE m.is_primary AND m.status = 'active'" . $search
+                    . ' ' . $q->orderBy() . ' LIMIT :limit OFFSET :offset'
+                );
+                $q->bindAll($stmt);
                 $stmt->execute();
             } else {
                 $countStmt = $this->db->prepare(
-                    "SELECT COUNT(*) AS cnt FROM memberships m WHERE m.is_primary AND m.tenant_id = :tenant_id AND m.status = 'active'"
+                    "SELECT COUNT(*) AS cnt
+                     FROM memberships m
+                     JOIN roles r ON m.role_id = r.id
+                     JOIN profiles p ON p.id = m.profile_id
+                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                     WHERE m.is_primary AND m.tenant_id = :tenant_id AND m.status = 'active'" . $search
                 );
                 $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $q->bindSearch($countStmt);
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-                $stmt = $this->db->prepare("
-                    SELECT m.profile_id AS id, pe.email, r.name AS role,
-                           m.tenant_id, m.ou_id, m.created_at, m.status,
-                           p.status AS account_status, p.auth_method
-                    FROM memberships m
-                    JOIN roles r ON m.role_id = r.id
-                    JOIN profiles p ON p.id = m.profile_id
-                    LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
-                    WHERE m.is_primary AND m.tenant_id = :tenant_id AND m.status = 'active'
-                    ORDER BY m.created_at DESC, m.profile_id ASC
-                    LIMIT :limit OFFSET :offset
-                ");
+                $stmt = $this->db->prepare(
+                    "SELECT m.profile_id AS id, pe.email, r.name AS role,
+                            m.tenant_id, m.ou_id, m.created_at, m.status,
+                            p.status AS account_status, p.auth_method
+                     FROM memberships m
+                     JOIN roles r ON m.role_id = r.id
+                     JOIN profiles p ON p.id = m.profile_id
+                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                     WHERE m.is_primary AND m.tenant_id = :tenant_id AND m.status = 'active'" . $search
+                    . ' ' . $q->orderBy() . ' LIMIT :limit OFFSET :offset'
+                );
                 $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
-                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $q->bindAll($stmt);
                 $stmt->execute();
             }
 
@@ -227,7 +320,7 @@ class UsersApiHandler
 
             $users = array_map(fn (array $row): array => $this->toPublicUser($row), $rows);
 
-            return Response::json(['data' => $users, 'pagination' => $p->meta($total)], 200);
+            return Response::json(['data' => $users, 'pagination' => $q->meta($total)], 200);
         } catch (\Throwable $e) {
             $this->log('error', 'Failed to fetch users', [
                 'event' => 'users.error',
