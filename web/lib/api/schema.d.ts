@@ -27511,6 +27511,12 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100). A client that needs every role must follow the `pagination` envelope to the last page; one request only ever describes page one. */
                 per_page?: number;
+                /** @description Sort key: `name`, `description`, or `created` (default, newest first). `permissionCount` is not offered — it is an aggregate the roles screen deliberately does not sort by. An unrecognised key falls back to the default rather than erroring. */
+                sort?: string;
+                /** @description Sort direction, `asc` or `desc`. Anything else is read as `asc`. */
+                dir?: string;
+                /** @description Case-insensitive substring match on role name or description. It narrows `pagination.total` too. */
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -27918,6 +27924,12 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100) */
                 per_page?: number;
+                /** @description Sort key: `name` (display name), `email`, or `assigned` (default, newest grant first). An unrecognised key falls back to the default rather than erroring. */
+                sort?: string;
+                /** @description Sort direction, `asc` or `desc`. Anything else is read as `asc`. */
+                dir?: string;
+                /** @description Case-insensitive substring match on a holder's display name or email. It narrows `pagination.total`, so a searched list's total is the number of MATCHING holders and no longer the role's headcount. */
+                q?: string;
             };
             header?: never;
             path: {
@@ -33103,6 +33115,12 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100) */
                 per_page?: number;
+                /** @description Sort key: `name` (default) or `rule`. `rule` orders by the rule KIND slug, not by the localised label the screen renders — the server cannot order by a string the client computes, but the kind still groups every row that renders the same label together. An unrecognised key falls back to the default rather than erroring. */
+                sort?: string;
+                /** @description Sort direction, `asc` or `desc`. Anything else is read as `asc`. */
+                dir?: string;
+                /** @description Case-insensitive substring match on a group's name or description — the two fields rendered verbatim. The rule kind is a slug the screen never shows, so it is not searched. The term narrows `pagination.total` too. */
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -33664,6 +33682,12 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100). A client that needs every user must follow the `pagination` envelope to the last page; one request only ever describes page one. */
                 per_page?: number;
+                /** @description Sort key: `name`, `email`, `role`, `status`, `created` (default), plus `tenant` for a system-tenant caller. `name` and `email` order identically — the name IS the email's local part. An unrecognised key is not an error: it falls back to the default, because a client asking for a column it cannot see should get a list rather than a 400. */
+                sort?: string;
+                /** @description Sort direction, `asc` or `desc`. Anything else is read as `asc`. */
+                dir?: string;
+                /** @description Case-insensitive substring match on email or role name. It narrows `pagination.total` too, so the envelope always describes the filtered list. */
+                q?: string;
             };
             header?: never;
             path?: never;

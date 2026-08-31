@@ -15,7 +15,8 @@ use Whity\Core\RBAC\RecordSectionRequirement;
 use Whity\Core\RBAC\RecordSectionResolver;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
-use Whity\Http\PaginationParams;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Sdk\Hooks\HookVetoException;
 use PDO;
@@ -372,7 +373,56 @@ class RolesApiHandler
     }
 
     /**
+     * What `GET /api/roles` lets a caller sort and search by.
+     *
+     * The keys are the columns the roles screen renders, minus the one it
+     * renders and deliberately refuses to sort by. `permissionCount` is an
+     * aggregate over a join and the screen sets `enableSorting: false` on it on
+     * purpose; offering a server key the UI has decided against would be
+     * inventing a feature here rather than moving one.
+     *
+     * `created` stays the DEFAULT (newest first) because that is the order this
+     * endpoint has always returned. A list whose default order changed on the
+     * day it learned to sort would read as a regression to every client that
+     * sends no `sort` at all.
+     *
+     * Search covers name and description: the row's two free-text fields, and
+     * the two the screen's own filter boxes already cover in the browser.
+     */
+    private static function listSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'name' => 'r.name',
+                'description' => 'r.description',
+                'created' => 'r.created_at',
+            ],
+            // The primary key. Role NAMES are unique per tenant rather than
+            // globally, so for a system-tenant caller they tie across tenants —
+            // which is exactly the state in which an untied ORDER BY repeats one
+            // row on two pages and never shows another.
+            tiebreaker: 'r.id',
+            searchable: ['r.name', 'r.description'],
+            defaultSort: 'created',
+            defaultDirection: 'desc',
+        );
+    }
+
+    /**
      * GET /api/roles - List roles visible to the current tenant (paginated).
+     *
+     * SORT AND SEARCH (#1102). `sort` / `dir` / `q` are read through
+     * {@see ListQuery} against {@see self::listSpec()}. The envelope is
+     * untouched, so a client that sends none of them cannot tell this changed.
+     * Both the SELECT and the COUNT carry the search predicate: a total that
+     * ignored the filter would have the screen draw page controls for pages that
+     * come back empty.
+     *
+     * The predicate is spelled two ways because the branches differ in whether
+     * they already have a WHERE. The tenant-scoped branch appends `AND (…)` to
+     * its visibility predicate; the system branch filters nothing of its own, so
+     * it has to introduce the `WHERE` itself — and only when there is a search,
+     * because `WHERE` with nothing after it is not SQL.
      *
      * @param Request $request The incoming request.
      * @return Response JSON list of roles with pagination envelope.
@@ -381,54 +431,57 @@ class RolesApiHandler
     {
         try {
             $tenantId = TenantContext::getTenantId();
-            $p = PaginationParams::fromPath($request->getPath());
+            $q = ListQuery::fromPath($request->getPath(), self::listSpec());
+            $search = $q->andSearch($this->db);
+            $predicate = $q->searchPredicate($this->db);
 
             // SYSTEM tenant (id 0) sees every role across all tenants.
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists roles across all tenants; scoped else-branch binds (r.tenant_id = ? OR r.tenant_id IS NULL)
-                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM roles r');
+                $countStmt = $this->db->prepare(
+                    'SELECT COUNT(*) AS cnt FROM roles r'
+                    . ($predicate === '' ? '' : ' WHERE ' . $predicate)
+                );
+                $q->bindSearch($countStmt);
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
                 // @tenant-guard-ignore: system-tenant (id 0) lists all roles; scoped else-branch binds (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)
-                $stmt = $this->db->prepare('
-                    SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
-                           COUNT(rp.id) AS permission_count
-                    FROM roles r
-                    LEFT JOIN role_permissions rp ON r.id = rp.role_id
-                    GROUP BY r.id, r.tenant_id
-                    ORDER BY r.created_at DESC
-                    LIMIT :limit OFFSET :offset
-                ');
-                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $stmt = $this->db->prepare(
+                    'SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
+                            COUNT(rp.id) AS permission_count
+                     FROM roles r
+                     LEFT JOIN role_permissions rp ON r.id = rp.role_id'
+                    . ($predicate === '' ? '' : ' WHERE ' . $predicate)
+                    . ' GROUP BY r.id, r.tenant_id ' . $q->orderBy() . ' LIMIT :limit OFFSET :offset'
+                );
+                $q->bindAll($stmt);
                 $stmt->execute();
             } else {
                 // A role is visible to a tenant when it is OWNED by that tenant
                 // (roles.tenant_id = currentTenant) OR is a GLOBAL/system role
                 // (roles.tenant_id IS NULL, e.g. the seeded base roles).
                 $countStmt = $this->db->prepare(
-                    'SELECT COUNT(*) AS cnt FROM roles r WHERE (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)'
+                    'SELECT COUNT(*) AS cnt FROM roles r
+                      WHERE (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)' . $search
                 );
                 $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $q->bindSearch($countStmt);
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-                $stmt = $this->db->prepare('
-                    SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
-                           COUNT(rp.id) AS permission_count
-                    FROM roles r
-                    LEFT JOIN role_permissions rp ON r.id = rp.role_id
-                    WHERE (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)
-                    GROUP BY r.id, r.tenant_id
-                    ORDER BY r.created_at DESC
-                    LIMIT :limit OFFSET :offset
-                ');
+                $stmt = $this->db->prepare(
+                    'SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
+                            COUNT(rp.id) AS permission_count
+                     FROM roles r
+                     LEFT JOIN role_permissions rp ON r.id = rp.role_id
+                     WHERE (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)' . $search
+                    . ' GROUP BY r.id, r.tenant_id ' . $q->orderBy() . ' LIMIT :limit OFFSET :offset'
+                );
                 $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
-                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $q->bindAll($stmt);
                 $stmt->execute();
             }
 
@@ -476,7 +529,7 @@ class RolesApiHandler
                 return $role;
             }, $roles);
 
-            return Response::json(['data' => $roles, 'pagination' => $p->meta($total)], 200);
+            return Response::json(['data' => $roles, 'pagination' => $q->meta($total)], 200);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to fetch roles', [
                 'event' => 'roles.error',
@@ -1086,6 +1139,41 @@ class RolesApiHandler
     }
 
     /**
+     * What `GET /api/roles/{id}/assignments` lets a caller sort and search by.
+     *
+     * The record page renders each holder as one line — display name, falling
+     * back to email — over a secondary line saying when the role was granted, so
+     * those three are the keys: `name`, `email`, `assigned`.
+     *
+     * The panel itself draws no sort or search control today; it asks for eight
+     * rows and says "and N more". That is the reason the keys exist rather than
+     * an argument against them: eight of a thousand holders with no way to look
+     * for one is the shape of the problem, and the endpoint answering `q` is
+     * what lets that panel grow a search box without a second endpoint.
+     *
+     * `assigned` stays the default, newest first — the endpoint's whole claim is
+     * that page one IS the recent-assignment history.
+     *
+     * TIEBREAKER `m.id`, the membership primary key. `created_at` ties whenever
+     * two people are given a role in the same transaction — a bulk grant, an
+     * import, a seeder — which is precisely when a list is long enough to page.
+     */
+    private static function assignmentsSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'name' => 'p.display_name',
+                'email' => 'pe.email',
+                'assigned' => 'm.created_at',
+            ],
+            tiebreaker: 'm.id',
+            searchable: ['p.display_name', 'pe.email'],
+            defaultSort: 'assigned',
+            defaultDirection: 'desc',
+        );
+    }
+
+    /**
      * GET /api/roles/{id}/assignments - who holds this role, newest first (#882).
      *
      * The record page's "12 users hold this role, most recently user3 on the
@@ -1153,45 +1241,62 @@ class RolesApiHandler
                 return Response::error('Role not found', 404);
             }
 
-            $p = PaginationParams::fromPath($request->getPath());
+            $q = ListQuery::fromPath($request->getPath(), self::assignmentsSpec());
+            $search = $q->andSearch($this->db);
             $roleId = (int)$id;
 
+            // The COUNT carries the SELECT's joins, which it does not otherwise
+            // need, because the search reads `p.display_name` and `pe.email`.
+            // Neither join multiplies rows — a membership has one profile and a
+            // profile has at most one primary email — so the unsearched total is
+            // still the headcount the record page's stat tile shows, and the
+            // LEFT JOIN still keeps a holder who has no primary email.
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) counts holders across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
-                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM memberships m WHERE m.role_id = :role_id');
+                $countStmt = $this->db->prepare(
+                    'SELECT COUNT(*) AS cnt
+                     FROM memberships m
+                     JOIN profiles p ON p.id = m.profile_id
+                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                     WHERE m.role_id = :role_id' . $search
+                );
                 $countStmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
+                $q->bindSearch($countStmt);
                 $countStmt->execute();
 
                 // @tenant-guard-ignore: system-tenant (id 0) lists holders across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
-                $listStmt = $this->db->prepare('
-                    SELECT m.id, m.profile_id, m.tenant_id, m.ou_id, m.is_primary, m.status, m.created_at,
-                           p.display_name, pe.email
-                    FROM memberships m
-                    JOIN profiles p ON p.id = m.profile_id
-                    LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
-                    WHERE m.role_id = :role_id
-                    ORDER BY m.created_at DESC, m.id DESC
-                    LIMIT :limit OFFSET :offset
-                ');
+                $listStmt = $this->db->prepare(
+                    'SELECT m.id, m.profile_id, m.tenant_id, m.ou_id, m.is_primary, m.status, m.created_at,
+                            p.display_name, pe.email
+                     FROM memberships m
+                     JOIN profiles p ON p.id = m.profile_id
+                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                     WHERE m.role_id = :role_id' . $search
+                    . ' ' . $q->orderBy() . ' LIMIT :limit OFFSET :offset'
+                );
                 $listStmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
             } else {
                 $countStmt = $this->db->prepare(
-                    'SELECT COUNT(*) AS cnt FROM memberships m WHERE m.role_id = :role_id AND m.tenant_id = :tenant_id'
+                    'SELECT COUNT(*) AS cnt
+                     FROM memberships m
+                     JOIN profiles p ON p.id = m.profile_id
+                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                     WHERE m.role_id = :role_id AND m.tenant_id = :tenant_id' . $search
                 );
                 $countStmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
                 $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $q->bindSearch($countStmt);
                 $countStmt->execute();
 
-                $listStmt = $this->db->prepare('
-                    SELECT m.id, m.profile_id, m.tenant_id, m.ou_id, m.is_primary, m.status, m.created_at,
-                           p.display_name, pe.email
-                    FROM memberships m
-                    JOIN profiles p ON p.id = m.profile_id
-                    LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
-                    WHERE m.role_id = :role_id AND m.tenant_id = :tenant_id
-                    ORDER BY m.created_at DESC, m.id DESC
-                    LIMIT :limit OFFSET :offset
-                ');
+                $listStmt = $this->db->prepare(
+                    'SELECT m.id, m.profile_id, m.tenant_id, m.ou_id, m.is_primary, m.status, m.created_at,
+                            p.display_name, pe.email
+                     FROM memberships m
+                     JOIN profiles p ON p.id = m.profile_id
+                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                     WHERE m.role_id = :role_id AND m.tenant_id = :tenant_id' . $search
+                    . ' ' . $q->orderBy() . ' LIMIT :limit OFFSET :offset'
+                );
                 $listStmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
                 $listStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
             }
@@ -1199,8 +1304,7 @@ class RolesApiHandler
             $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
             $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-            $listStmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
-            $listStmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+            $q->bindAll($listStmt);
             $listStmt->execute();
 
             /** @var array<int, array<string, mixed>> $rows */
@@ -1223,7 +1327,7 @@ class RolesApiHandler
                 ];
             }, $rows);
 
-            return Response::json(['data' => $data, 'pagination' => $p->meta($total)], 200);
+            return Response::json(['data' => $data, 'pagination' => $q->meta($total)], 200);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to fetch role assignments', [
                 'event' => 'roles.error',
