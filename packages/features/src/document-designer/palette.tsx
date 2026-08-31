@@ -117,8 +117,16 @@ export function Palette({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t('palette.blocks.heading', 'Blocks')}
           </h3>
+          {/*
+            Each visibility tier is its own labelled group, and WHICH group a
+            block sits in is the user-visible fact that "published tenant-wide"
+            means. The group carries a testid so that fact can be asserted
+            without reading its heading: the heading is translated
+            (`palette.scope.*`), so a test matching "Tenant-wide" would be
+            asserting the editor is in English as much as where the block is.
+          */}
           {BLOCK_SCOPES.filter((s) => blocks.some((b) => b.scope === s.id)).map((s) => (
-            <div key={s.id} className="space-y-1">
+            <div key={s.id} data-testid={`doc-block-group-${s.id}`} className="space-y-1">
               <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{scopeLabel(t, s)}</div>
               {blocks
                 .filter((b) => b.scope === s.id)
