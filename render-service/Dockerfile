@@ -67,6 +67,35 @@ FROM node:22-bookworm-slim AS runtime
 # /usr/share/fonts/truetype/noto/Noto{Naskh,Sans}Arabic-{Regular,Bold}.ttf.
 # puppeteer-core (not puppeteer) is used specifically so npm never tries to
 # download its OWN Chromium — this apt-installed binary is the only one.
+#
+# ─── `chromium` IS DELIBERATELY UNPINNED. READ THIS BEFORE PINNING IT. ───────
+#
+# Every rebuild takes whatever Debian bookworm ships that day. That matters
+# more here than in most services: the flowing mode's paginator
+# (src/flow/assets/paginate.js) measures and fragments content against the
+# browser's own layout, guarded by a refuse-on-disagreement check rather than
+# by a specification, and every number its design rests on was measured against
+# one build. A Chromium upgrade arriving through a rebuild can change
+# fragmentation, and the failure is not a crash — it is a long document that
+# paginates differently, or a guard that starts refusing renders that used to
+# succeed.
+#
+# `chromium=151.0.7922.173-1~deb12u1` would make the build reproducible and
+# would BREAK the day Debian rotates that version out for a security update,
+# which it does routinely. Trading silent behaviour drift for periodic hard
+# build failures on a security rebuild is a trade a maintainer should make
+# deliberately; #1134 chose instead to make the drift VISIBLE and LOUD:
+#
+#   - `npm run build:browser-info` (below) freezes the installed version into
+#     the image, and GET /health reports it beside the core version — so an
+#     operator diffing two images can SEE that the browser moved.
+#   - src/capability-probe.js asserts, at container start, the behaviours the
+#     paginator actually relies on, and says so at boot rather than at render
+#     time.
+#
+# If you do decide to pin, pin here AND update docs/wiki/Document-Render-Service.md,
+# because the wiki's measured-facts table is what the probe's expectations are
+# calibrated against.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       fonts-noto-core \
@@ -84,6 +113,16 @@ RUN npm ci --omit=dev
 
 COPY render-service/src ./src
 COPY --from=build /workspace/render-service/dist ./dist
+
+# The BROWSER's identity, recorded after the dist/ from the build stage has
+# landed so both facts about this image sit in one directory (#1134).
+#
+# This cannot live in the `build` stage beside `npm run build:info`: the
+# browser is installed here, in `runtime`, and nowhere else. One script file is
+# copied rather than the whole scripts/ directory, so the shipped image still
+# carries no build tooling. Last, so a change to it invalidates nothing above.
+COPY render-service/scripts/write-browser-info.js ./scripts/write-browser-info.js
+RUN npm run build:browser-info
 
 EXPOSE 8130
 

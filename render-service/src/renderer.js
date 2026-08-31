@@ -39,23 +39,39 @@ const READY_TIMEOUT_MS = Number(process.env.RENDER_READY_TIMEOUT_MS || 20000);
 // core side. See docs/wiki/Document-Render-Service.md.
 const PDF_TIMEOUT_MS = Number(process.env.RENDER_PDF_TIMEOUT_MS || 30000);
 
+/**
+ * The launch flags, named rather than inlined so the boot-time capability
+ * probe (src/capability-probe.js, #1134) can launch with EXACTLY these. A
+ * probe run under different flags is measuring a browser this service does not
+ * run, which is the same class of mistake as verifying something other than
+ * the thing you shipped.
+ *
+ * Naming them changes nothing about how `launchBrowser()` behaves.
+ */
+const CHROMIUM_LAUNCH_ARGS = [
+  // Standard, well-documented flags for running Chromium as root inside
+  // a container without a working sandbox namespace.
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  // /dev/shm is small by default in Docker; Chromium falls back to
+  // /tmp instead of crashing under memory pressure.
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+];
+
+/** The browser binary this service launches. Exported for the same reason. */
+function chromiumExecutablePath() {
+  return process.env.PUPPETEER_EXECUTABLE_PATH || DEFAULT_CHROMIUM_PATH;
+}
+
 let browserPromise = null;
 
 function launchBrowser() {
   if (!browserPromise) {
     browserPromise = puppeteer.launch({
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || DEFAULT_CHROMIUM_PATH,
+      executablePath: chromiumExecutablePath(),
       headless: true,
-      args: [
-        // Standard, well-documented flags for running Chromium as root inside
-        // a container without a working sandbox namespace.
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        // /dev/shm is small by default in Docker; Chromium falls back to
-        // /tmp instead of crashing under memory pressure.
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
+      args: CHROMIUM_LAUNCH_ARGS,
     });
     browserPromise.catch(() => {
       // A failed launch must not permanently poison every future call — the
@@ -144,4 +160,4 @@ async function shutdown() {
   }
 }
 
-module.exports = { renderToPdf, getBrowser, shutdown };
+module.exports = { renderToPdf, getBrowser, shutdown, CHROMIUM_LAUNCH_ARGS, chromiumExecutablePath };

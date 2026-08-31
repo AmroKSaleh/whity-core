@@ -1125,6 +1125,69 @@ jobs:
           docker logs whity_render_ci || true
           exit 1
 
+      # The image installs `chromium` unpinned, so the browser can move without
+      # this repository moving (#1134). Two things have to hold on every build:
+      # the image must be able to SAY which browser it has, and the boot probe
+      # must find that browser still behaving the way the flowing mode's
+      # paginator assumes. An image that cannot answer either is exactly the
+      # "reports success without looking" shape this gate exists to prevent.
+      #
+      # `notable` and `inconclusive` PASS on purpose. A capability arriving is
+      # news, not breakage; a probe that could not measure something is not
+      # evidence that anything changed. Only `degraded` (a required behaviour
+      # disagreed) and `error` (the probe could not run) fail.
+      - name: The image must know its browser, and the browser must still behave
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(curl -fsS http://127.0.0.1:18130/health \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["capabilities"]["status"])')
+            [ "${status}" = "pending" ] || break
+            sleep 1
+          done
+
+          BODY=$(curl -fsS http://127.0.0.1:18130/health)
+          echo "$BODY" | python3 -m json.tool
+
+          # The body goes in as an ARGUMENT: `python3 -` reads the script from
+          # stdin, so a pipe into it would be swallowed by the heredoc.
+          python3 - "$BODY" <<'PY'
+          import json, sys
+          health = json.loads(sys.argv[1])
+          browser = health["browser"]
+          caps = health["capabilities"]
+
+          if browser["source"] != "build" or not browser["version"]:
+              raise SystemExit(
+                  "::error::The render image cannot say which browser it was built with "
+                  f"(source={browser['source']!r}, version={browser['version']!r}). "
+                  "render-service/scripts/write-browser-info.js should have baked it in."
+              )
+
+          if browser["running_matches_build"] is False:
+              raise SystemExit(
+                  "::error::The browser answering at runtime "
+                  f"({browser['running_version']}) is not the one the build recorded "
+                  f"({browser['version']})."
+              )
+
+          if caps["status"] in ("degraded", "error"):
+              for line in caps["required_failures"] or [caps["error"]]:
+                  print(f"::error::capability probe: {line}")
+              raise SystemExit(f"::error::capability probe status is {caps['status']}")
+
+          # At RUNTIME a probe that never lands gates nothing, deliberately.
+          # In CI it is a failure: a probe that cannot finish inside a minute
+          # on a quiet runner is a probe nobody will get an answer from.
+          if caps["status"] in ("pending", "not_run"):
+              raise SystemExit(f"::error::capability probe never landed (status {caps['status']})")
+
+          print(f"Browser {browser['version']}; capability probe: {caps['status']} in {caps['ms']} ms.")
+          for line in caps["notable"]:
+              print(f"::warning::browser capability changed — {line}")
+          for probe in caps["unknown"]:
+              print(f"::warning::capability probe could not be measured: {probe}")
+          PY
+
       # A real render round-trip: text + a math element (KaTeX) + a barcode +
       # Arabic text (the hard cross-cutting RTL requirement). Structural/smoke
       # checks only (per the task brief, exact golden-image pixel diffing is
@@ -1270,7 +1333,11 @@ jobs:
       # where the Arabic fonts are.
       - name: Arabic/RTL contents-entry and running-head geometry
         run: |
-          docker cp render-service/scripts whity_render_ci:/app/scripts
+          # `scripts/.` — the CONTENTS, not the directory. /app/scripts already
+          # exists in the image (it holds write-browser-info.js, #1134), and
+          # `docker cp <dir> <existing dir>` would nest it as
+          # /app/scripts/scripts rather than merging.
+          docker cp render-service/scripts/. whity_render_ci:/app/scripts
           docker exec whity_render_ci node scripts/check-flow-rtl-geometry.js
 
       - name: Container logs (always, for debugging)

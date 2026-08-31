@@ -59,8 +59,13 @@ was built from:
 
 ```bash
 curl -s http://render:8130/health
-# {"status":"ok","core_version":"0.3.0","commit":"<sha>"}
+# {"status":"ok","core_version":"0.3.0","commit":"<sha>",
+#  "browser":{"version":"151.0.7922.173","source":"build", ...},
+#  "capabilities":{"status":"ok", ...}}
 ```
+
+The `browser` and `capabilities` halves answer a *different* drift question —
+see [The browser is unpinned](#the-browser-is-unpinned-and-that-is-visible-on-purpose).
 
 `core_version` comes from `src/Core/CoreVersion.php` — the same constant
 `GET /api/health` reports as `version` and `/web-build` reports as
@@ -112,6 +117,9 @@ docker compose --profile render up -d --build
 | `RENDER_READY_TIMEOUT_MS` / `RENDER_NAV_TIMEOUT_MS` | render | `20000` | Waiting for the harness to signal ready / to load. |
 | `RENDER_RATE_LIMIT_MAX` / `_WINDOW_MS` | render | `30` / `60000` | Per-window cap on `POST /render`. |
 | `RENDER_HARD_MAX_ROWS` / `_UNITS` / `_TEMPLATE_BYTES` | render | `2000` / `5000` / 10 MiB | Defence-in-depth ceilings inside the service; the operator-facing limits are the settings below. |
+| `RENDER_PROBE_TIMEOUT_MS` | render | `60000` | Per-step ceiling on the boot-time capability probe. Raise it only if `/health` reports `capabilities.status: "error"` with a launch timeout. |
+| `RENDER_FLOW_REQUIRE_CAPABILITIES` | render | `true` | Whether a **required** capability-probe failure refuses `POST /render/flow` with a `503`. The escape hatch, not a normal setting — see below. |
+| `RENDER_FLOW_CAPABILITY_WAIT_MS` | render | `RENDER_PROBE_TIMEOUT_MS` | How long a flow request waits for a probe that has not landed yet before rendering ungated. |
 
 ---
 
@@ -301,6 +309,11 @@ in ordinary body content. None of that changes the flowing mode — it prints at
 `margin: 0` with pre-fragmented boxes and draws its bands in-document — but the
 absence of margin-box support is not the reason.
 
+Those facts are now **re-measured at every container start**, because the
+browser they were measured against is not pinned — see
+[The browser is unpinned](#the-browser-is-unpinned-and-that-is-visible-on-purpose).
+If you change the table above, change the probe's expectations with it.
+
 Three ways out were measured on the same generated 130-page document (60
 tables, 90 figures, three generated front-matter lists — `npm run flow:fixture`
 produces it). Times are the median of three warm runs in the real image;
@@ -472,6 +485,190 @@ after it is suspect.
 
 ---
 
+## The browser is unpinned, and that is visible on purpose
+
+`render-service/Dockerfile` installs `chromium` with **no version constraint**,
+so every rebuild takes whatever Debian bookworm ships that day. At the time of
+writing that is **151.0.7922.173** (`151.0.7922.173-1~deb12u1`).
+
+That matters more here than in most services. The flowing mode's paginator is
+~840 lines that measure and fragment content against the browser's own layout,
+guarded by a refuse-on-disagreement check rather than by a specification, and
+every number its design rests on was measured against one build. A Chromium
+upgrade arriving silently through a rebuild can change fragmentation — and the
+failure is not a crash. It is a hundred-page document that paginates
+differently, or the disagreement guard starting to refuse renders that used to
+succeed, with nothing in this repository's history to explain either.
+
+### Why it is not pinned
+
+`chromium=151.0.7922.173-1~deb12u1` would make the build reproducible and would
+**break** the day Debian rotates that version out for a security update, which
+it does routinely. Trading silent behaviour drift for periodic hard build
+failures on a security rebuild is a real trade, and a maintainer may yet decide
+to make it. #1134 did not. It made the drift **visible and loud** instead. If
+you do pin, pin in the Dockerfile *and* update the measured-facts table above,
+because that table is what the probe's expectations are calibrated against.
+
+### 1. The browser is recorded into the image at build time
+
+`render-service/scripts/write-browser-info.js` runs in the Dockerfile's
+`runtime` stage — after the `apt-get`, the only place the browser exists — and
+freezes what was installed into `dist/browser-info.json`. The server reads it
+once at boot, says so in the log, and reports it on `/health`:
+
+```bash
+docker logs whity_render | head -1
+# [whity_render] browser: 151.0.7922.173 (apt 151.0.7922.173-1~deb12u1) at /usr/bin/chromium, recorded 2026-08-31T16:15:03.511Z
+
+curl -s http://localhost:8130/health | jq .browser
+```
+
+```json
+{
+  "version": "151.0.7922.173",
+  "package_version": "151.0.7922.173-1~deb12u1",
+  "banner": "Chromium 151.0.7922.173 built on Debian GNU/Linux 12 (bookworm)",
+  "executable": "/usr/bin/chromium",
+  "recorded_at": "2026-08-31T16:15:03.511Z",
+  "source": "build",
+  "running_version": "151.0.7922.173",
+  "running_banner": "Chrome/151.0.7922.173",
+  "running_matches_build": true
+}
+```
+
+Same shape, and the same rules, as `BuildIdentity` / `GET /api/build` on the PHP
+side (#1049): captured at build time because it cannot be recovered afterwards;
+a `source` field saying **where** the answer came from; `unknown` with nulls as
+a first-class answer, because a plausible-looking wrong version is worse than no
+version. A checkout that never ran `npm run build:browser-info` reports
+`source: "unknown"` — an image build always writes the file and **fails** if it
+cannot.
+
+`running_version` is a *second* reading of the same fact: what the browser
+answered when the boot probe launched it. `running_matches_build: false` means
+the binary under the recorded path is not the one this image installed;
+`null` means one of the two sides could not answer, which is a different
+finding and is reported as one.
+
+**This is the drift signal.** Two images, two `/health` responses, one diff.
+
+### 2. A boot-time capability probe
+
+`render-service/src/capability-probe.js` asserts, once at container start, the
+behaviours the paginator actually relies on. Twelve probes, measured at a level
+where the answer is real — computed style, and the bytes of a rendered PDF —
+never `CSS.supports()`.
+
+| Probe | Level | Expected | Fatal? |
+|---|---|---|:--:|
+| `range-client-rects-per-line` — `Range.getClientRects()` returns one rect per line box | DOM layout | present | **yes** |
+| `range-prefix-bottom-monotonic` — a prefix `Range`'s bottom grows monotonically and reaches the last line | DOM layout | present | **yes** |
+| `range-extract-contents-moves-text` — `extractContents()` moves the prefix out | DOM | present | **yes** |
+| `print-one-page-per-forced-break` — `break-after: page` yields one PDF page per page box | rendered PDF | present | **yes** |
+| `print-honours-css-page-size` — `preferCSSPageSize` prints at the `@page` size in exact mm | rendered PDF | present | **yes** |
+| `css-mm-at-96dpi` — a CSS millimetre lays out at the 96dpi ratio | DOM layout | present | no |
+| `css-target-counter` | computed style | **absent** | no |
+| `css-string-set` | computed style | **absent** | no |
+| `css-string-function` | computed style | **absent** | no |
+| `css-position-running` | computed style | **absent** | no |
+| `css-page-first-pseudo` — `@page :first` gives page 1 its own size | rendered PDF | present | no |
+| `css-named-pages` — a named `@page` gives a marked element its own size | rendered PDF | present | no |
+
+**The rule: a probe is fatal only when the paginator's arithmetic is wrong
+without it.** Three consequences are worth stating, because in each case the
+obvious choice is the wrong one:
+
+- **The missing features are not required to stay missing.** Their absence is
+  the entire reason this service paginates for itself. A Chromium that
+  implements `target-counter()` is an *opportunity* — a much simpler design
+  becomes available — and it must never take the render tier down. It is logged
+  loudly as `notable` and named against #1134.
+- **The paged-media features that work are not required either.** `@page :first`
+  and named pages work today; **neither render mode uses them**. Failing a boot
+  over a feature nothing depends on would make this diagnostic into a new
+  outage source, which is the one thing it must not be.
+- **"Could not determine" is never a failure, and never a success.** An
+  unreadable PDF or a browser that would not launch reports `unknown`; a
+  required probe that came back `unknown` makes the verdict `inconclusive`, not
+  `ok`. Ignorance is not evidence that anything changed, and it is not evidence
+  that nothing did.
+
+### What the verdict does
+
+```bash
+curl -s http://localhost:8130/health | jq '.capabilities | {status, ms, required_failures, notable, unknown}'
+```
+
+| `capabilities.status` | Meaning | Effect on traffic |
+|---|---|---|
+| `ok` | every probe answered and matched | none |
+| `notable` | an informational behaviour changed, in either direction | none — logged loudly |
+| `inconclusive` | a required probe could not be measured | none |
+| `degraded` | a **required** probe disagreed | `POST /render/flow` → `503` naming the probe |
+| `error` | the probe could not run at all | none |
+| `pending` / `not_run` | still running / never started | none |
+
+Only `degraded` refuses anything, and it refuses only the **flowing** mode —
+the one whose correctness rests on how this browser fragments content, and
+whose own paginator already refuses rather than emit page numbers it cannot
+vouch for. `POST /render` (fixed canvas) is deliberately **not** gated: #1134's
+constraint was not to touch that path, and its failure mode — a PDF at the
+wrong physical size — is visible in the first document anyone opens.
+
+Set `RENDER_FLOW_REQUIRE_CAPABILITIES=false` to lift the gate while keeping the
+report. That escape hatch exists because a gate with no way round it is itself
+a new way to be down.
+
+**If the probe itself cannot run, the service starts anyway** and gates
+nothing. A detector that can stop the service converts a diagnostic into an
+outage, and a crash loop is strictly harder to diagnose than a running
+container whose `/health` says the probe could not run. A browser that
+genuinely cannot launch already fails every render with a logged stack and a
+`500`; killing the container adds no information and removes the endpoint you
+would use to find out.
+
+### Cost, and what it does not cost
+
+The probe never blocks `listen()` — the server accepts requests immediately and
+`/health` reports `pending` until the probe lands. Only `POST /render/flow`
+waits for it, and that wait is bounded (`RENDER_FLOW_CAPABILITY_WAIT_MS`).
+
+Its own work is three page loads and two `page.pdf()` calls on trivial
+documents. Measured in the real image on a Docker Desktop host:
+
+```json
+"ms": 5550, "phases": { "launch_ms": 3791, "layout_ms": 504, "geometry_ms": 949, "paged_media_ms": 275 }
+```
+
+**The browser launch dominates and is entirely environmental.** The same image
+on a cold VM — Chromium waiting out dbus timeouts that do not exist on a Linux
+host — took **59 s**, essentially all of it the launch. That is why
+`capabilities.phases` reports the launch separately: before concluding anything
+about this code, look at which part took the time. The probe's own measuring is
+~1.7 s and does not vary.
+
+It launches a browser **of its own** and closes it, rather than warming the
+shared instance in `src/renderer.js`. Two reasons, both load-bearing: a detector
+must not be able to wedge the browser every subsequent render depends on; and
+the idle-memory row in [Measured](#measured) (~32 MB, "Chromium not launched
+yet") is what operators size hosts from, so a deployed-but-unused render
+container must not quietly start carrying ~250 MB.
+
+### What is deliberately not probed
+
+`@page` margin boxes, `counter(page)` and `counter(pages)`. All three manifest
+only as **text** in printed output, and reading that text back honestly needs a
+font-aware PDF parser — `pdfjs-dist` is a devDependency and the runtime image
+installs `--omit=dev`, so a probe built on it would only work outside the image
+it is supposed to check. The available shortcut is asking the CSSOM whether the
+at-rule parsed, which is exactly the class of answer `CSS.supports()` gives, and
+exactly the class of answer this probe refuses to take. Nothing in either render
+mode uses them, so they stay measured by hand and recorded in the table above.
+
+---
+
 ## References
 
 - [ADR 0012 — Document render as a dedicated microservice](../adr/0012-document-render-microservice.md)
@@ -480,5 +677,7 @@ after it is suspect.
 - `render-service/src/flow/` (the flowing mode: payload, HTML, bidi, paginator)
 - `render-service/scripts/generate-flow-fixture.js`, `verify-flow-pdf.js`, `check-flow-rtl-geometry.js`
 - `render-service/scripts/write-build-info.js` (how the image identifies itself)
+- `render-service/scripts/write-browser-info.js`, `render-service/src/browser-info.js` (which browser it was built around)
+- `render-service/src/capability-probe.js` (the boot-time probe, and which probes are fatal)
 - `src/Api/DocumentRenderApiHandler.php`, `src/Core/Document/Render/RenderServiceClient.php`
 - `src/Core/Settings/SettingsRegistry.php` (`documents.render_*`)
