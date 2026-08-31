@@ -13,6 +13,7 @@ use Whity\Core\Taxonomy\TagGroupRepository;
 use Whity\Core\Taxonomy\TagRepository;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
+use Whity\Http\ListQuery;
 
 /**
  * Tenant-scoped, RBAC-gated CRUD for tags (WC-621) — the individual tags that
@@ -45,6 +46,33 @@ final class TagsApiHandler
         $this->auditLogger = $auditLogger;
     }
 
+    /**
+     * GET /api/tags — the tenant's tags, sortable and searchable, optionally
+     * narrowed to one group.
+     *
+     * PAGINATION IS OPT-IN HERE, AND THAT IS A DECISION (#1102). This endpoint
+     * returned EVERY tag before it adopted {@see ListQuery}, and the admin table
+     * is not its only reader: `web/components/taxonomy/tag-picker.tsx` fetches
+     * it whole to populate a picker, and the tag-group record screen fetches
+     * `?group_id=N` to show a group's tags. Paginating it unconditionally would
+     * cut those to twenty-five with nothing raising an error — the picker would
+     * simply stop offering most of the tenant's tags, which reads as missing
+     * data rather than as a truncated response. The desktop and mobile clients
+     * that also read it are not updated in this repository, so they could not be
+     * fixed in the same change.
+     *
+     * So: a caller that sends `page` or `per_page` gets one page and a
+     * `pagination` envelope; a caller that sends neither gets what it gets
+     * today — every row, and no `pagination` key. The choice is
+     * {@see ListQuery::fromPath()}'s default rather than something this handler
+     * computes.
+     *
+     * `sort`, `dir` and `q` apply either way, which is the actual fix: the admin
+     * table can stop sorting and filtering client-side over a fetched slice
+     * without any client being forced to learn paging first. The `group_id`
+     * filter is unchanged and composes with all of it — including the count, so
+     * a filtered page never reports an unfiltered total.
+     */
     public function list(Request $request): Response
     {
         $auth = $this->authorize($request, CorePermissions::TAGS_READ);
@@ -53,16 +81,26 @@ final class TagsApiHandler
         }
         [$tenantId] = $auth;
 
-        $query = self::queryParams($request);
+        $params = self::queryParams($request);
         $groupId = null;
-        if (isset($query['group_id']) && $query['group_id'] !== '') {
-            if (!ctype_digit($query['group_id'])) {
+        if (isset($params['group_id']) && $params['group_id'] !== '') {
+            if (!ctype_digit($params['group_id'])) {
                 return Response::error('group_id must be a positive integer', 422);
             }
-            $groupId = (int) $query['group_id'];
+            $groupId = (int) $params['group_id'];
         }
 
-        return Response::json(['data' => $this->tags->listForTenant($tenantId, $groupId)]);
+        $query = ListQuery::fromPath($request->getPath(), TagRepository::listSpec());
+        $rows = $this->tags->listForTenant($tenantId, $groupId, $query);
+
+        if (!$query->paginated) {
+            return Response::json(['data' => $rows]);
+        }
+
+        return Response::json([
+            'data' => $rows,
+            'pagination' => $query->meta($this->tags->countForTenant($tenantId, $groupId, $query)),
+        ]);
     }
 
     /**
