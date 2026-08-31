@@ -146,6 +146,12 @@ const RECORD_LOCKED_SECTIONS = {
   permissions: { state: 'read-only' as const, denial: RECORD_DENIAL },
 };
 
+/**
+ * `listRoles` answers a PAGE since #1102 — the rows plus the full count — so a
+ * fake that resolved a bare array would no longer satisfy the adapter.
+ */
+const rolesPage = (roles: Role[]) => ({ roles, total: roles.length, totalPages: 1 });
+
 /** English-fallback translator: returns the caller-supplied source string. */
 const t = (key: string, fallback?: string) => fallback ?? key;
 /** The caller holds every capability, so only tenancy differs between cases. */
@@ -153,7 +159,7 @@ const can = () => true;
 
 function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
   return {
-    listRoles: jest.fn().mockResolvedValue([]),
+    listRoles: jest.fn().mockResolvedValue(rolesPage([])),
     getRole: jest
       .fn()
       .mockResolvedValue({ ...OWNED_ROLE, permissions: [], sections: EDITABLE_SECTIONS }),
@@ -186,7 +192,7 @@ async function openRowMenu(user: ReturnType<typeof userEvent.setup>, roleName: s
 describe('RolesScreen marks GLOBAL rows in the list (#886)', () => {
   it('badges a global row and leaves a tenant-owned row unmarked', async () => {
     const adapter = fakeAdapter({
-      listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_TENANT, OWNED_ROLE]),
+      listRoles: jest.fn().mockResolvedValue(rolesPage([GLOBAL_ROLE_FOR_TENANT, OWNED_ROLE])),
     });
 
     render(<RolesScreen adapter={adapter} can={can} t={t} onOpenRecord={jest.fn()} />);
@@ -208,7 +214,7 @@ describe('RolesScreen marks GLOBAL rows in the list (#886)', () => {
    */
   it('still badges the global row for a tenant-0 operator, for whom every role is manageable', async () => {
     const adapter = fakeAdapter({
-      listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_OPERATOR, OWNED_ROLE]),
+      listRoles: jest.fn().mockResolvedValue(rolesPage([GLOBAL_ROLE_FOR_OPERATOR, OWNED_ROLE])),
     });
 
     render(<RolesScreen adapter={adapter} can={can} t={t} onOpenRecord={jest.fn()} />);
@@ -224,7 +230,7 @@ describe('RolesScreen marks GLOBAL rows in the list (#886)', () => {
   it('keeps Edit/Delete gated on manageability, not on globality', async () => {
     const user = userEvent.setup();
     const adapter = fakeAdapter({
-      listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_OPERATOR]),
+      listRoles: jest.fn().mockResolvedValue(rolesPage([GLOBAL_ROLE_FOR_OPERATOR])),
     });
 
     render(<RolesScreen adapter={adapter} can={can} t={t} onOpenRecord={jest.fn()} />);
@@ -251,7 +257,7 @@ describe('The deployment-wide edit announces itself (#886)', () => {
   it('warns in the delete modal too, since that half is irreversible', async () => {
     const user = userEvent.setup();
     const adapter = fakeAdapter({
-      listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE_FOR_OPERATOR]),
+      listRoles: jest.fn().mockResolvedValue(rolesPage([GLOBAL_ROLE_FOR_OPERATOR])),
     });
 
     render(<RolesScreen adapter={adapter} can={can} t={t} onOpenRecord={jest.fn()} />);

@@ -890,3 +890,194 @@ export function DataTable<TData>({
     </div>
   )
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * The CALLER's half of server mode
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * One list request's page, sort and search — the client mirror of the server's
+ * `ListQuery` (`src/Http/ListQuery.php`).
+ *
+ * `sort`/`dir` and `q` are OPTIONAL, and their absence is meaningful rather than
+ * a default nobody filled in. Sending `sort=` with nothing in it, or `dir=asc`
+ * with no column, would have the endpoint order by something the UI invented;
+ * leaving them out is how a caller says "use your own default order", which is
+ * the only honest thing to say when no column is chosen.
+ */
+export interface DataTableQueryRequest {
+  /** 1-based, the way the endpoints count pages. */
+  page: number
+  perPage: number
+  /** The ENDPOINT's sort key (not the column id) — absent when none is chosen. */
+  sort?: string
+  /** Absent exactly when `sort` is. */
+  dir?: "asc" | "desc"
+  /** Absent when there is nothing to search for. */
+  q?: string
+}
+
+/**
+ * A {@link DataTableQueryRequest} as a query string, no leading `?`.
+ *
+ * Written here rather than at each screen so the "absent means absent" rule
+ * above is applied once: a helper that always set `sort` and `dir` would undo
+ * the whole point of making them optional.
+ */
+export function dataTableQueryString(request: DataTableQueryRequest): string {
+  const params = new URLSearchParams()
+  params.set("page", String(request.page))
+  params.set("per_page", String(request.perPage))
+  if (request.sort !== undefined && request.sort !== "") {
+    params.set("sort", request.sort)
+    params.set("dir", request.dir ?? "asc")
+  }
+  if (request.q !== undefined && request.q !== "") {
+    params.set("q", request.q)
+  }
+  return params.toString()
+}
+
+/** Rows per page for a server-driven admin list, matching the API's own default. */
+export const DEFAULT_DATA_TABLE_PER_PAGE = 25
+
+export interface UseDataTableQueryOptions {
+  /** Rows per request. Defaults to {@link DEFAULT_DATA_TABLE_PER_PAGE}. */
+  perPage?: number
+  /**
+   * The COLUMN ID the table starts sorted by. Omit — the default — to start
+   * with no column chosen, so the first request carries no `sort` and the
+   * reader gets the endpoint's own default ordering. Naming one here just to
+   * restate that default would be a claim the UI cannot keep if the endpoint's
+   * default ever moves.
+   */
+  initialSortKey?: string | null
+  initialDirection?: "asc" | "desc"
+  /**
+   * Column id → the endpoint's `sort` key, for the columns whose names differ.
+   * Identity for anything absent, which is why this holds the RENAMES only.
+   *
+   * The two vocabularies are genuinely separate. A column id is whatever the
+   * screen called it (`accountStatus`, `createdAt`, `ruleLabel`); the sort key
+   * is whatever that endpoint's `ListSpec` declared (`status`, `created`,
+   * `rule`). Getting it wrong is an error nowhere: `ListQuery` reads an unknown
+   * key as "no sort was asked for" and falls back to the endpoint's default, so
+   * the column would look sortable, respond to clicks, and quietly reorder
+   * nothing. Only mark a column `enableSorting` when that endpoint's spec
+   * actually offers the key it maps to.
+   */
+  sortKeys?: Record<string, string>
+  /** Forwarded to {@link DataTableServerSearch.debounceMs}. */
+  searchDebounceMs?: number
+}
+
+/**
+ * The page/sort/search state of ONE server-driven table, plus the three props
+ * {@link DataTable} needs to render it.
+ */
+export interface DataTableQuery {
+  /** What to ask the endpoint for. Thread it through EVERY request. */
+  request: DataTableQueryRequest
+  /** 1-based current page, for a caller that needs it outside `request`. */
+  page: number
+  setPage: (page: number) => void
+  /** Hand straight to `<DataTable sorting={…}>`. */
+  sorting: DataTableServerSorting
+  /** Hand straight to `<DataTable search={…}>`. */
+  search: DataTableServerSearch
+  /** Build `<DataTable pagination={…}>` once the response's totals are known. */
+  pagination: (meta: { total: number; totalPages: number }) => DataTableServerPagination
+}
+
+/**
+ * Hold a server-driven table's page, sort and search in one place.
+ *
+ * WHY A HOOK RATHER THAN THREE `useState` CALLS PER SCREEN. Changing the sort or
+ * the search term invalidates the current page offset, and resetting to page 1
+ * is the CALLER's job because the caller owns the pagination state (see
+ * {@link DataTableServerSorting.onSortingChange}). Written out per screen that
+ * reset is one line every screen has to remember, and nothing notices its
+ * absence until somebody on page 7 searches for a term with three matches and
+ * gets an empty table with nothing on screen explaining it. Here it is written
+ * once and cannot be forgotten.
+ *
+ * It also owns the rule that is easiest to get subtly wrong: a `sortKey` of null
+ * — the third click of asc → desc → none — must send NO `sort` and NO `dir`, so
+ * the endpoint applies its own default ordering rather than one this component
+ * made up.
+ *
+ * Debouncing is NOT here: {@link DataTableServerSearch} already debounces the
+ * input, and a second timer on top would make the table lag a keystroke behind
+ * for no benefit at all.
+ *
+ * ```tsx
+ * const query = useDataTableQuery({ sortKeys: { accountStatus: 'status' } })
+ * const queryString = dataTableQueryString(query.request)
+ * const { data } = useFetch(() => fetchUsers(queryString), [queryString])
+ * <DataTable
+ *   sorting={query.sorting}
+ *   search={query.search}
+ *   pagination={query.pagination({ total, totalPages })}
+ * />
+ * ```
+ */
+export function useDataTableQuery({
+  perPage: initialPerPage = DEFAULT_DATA_TABLE_PER_PAGE,
+  initialSortKey = null,
+  initialDirection = "asc",
+  sortKeys,
+  searchDebounceMs,
+}: UseDataTableQueryOptions = {}): DataTableQuery {
+  const [page, setPage] = React.useState(1)
+  const [perPage, setPerPage] = React.useState(initialPerPage)
+  const [sortKey, setSortKey] = React.useState<string | null>(initialSortKey)
+  const [direction, setDirection] = React.useState<"asc" | "desc">(initialDirection)
+  const [search, setSearch] = React.useState("")
+
+  const endpointSort = sortKey === null ? undefined : (sortKeys?.[sortKey] ?? sortKey)
+
+  const request: DataTableQueryRequest = {
+    page,
+    perPage,
+    ...(endpointSort === undefined ? {} : { sort: endpointSort, dir: direction }),
+    ...(search === "" ? {} : { q: search }),
+  }
+
+  return {
+    request,
+    page,
+    setPage,
+    sorting: {
+      sortKey,
+      direction,
+      onSortingChange: (nextSortKey, nextDirection) => {
+        setSortKey(nextSortKey)
+        setDirection(nextDirection)
+        // The reset this hook exists for. Page 7 of the old ordering is not
+        // page 7 of the new one — it is an arbitrary window into a different
+        // list.
+        setPage(1)
+      },
+    },
+    search: {
+      value: search,
+      debounceMs: searchDebounceMs,
+      onSearchChange: (next) => {
+        setSearch(next)
+        // Same reason, more visibly: a search that narrows the list to three
+        // rows has no page 7 at all, so staying there renders an empty table.
+        setPage(1)
+      },
+    },
+    pagination: ({ total, totalPages }) => ({
+      pageIndex: page - 1,
+      pageSize: perPage,
+      pageCount: totalPages,
+      total,
+      onPaginationChange: (nextPageIndex, nextPageSize) => {
+        setPage(nextPageIndex + 1)
+        setPerPage(nextPageSize)
+      },
+    }),
+  }
+}
