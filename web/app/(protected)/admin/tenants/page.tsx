@@ -50,12 +50,16 @@ export default function TenantsPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
 
-  // The backend supports page/per_page but not sort/filter query params, so
-  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
-  // the backend's own page-size ceiling (100) rather than its default fixes
-  // the previous silent page-1-only truncation for the common case. Tenants
-  // beyond 100 rows are still capped; that's a pre-existing limit, just moved
-  // further out.
+  // Sort/filter/pagination all still run CLIENT-side over a single fetch —
+  // fetching the backend's own page-size ceiling (100) rather than its default
+  // fixes the previous silent page-1-only truncation for the common case, and
+  // tenants beyond 100 rows remain capped.
+  //
+  // #1102: the CAP is now the only thing left in the way. `GET /api/v1/tenants`
+  // accepts `sort`/`dir` (name, slug, userCount, createdAt) and `q` (name and
+  // slug) and reports a search-filtered total, so this screen can move to
+  // server-side sort and search whenever the table is wired for it. Until then
+  // the hundredth workspace is still the last one a reader can reach.
   const { data, loading: isLoading, error, refetch: fetchTenants } = useFetch(async () => {
     const response = await apiClient('/api/v1/tenants?per_page=100');
     if (!response.ok) {

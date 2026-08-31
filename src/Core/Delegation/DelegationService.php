@@ -8,6 +8,7 @@ use Whity\Api\Exception\PermissionNotDelegableException;
 use Whity\Auth\DelegatedPermissionResolver;
 use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Http\ListQuery;
 
 /**
  * Delegation domain service (WC-34).
@@ -148,11 +149,13 @@ class DelegationService implements DelegatedPermissionResolver
     /**
      * Count delegations matching the given filters.
      *
-     * @param int         $tenantId
-     * @param string|null $granteeType
-     * @param int|null    $granteeId
-     * @param int|null    $grantorUserId
-     * @param bool        $includeRevoked
+     * @param int            $tenantId
+     * @param string|null    $granteeType
+     * @param int|null       $granteeId
+     * @param int|null       $grantorUserId
+     * @param bool           $includeRevoked
+     * @param ListQuery|null $listQuery The caller's search, which must narrow this
+     *        count exactly as it narrows {@see self::list()}.
      * @return int Total matching rows.
      */
     public function count(
@@ -160,25 +163,28 @@ class DelegationService implements DelegatedPermissionResolver
         ?string $granteeType = null,
         ?int $granteeId = null,
         ?int $grantorUserId = null,
-        bool $includeRevoked = false
+        bool $includeRevoked = false,
+        ?ListQuery $listQuery = null
     ): int {
         return $this->repository->count(
             $tenantId,
             $granteeType,
             $granteeId,
             $grantorUserId,
-            $includeRevoked
+            $includeRevoked,
+            $listQuery
         );
     }
 
     /**
-     * @param int         $tenantId
-     * @param string|null $granteeType
-     * @param int|null    $granteeId
-     * @param int|null    $grantorUserId
-     * @param bool        $includeRevoked
-     * @param int|null    $limit
-     * @param int         $offset
+     * @param int            $tenantId
+     * @param string|null    $granteeType
+     * @param int|null       $granteeId
+     * @param int|null       $grantorUserId
+     * @param bool           $includeRevoked
+     * @param int|null       $limit
+     * @param int            $offset
+     * @param ListQuery|null $listQuery The caller's sort and search.
      * @return array<int, array<string, mixed>> Normalised delegation rows.
      */
     public function list(
@@ -188,7 +194,8 @@ class DelegationService implements DelegatedPermissionResolver
         ?int $grantorUserId = null,
         bool $includeRevoked = false,
         ?int $limit = null,
-        int $offset = 0
+        int $offset = 0,
+        ?ListQuery $listQuery = null
     ): array {
         return $this->repository->list(
             $tenantId,
@@ -197,7 +204,8 @@ class DelegationService implements DelegatedPermissionResolver
             $grantorUserId,
             $includeRevoked,
             $limit,
-            $offset
+            $offset,
+            $listQuery
         );
     }
 
