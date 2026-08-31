@@ -711,37 +711,125 @@ export function DataTable<TData>({
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <TableHead
-                      key={header.id}
-                      style={
-                        enableColumnResizing ? { width: header.getSize(), position: "relative" } : undefined
-                      }
-                      className={cn(
-                        header.column.getCanSort() && "cursor-pointer select-none hover:bg-muted/60"
-                      )}
-                      onClick={header.column.getToggleSortingHandler()}
-                    >
-                      <div className="flex items-center gap-1">
+                  {headerGroup.headers.map((header) => {
+                    const canSort = header.column.getCanSort()
+                    const sorted = header.column.getIsSorted()
+                    const content = (
+                      <>
                         {flexRender(header.column.columnDef.header, header.getContext())}
-                        {header.column.getCanSort() &&
-                          (header.column.getIsSorted() === "asc" ? (
+                        {canSort &&
+                          (sorted === "asc" ? (
                             <IconChevronUp className="size-3.5" />
-                          ) : header.column.getIsSorted() === "desc" ? (
+                          ) : sorted === "desc" ? (
                             <IconChevronDown className="size-3.5" />
                           ) : (
                             <IconArrowsSort className="size-3.5 opacity-40" />
                           ))}
-                      </div>
-                      {enableColumnResizing && header.column.getCanResize() && (
-                        <div
-                          onMouseDown={header.getResizeHandler()}
-                          onTouchStart={header.getResizeHandler()}
-                          className="absolute end-0 top-0 h-full w-1 cursor-col-resize touch-none select-none bg-border/0 hover:bg-ring/50"
-                        />
-                      )}
-                    </TableHead>
-                  ))}
+                      </>
+                    )
+                    return (
+                      <TableHead
+                        key={header.id}
+                        style={
+                          enableColumnResizing ? { width: header.getSize(), position: "relative" } : undefined
+                        }
+                        className={cn(
+                          canSort && "cursor-pointer select-none hover:bg-muted/60"
+                        )}
+                        /**
+                         * WHICH COLUMN IS SORTED, SAID OUT LOUD.
+                         *
+                         * Read straight off `getIsSorted()`, which is fed by
+                         * `state.sorting` — and `sortingState` above resolves that
+                         * from `serverSorting` when the caller owns the sort and from
+                         * `clientSorting` when this component does. One expression
+                         * therefore covers BOTH modes; deriving it from
+                         * `clientSorting` instead would have left every
+                         * server-sorted table (the ones where the header is the only
+                         * route to rows on another page) announcing "not sorted"
+                         * while visibly sorted.
+                         *
+                         * Only on columns that can sort. `aria-sort="none"` on a
+                         * fixed column would advertise a control that is not there.
+                         */
+                        aria-sort={
+                          canSort
+                            ? sorted === "asc"
+                              ? "ascending"
+                              : sorted === "desc"
+                                ? "descending"
+                                : "none"
+                            : undefined
+                        }
+                        /**
+                         * THE HANDLER STAYS ON THE CELL — the button below has none,
+                         * deliberately.
+                         *
+                         * A `<button>` activated by Enter or Space dispatches a real
+                         * `click` that bubbles, so keyboard activation lands on this
+                         * exact handler and does exactly what a mouse click does,
+                         * third-click-back-to-unsorted included. Duplicating the
+                         * handler onto the button instead would fire it twice for
+                         * one mouse click (button, then bubbled to the cell).
+                         *
+                         * Keeping it here also keeps the WHOLE CELL a click target
+                         * rather than shrinking it to the label, which is both the
+                         * behaviour 26 callers already have and what every existing
+                         * test that clicks `getByRole('columnheader')` exercises.
+                         */
+                        onClick={header.column.getToggleSortingHandler()}
+                      >
+                        {canSort ? (
+                          /**
+                           * The focusable, activatable control the cell itself could
+                           * never be (#1129). A `th` takes no keyboard focus and has
+                           * no activation behaviour, so before this a keyboard user
+                           * could not sort ANY admin table at all.
+                           *
+                           * Inside the cell rather than instead of it, matching the
+                           * W3C APG sortable-table pattern: the `th` keeps its
+                           * `columnheader` role and carries `aria-sort`, the button
+                           * carries focus and activation.
+                           *
+                           * NO `aria-label`. It is tempting to name this "Sort by
+                           * Email", but a `columnheader`'s name is computed from its
+                           * contents and an `aria-label` on a descendant REPLACES
+                           * that descendant's contribution — so the cell would stop
+                           * being named "Email" and every
+                           * `getByRole('columnheader', { name })` selector across the
+                           * suites would be asserting against a name no user asked
+                           * for. `aria-sort` already carries the state; the role
+                           * carries the affordance.
+                           *
+                           * `cursor-pointer` is not redundant: Tailwind v4's preflight
+                           * resets buttons to `cursor: default`, which would undo the
+                           * pointer cursor the cell sets.
+                           *
+                           * RTL: `flex` + `gap` + `text-start` are direction-relative,
+                           * so the label leads and the chevron trails on whichever
+                           * side "trailing" means, and the symmetric `-mx-1 px-1`
+                           * has no side to get wrong. The three icons are vertical
+                           * arrows — nothing to mirror.
+                           */
+                          <button
+                            type="button"
+                            className="-mx-1 flex cursor-pointer items-center gap-1 rounded-sm px-1 text-start font-medium tracking-wider text-inherit uppercase outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          >
+                            {content}
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1">{content}</div>
+                        )}
+                        {enableColumnResizing && header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            className="absolute end-0 top-0 h-full w-1 cursor-col-resize touch-none select-none bg-border/0 hover:bg-ring/50"
+                          />
+                        )}
+                      </TableHead>
+                    )
+                  })}
                 </TableRow>
               ))}
               {filterableColumns.length > 0 && (
