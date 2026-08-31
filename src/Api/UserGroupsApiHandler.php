@@ -22,7 +22,7 @@ use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
-use Whity\Http\PaginationParams;
+use Whity\Http\ListQuery;
 use Whity\Sdk\Routing\ResolvedRecipient;
 
 /**
@@ -151,6 +151,16 @@ final class UserGroupsApiHandler
      * Paginated, because a tenant accumulates groups without bound and a picker
      * that fetches all of them is a picker that stops loading at some point
      * nobody predicted.
+     *
+     * SORTED AND SEARCHED SERVER-SIDE (#1102) against
+     * {@see UserGroupRepository::listSpec()} — `sort`, `dir` and `q`. The
+     * envelope is the same `{data, pagination}` it has always been, so a client
+     * that sends none of them cannot tell this endpoint changed.
+     *
+     * ONE ListQuery, PASSED TO BOTH the count and the page, so the total
+     * describes the rows the search actually returns. Handing the count a
+     * different filter — or none — is how a list ends up reporting nine hundred
+     * matches and paging through eleven.
      */
     public function index(Request $request): Response
     {
@@ -160,13 +170,13 @@ final class UserGroupsApiHandler
         }
         [$tenantId] = $ctx;
 
-        $p = PaginationParams::fromPath($request->getPath());
-        $total = $this->groups->countForTenant($tenantId);
-        $rows = $this->groups->listForTenant($tenantId, $p->perPage, $p->offset);
+        $query = ListQuery::fromPath($request->getPath(), UserGroupRepository::listSpec());
+        $total = $this->groups->countForTenant($tenantId, $query);
+        $rows = $this->groups->listForTenant($tenantId, $query);
 
         return Response::json([
             'data' => array_map(UserGroupPresenter::group(...), $rows),
-            'pagination' => $p->meta($total),
+            'pagination' => $query->meta($total),
         ]);
     }
 
