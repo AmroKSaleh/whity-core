@@ -636,8 +636,13 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'lock',
         'group' => 'access',
         'order' => 2,
-        // WC-175 (#191): mirrors GET /api/roles, gated on the 'admin' ROLE.
-        'requiredRole' => 'admin',
+        // Mirrors GET /api/roles, which #988 moved from the 'admin' ROLE NAME to
+        // the `roles:read` SLUG. This item was left behind and kept asserting the
+        // role, so an instance whose administrative role has been renamed — the
+        // whole point of a white-labelled platform — held `roles:read`, could use
+        // the Roles screen, and never saw the link to it. A nav item that mirrors
+        // a route has to mirror the gate, not the gate the route used to have.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::ROLES_READ,
     ];
     $items[] = [
         'id' => 'ous',
