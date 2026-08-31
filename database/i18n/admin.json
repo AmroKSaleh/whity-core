@@ -1866,7 +1866,7 @@
         "userGroups.delete.success": "Group deleted.",
         "userGroups.delete.title": "Delete “{name}”?",
         "userGroups.description": "A group is a named RULE — \"everyone holding the instructor role\" — not a saved list of people. Who it contains is worked out afresh every time it is used, so a group keeps up with the organisation on its own.",
-        "userGroups.error.partial": "Only some user groups could be loaded, so this list is not complete. Reload to try again.",
+        "userGroups.error.load": "The user groups could not be loaded.",
         "userGroups.error.rules": "The rule kinds could not be loaded.",
         "userGroups.form.blocked.config": "The rule still needs its setting — without it the group would name nobody.",
         "userGroups.form.blocked.kind": "A group needs a rule that says who is in it.",

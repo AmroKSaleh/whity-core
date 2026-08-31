@@ -56,7 +56,12 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import { GROUPS_WRITE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
+import {
+  DataTable,
+  dataTableQueryString,
+  useDataTableQuery,
+  type DataTableColumn,
+} from '@/components/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
@@ -133,20 +138,47 @@ export default function UserGroupsPage() {
   const t = useTranslation('admin');
   const canWrite = hasPermission(GROUPS_WRITE);
 
+  /**
+   * Page, sort and search belong to the SERVER (#1102).
+   *
+   * This screen used to walk every page of `/user-groups` with `fetchAllPages`
+   * and hand the whole set to the table, which then sorted, filtered and paged
+   * it in the browser. That was honest about completeness — a partial walk threw
+   * rather than rendering a short list as whole — but it paid for it with one
+   * request per hundred groups on every visit, and the "complete" it was
+   * defending only ever mattered because the sorting and searching were local.
+   * With the server doing all three, one request answers the question actually
+   * on screen, and the row count in the footer is the server's own.
+   *
+   * `ruleLabel` → `rule` is the one rename: the column renders a LOCALISED label
+   * resolved from `/api/v1/group-rules`, while the endpoint can only order by
+   * the `rule_kind` slug behind it — which still groups every row that renders
+   * the same label together. `name` needs no entry, and `description` is not
+   * sortable at all because `UserGroupRepository::listSpec()` offers no key for
+   * it; it IS searchable, which is why the search box finds a group by its
+   * description even though the header will not sort by it.
+   */
+  const query = useDataTableQuery({ sortKeys: { ruleLabel: 'rule' } });
+  const queryString = dataTableQueryString(query.request);
+
   const groups = useFetch(async () => {
-    const all = await fetchAllPages<UserGroup>(apiClient, '/api/v1/user-groups');
-    if (!all.complete) {
-      // A short list rendered as though it were whole is how somebody concludes
-      // a group does not exist and makes a second one meaning the same thing.
+    const response = await apiClient(`/api/v1/user-groups?${queryString}`);
+    if (!response.ok) {
       throw new Error(
-        t(
-          'userGroups.error.partial',
-          'Only some user groups could be loaded, so this list is not complete. Reload to try again.'
-        )
+        t('userGroups.error.load', 'The user groups could not be loaded.')
       );
     }
-    return all.items;
-  }, [apiClient]);
+    const body = (await response.json()) as {
+      data: UserGroup[];
+      pagination?: { total: number; totalPages: number };
+    };
+    const items = body.data ?? [];
+    return {
+      items,
+      total: body.pagination?.total ?? items.length,
+      totalPages: body.pagination?.totalPages ?? 1,
+    };
+  }, [apiClient, queryString]);
 
   /** What a group's definition may name. NOT the route-step list — see the docblock. */
   const rules = useFetch(async () => {
@@ -192,7 +224,7 @@ export default function UserGroupsPage() {
     [rules.data]
   );
 
-  const rows = (groups.data ?? []).map((group) => ({
+  const rows = (groups.data?.items ?? []).map((group) => ({
     ...group,
     ruleLabel: ruleLabel(group.rule_kind),
   }));
@@ -200,10 +232,14 @@ export default function UserGroupsPage() {
 
   const columns: DataTableColumn<Row>[] = [
     {
+      // The per-column filter box is gone, and its absence is the same fix as
+      // the rest of this change: a column filter is applied by the table to the
+      // rows it holds, which is now ONE page, so it would hide matches on the
+      // page and leave every other match where it was. The search box above the
+      // table asks the server, across name and description both.
       accessorKey: 'name',
       header: t('userGroups.table.name', 'Name'),
       enableSorting: true,
-      enableColumnFilter: true,
       cell: (group) => <span className="font-medium">{group.name}</span>,
     },
     {
@@ -271,10 +307,19 @@ export default function UserGroupsPage() {
           data={rows}
           getRowId={(group) => String(group.id)}
           rowActions={canWrite ? rowActions : undefined}
-          isLoading={groups.loading}
-          enableGlobalFilter
+          // The skeleton is for the FIRST load only. DataTable's loading branch
+          // replaces the whole table, search box included, so showing it on
+          // every request would unmount the search input mid-word and take the
+          // caret with it. `data` is null until the first response lands and
+          // non-null forever after.
+          isLoading={groups.loading && groups.data === null}
           globalFilterPlaceholder={t('userGroups.searchPlaceholder', 'Search user groups…')}
-          pagination={{ pageSize: 10 }}
+          sorting={query.sorting}
+          search={query.search}
+          pagination={query.pagination({
+            total: groups.data?.total ?? 0,
+            totalPages: groups.data?.totalPages ?? 1,
+          })}
         />
       )}
 

@@ -10,7 +10,12 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { USERS_WRITE, USERS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
+import {
+  DataTable,
+  dataTableQueryString,
+  useDataTableQuery,
+  type DataTableColumn,
+} from '@/components/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import {
@@ -33,6 +38,12 @@ import { MembershipsModal } from './memberships-modal';
  * the published `GET /api/users` contract instead of hand-mirroring it.
  */
 export type User = components['schemas']['User'];
+
+/** `GET /api/v1/users` — the envelope every core list endpoint answers with. */
+interface UsersResponse {
+  data: User[];
+  pagination?: { total: number; totalPages: number };
+}
 
 /**
  * Whether the list's Edit action opens the record page (#882) or the edit modal.
@@ -59,22 +70,62 @@ export default function UsersPage() {
   const [isMembershipsModalOpen, setIsMembershipsModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
-  // The backend supports page/per_page but not sort/filter query params, so
-  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
-  // the backend's own page-size ceiling (100) rather than its 25-row default
-  // fixes the previous silent page-1-only truncation for the common case.
-  // Tenants with >100 users are still capped until the backend grows real
-  // search/sort support; that's a pre-existing limit, just moved further out.
-  const { data, loading: isLoading, error, refetch: fetchUsers } = useFetch(async () => {
-    const response = await apiClient('/api/v1/users?per_page=100');
+  /**
+   * Page, sort and search all belong to the SERVER now (#1102).
+   *
+   * Until this, the screen fetched `per_page=100` and sorted, filtered and
+   * paginated that slice in the browser — so on a tenant with 150 people, 50 of
+   * them were simply not on this screen and nothing said so. The table could
+   * not have told anybody either: everything it knew was the hundred rows it
+   * had been handed.
+   *
+   * `sortKeys` maps THIS SCREEN's column ids onto the keys
+   * `UsersApiHandler::listSpec()` declares — `name`, `email`, `role`, `status`,
+   * `created`, plus `tenant` for the system tenant. A column whose id already
+   * is the key needs no entry. Only those columns are marked `enableSorting`
+   * below: an unknown key is not an error server-side, it silently falls back
+   * to the endpoint's default order, so a sortable-looking header for a column
+   * the endpoint does not know would click, animate and reorder nothing.
+   */
+  const query = useDataTableQuery({
+    sortKeys: { accountStatus: 'status', createdAt: 'created' },
+  });
+  const queryString = dataTableQueryString(query.request);
+
+  // `queryString` is the whole dependency, which is also what makes `fetchUsers`
+  // safe to call after a create/edit/delete: `refetch` re-runs THIS closure, so
+  // the refetch carries the page, sort and term the operator was looking at
+  // rather than dropping them back to an unfiltered page 1.
+  const { data, loading, error, refetch: fetchUsers } = useFetch(async () => {
+    const response = await apiClient(`/api/v1/users?${queryString}`);
     if (!response.ok) {
       throw new Error(t('users.error.load', 'Failed to fetch users'));
     }
-    const body: { data: User[] } = await response.json();
-    return body.data;
-  }, []);
+    const body: UsersResponse = await response.json();
+    const rows = body.data ?? [];
+    return {
+      rows,
+      // An endpoint that answered without an envelope would otherwise report
+      // zero rows across one page while rendering rows — read what is there,
+      // fall back to what the page itself proves.
+      total: body.pagination?.total ?? rows.length,
+      totalPages: body.pagination?.totalPages ?? 1,
+    };
+  }, [queryString]);
 
-  const users = data ?? [];
+  const users = data?.rows ?? [];
+
+  /**
+   * The skeleton is for the FIRST load only.
+   *
+   * DataTable's loading branch replaces the whole table — search box included —
+   * so showing it on every request would unmount the search input mid-word:
+   * each debounced keystroke would blow away the draft and the caret. `data`
+   * stays null until the first response lands and is non-null forever after,
+   * which is exactly "have we ever had something to show". Later requests leave
+   * the previous page on screen until the new one arrives.
+   */
+  const isLoading = loading && data === null;
 
   useEffect(() => {
     if (error) {
@@ -147,12 +198,18 @@ export default function UsersPage() {
     }
   };
 
+  // The per-column filter boxes are gone from `name` and `email`, and their
+  // absence is the same fix as the rest of this change. A column filter is
+  // applied by the table to the rows it holds, which is now ONE page: typing
+  // "sara" into it would hide four of the twenty-five on screen and leave the
+  // Sara on page 3 exactly where she was. The search box above the table is the
+  // replacement, and it asks the server — which matches on email and role name
+  // (`searchable` in the same ListSpec).
   const columns: DataTableColumn<User>[] = [
     {
       accessorKey: 'name',
       header: t('users.table.name', 'Name'),
       enableSorting: true,
-      enableColumnFilter: true,
       // #882: the row's own name opens the record — the affordance a list gets
       // once its records have addresses. Same treatment the roles list gained.
       cell: (user) => (
@@ -169,9 +226,14 @@ export default function UsersPage() {
       accessorKey: 'email',
       header: t('users.table.email', 'Email'),
       enableSorting: true,
-      enableColumnFilter: true,
     },
     { accessorKey: 'role', header: t('users.table.role', 'Role'), enableSorting: true },
+    // NOT sortable, deliberately. `tenant` is in the spec's `sortable` map only
+    // when the caller is the system tenant — for anybody else every row holds
+    // the same tenant id, so the key would order nothing and the endpoint does
+    // not offer it. This screen does not know which caller it is serving, and a
+    // header that sorts for one operator and silently does nothing for the next
+    // is worse than one that never claimed to.
     { accessorKey: 'tenantId', header: t('users.table.tenantId', 'Tenant ID') },
     {
       accessorKey: 'accountStatus',
@@ -270,9 +332,13 @@ export default function UsersPage() {
         getRowId={(user) => String(user.id)}
         rowActions={rowActions}
         isLoading={isLoading}
-        enableGlobalFilter
         globalFilterPlaceholder={t('users.searchPlaceholder', 'Search users…')}
-        pagination={{ pageSize: 10 }}
+        sorting={query.sorting}
+        search={query.search}
+        pagination={query.pagination({
+          total: data?.total ?? 0,
+          totalPages: data?.totalPages ?? 1,
+        })}
       />
 
       {/*

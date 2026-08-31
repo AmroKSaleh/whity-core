@@ -19,8 +19,19 @@ export type {
   DataTableServerSorting,
   DataTableServerSearch,
   DataTableProps,
+  DataTableQuery,
+  DataTableQueryRequest,
+  UseDataTableQueryOptions,
 } from '@amroksaleh/ui/data-table';
-export { DATA_TABLE_SEARCH_DEBOUNCE_MS } from '@amroksaleh/ui/data-table';
+// Re-exported through this wrapper so a screen reaches the table and the state
+// that drives it from ONE import, rather than half from here and half from the
+// package the wrapper exists to hide.
+export {
+  DATA_TABLE_SEARCH_DEBOUNCE_MS,
+  DEFAULT_DATA_TABLE_PER_PAGE,
+  dataTableQueryString,
+  useDataTableQuery,
+} from '@amroksaleh/ui/data-table';
 
 export function DataTable<TData>(props: React.ComponentProps<typeof BaseDataTable<TData>>) {
   const t = useTranslation('common');

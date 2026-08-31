@@ -23,6 +23,8 @@ import type {
   RoleAssignmentsPage,
   RoleCreateInput,
   RoleInput,
+  RoleListPage,
+  RoleListQuery,
   RoleScope,
   RoleWithPermissions,
   RolesAdapter,
@@ -79,11 +81,41 @@ function withCreatedAt<T extends { createdAt?: string }>(row: T): T {
  * exists to make unnecessary.
  */
 function paginationTotal(body: unknown): number {
-  if (typeof body !== "object" || body === null || !("pagination" in body)) return 0
+  return paginationNumber(body, "total", 0)
+}
+
+/** One numeric field of the `pagination` envelope, or `fallback` when absent. */
+function paginationNumber(body: unknown, field: string, fallback: number): number {
+  if (typeof body !== "object" || body === null || !("pagination" in body)) return fallback
   const pagination = (body as { pagination: unknown }).pagination
-  if (typeof pagination !== "object" || pagination === null || !("total" in pagination)) return 0
-  const total = (pagination as { total: unknown }).total
-  return typeof total === "number" ? total : 0
+  if (typeof pagination !== "object" || pagination === null || !(field in pagination)) {
+    return fallback
+  }
+  const value = (pagination as Record<string, unknown>)[field]
+  return typeof value === "number" ? value : fallback
+}
+
+/**
+ * A {@link RoleListQuery} as a query string.
+ *
+ * `sort`/`dir` and `q` are written ONLY when present, which is the whole
+ * contract: `ListQuery` treats an unrecognised or empty `sort` as "no sort was
+ * asked for" and falls back to the endpoint's default ordering, so sending an
+ * empty one would have the screen present the endpoint's default as the sort
+ * the reader chose.
+ */
+function listQueryString(query: RoleListQuery): string {
+  const params = new URLSearchParams()
+  params.set("page", String(query.page))
+  params.set("per_page", String(query.perPage))
+  if (query.sort !== undefined && query.sort !== "") {
+    params.set("sort", query.sort)
+    params.set("dir", query.dir ?? "asc")
+  }
+  if (query.q !== undefined && query.q !== "") {
+    params.set("q", query.q)
+  }
+  return params.toString()
 }
 
 /**
@@ -120,15 +152,25 @@ function parsePermissionSlugs(body: unknown): string[] {
  */
 export function createRolesAdapter(transport: Transport): RolesAdapter {
   return {
-    async listRoles(): Promise<Role[]> {
-      // per_page=100: the backend has no sort/filter params, so we fetch its
-      // page-size ceiling and sort/filter/paginate client-side. >100 roles are
-      // silently capped (pre-existing limit).
-      const { status, body } = await transport.request("GET", "/api/v1/roles?per_page=100")
+    async listRoles(query: RoleListQuery): Promise<RoleListPage> {
+      // ONE page, ordered and searched by the server (#1102). It used to be
+      // `per_page=100` with the screen sorting and filtering that slice in the
+      // browser, which capped a tenant at a hundred roles and said nothing.
+      const { status, body } = await transport.request(
+        "GET",
+        `/api/v1/roles?${listQueryString(query)}`
+      )
       if (!isOk(status)) {
         throw new Error(serverMessage(body) || `Failed to fetch roles (${status})`)
       }
-      return (unwrapData<Role[]>(body) ?? []).map(withCreatedAt)
+      const roles = (unwrapData<Role[]>(body) ?? []).map(withCreatedAt)
+      return {
+        roles,
+        // `roles.length` is the PAGE size, never the answer — read the envelope
+        // and fall back only to what this page itself proves.
+        total: paginationNumber(body, "total", roles.length),
+        totalPages: paginationNumber(body, "totalPages", 1),
+      }
     },
 
     async getRole(id: number): Promise<RoleWithPermissions> {
