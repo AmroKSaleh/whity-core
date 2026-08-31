@@ -52,6 +52,34 @@ groups:
           summary: "whity-core {{ $labels.env }} health returns HTTP {{ $value }}"
           description: "GET /api/health on {{ $labels.instance }} has returned an unexpected status for >5m."
 
+  - name: whity-core-deployment
+    rules:
+      # #1049: the database is behind the code that is serving traffic.
+      #
+      # NOT an availability alert, and it must not be read as one: everything
+      # answers, /api/health is 200, and the app is wrong. The whity_build_drift
+      # module fails its probe when GET /api/build reports a non-zero (or
+      # unreadable) pending_migration_count — i.e. `migrate run` was not part of
+      # the deploy, or did not finish. The symptom, when it surfaces at all, is
+      # a 500 on the first request to a surface the update added.
+      #
+      # This is the alert that did not exist when this project's own staging sat
+      # at migration 100 under a checkout at 115 for weeks, discovered by hand.
+      # 10m rather than 2m: a deploy legitimately passes through this state for
+      # the seconds between `up -d` and `migrate run`.
+      - alert: WhitySchemaBehindCode
+        expr: probe_success{job="whity-build-drift"} == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "whity-core {{ $labels.env }} is running code its database has not been migrated for"
+          description: >-
+            GET /api/build on {{ $labels.instance }} has not reported
+            pending_migration_count=0 for >10m. Run `php public/index.php migrate run`
+            in the app container, then re-read /api/build. /api/health cannot see this:
+            it reports a version constant, not the schema state.
+
   - name: whity-core-latency
     rules:
       # Health-probe round trip slow — a coarse latency SLI until the app

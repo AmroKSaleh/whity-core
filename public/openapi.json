@@ -12,6 +12,57 @@
         }
     ],
     "paths": {
+        "/api/build": {
+            "get": {
+                "operationId": "get_api_build",
+                "summary": "Build identity of the running backend (the backend half of /web-build)",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The identity of the running process and the schema state it is in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BuildIdentityResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/health": {
             "get": {
                 "operationId": "get_api_health",
@@ -34074,6 +34125,64 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "BuildIdentityResponse": {
+                "type": "object",
+                "properties": {
+                    "commit": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": [
+                            "build",
+                            "checkout",
+                            "unknown"
+                        ]
+                    },
+                    "core_version": {
+                        "type": "string"
+                    },
+                    "built_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "booted_at": {
+                        "type": "string"
+                    },
+                    "uptime_seconds": {
+                        "type": "integer"
+                    },
+                    "checkout_commit": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "applied_migration_count": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "latest_applied_migration": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "pending_migration_count": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "commit",
+                    "source",
+                    "core_version",
+                    "built_at",
+                    "booted_at",
+                    "uptime_seconds",
+                    "checkout_commit",
+                    "applied_migration_count",
+                    "latest_applied_migration",
+                    "pending_migration_count"
                 ]
             },
             "CapabilityDenial": {

@@ -22,6 +22,47 @@ modules:
       fail_if_not_ssl: false          # set true once staging/prod are HTTPS-only
       preferred_ip_protocol: ip4
 
+  # #1049: DEPLOYMENT DRIFT, which the health module above cannot see.
+  #
+  # /api/health reports CoreVersion::VERSION — a constant in the SOURCE. It is
+  # identical across every commit between releases, so a backend running a
+  # three-week-old checkout probes exactly like one deployed this morning. Both
+  # halves of a half-applied update have now happened here under a green health
+  # probe: a database 15 migrations behind its own checkout, and workers still
+  # serving code that had been replaced on disk four days earlier.
+  #
+  # GET /api/build answers both. The SCHEMA half is expressible as a plain body
+  # match, so blackbox asserts it with no scripting: the probe FAILS when the
+  # running code expects migrations the database has not applied.
+  #
+  # `probe_success == 0` on this job therefore means "this deployment is not the
+  # deployment you think it is", NOT "the service is down" — WhityHealthProbeDown
+  # covers that from the other module. Keep them as separate jobs so the two
+  # alerts stay distinguishable.
+  #
+  # The COMMIT half — `commit` (frozen at worker boot) versus `checkout_commit`
+  # (read from disk now), whose inequality is a deploy that pulled and never
+  # restarted — needs the two values compared to each other, and blackbox's
+  # regexes are Go RE2, which has no backreferences. It cannot be written here.
+  # Compare them in a script/exec exporter, or in the deploy runbook
+  # (docs/wiki/Core-Update.md step 7), which is where the same check already
+  # sits for `/web-build` against `/api/health`.
+  whity_build_drift:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      fail_if_not_ssl: false          # set true once staging/prod are HTTPS-only
+      preferred_ip_protocol: ip4
+      fail_if_body_not_matches_regexp:
+        # Migrations the running code expects but the database has not applied.
+        # Null (rather than a number) also fails this, correctly: the endpoint
+        # reports null when it could not ask the database, and "could not tell"
+        # must never read as "nothing pending".
+        - '"pending_migration_count":0'
+
 # ── 2. Prometheus scrape jobs (prometheus.yml → scrape_configs) ─────────────
 # The relabel dance is the standard blackbox pattern: the target URL is carried
 # in __param_target, and the real scrape address is the blackbox_exporter. The
@@ -38,6 +79,33 @@ scrape_configs:
           env: staging
       - targets:
           - https://app.example.com/api/health        # <- your production URL
+        labels:
+          env: production
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115           # <- your blackbox_exporter addr
+
+  # #1049: the drift job. Separate from whity-health on purpose — its
+  # probe_success answers a different question ("is this the deployment you
+  # think it is?"), and folding the two together would make a stale schema and
+  # an unreachable service the same alert.
+  - job_name: whity-build-drift
+    metrics_path: /probe
+    params:
+      module: [whity_build_drift]
+    # Once per minute is generous: this changes only when somebody deploys.
+    scrape_interval: 60s
+    static_configs:
+      - targets:
+          - https://staging.example.com/api/build     # <- your staging URL
+        labels:
+          env: staging
+      - targets:
+          - https://app.example.com/api/build         # <- your production URL
         labels:
           env: production
     relabel_configs:

@@ -50,3 +50,10 @@ phpunit_full.log
 # Bytecode from the python CI helpers (scripts/ci-mutation-gate.py). Running one
 # locally leaves it behind, and a `git add -A` would otherwise commit it.
 __pycache__/
+
+# The backend's build identity (#1049), written by
+# scripts/write-build-identity.php at image-build time and read at boot by
+# BuildIdentity for GET /api/build. NEVER committed: a tracked copy would be a
+# constant that moves with the source whether or not the source was deployed,
+# which is the exact failure /api/build exists to detect.
+/build-identity.json

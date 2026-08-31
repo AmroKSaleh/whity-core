@@ -220,6 +220,7 @@ use Whity\Api\MeCapabilitiesApiHandler;
 use Whity\Api\PermittedActionsApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
+use Whity\Api\BuildApiHandler;
 use Whity\Api\OpenApiHandler;
 use Whity\Api\IdentityProvidersApiHandler;
 use Whity\Api\TenantEmailDomainApiHandler;
@@ -1112,7 +1113,10 @@ $kernel = new HttpKernel($router, $rbacMiddleware);
 // suite) is never throttled — operators tighten them per deployment.
 $rateLimitEnabled    = (($_ENV['RATE_LIMIT_ENABLED'] ?? '1') !== '0');
 $rateLimitStore      = new SharedStoreRateLimitStore(new DatabaseSharedStore($db->getPdo()));
-$rateLimitExemptPaths = ['/api/health', '/api/version', '/api/openapi.json'];
+// #1049: /api/build joins the infrastructure probes. A monitor that compares it
+// against /web-build on an interval is the intended consumer, and a throttled
+// 429 there is indistinguishable from the drift it is watching for.
+$rateLimitExemptPaths = ['/api/health', '/api/version', '/api/openapi.json', '/api/build'];
 
 $preAuthRateLimiter = new RateLimitMiddleware(
     $rateLimitStore,
@@ -1772,6 +1776,38 @@ $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'l
 // $bootTimestamp drives the reported worker uptime.
 $healthHandler = new HealthApiHandler($db, $bootTimestamp);
 $router->registerUnversioned('GET', '/api/health', [$healthHandler, 'handle']);
+
+// Build identity (#1049). The backend's equivalent of the web tier's
+// /web-build: WHICH CHECKOUT this worker is running, when it booted, and how
+// far the schema is behind it. /api/health cannot answer that — it reports
+// CoreVersion::VERSION, a constant in the source, which is identical across
+// every commit between releases and so moves with the code whether or not the
+// code was deployed. A backend four days behind and a database 15 migrations
+// behind its checkout were both found by hand, under a green health probe.
+//
+// A SIBLING ROUTE, not more keys on /api/health: the schema fields cost a table
+// scan plus a directory listing, and the liveness probe an orchestrator restarts
+// containers over must stay dependency-light. Same reason /web-build is its own
+// route rather than a field on something already being polled.
+//
+// UNVERSIONED beside /api/health and /api/version, and unauthenticated for the
+// reason spelled out on BuildApiHandler's docblock: the operator diagnosing
+// drift is often the one who CANNOT sign in (the concrete incident had the
+// login path's own column unmigrated), and the check is a two-probe comparison
+// against /web-build, which is served unauthenticated by another tier.
+//
+// $bootTimestamp is shared with the health handler on purpose — one worker, one
+// boot, one answer. The identity itself is resolved ONCE inside the constructor,
+// here at boot: re-reading it per request would report the checkout on DISK,
+// which is the thing that moves, and would be confidently wrong exactly when it
+// mattered.
+$buildHandler = new BuildApiHandler(
+    $db,
+    dirname(__DIR__),
+    __DIR__ . '/../database/migrations',
+    $bootTimestamp
+);
+$router->registerUnversioned('GET', '/api/build', [$buildHandler, 'handle']);
 
 // WC-status-page: the public service-status surface behind /status. Registered
 // versioned (bare path — the router prepends /v1) and, like /api/health,
