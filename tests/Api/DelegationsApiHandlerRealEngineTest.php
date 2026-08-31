@@ -334,7 +334,7 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
         $this->assertSame($this->listedPermissions('/api/delegations'), $attack);
         $this->assertSame(
             5,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM permission_delegations')->fetchColumn(),
+            $this->scalar('SELECT COUNT(*) FROM permission_delegations'),
             'the table is still there (four tenant-1 rows plus the tenant-2 decoy)'
         );
     }
@@ -426,9 +426,7 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
         // The row really is there — the search just cannot see it.
         $this->assertSame(
             1,
-            (int) $this->pdo->query(
-                "SELECT COUNT(*) FROM permission_delegations WHERE permission = 'secrets:read'"
-            )->fetchColumn()
+            $this->scalar("SELECT COUNT(*) FROM permission_delegations WHERE permission = 'secrets:read'")
         );
     }
 
@@ -674,4 +672,21 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
         return $pdo;
     }
+
+    /**
+     * One integer out of a scalar query.
+     *
+     * `PDO::query()` can return false, and PHPStan says so. This file carries a
+     * baseline of six grandfathered call sites that ignore that; adding more
+     * would grow a baseline whose whole purpose is to stop growing, so the new
+     * assertions go through here instead.
+     */
+    private function scalar(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        $this->assertNotFalse($stmt, "query failed: {$sql}");
+
+        return (int) $stmt->fetchColumn();
+    }
+
 }

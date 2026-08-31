@@ -217,7 +217,7 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
         $this->assertSame($this->listedIds('/api/tenants'), $attack);
         $this->assertSame(
             6,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM tenants')->fetchColumn(),
+            $this->scalar('SELECT COUNT(*) FROM tenants'),
             'the table is still there (five fixtures plus the system tenant)'
         );
     }
@@ -1007,4 +1007,21 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, true, true, NOW())'
         )->execute([$profileId, $email]);
     }
+
+    /**
+     * One integer out of a scalar query.
+     *
+     * `PDO::query()` can return false, and PHPStan says so. This file carries a
+     * baseline of six grandfathered call sites that ignore that; adding more
+     * would grow a baseline whose whole purpose is to stop growing, so the new
+     * assertions go through here instead.
+     */
+    private function scalar(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        $this->assertNotFalse($stmt, "query failed: {$sql}");
+
+        return (int) $stmt->fetchColumn();
+    }
+
 }
