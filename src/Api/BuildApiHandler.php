@@ -98,6 +98,10 @@ use Whity\Database\Database;
  *                         image deployment, which has no `.git` and needs none.
  *  - `applied_migration_count` / `latest_applied_migration` /
  *    `pending_migration_count` : the schema state this instance is actually in.
+ *                         CORE migrations only — plugin migrations share the
+ *                         same ledger table and are excluded; see
+ *                         {@see self::appliedMigrationNames()} for why counting
+ *                         them made two of these three fields wrong.
  *
  * `commit` versus `checkout_commit` is the pair that makes the reported
  * incident self-evident from one request. They are two different questions —

@@ -42,9 +42,12 @@ declare(strict_types=1);
  * release.yml's smoke job, which asserts the served `/api/build` names the
  * release commit — a check on what is SERVED rather than on what was written.
  *
- * Deliberately standalone: no Composer autoloader (the release stage runs this
- * before `composer install`) and no dependency beyond the one core file it
- * reuses rather than re-implements.
+ * Deliberately standalone: it never touches the Composer autoloader, and its
+ * only dependency is the one core file it reuses rather than re-implements
+ * (`src/Core/BuildIdentity.php`, which itself needs nothing beyond the SPL).
+ * So its position in the Dockerfile is a caching decision and nothing else —
+ * it sits after `composer install` today only so that rebuilding the same
+ * context under a new commit reuses the dependency layer.
  */
 
 const CORE_VERSION_RELATIVE = 'src/Core/CoreVersion.php';

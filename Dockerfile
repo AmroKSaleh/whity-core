@@ -85,11 +85,12 @@ RUN composer install --no-dev --prefer-dist --no-progress --no-interaction \
 # backend was found four days behind with a green health probe. GET /api/build
 # answers that instead, and this is where its answer comes from.
 #
-# It CANNOT be derived at runtime here: .dockerignore drops .git, so the tree
-# below is a copy with no revision metadata and no git binary worth having. The
-# commit therefore arrives as a build arg — the same WHITY_BUILD_COMMIT
-# release.yml already passes to all three image legs (its comment there said
-# the app image "ignores it"; it no longer does).
+# It CANNOT be derived here, at build time or at run time: .dockerignore drops
+# .git, so the tree COPYied above is a copy with no revision metadata — `git`
+# is installed for composer, and has nothing to read. The commit therefore
+# arrives as a build arg — the same WHITY_BUILD_COMMIT release.yml already
+# passes to all three image legs (its comment there said the app image
+# "ignores it"; it no longer does).
 #
 # Placed AFTER composer install so rebuilding the same context under a new
 # commit reuses the dependency layer. A build with no arg does not fail: the
