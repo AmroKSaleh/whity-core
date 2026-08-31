@@ -68,7 +68,10 @@ const can = () => true;
 
 function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
   return {
-    listRoles: jest.fn().mockResolvedValue([MANAGEABLE_ROLE]),
+    // #1102: a PAGE of roles plus the full count, not a bare array.
+    listRoles: jest
+      .fn()
+      .mockResolvedValue({ roles: [MANAGEABLE_ROLE], total: 1, totalPages: 1 }),
     getRole: jest.fn().mockResolvedValue({ ...MANAGEABLE_ROLE, permissions: [] }),
     getRolePermissions: jest.fn().mockResolvedValue([]),
     getRoleAssignments: jest.fn().mockResolvedValue({ assignments: [], total: 0 }),

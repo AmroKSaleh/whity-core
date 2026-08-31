@@ -101,7 +101,10 @@ const GLOBAL_ROLE: RoleWithPermissions = {
 
 function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
   return {
-    listRoles: jest.fn().mockResolvedValue([]),
+    // #1102: `listRoles` answers a PAGE — rows plus the full count — not an
+    // array. The record page never calls it; the shape is here so the fake
+    // still satisfies `RolesAdapter`.
+    listRoles: jest.fn().mockResolvedValue({ roles: [], total: 0, totalPages: 1 }),
     getRole: jest.fn().mockResolvedValue(TENANT_ROLE),
     getRolePermissions: jest.fn().mockResolvedValue([]),
     getRoleAssignments: jest.fn().mockResolvedValue({ assignments: [], total: 0 }),
