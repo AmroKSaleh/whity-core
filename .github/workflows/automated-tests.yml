@@ -1211,6 +1211,13 @@ jobs:
       # longer reproduced.
       - name: Paged-media facts that only exist as printed text
         run: |
+          # COPIED IN rather than baked into the image. The runtime stage ships
+          # exactly one script (`write-browser-info.js`, which it must run at
+          # build time) and this is a diagnostic — putting it in the image would
+          # be the same trade refused above for the parser. It lands in /app/
+          # scripts because its `require('../src/renderer')` is relative to
+          # itself, and it needs the service's own launch configuration.
+          docker cp render-service/scripts/render-paged-media-probe.js             whity_render_ci:/app/scripts/render-paged-media-probe.js
           docker exec whity_render_ci node scripts/render-paged-media-probe.js             --out /tmp/paged-media.pdf
           docker cp whity_render_ci:/tmp/paged-media.pdf /tmp/paged-media.pdf
           node render-service/scripts/verify-paged-media-text.js --pdf /tmp/paged-media.pdf
