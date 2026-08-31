@@ -160,6 +160,30 @@ export interface RouteFlowEditorLabels {
    * each. `RouteFlowResolution.merges` says the same thing as "once per COHORT";
    * this is that sentence in words an author of a route already has.
    *
+   * WHY THIS LABEL IS NOT CONDITIONAL, WHICH WAS #1058's PREFERRED FIX. The
+   * canvas would have to know whether the stage's rule resolves against the
+   * ACTOR, and no truthful version of that flag exists to pass it:
+   *
+   *  - Per KIND is wrong for a kind core already ships. `group` dereferences a
+   *    stored user group, and a group whose own definition is `role_below_actor`
+   *    is actor-relative while one defined as `role` is not — so the answer for
+   *    `group` lives in another tenant record, behind `groups:read`, which an
+   *    author of a route does not necessarily hold. A per-kind boolean would
+   *    have to lie about `group` in one direction or the other.
+   *  - The other branch would be wrong too, and not rarely. De-duplication is
+   *    over OPEN items (migration 112's partial unique index), so even a rule
+   *    that never reads the actor settles TWICE when the second arrival lands
+   *    after the first cohort closed — a fan-out where one recipient approves
+   *    straight into the merge and another rejects the long way round does
+   *    exactly that. "Not actor-relative, therefore settles once" is the same
+   *    compression as "settles once", one level down.
+   *
+   * So a conditional card note would replace one confident falsehood with two
+   * quieter ones. The mechanism is the only claim that survives both, and the
+   * CASE DISTINCTION is stated where there is room to hedge it honestly: the
+   * host's stage inspector (`routeTemplates.inspector.merges`), which is open on
+   * the very stage in question at the moment its rule is being chosen.
+   *
    * LENGTH IS LOAD-BEARING. Notes are joined into one span clamped to
    * {@link ROUTE_FLOW_MAX_NOTES} lines, so a longer string here pushes a later
    * note off the card — which is #1042 exactly. The replacement is the same
