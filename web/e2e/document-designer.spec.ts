@@ -76,21 +76,24 @@ function newDocument(page: Page) {
 
 /**
  * Remove a block from the library again. Blocks are tenant-wide, so without
- * this every run of this spec leaves another auto-named "Block N" behind, and
- * position-based locators slowly rot. Accepts any of the per-block testids.
+ * this every run of this spec leaves another auto-named "Block N" behind.
+ * Takes the block's own id, as {@link saveSelectionAsBlock} returns it.
  */
-async function deleteBlock(page: Page, anyBlockTestId: string) {
-  const id = anyBlockTestId.replace(/^doc-block-(insert|scope|delete)-/, '');
+async function deleteBlock(page: Page, blockId: string) {
   await openLayers(page);
-  await page.getByTestId(`doc-block-delete-${id}`).click();
-  await expect(page.getByTestId(`doc-block-insert-${id}`)).toHaveCount(0);
+  await page.getByTestId(`doc-block-delete-${blockId}`).click();
+  await expect(page.getByTestId(`doc-block-insert-${blockId}`)).toHaveCount(0);
 }
 
-/** testids of every block currently offered in the rail's Blocks library. */
-function blockInsertIds(page: Page): Promise<string[]> {
-  return page
-    .locator('[data-testid^="doc-block-insert-"]')
-    .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid') ?? ''));
+/**
+ * Content this run authored, unique to it.
+ *
+ * Canvas text is what proves an inserted instance is the one this spec made
+ * rather than whatever else the library offers, so it must not be a string
+ * another block could also carry.
+ */
+function uniqueText(label: string): string {
+  return `${label} ${Date.now()}`;
 }
 
 /** The two blocks every tenant has out of the box, by the name both sources give them. */
@@ -116,35 +119,39 @@ function starterBlock(page: Page, name: string) {
 }
 
 /**
- * Save the current selection as a block and return the testid of the block it
- * created.
+ * Save the current selection as a block and return the id the SERVER gave it.
  *
- * Blocks persist tenant-wide, so earlier runs of this spec leave look-alikes
- * behind — and they are auto-named "Block N", so neither position nor name
- * identifies ours. Diff the library instead: whatever appeared is ours.
+ * The id is read from the create call's OWN response — `POST
+ * /api/v1/document-blocks` answers 201 with the row it just wrote — so it names
+ * this spec's block whatever else the library holds. Every later step keys off
+ * that id: `doc-block-insert-<id>`, `doc-block-scope-<id>`,
+ * `doc-block-delete-<id>`, `menu-item-insert-block-<id>`.
+ *
+ * This deliberately does NOT diff the library before and after. Blocks are
+ * tenant-wide and auto-named "Block N", so a diff was the only way to tell
+ * which row was ours — but a diff is a claim about the whole library: it needs
+ * the list to be settled before the snapshot (so it had to wait on a starter it
+ * did not create), it credits us with any row that appears for any other reason
+ * in the window, and it is the one thing here that could not survive a second
+ * writer. The id needs none of that: it comes from the answer to this spec's
+ * own request.
  */
 async function saveSelectionAsBlock(page: Page): Promise<string> {
-  await openLayers(page);
-  // The library is fetched on mount. Wait for a starter that is always present
-  // before snapshotting, or "before" is empty and every existing block — the
-  // system starters included — looks newly created.
-  await expect(starterBlock(page, STARTER_HEADER)).toBeVisible();
-  const before = new Set(await blockInsertIds(page));
+  const created = page.waitForResponse(
+    (r) => r.url().includes('/api/v1/document-blocks') && r.request().method() === 'POST',
+    { timeout: 15_000 }
+  );
   await chooseMenu(page, 'format', 'save-as-block');
+
+  const response = await created;
+  expect(response.status(), 'saving a selection should create a block').toBe(201);
+  const blockId = String(((await response.json()) as { data: { id: number | string } }).data.id);
+
+  // The chrome confirms the save, and the rail's library now offers this block.
   await expect(page.getByRole('status').filter({ hasText: 'Saved block' })).toBeVisible();
   await openLayers(page);
-
-  let created = '';
-  await expect
-    .poll(
-      async () => {
-        created = (await blockInsertIds(page)).find((id) => !before.has(id)) ?? '';
-        return created;
-      },
-      { timeout: 10_000 }
-    )
-    .not.toBe('');
-  return created;
+  await expect(page.getByTestId(`doc-block-insert-${blockId}`)).toBeVisible();
+  return blockId;
 }
 
 test.describe('Document & Label Designer', () => {
@@ -536,7 +543,11 @@ test.describe('Document & Label Designer', () => {
 
   test('reusable blocks: save a selection as a block and insert it into a fresh document', async ({ page }) => {
     await page.goto('/admin/documents');
+    // Text unique to this run, so the instance found on the canvas at the end
+    // can only be the block this spec saved.
+    const marker = uniqueText('Reusable block');
     await addElement(page, 'text');
+    await page.getByTestId('doc-text-value').fill(marker);
     await addElement(page, 'rect');
 
     // Select both elements and save them as a reusable block.
@@ -550,13 +561,13 @@ test.describe('Document & Label Designer', () => {
     await newDocument(page);
     await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(0);
 
-    // Insert the saved block → a single block instance carrying its content.
+    // Insert THIS spec's block → a single instance carrying its content.
     await openLayers(page);
-    const insertBtn = page.getByTestId(blockId);
+    const insertBtn = page.getByTestId(`doc-block-insert-${blockId}`);
     await expect(insertBtn).toBeVisible();
     await insertBtn.click();
     await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(1);
-    await expect(page.getByTestId('doc-page').getByText('Text')).toBeVisible();
+    await expect(page.getByTestId('doc-page').getByText(marker)).toBeVisible();
 
     await deleteBlock(page, blockId);
   });
@@ -565,19 +576,22 @@ test.describe('Document & Label Designer', () => {
     await page.goto('/admin/documents');
     const canvas = page.getByTestId('doc-page');
 
-    // Make a block from a text element reading "LOGO" (inserting selects it,
-    // which is what Save-as-block acts on).
+    // Make a block from a text element reading a marker unique to this run
+    // (inserting selects it, which is what Save-as-block acts on).
+    const original = uniqueText('LOGO');
+    const edited = uniqueText('BRAND');
     await addElement(page, 'text');
-    await page.getByTestId('doc-text-value').fill('LOGO');
+    await page.getByTestId('doc-text-value').fill(original);
     const blockId = await saveSelectionAsBlock(page);
 
-    // Fresh doc, insert the block twice → two instances, both showing "LOGO".
+    // Fresh doc, insert THIS spec's block twice → two instances, both showing
+    // the original marker.
     await newDocument(page);
     await openLayers(page);
-    const insert = page.getByTestId(blockId);
+    const insert = page.getByTestId(`doc-block-insert-${blockId}`);
     await insert.click();
     await insert.click();
-    await expect(canvas.getByText('LOGO')).toHaveCount(2);
+    await expect(canvas.getByText(original)).toHaveCount(2);
 
     // Select one instance and open block edit mode from the Format menu.
     await page.locator('[data-testid^="doc-layer-select-"]').first().click();
@@ -587,16 +601,16 @@ test.describe('Document & Label Designer', () => {
     // Page management is meaningless inside a block, so it is hidden.
     await expect(page.getByTestId('doc-add-page')).toHaveCount(0);
 
-    // Edit the block's text to "BRAND" and finish. Picking a layer does not
-    // move the rail, so step across to its properties.
+    // Edit the block's text to the second marker and finish. Picking a layer
+    // does not move the rail, so step across to its properties.
     await page.locator('[data-testid^="doc-layer-select-"]').first().click();
     await page.getByTestId('doc-tab-element').click();
-    await page.getByTestId('doc-text-value').fill('BRAND');
+    await page.getByTestId('doc-text-value').fill(edited);
     await page.getByTestId('doc-block-edit-done').click();
 
     // Both instances now show the edited content — the edit propagated.
-    await expect(canvas.getByText('BRAND')).toHaveCount(2);
-    await expect(canvas.getByText('LOGO')).toHaveCount(0);
+    await expect(canvas.getByText(edited)).toHaveCount(2);
+    await expect(canvas.getByText(original)).toHaveCount(0);
 
     await deleteBlock(page, blockId);
   });
@@ -610,7 +624,7 @@ test.describe('Document & Label Designer', () => {
     // earlier tests leave look-alikes behind, and publishing moves a block
     // between scope groups — so any position-based locator would drift onto a
     // different block halfway through.
-    const scope = page.getByTestId(blockId.replace('doc-block-insert-', 'doc-block-scope-'));
+    const scope = page.getByTestId(`doc-block-scope-${blockId}`);
     await expect(scope).toHaveValue('personal');
 
     // Publish it tenant-wide; the choice sticks (it moves under the Tenant group).
@@ -737,13 +751,31 @@ test.describe('Document & Label Designer', () => {
   test('Insert ▸ Block offers the same library as the side rail', async ({ page }) => {
     await page.goto('/admin/documents');
 
-    // The starter header is reachable without opening the rail at all. By its
-    // menu LABEL, which is the block's name, for the reason starterBlock() gives.
+    // "The same library" is a claim about a row being in BOTH places, so prove
+    // it with a row this spec put there: saving asserts the block is offered in
+    // the rail, and it is inserted here from the menu without the rail being
+    // touched. A starter alone would prove it only for a row somebody else made.
+    const marker = uniqueText('Menu parity block');
+    await addElement(page, 'text');
+    await page.getByTestId('doc-text-value').fill(marker);
+    const blockId = await saveSelectionAsBlock(page);
+
+    await newDocument(page);
+    await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(0);
+
     await openMenu(page, 'insert');
     await page.getByTestId('menu-item-insert-block').click();
-    await page.getByRole('menuitem', { name: STARTER_HEADER }).click();
+    // Both scope groups the menu builds are populated from that one library:
+    // the System starter (by its menu LABEL, which is the block's name — see
+    // starterBlock()) and this spec's own Personal block, by its own id.
+    await expect(page.getByRole('menuitem', { name: STARTER_HEADER })).toBeVisible();
+    await page.getByTestId(`menu-item-insert-block-${blockId}`).click();
+
+    // What landed on the canvas is this spec's block, not another one.
     await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(1);
-    await expect(page.getByTestId('doc-page').getByText('Acme Corp').first()).toBeVisible();
+    await expect(page.getByTestId('doc-page').getByText(marker)).toBeVisible();
+
+    await deleteBlock(page, blockId);
   });
 
   test('setting element opacity applies it on the canvas', async ({ page }) => {
