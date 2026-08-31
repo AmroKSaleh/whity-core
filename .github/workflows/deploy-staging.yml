@@ -3,13 +3,19 @@
 # Flow: pick an image tag -> copy docker-compose.staging-remote.yml to the host
 # -> write .env.staging from a secret -> `docker compose pull && up -d` ->
 # `migrate run` inside the app container -> poll GET /api/health AND GET /login
-# on the host until both return 200. A deploy that does not end with a healthy
-# API *and* a rendering UI FAILS the run.
+# on the host until both return 200, then read GET /api/build. A deploy that
+# does not end with a healthy API, a rendering UI *and* a schema the running
+# code expects FAILS the run.
 #
 # The UI check is not belt-and-braces (WHIT-588): v0.2.0 deployed green on
 # /api/health alone while shipping no frontend at all, so "the deploy worked"
 # and "a human can use it" were two different facts and only the first was
 # being measured.
+#
+# The build-identity check is the third such fact (#1049): staging was later
+# found running a database 15 migrations behind its own checkout, with
+# /api/health answering ok the whole time, because a version constant cannot
+# report anything about whether a deploy landed.
 #
 # ACTIVATE-BY-CONFIG: this does nothing until you set the staging secrets. The
 # `preflight` job checks whether STAGING_SSH_HOST is set and, if not, the deploy
@@ -185,6 +191,26 @@ jobs:
             done
             if [ "$api_ok" != true ]; then
               echo "API health check failed — dumping app logs:"
+              $COMPOSE logs --tail=100 frankenphp
+              exit 1
+            fi
+
+            # Build-identity gate (#1049). A green /api/health says the process
+            # is alive; it reports CoreVersion::VERSION, a constant in the
+            # source, and says nothing about whether THIS deploy landed. The
+            # schema half is the part that has actually failed here: staging was
+            # found sitting at migration 100 under a checkout at 115 — the
+            # documents, routing and collections tables absent — while
+            # /api/health answered {"status":"ok"} throughout, and it was found
+            # by hand weeks later. `migrate run` above has just completed, so a
+            # non-zero pending count means the workers now serving traffic are
+            # not the code the database was migrated for.
+            echo "==> Build identity http://localhost:${APP_PORT}/api/build"
+            build=$(curl -s --max-time 10 "http://localhost:${APP_PORT}/api/build" || true)
+            echo "$build"
+            pending=$(printf '%s' "$build" | grep -o '"pending_migration_count":[^,}]*' | cut -d: -f2 | tr -d ' "')
+            if [ "$pending" != "0" ]; then
+              echo "Deployed backend reports pending_migration_count=${pending:-<unreadable>} — the schema is not the one this code expects."
               $COMPOSE logs --tail=100 frankenphp
               exit 1
             fi

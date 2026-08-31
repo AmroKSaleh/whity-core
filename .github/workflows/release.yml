@@ -420,9 +420,12 @@ jobs:
           # The build context is a COPIED tree with no .git, so next.config.ts
           # cannot resolve the commit itself and every /web-build field comes
           # back null — which is how v0.2.2 shipped an endpoint that answered
-          # but could not identify the bundle it served. Harmless to the app
-          # image, which ignores it; the render image consumes it for the same
-          # reason the web image does, and reports it on /health.
+          # but could not identify the bundle it served. The render image
+          # consumes it for the same reason the web image does, and reports it
+          # on /health. Since #1049 ALL THREE legs consume it: the app image
+          # bakes it into build-identity.json and reports it on /api/build, so
+          # the backend can finally answer which checkout it is running rather
+          # than only which version the source claims to be.
           build-args: |
             WHITY_BUILD_COMMIT=${{ github.sha }}
           tags: |
@@ -640,6 +643,50 @@ jobs:
           docker logs whity-app
           docker ps -a
           exit 1
+
+      # The BACKEND must be able to identify itself too (#1049).
+      #
+      # /api/health passing has never been evidence of anything but liveness:
+      # it reports CoreVersion::VERSION, a constant in the source, which is
+      # identical across every commit between releases. A backend four days
+      # behind answered it happily throughout. GET /api/build reports the
+      # commit the image was BUILT from, and this is the gate that stops an
+      # image that cannot say so from being published — the app-image
+      # equivalent of the /web-build and render /health checks below, and the
+      # reason scripts/write-build-identity.php does not need to fail the
+      # docker build for a local operator.
+      #
+      # Asserting the VALUE, not the presence: `commit` must equal the commit
+      # being released and `source` must be `build`, so an image that fell back
+      # to `unknown` — or to a commit that is not this one — fails here rather
+      # than in somebody's deployment six weeks later.
+      - name: The app image must report the commit it was built from
+        env:
+          EXPECTED: ${{ github.sha }}
+        run: |
+          BODY=$(curl -s --max-time 10 http://localhost:8000/api/build)
+          echo "$BODY"
+
+          PROBLEM=$(python3 - "$BODY" "$EXPECTED" <<'PY'
+          import json, sys
+          try:
+              d = json.loads(sys.argv[1])
+          except Exception as e:
+              print(f"unparseable: {e}")
+              sys.exit(0)
+          expected = sys.argv[2].lower()
+          if d.get("source") != "build":
+              print(f"source is {d.get('source')!r}, expected 'build' — the identity was not baked into the image")
+          elif (d.get("commit") or "").lower() != expected:
+              print(f"commit is {d.get('commit')!r}, expected {expected!r}")
+          PY
+          )
+
+          if [ -n "$PROBLEM" ]; then
+            echo "::error::/api/build cannot identify the running backend — ${PROBLEM}."
+            exit 1
+          fi
+          echo "Backend identity check passed."
 
       # Start the frontend on the same bridge, pointed at the app container by
       # its DNS name — the topology docker-compose.staging-remote.yml deploys.

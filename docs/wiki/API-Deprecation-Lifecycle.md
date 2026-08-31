@@ -125,4 +125,4 @@ The deprecation machinery is automatic:
 
 ## Exception: Infrastructure Endpoints
 
-Unversioned infrastructure routes (`/api/health`, `/api/version`, `/api/openapi.json`) are not subject to this policy. Changes to these paths are coordinated separately and communicated via release notes.
+Unversioned infrastructure routes (`/api/health`, `/api/version`, `/api/openapi.json`, `/api/build`) are not subject to this policy. Changes to these paths are coordinated separately and communicated via release notes.
