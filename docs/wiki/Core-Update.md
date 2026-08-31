@@ -19,6 +19,16 @@ operator-driven runbook — no deployment self-mutates.
   | | `GET /api/v1/platform/version` → `sdk_version` | system-tenant admin; same value |
   | Frontend bundle | `GET /web-build` → `core_version` | unauthenticated, served by the WEB tier |
 
+  A version is not an identity, which is why there is a fourth thing to read.
+  `version` is a **constant in the source**: it changes only on a release bump,
+  so between releases it is the same string on every commit and it moves with
+  the code whether or not the code was deployed. **`GET /api/build`**
+  (unauthenticated, #1049) answers the question `version` cannot — which
+  *commit* the backend is running, when its workers booted, whether the
+  checkout on disk has moved underneath them, and how many migrations are
+  still pending. It is the backend's counterpart to `/web-build`, named the
+  same way where it means the same thing, so the two documents diff directly.
+
   The SDK contract version is on the PUBLIC probe deliberately: a plugin that
   stops loading after an upgrade is nearly always this number moving, and that
   is diagnosed from monitoring rather than from an admin session. See the
@@ -181,6 +191,7 @@ For a compose-based deployment (the per-product deployment anatomy in
 
    ```bash
    curl -s http://<host>/api/health   | jq '{status, version}'
+   curl -s http://<host>/api/build    | jq '{commit, source, checkout_commit, booted_at, pending_migration_count}'
    curl -s http://<host>/web-build    | jq '{core_version, commit, built_at}'
    ```
 
@@ -194,6 +205,33 @@ For a compose-based deployment (the per-product deployment anatomy in
    A `core_version` that lags `version` means the frontend was not rebuilt —
    go back to step 5. Worth wiring into monitoring: comparing those two
    fields is the cheapest alarm for a half-applied update.
+
+   **`/api/build` is what makes steps 3 and 6 checkable at all** (#1049).
+   `version` is a constant in the source: it is identical across every commit
+   between releases, so it cannot tell a backend running today's checkout from
+   one running a three-week-old one, and it says nothing about the schema.
+   Read three things there:
+
+   - `commit` is the checkout the WORKERS ARE RUNNING, frozen at boot. It
+     equals `/web-build`'s `commit` on a deployment where both tiers were
+     updated together.
+   - `commit` **must equal `checkout_commit`** on a source deployment.
+     `checkout_commit` is read from disk per request, so when the two differ
+     the code was updated and the workers were never restarted — step 6 did
+     not happen, or did not take. Workers never recycle (no `max_requests`),
+     so the old build serves indefinitely and `/api/health` stays green. In an
+     image deployment `checkout_commit` is `null` and there is nothing to
+     compare — `booted_at` is the field to read instead.
+   - `pending_migration_count` **must be 0.** Anything else means step 4 did
+     not run or did not finish: the code is new and the schema is not, which
+     500s the first query against a table the update added. Staging was found
+     15 migrations behind its own checkout in exactly this state, by hand,
+     weeks later.
+
+   `source` says where `commit` came from — `build` (baked into the image at
+   build time), `checkout` (read from `.git` at worker boot), or `unknown`. A
+   deployment reporting `unknown` cannot answer any of the above; for an image
+   that means it was built without `--build-arg WHITY_BUILD_COMMIT=<sha>`.
 
    **If the render profile is running, it is a third tier to check** — and the
    one whose staleness is least visible, since a stale render container is

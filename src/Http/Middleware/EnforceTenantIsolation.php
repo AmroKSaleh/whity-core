@@ -136,6 +136,15 @@ class EnforceTenantIsolation
         // WC-206: /api/version is also unversioned and probe-safe.
         '/api/health',
         '/api/version',
+        // #1049: build identity — which checkout this worker is running, and how
+        // far the schema is behind it. Public and unversioned for the same
+        // reasons as the two above, plus one of its own: the operator asking is
+        // frequently the one who cannot authenticate, because a half-applied
+        // update is what they are diagnosing (the incident behind it had
+        // `profiles.auth_method` unmigrated — the column the login path reads).
+        // Full reasoning, and the one line that undoes it, on
+        // BuildApiHandler's docblock.
+        '/api/build',
         // WC-209: the dynamic OpenAPI document. Unversioned and unauthenticated
         // (matching the static /openapi.json already served by Caddy) — it
         // exposes only route shapes, never tenant data, so it bypasses tenant

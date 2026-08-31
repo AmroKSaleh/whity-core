@@ -2521,6 +2521,26 @@ final class CoreApiSchemas
                     ],
                 ],
             ],
+            // #1049: build identity — which checkout the worker is RUNNING, as
+            // opposed to the version constant /api/health reports. UNVERSIONED
+            // beside /api/health so a runbook or alert rule survives an API
+            // version bump, and unauthenticated so it is answerable by the
+            // operator diagnosing a half-applied update, who frequently cannot
+            // sign in. Reasoning in full on BuildApiHandler's docblock.
+            [
+                'method' => 'GET',
+                'path' => '/api/build',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'unversioned' => true,
+                'schema' => [
+                    'summary' => 'Build identity of the running backend (the backend half of /web-build)',
+                    'tags' => ['platform-ops'],
+                    'responses' => [
+                        200 => self::jsonResponse('The identity of the running process and the schema state it is in', 'BuildIdentityResponse'),
+                    ],
+                ],
+            ],
             // WC-209: the dynamic OpenAPI document, regenerated from the live
             // router at request time. UNVERSIONED (stored at /api/openapi.json
             // regardless of the version prefix, like /api/health) and
@@ -6828,6 +6848,43 @@ final class CoreApiSchemas
                 'db_connected' => self::bool(),
                 'memory_usage_mb' => ['type' => 'number', 'format' => 'float'],
             ], ['status', 'version', 'sdk_version', 'workers_active', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
+
+            // GET /api/build — top-level (not data-enveloped), like /api/health.
+            //
+            // #1049. Every identifying field is NULLABLE and that is the
+            // contract, not an omission: a deployment that cannot establish its
+            // own commit must say so, because a plausible-looking wrong value is
+            // worse than no value to the monitor comparing this document against
+            // /web-build. `source` names which of the three sources answered, so
+            // a consumer can tell a baked build identity from a checkout read
+            // without inferring it from the presence of a hash.
+            //
+            // No `build_id`: /web-build has one because Next produces a bundle
+            // with an id; PHP loads source, so a second name for the commit
+            // could only ever agree with `commit` or be wrong.
+            'BuildIdentityResponse' => self::object([
+                'commit' => self::str(true),
+                'source' => ['type' => 'string', 'enum' => ['build', 'checkout', 'unknown']],
+                'core_version' => self::str(),
+                'built_at' => self::str(true),
+                'booted_at' => self::str(),
+                'uptime_seconds' => self::int(),
+                'checkout_commit' => self::str(true),
+                'applied_migration_count' => self::int(true),
+                'latest_applied_migration' => self::str(true),
+                'pending_migration_count' => self::int(true),
+            ], [
+                'commit',
+                'source',
+                'core_version',
+                'built_at',
+                'booted_at',
+                'uptime_seconds',
+                'checkout_commit',
+                'applied_migration_count',
+                'latest_applied_migration',
+                'pending_migration_count',
+            ]),
 
             // GET /api/platform/version (WHIT-587)
             'PlatformVersionResponse' => self::object([

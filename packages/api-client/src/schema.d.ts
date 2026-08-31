@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Build identity of the running backend (the backend half of /web-build) */
+        get: operations["get_api_build"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -4668,6 +4685,19 @@ export interface components {
         BrandingResponse: {
             data: components["schemas"]["Branding"];
         };
+        BuildIdentityResponse: {
+            commit: string | null;
+            /** @enum {string} */
+            source: "build" | "checkout" | "unknown";
+            core_version: string;
+            built_at: string | null;
+            booted_at: string;
+            uptime_seconds: number;
+            checkout_commit: string | null;
+            applied_migration_count: number | null;
+            latest_applied_migration: string | null;
+            pending_migration_count: number | null;
+        };
         CapabilityDenial: {
             /** @enum {string} */
             code: "no-resource" | "no-route" | "forbidden";
@@ -7642,6 +7672,53 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_api_build: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The identity of the running process and the schema state it is in */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildIdentityResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_health: {
         parameters: {
             query?: never;
