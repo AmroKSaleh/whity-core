@@ -285,6 +285,22 @@ reports which printed page an element landed on. So `"Table 34 …… 78"` canno
 be produced from a document Chrome has paginated, because the 78 does not exist
 anywhere the document can read.
 
+> **Do not re-check that claim with `CSS.supports()` — it lies here.**
+> `CSS.supports('content', 'target-counter(attr(href), page)')` returns **true**
+> on Chromium 151, and the declaration survives in the CSSOM. It is dropped at
+> computed-value time: `getComputedStyle(a, '::after').content` is `"none"` and
+> nothing is printed. Verify at the rendered-output level or you will "disprove"
+> this paragraph and reopen a settled decision.
+
+Chromium 151 does support more paged media than this section once implied, which
+matters if you are choosing where to draw page furniture: `@page` margin boxes,
+`counter(page)` AND `counter(pages)` (so "3 of 12" is native), `@page :first`,
+`@page :left` / `:right`, and named pages all work. What does not: `string-set` /
+`string()` for a running section name, `position: running()`, and `counter(page)`
+in ordinary body content. None of that changes the flowing mode — it prints at
+`margin: 0` with pre-fragmented boxes and draws its bands in-document — but the
+absence of margin-box support is not the reason.
+
 Three ways out were measured on the same generated 130-page document (60
 tables, 90 figures, three generated front-matter lists — `npm run flow:fixture`
 produces it). Times are the median of three warm runs in the real image;
@@ -296,9 +312,10 @@ PDF by `scripts/verify-flow-pdf.js`.
 |---|---|---|
 | **Own paginator in the page** (what ships) | **3.7 s** (repeat sessions 3.6–4.3 s) | **294 / 294** |
 | Two-pass, page estimated in the DOM from `offsetTop / pageHeight` | 4.2 s (4.0–4.3 s) | **0 / 294** |
-| Two-pass, page recovered from the first-pass PDF | 11.8 s (11.6–11.8 s) | 294 / 294 |
+| Two-pass, page recovered from the first-pass PDF **by text extraction** | 11.8 s (11.6–11.8 s) | 294 / 294 |
+| Two-pass, page recovered from the first-pass PDF **by named destinations** | see correction below — **at parity** | 150 / 150 |
 | Two-pass, first pass laid out *without* the generated list | 37.5 s | **0 / 294** |
-| Paged.js polyfill | 18.8 s, and it truncated the document | n/a |
+| Paged.js polyfill | see correction below — **collapses on RTL** | n/a |
 
 Run-to-run spread on one host is a few hundred milliseconds; the gaps in that
 table are larger than the noise, which is the only reason it decides anything.
@@ -309,19 +326,53 @@ fragmentation is exactly what departs from one, and every push a `break-inside`
 or an unbreakable row causes accumulates, so the error grows down the document.
 It is the dangerous kind of wrong, because the output looks typeset.
 
-Recovering the numbers from the first-pass PDF is correct, but it costs two
-full `page.pdf()` calls plus a text-extraction pass — three times the render
-time — and it needs a PDF parser as a production dependency of the render tier
-plus a machine-readable marker printed beside every anchor so the extractor can
-find it. Paginating in the page instead makes the answer known before any PDF
-exists, and makes `page.pdf()` **faster**, because Chromium is handed page boxes
-it does not have to fragment.
+Recovering the numbers from the first-pass PDF is correct. The 11.8 s above is
+the cost of recovering them **by extracting text**, and that is not the only way.
 
-Paged.js paginated a 14-page document correctly in 1.3 s, and silently
-truncated anything larger in this harness — a 45-page document came back as
-four pages, with no error. Even at the size where it worked its pagination rate
-was ~93 ms/page against the shipped paginator's ~11 ms/page. It is not a
-dependency of this service and never became one.
+> **Correction (2026-08-31).** Chromium emits a PDF **named destination for every
+> `id` targeted by an internal `<a href="#id">`** — precisely the links a contents
+> list already contains. `pdfjs.getDestinations()` + `getPageIndex()` resolves all
+> 150 anchors of a 110-page document in **14–27 ms**, with **no marker printed in
+> the document and no text extraction**. Measured head-to-head on this repo's own
+> `flow:fixture` through its own `document.js` + `html.js`, two-pass then runs at
+> **0.78× (LTR) to 0.91× (RTL)** of the shipped paginator — at parity or slightly
+> **cheaper**, not three times the cost. It is direction-neutral and verified
+> 150/150 on a fully Arabic document.
+>
+> **So do not defend the shipped design on render time.** The argument that
+> actually holds is below.
+
+> **Correction (2026-08-31).** The size-truncation finding does **not**
+> reproduce. Paged.js 0.4.3 under Chromium 151 paginates LTR correctly and
+> linearly to at least **136 pages** (240 sections, ~35 ms/page), staying within
+> one page of Chromium throughout, and its `target-counter()` rewriting prints
+> real, increasing page numbers.
+>
+> **It collapses on RTL.** A `dir="rtl"` document of 120 sections — 69 pages of
+> content — comes back as **one page**, with every cross-reference printing `1`.
+> No error, no warning. The earlier investigation's fixture defaults to RTL, so
+> what was diagnosed as size-dependent truncation was almost certainly this.
+>
+> That is a **stronger** reason to reject Paged.js, not a weaker one. Arabic and
+> RTL are hard requirements here, and this is the failure mode this service is
+> most careful about elsewhere: output that looks completely typeset and is
+> wholly wrong.
+
+It is not a dependency of this service and never became one.
+
+### The argument that actually decides it
+
+Not render time. **The paginator is plain browser JavaScript with no Puppeteer
+dependency** — `html.js` inlines it into the page with a `<script>` tag. So the
+same algorithm can run in an editor's browser and produce *identical* page
+breaks, because it is ours and it is deterministic.
+
+Under any two-pass scheme the breaks come from Chromium's **print**
+fragmentation, which screen layout cannot reproduce; an editor would have to ask
+the server where the pages fall, for every edit. Owning the algorithm is what
+makes a WYSIWYG flowing editor possible at all. If that requirement is ever
+dropped, two-pass via named destinations is a real, measured, RTL-safe
+alternative at parity cost.
 
 ### The trap in generated front matter
 
@@ -412,7 +463,7 @@ the issue guessed at is not the one that meets it.
 | `RENDER_FLOW_NAV_TIMEOUT_MS` | `30000` | Loading the generated page. |
 | `RENDER_FLOW_MAX_BLOCKS` | `20000` | Hard ceiling on content blocks. |
 | `RENDER_FLOW_MAX_TABLE_ROWS` | `5000` | Hard ceiling on rows in one table. |
-| `RENDER_FLOW_MAX_BYTES` | 40 MiB | Hard ceiling on the whole payload. |
+| `RENDER_FLOW_MAX_BYTES` | 20 MiB | Hard ceiling on the whole payload. Deliberately below express's 25 MiB `json` limit, so an oversized payload is refused by this service with its own error rather than by the body parser. (This row said 40 MiB until 2026-08-31; the code has always said 20 — see `src/flow/document.js`.) |
 
 A render whose pagination overran a page box is **refused**, not returned: an
 overrun means a unit was placed where it does not fit, so at least one recorded
