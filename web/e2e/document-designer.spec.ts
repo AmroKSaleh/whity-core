@@ -86,6 +86,23 @@ async function deleteBlock(page: Page, blockId: string) {
 }
 
 /**
+ * One block, as it appears under ONE scope group of the rail's library.
+ *
+ * The rail groups the library by visibility tier (System / Personal /
+ * Tenant-wide / Global) and a group is rendered only while it has a block in
+ * it, so "this block is under Tenant-wide and no longer under Personal" is
+ * exactly what a user means by published — and after a reload it is a
+ * statement about the row the SERVER returned, not about local state.
+ *
+ * The group is located by its testid rather than by its heading: the heading
+ * is translated (`palette.scope.*`), so matching the text "Tenant-wide" would
+ * assert the editor is in English as much as it asserts where the block sits.
+ */
+function blockInGroup(page: Page, scope: 'system' | 'personal' | 'tenant' | 'global', blockId: string) {
+  return page.getByTestId(`doc-block-group-${scope}`).getByTestId(`doc-block-insert-${blockId}`);
+}
+
+/**
  * Content this run authored, unique to it.
  *
  * Canvas text is what proves an inserted instance is the one this spec made
@@ -615,7 +632,7 @@ test.describe('Document & Label Designer', () => {
     await deleteBlock(page, blockId);
   });
 
-  test('block scoping: a saved block defaults to Personal and can be published tenant-wide', async ({ page }) => {
+  test('block scoping: a saved block defaults to Personal and publishing it tenant-wide is accepted by the server', async ({ page }) => {
     await page.goto('/admin/documents');
     await addElement(page, 'text');
     const blockId = await saveSelectionAsBlock(page);
@@ -626,10 +643,29 @@ test.describe('Document & Label Designer', () => {
     // different block halfway through.
     const scope = page.getByTestId(`doc-block-scope-${blockId}`);
     await expect(scope).toHaveValue('personal');
+    await expect(blockInGroup(page, 'personal', blockId)).toBeVisible();
 
-    // Publish it tenant-wide; the choice sticks (it moves under the Tenant group).
+    // Publishing is the PATCH, not the click. `documents:publish` gates moving
+    // a block into a shared tier and the backend answers 403 without it, so
+    // wait for the server's own answer: the select is a controlled input whose
+    // value the click has already set, and a refused publish never re-renders
+    // it — reading it back here would pass whatever the server said. Waiting
+    // also keeps the reload below from cancelling the request in flight.
+    const published = page.waitForResponse(
+      (r) => r.url().includes(`/api/v1/document-blocks/${blockId}`) && r.request().method() === 'PATCH',
+      { timeout: 15_000 }
+    );
     await scope.selectOption('tenant');
-    await expect(scope).toHaveValue('tenant');
+    expect((await published).status(), 'publishing a block tenant-wide should be allowed').toBe(200);
+
+    // Reload, so the library on screen is what `GET /document-blocks` just
+    // returned rather than anything this browser was holding: the block is now
+    // offered under Tenant-wide and is gone from Personal, which is what the
+    // rest of the tenant will see.
+    await page.reload();
+    await openLayers(page);
+    await expect(blockInGroup(page, 'tenant', blockId)).toBeVisible();
+    await expect(blockInGroup(page, 'personal', blockId)).toHaveCount(0);
 
     await deleteBlock(page, blockId);
   });
