@@ -130,7 +130,16 @@ final class SettingsApiRealEngineTest extends TestCase
         // does not. It grants nobody anything, so it is a preference rather
         // than governance, and it defaults FALSE so an instance that never sets
         // it behaves exactly as it does today.
-        self::assertCount(20, $data['registry']);
+        // 23 since #1072 added the three documents.flow_max_* ceilings — how
+        // many content blocks, how large a single table, and how many bytes a
+        // flowing document may be. Per-tenant for the same reason the rest of
+        // this list is: a tenant issuing hundred-page compliance submissions
+        // and a tenant printing two-page receipts should not be held to one
+        // number, and the render service that enforces the hard limits has no
+        // idea tenants exist. The instance-wide documents.render_enabled switch
+        // above them stays global-only, because whether a whole
+        // browser-bearing container runs is an operator's decision.
+        self::assertCount(23, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

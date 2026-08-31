@@ -51,6 +51,13 @@ const DEFAULT_FONT_STACK =
   "'Noto Naskh Arabic', 'Noto Sans Arabic', 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif";
 
 const { escapeHtml, isolateForeignRuns } = require('./bidi');
+const { QR_SIZE_MM } = require('./document');
+
+/* Already a dependency of this service for the fixed-canvas mode's barcode
+ * element; the flowing mode draws its verification code with the same encoder
+ * so two modes of one product cannot print two different barcodes for one
+ * token. */
+const bwipjs = require('bwip-js');
 
 /**
  * Escape a JSON string for embedding inside a <script> block. `</` is the
@@ -116,6 +123,55 @@ function renderFigure(block, direction) {
   );
 }
 
+/**
+ * The platform's verification code: a QR, and the reference printed beneath it.
+ *
+ * DRAWN AS INLINE SVG, not a raster. A QR is a lattice of hard edges, and a
+ * bitmap scaled to a print resolution nobody knows in advance is exactly how a
+ * code that scanned in review stops scanning on paper. SVG is resolution-free,
+ * so the printer decides the dot size.
+ *
+ * The reference underneath is not decoration either: it is the fallback for
+ * every reader who cannot scan — a photocopy, a fax, a phone with no camera
+ * permission, a document read aloud over a phone call — and it is what somebody
+ * types into the verification page when the code will not read.
+ *
+ * A FAILURE HERE DOES NOT FAIL THE DOCUMENT. If the encoder throws, the block
+ * degrades to the reference text alone and the render continues. Losing a
+ * hundred-page submission over one barcode would be the wrong trade, and the
+ * degraded form still carries the one thing a person can act on.
+ */
+function renderQr(block, direction) {
+  let svg = '';
+  try {
+    svg = bwipjs.toSVG({
+      bcid: 'qrcode',
+      text: block.value,
+      // Error correction M: the standard trade for print, and enough that a
+      // fold or a coffee ring through a corner still reads.
+      eclevel: 'M',
+      scale: 3,
+      includetext: false,
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[whity_render] verification code could not be encoded:', err && err.message ? err.message : err);
+  }
+
+  return (
+    `<div class="flow-qr" data-flow-unit="qr">` +
+    (svg ? `<div class="flow-qr-code" style="width:${mm(QR_SIZE_MM)};height:${mm(QR_SIZE_MM)}">${svg}</div>` : '') +
+    (block.reference
+      // The reference is a machine-shaped token (`9F2A-4C11-8B03`) and stays
+      // left-to-right inside an Arabic document, hence the isolation — without
+      // it the hyphens resolve with the surrounding RTL text and the groups
+      // print in the wrong order, which looks like a typo and is a wrong code.
+      ? `<div class="flow-qr-reference">${isolateForeignRuns(block.reference, direction)}</div>`
+      : '') +
+    `</div>`
+  );
+}
+
 function renderBlock(block, direction) {
   switch (block.type) {
     case 'heading': {
@@ -134,6 +190,8 @@ function renderBlock(block, direction) {
       return renderTable(block, direction);
     case 'figure':
       return renderFigure(block, direction);
+    case 'qr':
+      return renderQr(block, direction);
     case 'pageBreak':
       return '<div class="flow-page-break" data-flow-unit="pageBreak"></div>';
     case 'spacer':

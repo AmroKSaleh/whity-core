@@ -1236,6 +1236,97 @@ audits `helloworld:greeting.created` when a greeting is created.
 
 ---
 
+## Step 12 — Turn your content into a document (SDK 1.41)
+
+Before SDK 1.41 the SDK had **no rendering surface at all**. A plugin holding
+structured content — an invoice, a certificate, a statement of account, a
+compliance submission — either shipped JSON and asked somebody to print a web
+page, or built its own renderer. Neither is a plugin author's mistake; both are
+what a missing seam produces.
+
+Unlike the capability interfaces above, this one you **resolve** rather than
+implement:
+
+```php
+use Whity\Sdk\Render\DocumentRenderer;
+use Whity\Sdk\Render\FlowDocument;
+use Whity\Sdk\Render\RenderRejectedException;
+use Whity\Sdk\Render\RenderUnavailableException;
+
+$renderer = \Whity\app(DocumentRenderer::class);
+
+if (!$renderer->isAvailable()) {
+    // The DEFAULT state of a fresh install: rendering is an optional container
+    // and `documents.render_enabled` starts false. Check before you spend a
+    // hundred queries assembling a tree nobody can print.
+    return Response::error('Document rendering is not enabled here', 503);
+}
+
+$document = FlowDocument::create()
+    ->withTitle('Statement of account')
+    ->withContents()
+    ->withListOfTables()
+    ->heading(1, 'Summary')
+    ->paragraph($summaryText)
+    ->table(['Date', 'Reference', 'Amount'], $rows, caption: 'Transactions')
+    ->pageBreak()
+    ->heading(1, 'Detail')
+    ->figure($chartAsDataUri, caption: 'Balance over time');
+
+try {
+    $issued = $renderer->issue($document, 'Statement — March 2026');
+} catch (RenderRejectedException $e) {
+    // Will never succeed unchanged: a ceiling, or a tree the renderer refused.
+    // ->clientMessage is written to be shown.
+    return Response::error($e->clientMessage, 422);
+} catch (RenderUnavailableException) {
+    // The tier could not do it. Retryable. Do not lose the user's work.
+    return Response::error('Rendering is temporarily unavailable', 503);
+}
+```
+
+**Arabic and RTL are first-class.** `FlowDocument::rightToLeft()` settles the
+direction at creation — which picks the default caption words, the running
+footer wording, and the base direction every mixed Arabic/Latin run resolves
+against. It is fixed at creation deliberately, so no document can have its
+paragraphs resolved two different ways.
+
+**Two outcomes, and the choice matters.** `render()` answers bytes and stores
+nothing — right for a preview, an email attachment, an export somebody
+downloads and forgets. `issue()` answers an `IssuedDocument`: a record with an
+id and an immutable artifact, which routing, verification and the organizer
+already understand. Prefer `issue()` when the document is *a thing that
+happened* and `render()` when it is *a view of something*. Getting it wrong one
+way fills a tenant's storage with drafts; the other way loses the audit trail
+for a document somebody acted on.
+
+**You do not name a tenant, and you cannot.** No method takes a tenant id. The
+host reads the tenant and the actor from its own request-scoped context, so a
+document built from one tenant's content and filed in another's storage has no
+expression in this API.
+
+**You do not number anything.** Tables, figures and heading numbers are
+assigned by the renderer in document order, and the generated contents list is
+page-numbered from where each anchor actually landed. A caller that numbered
+its own would have to renumber on every insert, and a disagreement between its
+numbers and the generated lists would be invisible until somebody read the
+printed document.
+
+**Ceilings are the tenant's, not yours.** `documents.flow_max_blocks`,
+`flow_max_table_rows` and `flow_max_bytes` are per-tenant settings; a breach is
+a `RenderRejectedException` naming the number, because the number is
+configurable and therefore not knowable from your side.
+
+**Where it is available.** The host registers this seam in the **HTTP entry
+point only**. Resolving it from a CLI command or a queue worker throws the
+container's ordinary "not registered" error — issuing a document needs the
+per-tenant storage stack, and building a second copy of that in the CLI kernel
+is the split-backend hazard the storage factory warns about. Until it is wired
+there, render inside the request, or have the job enqueue the document's
+*inputs* and render on the next request that needs them.
+
+---
+
 ## Checklist
 
 - [ ] Directory `plugins/HelloWorld/` with namespace prefix `HelloWorld\`.
@@ -1266,6 +1357,11 @@ audits `helloworld:greeting.created` when a greeting is created.
       `targetType` and `idKey`, and are dispatched via
       `Events::forPlugin($this->getName(), …)` rather than a hand-written
       prefix (Step 11).
+- [ ] (Optional) Document rendering checks `isAvailable()` before assembling
+      anything expensive, handles `RenderRejectedException` and
+      `RenderUnavailableException` **separately** (one is permanent, the other
+      is the default state of a fresh install), and is not called from a CLI
+      command or a queue worker (Step 12).
 
 See [Architecture.md](./Architecture.md) for how this all fits together.
 

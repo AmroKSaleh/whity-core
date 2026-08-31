@@ -56,7 +56,34 @@ const BLOCK_TYPES = new Set([
   'figure',
   'pageBreak',
   'spacer',
+  // The platform's verification code (#1036 for the fixed-canvas mode, extended
+  // to this one). Drawn here rather than embedded as a `figure` by the caller
+  // because the caller has no barcode encoder and this service already does —
+  // and because an image the caller supplies is an image the caller chose,
+  // which is the wrong property for the one mark on a document that is supposed
+  // to attest to where it came from.
+  'qr',
 ]);
+
+/**
+ * How large the QR is drawn, in millimetres.
+ *
+ * Fixed rather than caller-supplied: a verification code has one job, which is
+ * to be scannable, and every knob here is a way to produce one that is not.
+ * 30 mm at the module's default error correction reads reliably from a phone at
+ * arm's length on a 200-dpi office print.
+ */
+const QR_SIZE_MM = Number(process.env.RENDER_FLOW_QR_SIZE_MM || 30);
+
+/**
+ * Longest string a verification code will encode.
+ *
+ * Well inside QR's own capacity, and that is the point: the limit that matters
+ * is not what the encoder accepts but what a phone camera resolves off paper.
+ * A verification URL is a domain plus a token — nothing legitimate approaches
+ * this.
+ */
+const MAX_QR_VALUE_LENGTH = 512;
 
 /**
  * Default caption/label words. Overridable per payload so the caller picks
@@ -189,6 +216,22 @@ function validateFlowPayload(payload) {
       }
       if (block.columns !== undefined && !Array.isArray(block.columns)) {
         return `"content[${i}].columns" must be an array`;
+      }
+    }
+    if (block.type === 'qr') {
+      if (typeof block.value !== 'string' || block.value === '') {
+        return `"content[${i}].value" must be the non-empty string the code encodes`;
+      }
+      if (block.value.length > MAX_QR_VALUE_LENGTH) {
+        // A QR's capacity is finite and its readability degrades into an
+        // unscannable lattice well before the encoder refuses outright.
+        // Refusing here names the reason; letting it through produces a printed
+        // document carrying a mark that looks like a verification code and
+        // scans as nothing.
+        return `"content[${i}].value" exceeds ${MAX_QR_VALUE_LENGTH} characters, beyond which the code stops being reliably scannable`;
+      }
+      if (block.reference !== undefined && typeof block.reference !== 'string') {
+        return `"content[${i}].reference" must be a string`;
       }
     }
     if (block.type === 'figure') {
@@ -386,4 +429,6 @@ module.exports = {
   MAX_BLOCKS,
   MAX_TABLE_ROWS,
   MAX_PAYLOAD_BYTES,
+  MAX_QR_VALUE_LENGTH,
+  QR_SIZE_MM,
 };

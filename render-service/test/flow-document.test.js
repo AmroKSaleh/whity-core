@@ -231,3 +231,78 @@ describe('normaliseFlowDocument numbering', () => {
     expect(d.frontMatter[1].title).toBe('مخصص');
   });
 });
+
+/**
+ * The verification-code block (#1036's codes, extended to the flowing mode).
+ *
+ * Not general-purpose furniture: this is the one mark on a document that
+ * attests to where the document came from. So what is pinned is that it draws a
+ * REAL code, that its human-readable fallback survives an RTL document intact,
+ * and that the refusals are the ones which stop an unscannable lattice reaching
+ * paper looking like the genuine article.
+ */
+describe('the verification-code block', () => {
+  const { buildFlowHtml } = require('../src/flow/html');
+
+  const withQr = (qr) => normaliseFlowDocument(minimal({ content: [{ type: 'qr', ...qr }] }));
+
+  test('accepts a code with a value and a reference', () => {
+    expect(
+      validateFlowPayload(
+        minimal({ content: [{ type: 'qr', value: 'https://example.test/verify/x', reference: 'AAAA-BBBB' }] })
+      )
+    ).toBeNull();
+  });
+
+  test('refuses a code with nothing to encode', () => {
+    expect(validateFlowPayload(minimal({ content: [{ type: 'qr', value: '' }] })))
+      .toMatch(/must be the non-empty string the code encodes/);
+  });
+
+  test('refuses a value too long to scan reliably off paper', () => {
+    // The limit that matters is not what the encoder accepts but what a phone
+    // camera resolves from a printed page. Past this the code still ENCODES; it
+    // just stops being readable, which produces a document carrying a mark that
+    // looks like a verification code and scans as nothing.
+    expect(validateFlowPayload(minimal({ content: [{ type: 'qr', value: 'x'.repeat(513) }] })))
+      .toMatch(/stops being reliably scannable/);
+  });
+
+  test('refuses a non-string reference', () => {
+    expect(validateFlowPayload(minimal({ content: [{ type: 'qr', value: 'ok', reference: 7 }] })))
+      .toMatch(/reference" must be a string/);
+  });
+
+  test('draws a real barcode as inline SVG rather than a raster', () => {
+    // Resolution-free on purpose: a bitmap scaled to a print resolution nobody
+    // knows in advance is how a code that scanned in review stops scanning on
+    // paper.
+    const html = buildFlowHtml(withQr({ value: 'https://example.test/verify/abc' }));
+
+    expect(html).toContain('data-flow-unit="qr"');
+    expect(html).toContain('<svg');
+  });
+
+  test('isolates the printed reference inside a right-to-left document', () => {
+    // `9F2A-4C11-8B03` is a left-to-right token in an RTL paragraph. Without a
+    // bidi isolate the hyphens resolve with the surrounding Arabic and the
+    // groups print in the wrong order — which reads as a typo and IS a wrong
+    // code, typed into the verification page by somebody who could not scan.
+    const doc = normaliseFlowDocument({
+      direction: 'rtl',
+      content: [{ type: 'qr', value: 'https://example.test/v/x', reference: '9F2A-4C11-8B03' }],
+    });
+
+    expect(buildFlowHtml(doc)).toMatch(/flow-qr-reference">[^<]*<bdi>/);
+  });
+
+  test('keeps the code and its reference on one page', () => {
+    // A barcode split across a page boundary scans as nothing. The paginator
+    // already moves unsplittable units whole; this pins the CSS that stops a
+    // browser's own break heuristics separating the code from the reference
+    // that is supposed to stand in for it.
+    const html = buildFlowHtml(withQr({ value: 'https://example.test/v/x', reference: 'AAAA-BBBB' }));
+
+    expect(html).toMatch(/\.flow-qr\s*\{[^}]*break-inside:\s*avoid/);
+  });
+});

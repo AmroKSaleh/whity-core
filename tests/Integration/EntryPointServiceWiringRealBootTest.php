@@ -102,6 +102,77 @@ final class EntryPointServiceWiringRealBootTest extends TestCase
     }
 
     /**
+     * The SDK rendering seam resolves after a real boot, fully assembled
+     * (#1072).
+     *
+     * A source-scanning test already pins that index.php contains the
+     * registration ({@see \Tests\Core\DocumentRenderSeamEntryPointWiringTest}),
+     * and it cannot catch the failure this one is for. The seam is registered
+     * roughly 160 lines below the renderer it wraps, because it also needs
+     * `$documentQrService`, which is built later still — and PHP does not
+     * hoist. Get that order wrong and every request 500s at boot on an
+     * undefined variable, while the source scan, PHPStan and the whole unit
+     * suite stay green because none of them ever runs the file.
+     *
+     * So this boots it, and then asks the container for the CONTRACT a plugin
+     * would ask for.
+     */
+    public function testHttpEntryPointResolvesTheSdkRenderingSeamFullyAssembled(): void
+    {
+        $result = $this->runProbe(<<<'PHP'
+            $_SERVER['REQUEST_METHOD'] = 'GET';
+            $_SERVER['REQUEST_URI']    = '/api/health';
+            $_SERVER['HTTP_HOST']      = 'localhost';
+            $_GET = [];
+
+            ob_start();
+            require __DIR__ . '/public/index.php';
+            ob_end_clean();
+
+            // Exactly the line a plugin author writes (Plugin-Development.md
+            // Step 12). Resolving by the SDK INTERFACE is the point: a plugin
+            // may not reference a core namespace at all.
+            $renderer = \Whity\app(\Whity\Sdk\Render\DocumentRenderer::class);
+
+            $reflection = new \ReflectionClass($renderer);
+            $qr = $reflection->getProperty('qr');
+            $qr->setAccessible(true);
+
+            whity_probe_emit([
+                'implements_contract' => $renderer instanceof \Whity\Sdk\Render\DocumentRenderer,
+                'is_the_host_adapter' => $renderer instanceof \Whity\Core\Document\Render\SdkDocumentRenderer,
+                'stable_identity'     => $renderer === \Whity\app(\Whity\Sdk\Render\DocumentRenderer::class),
+                // The collaborator that arrives last and is therefore the one a
+                // wrong ordering would leave null.
+                'qr_service_wired'    => $qr->getValue($renderer) !== null,
+                // Answers rather than throws with no tenant context, which is
+                // what makes it safe for a plugin to call speculatively.
+                'availability_answers' => $renderer->isAvailable() === false,
+            ]);
+            PHP);
+
+        self::assertTrue(
+            $result['implements_contract'],
+            'The container must hand back something implementing the SDK contract; a plugin '
+            . 'type-hints that interface and can reference nothing else.'
+        );
+        self::assertTrue($result['is_the_host_adapter'], 'and it must be the host adapter.');
+        self::assertTrue($result['stable_identity'], 'Resolving twice must return one instance.');
+        self::assertTrue(
+            $result['qr_service_wired'],
+            'The verification-code service must be wired in. It is constructed AFTER the renderer '
+            . 'the seam wraps, so this is the collaborator a wrong registration order silently '
+            . 'leaves null — and the symptom would be documents that issue perfectly well and '
+            . 'quietly carry no verification code at all.'
+        );
+        self::assertTrue(
+            $result['availability_answers'],
+            'isAvailable() must ANSWER outside a tenant context rather than throw: it exists to '
+            . 'be called speculatively, before a plugin spends its queries assembling a document.'
+        );
+    }
+
+    /**
      * The same property through the CLI kernel. A registry wired in only one
      * entry point is the divergence bug class this repo has already paid for in
      * #717 and #724: the same plugin, reached two ways, would disagree about
