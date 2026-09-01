@@ -140,6 +140,7 @@ final class CoreApiSchemas
             self::invitationRoutes(),
             self::twoFactorRecoveryRoutes(),
             self::dataTypeRoutes(),
+            self::reportRoutes(),
             self::resourceRoleGrantRoutes()
         );
     }
@@ -9453,6 +9454,79 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+        ];
+    }
+
+    /**
+     * Tabular reports, emitted as documents (#947 item 6).
+     *
+     * Both routes are gated on `documents:render`, and the source is gated a
+     * SECOND time on its own permission inside the handler. The two mean
+     * different things: producing a report spends a headless-browser page and
+     * writes to the tenant's storage, which is what `documents:render` governs;
+     * seeing the rows is governed by whatever already governs reading that
+     * data. There is deliberately no `reports:run` permission — a report is a
+     * READ, and a second vocabulary for it would be a second answer to a
+     * question that already has one.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function reportRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/reports', 'documents:render', [
+                'summary' => 'List the reports this caller may run',
+                'description' => 'FILTERED to what the caller may actually run, not annotated with a '
+                    . 'permitted flag: listing a report over data the caller cannot see would publish '
+                    . 'its existence, and would leave every client to re-implement the same filter '
+                    . 'differently. `required_permission` is carried so a screen can hide what it '
+                    . 'must without asking.',
+                'tags' => ['reports'],
+                'responses' => [
+                    200 => self::jsonResponse('The runnable reports', self::object(
+                        ['data' => ['type' => 'array', 'items' => self::object(
+                            [
+                                'key' => ['type' => 'string'],
+                                'label' => ['type' => 'string'],
+                                'origin' => ['type' => 'string'],
+                                'required_permission' => ['type' => 'string'],
+                            ],
+                            ['key', 'label', 'origin', 'required_permission']
+                        )]],
+                        ['data']
+                    )),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/reports/{source:[a-z][a-z0-9_]*}/document', 'documents:render', [
+                'summary' => 'Run a report and issue it as a document',
+                'description' => 'Runs the named source and renders its rows as a flowing, paginated '
+                    . 'document — a real `documents` record with an immutable artifact, so routing, '
+                    . 'verification and the organizer all apply to it. Bounded by '
+                    . '`documents.flow_max_table_rows`; when the ceiling bites, `truncated` is true '
+                    . 'AND the document says so on its own first page, because a reader holding a '
+                    . 'printed subset has no other way to know it is one. Answers 202 rather than 201 '
+                    . 'when the record was created but the render did not produce an artifact — the '
+                    . 'document exists and can be re-rendered against the same id.',
+                'tags' => ['reports'],
+                'responses' => [
+                    201 => self::jsonResponse('The issued document', self::dataEnvelope(self::object(
+                        [
+                            'document_id' => ['type' => 'integer'],
+                            'title' => ['type' => 'string'],
+                            'page_count' => ['type' => 'integer'],
+                            'row_count' => ['type' => 'integer'],
+                            'total_rows' => ['type' => 'integer'],
+                            'truncated' => ['type' => 'boolean'],
+                            'content_url' => ['type' => 'string', 'nullable' => true],
+                        ],
+                        ['document_id', 'title', 'row_count', 'total_rows', 'truncated']
+                    ))),
+                    202 => self::errorResponse('The document was recorded but no artifact was stored'),
+                    404 => self::errorResponse('No such report, or the caller may not read its data'),
+                    422 => self::errorResponse('The document was refused (a tenant ceiling, or a tree the renderer would not accept)'),
+                    503 => self::errorResponse('The report could not be run, or rendering is unavailable'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
