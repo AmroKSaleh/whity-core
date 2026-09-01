@@ -60,6 +60,27 @@ final class SdkDocumentRendererTest extends TestCase
     {
         $this->pdo = SchemaFromMigrations::make(true);
         $pdo = $this->pdo;
+        // The tenant has to EXIST. Both `tenant_settings.tenant_id` and
+        // `documents.tenant_id` carry foreign keys that PostgreSQL enforces and
+        // SQLite (which does not turn on `PRAGMA foreign_keys` by default) does
+        // not — so writing an override or raising a document against an id
+        // nobody created passes on the SQLite shards and fails on the
+        // real-engine ones, where the constraint is real.
+        $pdo->exec(
+            'INSERT INTO tenants (id, name, slug) VALUES (' . self::TENANT . ", 'tenant-issuer', 'tenant-issuer')"
+            . ' ON CONFLICT DO NOTHING'
+        );
+        // And the ACTOR, for the same reason: `documents.created_by` and
+        // `document_artifacts.rendered_by` both reference profiles. The actor
+        // is read from AuditContext rather than passed in, so a test that did
+        // not seed one would be proving the seam stamps provenance while
+        // stamping an id that resolves to nobody.
+        $pdo->exec(
+            'INSERT INTO profiles (id, display_name, password_hash) VALUES ('
+            . self::ACTOR . ", 'Issuing Actor', 'x')"
+            . ' ON CONFLICT DO NOTHING'
+        );
+
         $this->settings = new SettingsService(
             new GlobalSettingsRepository($pdo),
             new TenantSettingsRepository($pdo)

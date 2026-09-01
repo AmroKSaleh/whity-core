@@ -33,6 +33,9 @@ final class FlowDocumentRendererTest extends TestCase
 {
     private const TENANT = 7;
 
+    /** A second tenant, so "this ceiling is not that tenant's" is provable. */
+    private const OTHER_TENANT = 999;
+
     private SettingsService $settings;
     private FakeRenderServiceClient $client;
     private FlowDocumentRenderer $renderer;
@@ -40,6 +43,20 @@ final class FlowDocumentRendererTest extends TestCase
     protected function setUp(): void
     {
         $pdo = SchemaFromMigrations::make(true);
+        // The tenants have to EXIST. `tenant_settings.tenant_id` carries a
+        // foreign key that PostgreSQL enforces and SQLite (which does not turn
+        // on `PRAGMA foreign_keys` by default) does not — so a test that writes
+        // a per-tenant override against an id nobody created passes on the
+        // SQLite shards and fails on the real-engine ones. Both ids this file
+        // uses are seeded, including the second one, whose whole job is to
+        // prove a ceiling does NOT leak across tenants.
+        foreach ([self::TENANT, self::OTHER_TENANT] as $id) {
+            $pdo->exec(
+                "INSERT INTO tenants (id, name, slug) VALUES ({$id}, 'tenant-{$id}', 'tenant-{$id}')"
+                . ' ON CONFLICT DO NOTHING'
+            );
+        }
+
         $this->settings = new SettingsService(
             new GlobalSettingsRepository($pdo),
             new TenantSettingsRepository($pdo)
@@ -132,7 +149,7 @@ final class FlowDocumentRendererTest extends TestCase
         $payload = FlowDocument::create()->paragraph('a')->paragraph('b')->toPayload();
 
         // Another tenant keeps the registry default and renders it happily.
-        $this->renderer->render(999, $payload);
+        $this->renderer->render(self::OTHER_TENANT, $payload);
         self::assertCount(1, $this->client->flowCalls);
 
         $this->expectException(DocumentRenderRejectedException::class);
