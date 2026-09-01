@@ -479,6 +479,7 @@ function RouteFlowBody({
           labels={{
             empty: t('routeTemplates.canvas.empty', 'No stages yet. Add the first one to start the flow.'),
             decision: t('routeTemplates.canvas.decision', 'Decision'),
+            delivery: t('routeTemplates.canvas.delivery', 'Sent, not asked'),
             reaches: t('routeTemplates.canvas.reaches', 'Reaches'),
             people: t('routeTemplates.canvas.people.other', 'people'),
             person: t('routeTemplates.canvas.people.one', 'person'),
@@ -783,13 +784,19 @@ function StageInspector({
         </p>
       )}
 
+      {/* WHAT THIS STAGE DOES TO THE PEOPLE IT REACHES (#1054/#1064).
+          Two switches, and they are mutually exclusive at the CONTROL rather
+          than at save: the server refuses the pair at three layers, and an
+          affordance whose only outcome is a refusal is worse than no affordance
+          — the same argument the canvas already makes for not drawing verdict
+          handles on a non-decision step. */}
       <label className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">
           {t('routeTemplates.inspector.decision', 'Requires a decision')}
         </span>
         <Switch
           checked={step.decision}
-          disabled={readOnly}
+          disabled={readOnly || step.satisfiedBy === 'delivery'}
           onCheckedChange={(checked) =>
             // Dropping the quorum when a stage stops being a gate: a quorum on a
             // stage that asks for no verdict can never be consulted, and the
@@ -799,6 +806,40 @@ function StageInspector({
           }
         />
       </label>
+
+      <label className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">
+          {t('routeTemplates.inspector.delivery', 'Sends without asking')}
+        </span>
+        <Switch
+          checked={step.satisfiedBy === 'delivery'}
+          disabled={readOnly || step.decision}
+          onCheckedChange={(checked) =>
+            onChange({ satisfiedBy: checked ? 'delivery' : 'act' })
+          }
+        />
+      </label>
+
+      {/* Said once, under whichever switch is on, rather than as a warning that
+          appears after a refusal. An author turning one on needs to know why the
+          other went grey, and an author who has turned neither on needs neither
+          sentence. */}
+      {step.satisfiedBy === 'delivery' && (
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'routeTemplates.inspector.deliveryExplained',
+            'Everybody this stage reaches is sent the document and asked for nothing. Their item closes the moment it is sent, so the flow continues immediately and this stage cannot also be a decision.'
+          )}
+        </p>
+      )}
+      {step.decision && (
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'routeTemplates.inspector.decisionExcludesDelivery',
+            'A decision needs somebody holding the item to answer it, so this stage cannot also send without asking.'
+          )}
+        </p>
+      )}
 
       {step.decision && (
         <label className="block space-y-1">
