@@ -149,7 +149,10 @@ describe('RouteComposer — naming a user group', () => {
 
     // Written out from GroupRuleResolver's documented config, not derived.
     expect(issuedBody()).toEqual({
-      steps: [{ rule_kind: 'group', rule_config: { group_id: 7 } }],
+      // `satisfied_by` on every step since #1064 — see the note in
+      // document-routing-actions.test.tsx for why it is sent even when it is
+      // the value the server would have defaulted to.
+      steps: [{ rule_kind: 'group', rule_config: { group_id: 7 }, satisfied_by: 'act' }],
     });
   });
 
@@ -279,7 +282,9 @@ describe('RouteComposer — naming people outright', () => {
     await waitFor(() => expect(onIssued).toHaveBeenCalled());
 
     expect(issuedBody()).toEqual({
-      steps: [{ rule_kind: 'explicit', rule_config: { profile_ids: [11, 12] } }],
+      steps: [
+        { rule_kind: 'explicit', rule_config: { profile_ids: [11, 12] }, satisfied_by: 'act' },
+      ],
     });
   });
 
@@ -361,5 +366,67 @@ describe('RouteComposer — mounted before the rule catalogue has arrived', () =
       expect(screen.getAllByText(/a route needs at least one step/i).length).toBeGreaterThan(0)
     );
     expect(screen.queryByLabelText('Rule')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * A step that TELLS rather than ASKS (#1054/#1064).
+ *
+ * The linear path could not express this at all, so #1054's feature was
+ * reachable only from the API or the canvas. It is the first per-step flag this
+ * path has ever authored, and it earns that on the strength of what it changes:
+ * a delivery step closes every item the instant it opens them, which is the
+ * difference between a circulation waiting on forty acknowledgements and one
+ * waiting on none.
+ */
+describe('RouteComposer — a step that sends without asking', () => {
+  it('defaults to asking', async () => {
+    // The default is the ordinary case and must stay it: a composer that
+    // silently created delivery steps would close every recipient's item the
+    // moment a route was issued, and nobody would be asked for anything.
+    renderComposer();
+    chooseKind('Everyone in a user group');
+    fireEvent.click(screen.getByLabelText('User group'));
+    fireEvent.click(screen.getByRole('option', { name: 'Instructors' }));
+
+    const submit = screen.getByRole('button', { name: /send document/i });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(mockApiClient).toHaveBeenCalled());
+    expect(issuedBody()).toEqual({
+      steps: [{ rule_kind: 'group', rule_config: { group_id: 7 }, satisfied_by: 'act' }],
+    });
+  });
+
+  it('sends the choice to the server rather than relying on its default', async () => {
+    renderComposer();
+    chooseKind('Everyone in a user group');
+    fireEvent.click(screen.getByLabelText('User group'));
+    fireEvent.click(screen.getByRole('option', { name: 'Instructors' }));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Send without asking/i }));
+
+    const submit = screen.getByRole('button', { name: /send document/i });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(mockApiClient).toHaveBeenCalled());
+    expect(issuedBody()).toEqual({
+      steps: [{ rule_kind: 'group', rule_config: { group_id: 7 }, satisfied_by: 'delivery' }],
+    });
+  });
+
+  it('says what the choice does, not just what it is called', async () => {
+    // "Send without asking" alone is a setting name. What an author needs to
+    // know is the consequence — that the item closes immediately and the route
+    // moves on — because that is the part that surprises somebody who expected
+    // to see acknowledgements come back.
+    renderComposer();
+    chooseKind('Everyone in a user group');
+
+    expect(
+      screen.getByText(/their item closes immediately, and the route continues/i)
+    ).toBeInTheDocument();
   });
 });

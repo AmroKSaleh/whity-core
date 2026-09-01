@@ -635,6 +635,7 @@
         "routing.compose.roles.partial": "تعذّر تحميل بعض الأدوار، لذا قد تكون هذه القائمة ناقصة.",
         "routing.compose.send": "إرسال المستند",
         "routing.compose.sending": "جارٍ الإرسال…",
+        "routing.compose.step.delivery": "يُرسِل دون أن يطلب — كل من تصل إليه هذه الخطوة يُبلَّغ، ويُغلق عنصره فوراً، ويستمر المسار.",
         "routing.compose.step.down": "تأخير الخطوة",
         "routing.compose.step.fromPlugin": "من {plugin}",
         "routing.compose.step.group": "مجموعة مستخدمين",

@@ -634,6 +634,7 @@
         "routing.compose.roles.partial": "Only some roles could be loaded, so this list may be incomplete.",
         "routing.compose.send": "Send document",
         "routing.compose.sending": "Sending…",
+        "routing.compose.step.delivery": "Send without asking — everybody this step reaches is told, their item closes immediately, and the route continues.",
         "routing.compose.step.down": "Move step later",
         "routing.compose.step.fromPlugin": "from {plugin}",
         "routing.compose.step.group": "User group",

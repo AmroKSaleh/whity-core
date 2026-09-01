@@ -429,6 +429,21 @@ export interface DraftStep {
   rule_kind: string;
   rule_config: Record<string, unknown>;
   label: string;
+  /**
+   * Whether this step ASKS the people it reaches or simply TELLS them (#1054).
+   *
+   * The first per-step flag this linear path has ever authored, and it earns
+   * that on the strength of what it changes: a delivery step closes every item
+   * the instant it opens them, so it is the difference between a circulation
+   * that waits for forty acknowledgements and one that waits for none.
+   *
+   * `decision` is deliberately still absent here. This list cannot express what
+   * a design contains — gates, quorums and verdict branches all need the
+   * canvas — and a half-expressible gate would be worse than none. "Told rather
+   * than asked" needs no graph to be meaningful, which is why it is the one
+   * that belongs.
+   */
+  satisfied_by: RouteSatisfactionName;
 }
 
 // ---------------------------------------------------------------------------

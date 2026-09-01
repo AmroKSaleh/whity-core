@@ -248,7 +248,11 @@ let draftKeySeed = 0;
 const nextDraftKey = (): string => `step-${++draftKeySeed}`;
 
 function newStep(kind: string): DraftStep {
-  return { key: nextDraftKey(), rule_kind: kind, rule_config: {}, label: '' };
+  // `satisfied_by` stated rather than omitted. The server reads a missing value
+  // as `act`, so leaving it out would work — and would be the same silence that
+  // let the flow editor destroy a delivery stage on save (#1064). A step that
+  // says what it is cannot be defaulted into something else.
+  return { key: nextDraftKey(), rule_kind: kind, rule_config: {}, label: '', satisfied_by: 'act' };
 }
 
 export function RouteComposer({
@@ -549,6 +553,12 @@ export function RouteComposer({
                     rule_kind: step.rule_kind,
                     rule_config: step.rule_config,
                     ...(step.label.trim() === '' ? {} : { label: step.label.trim() }),
+                    // Sent ALWAYS, including when it is `act` (#1064). The
+                    // server defaults a missing value to `act`, so omitting it
+                    // would work by coincidence rather than by intent — and it
+                    // is exactly the omission that let the flow editor turn a
+                    // delivery stage into an ordinary one on save.
+                    satisfied_by: step.satisfied_by,
                   })),
                 }
           ),
@@ -1023,6 +1033,34 @@ export function RouteComposer({
                   onChange={(e) => updateStep(step.key, { label: e.target.value })}
                   className="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm text-foreground"
                 />
+              </div>
+
+              {/* WHAT THIS STEP DOES TO THE PEOPLE IT REACHES (#1054/#1064).
+                  A checkbox rather than the canvas's paired switches, because
+                  this path cannot author a decision at all — so there is no
+                  second state to be mutually exclusive WITH, and a pair of
+                  switches would imply a choice one of whose arms is missing. */}
+              <div className="mt-2">
+                <label
+                  className="flex items-start gap-2 text-xs text-muted-foreground"
+                  htmlFor={`delivery-${step.key}`}
+                >
+                  <input
+                    id={`delivery-${step.key}`}
+                    type="checkbox"
+                    checked={step.satisfied_by === 'delivery'}
+                    onChange={(e) =>
+                      updateStep(step.key, { satisfied_by: e.target.checked ? 'delivery' : 'act' })
+                    }
+                    className="mt-0.5"
+                  />
+                  <span>
+                    {t(
+                      'routing.compose.step.delivery',
+                      'Send without asking — everybody this step reaches is told, their item closes immediately, and the route continues.'
+                    )}
+                  </span>
+                </label>
               </div>
             </li>
           );
