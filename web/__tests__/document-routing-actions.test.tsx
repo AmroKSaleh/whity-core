@@ -490,7 +490,14 @@ describe('RouteComposer', () => {
     expect(url).toBe('/api/v1/documents/318/routes');
     const body = JSON.parse(String((options as RequestInit).body));
     expect(Array.isArray(body.steps)).toBe(true);
-    expect(body.steps).toEqual([{ rule_kind: 'role', rule_config: { role_id: 3 } }]);
+    // `satisfied_by` rides along on every step since #1064, including when it is
+    // `act`. The server would default a missing value to exactly that, so
+    // sending it changes no behaviour — what it changes is that the step SAYS
+    // what it is instead of relying on a default, which is the omission that let
+    // the flow editor turn a delivery stage into an ordinary one on save.
+    expect(body.steps).toEqual([
+      { rule_kind: 'role', rule_config: { role_id: 3 }, satisfied_by: 'act' },
+    ]);
     // Title omitted so the server falls back to the document's own.
     expect(body.title).toBeUndefined();
   });
