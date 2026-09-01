@@ -173,6 +173,72 @@ final class EntryPointServiceWiringRealBootTest extends TestCase
     }
 
     /**
+     * The report registry boots POPULATED, and its routes are registered
+     * (#947 item 6).
+     *
+     * Two failures this catches that nothing else can. The registry is built
+     * from `$documentRepository`, `$documentVisibilityPolicy` and
+     * `$serverLabels`, all defined further UP the file, and PHP does not hoist
+     * — so a registration that drifted above one of them is a boot-time fatal
+     * on every request while every unit test stays green.
+     *
+     * And the registry is a {@see \Whity\Core\Container\HostWiredService} for a
+     * specific reason worth proving rather than asserting: an empty one answers
+     * "no such report" for every key, which is exactly what an installation
+     * with no reports configured looks like. So this checks the source is
+     * actually THERE, not merely that something resolved.
+     */
+    public function testHttpEntryPointResolvesAPopulatedReportRegistryAndRegistersItsRoutes(): void
+    {
+        $result = $this->runProbe(<<<'PHP'
+            $_SERVER['REQUEST_METHOD'] = 'GET';
+            $_SERVER['REQUEST_URI']    = '/api/health';
+            $_SERVER['HTTP_HOST']      = 'localhost';
+            $_GET = [];
+
+            ob_start();
+            require __DIR__ . '/public/index.php';
+            ob_end_clean();
+
+            $registry = \Whity\app(\Whity\Core\Report\ReportSourceRegistry::class);
+            $documents = $registry->get(\Whity\Core\Report\ReportSourceRegistry::CORE_DOCUMENTS);
+
+            $routes = array_map(
+                static fn (array $r): string => strtoupper((string) $r['method']) . ' ' . (string) $r['path'],
+                $router->getRoutes()
+            );
+
+            whity_probe_emit([
+                'keys'                => $registry->keys(),
+                'documents_source'    => $documents !== null,
+                // The gate that decides who may see these rows. An empty string
+                // here would mean every caller the ROUTE admits can read them.
+                'required_permission' => $documents?->requiredPermission(),
+                'has_index_route'     => in_array('GET /api/v1/reports', $routes, true),
+                'has_document_route'  => (bool) preg_grep('#^POST /api/v1/reports/#', $routes),
+            ]);
+            PHP);
+
+        self::assertSame(
+            [\Whity\Core\Report\ReportSourceRegistry::CORE_DOCUMENTS],
+            $result['keys'],
+            'The registry must boot POPULATED. An empty one is indistinguishable from an '
+            . 'installation with no reports, so the caller is told their report does not exist '
+            . 'and goes looking at their own permissions.'
+        );
+        self::assertTrue($result['documents_source']);
+        self::assertSame(
+            'documents:read',
+            $result['required_permission'],
+            'The documents report must be gated on the permission that already governs reading '
+            . 'documents. A report is a READ; a second vocabulary for it would be a second answer '
+            . 'to one question.'
+        );
+        self::assertTrue($result['has_index_route'], 'GET /api/v1/reports must be registered.');
+        self::assertTrue($result['has_document_route'], 'POST /api/v1/reports/{source}/document must be registered.');
+    }
+
+    /**
      * The same property through the CLI kernel. A registry wired in only one
      * entry point is the divergence bug class this repo has already paid for in
      * #717 and #724: the same plugin, reached two ways, would disagree about
