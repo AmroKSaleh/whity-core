@@ -106,13 +106,17 @@ class CreateRouteStepEffects
 {
     public static function up(Database $db): void
     {
-        // THE DECLARATION. One literal create table statement per table, never
+        // THE DECLARATION. One literal create-table statement per table, never
         // a loop over interpolated names — TenantOwnedTablesTest and
         // CoreTablesTest re-derive their registries by scanning this source, so
-        // every name has to appear literally. (Migrations 059, 108 and 112 carry
-        // the same note, and spell the keyword in lowercase in prose for the
-        // same reason: the schema test reads a capitalised one inside a comment
-        // as a real declaration.)
+        // every name has to appear literally.
+        //
+        // HYPHENATED in prose, as migrations 108 and 112 also write it, and not
+        // merely as a style: MigrationSchemaTest scans every migration for the
+        // two words followed by an identifier and requires an `IF NOT EXISTS`
+        // between them. It matches case-INSENSITIVELY, so lowercasing the
+        // keyword is not enough — this comment, written with a space, failed
+        // that test by describing a table called "statement".
         //
         // `UNIQUE (step_id, position)` is what makes the ordering the database's
         // to enforce rather than the author's to remember, mirroring

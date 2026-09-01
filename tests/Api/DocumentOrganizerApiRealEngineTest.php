@@ -348,7 +348,13 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         // here on the scenario's own terms too — an installation that never ran
         // migration 112 records no route events, so it has no decision that
         // could reference one.
+        // `document_route_effect_attempts` (migration 139) is the third of the
+        // same kind: an attempt records which routing act caused a stage to
+        // notify somebody, so it points at the trail as well. Same argument on
+        // the scenario's terms — an installation with no route events has never
+        // reached a stage, so nothing could have fired an effect at one.
         $this->pdo->exec('DROP TABLE meeting_decisions');
+        $this->pdo->exec('DROP TABLE document_route_effect_attempts');
         $this->pdo->exec('DROP TABLE document_route_recipients');
         $this->pdo->exec('DROP TABLE document_route_events');
 
