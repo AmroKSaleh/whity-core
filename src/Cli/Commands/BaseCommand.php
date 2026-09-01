@@ -231,6 +231,25 @@ abstract class BaseCommand implements CliCommand, CommandHelp
         );
         \Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry);
 
+        // EFFECT catalogue (#1032), mirroring public/index.php exactly.
+        //
+        // The CATALOGUE is wired here and the RUNNER is not, and the asymmetry
+        // is deliberate rather than an omission. A catalogue answers "what kinds
+        // exist", which a CLI command validating or describing a route needs and
+        // which must not depend on which entry point is asking — an empty one
+        // here would report every authored effect as an unknown kind.
+        //
+        // The runner is a hook subscriber that fires effects on a routing act,
+        // and it is wired beside RoutingNotifications in the HTTP entry point
+        // only, because that is where RoutingNotifications is. Wiring one
+        // without the other would let a CLI-driven act take its side effects
+        // while telling its own recipients nothing.
+        $routeEffectRegistry = new \Whity\Core\Document\Routing\RouteEffectRegistry();
+        $routeEffectRegistry->registerCoreEffects(
+            new \Whity\Core\Document\Routing\NotifyEffect($routingRuleRegistry)
+        );
+        \Whity\register_service(\Whity\Core\Document\Routing\RouteEffectRegistry::class, $routeEffectRegistry);
+
         // INBOX SOURCE catalogue (#881). Registered with core's routing source
         // already attached, so a command asking "what is awaiting this person"
         // gets the same answer the HTTP surface gives. An empty registry here

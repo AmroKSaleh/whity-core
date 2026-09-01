@@ -487,6 +487,24 @@ $routingRuleRegistry->registerCoreRoutingRules(
 );
 \Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry); // @phpstan-ignore-line
 
+// 4b-bis. WHAT A ROUTING STAGE DOES TO THE WORLD (#1032) — the sibling
+// catalogue migration 112 specified, beside the rule registry above.
+//
+// Core ships one kind, `notify`, and its audience is a RULE resolved through
+// the registry on the line above rather than a stored list of people: a list is
+// resolved once when the route is authored and is wrong from the first
+// reorganisation onwards, which is the argument the rule registry itself is
+// built on.
+//
+// The catalogue is registered here; the ENGINE that runs these is wired further
+// down beside RoutingNotifications, because it needs the notification
+// dispatcher and because both must run AFTER the router's transaction commits.
+$routeEffectRegistry = new \Whity\Core\Document\Routing\RouteEffectRegistry();
+$routeEffectRegistry->registerCoreEffects(
+    new \Whity\Core\Document\Routing\NotifyEffect($routingRuleRegistry)
+);
+\Whity\register_service(\Whity\Core\Document\Routing\RouteEffectRegistry::class, $routeEffectRegistry); // @phpstan-ignore-line
+
 // 4c-ante-ter. INBOX SOURCE catalogue (#881). The inbox surface belongs to this
 // registry rather than to any one subsystem: routing's recipient rows ARE an
 // inbox, and shipping them behind their own endpoint would leave a person who
@@ -3404,6 +3422,36 @@ $routingNotifications = new \Whity\Core\Document\Routing\RoutingNotifications(
     $settingsService
 );
 $routingNotifications->subscribe($hookManager);
+
+// THE EFFECT ENGINE (#1032), beside the notifier and for the same reasons.
+//
+// Migration 112 refused to ship an effect DECLARATION without this, because "an
+// effect declaration with no engine to run it is a stored intention that
+// silently does nothing" — so the two land together or not at all.
+//
+// A SUBSCRIBER, not a call from inside DocumentRouter. The router broadcasts
+// after its transaction commits, deliberately: an effect invoked inside that
+// transaction would hold the routing write open for as long as a notification
+// write takes, and a failure to notify would roll back an approval somebody had
+// already been told was recorded.
+//
+// It is fail-soft per effect and every path ends in a recorded attempt —
+// including the paths where nothing happened, which is the whole point. A
+// swallowed exception is silence, and silence is what this feature exists to
+// eliminate.
+//
+// SAME GAP AS THE NOTIFIER ABOVE: neither is wired into BaseCommand, so a
+// routing act driven from a CLI command notifies nobody and fires no effects.
+// That is pre-existing and consistent rather than newly introduced here —
+// wiring only ONE of the two into the CLI kernel would be worse, because a
+// stage would then take its side effects without telling its own recipients.
+$routeEffectRunner = new \Whity\Core\Document\Routing\RouteEffectRunner(
+    $routeEffectRegistry,
+    new \Whity\Core\Document\Routing\RouteStepEffectRepository($db->getPdo()),
+    new \Whity\Core\Document\Routing\RouteEffectAttemptRepository($db->getPdo()),
+    $notificationDispatcher
+);
+$routeEffectRunner->subscribe($hookManager);
 
 // 13b-quinquies-ter. CONVENING (migrations 130/131) — deliberative BODIES that
 // meet, minute numbered decisions, and drive a document's existing approval
