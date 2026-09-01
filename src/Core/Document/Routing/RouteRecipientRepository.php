@@ -331,6 +331,54 @@ final class RouteRecipientRepository
     }
 
     /**
+     * How many COHORTS each step of a route has opened (#1140).
+     *
+     * A cohort is "the rows one act opened", keyed by `created_by_event_id`, so
+     * this is a count of distinct opening events per step. One is the ordinary
+     * answer. TWO OR MORE MEANS THE STEP SETTLED MORE THAN ONCE — and that is a
+     * fact the trail has always held and nothing has ever reported.
+     *
+     * WHY THIS IS THE RIGHT MEASURE, rather than counting events or arrivals.
+     * De-duplication at a step is over OPEN rows only: migration 112's unique
+     * index is partial (`WHERE closed_by_event_id IS NULL`), so a second arrival
+     * is absorbed into the first cohort *while that cohort is still open* and
+     * opens a NEW one once it has closed. Counting cohorts therefore counts
+     * settlements exactly, because a second cohort is what a second settlement
+     * IS — not a proxy for it.
+     *
+     * That also makes this the general answer #1140 asks for. #1058 framed
+     * double settlement as a property of actor-relative rules; it is really a
+     * property of TIMING, reachable for any rule kind whenever the second
+     * arrival lands after the first cohort closed — one recipient approving
+     * straight into a merge stage while another travels the long way round
+     * through a rework loop. No static picture of the graph can show which side
+     * of that line a given document will fall on, which is exactly why it has to
+     * be read back from what the document actually did.
+     *
+     * Derived, never stored. A counter beside the trail is a second source of
+     * truth that can disagree with it, and the trail is the auditable one.
+     *
+     * @return array<int, int> step id => distinct cohorts opened there.
+     */
+    public function cohortCountsByStep(int $routeId, int $tenantId): array
+    {
+        $statement = $this->db->prepare(
+            'SELECT step_id, COUNT(DISTINCT created_by_event_id) AS cohorts
+               FROM document_route_recipients
+              WHERE tenant_id = :tenant_id AND route_id = :route_id
+              GROUP BY step_id'
+        );
+        $statement->execute(['tenant_id' => $tenantId, 'route_id' => $routeId]);
+
+        $counts = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $counts[(int) $row['step_id']] = (int) $row['cohorts'];
+        }
+
+        return $counts;
+    }
+
+    /**
      * Every recipient row on a document, oldest first — who a route reached and
      * what became of it.
      *

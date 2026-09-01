@@ -70,6 +70,10 @@ final class RoutingPresenter
      *        it (#1037). Defaults to empty, which publishes every step as zero —
      *        the honest answer for a caller that did not ask the trail, and the
      *        same one a route with no rejections yet produces.
+     * @param array<int, int> $cohortsByStep step id => cohorts opened there
+     *        (#1140), which is how many times the step SETTLED. Defaults to
+     *        empty for the same reason, and zero is honest here too: a step
+     *        nothing has reached has opened no cohorts.
      * @return array<string, mixed>
      */
     public static function route(
@@ -78,6 +82,7 @@ final class RoutingPresenter
         array $edges = [],
         string $defaultQuorum = RouteQuorum::ALL,
         array $rejectionsByStep = [],
+        array $cohortsByStep = [],
     ): array {
         return [
             'id' => (int) $route['id'],
@@ -91,6 +96,7 @@ final class RoutingPresenter
                 static fn (array $step): array => self::step(
                     $step,
                     $rejectionsByStep[(int) $step['id']] ?? 0,
+                    $cohortsByStep[(int) $step['id']] ?? 0,
                 ),
                 $steps,
             ),
@@ -126,10 +132,27 @@ final class RoutingPresenter
      * @param array<string, mixed> $step
      * @return array<string, mixed>
      */
-    public static function step(array $step, int $rejections = 0): array
+    public static function step(array $step, int $rejections = 0, int $cohorts = 0): array
     {
         return [
             'id' => (int) $step['id'],
+            // #1140: how many COHORTS this step has opened. One is ordinary;
+            // more than one means the step SETTLED MORE THAN ONCE and opened a
+            // continuation each time, so everything downstream ran again —
+            // including anything that emails people or ends a chain.
+            //
+            // Published as the count rather than as a boolean, because "twice"
+            // and "nine times" are different situations and a flag would make
+            // them look identical. Zero means nothing has arrived here yet,
+            // which is distinct from one.
+            //
+            // NOT A DEFECT REPORT. Settling once per cohort is deliberate and
+            // documented; what was missing is any surface saying it happened to
+            // a PARTICULAR document. The canvas cannot say it — whether a second
+            // arrival is late depends on who acts and how long a rework loop
+            // takes, not on the graph an author drew — so it can only be read
+            // back afterwards, from here.
+            'cohort_count' => $cohorts,
             // #1037: how many times a rejection has sent the document back from
             // here. Derived from the trail's verdict rows, never stored — a
             // counter beside the trail is a second source of truth that can
