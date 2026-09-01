@@ -368,6 +368,12 @@ final class DocumentRoutingApiHandler
                 // was created moments ago, where zero is not a default but the
                 // fact.
                 $this->events->rejectionCountsByStep((int) $route['id'], $tenantId),
+                // #1140: how many cohorts each step has opened, which is how
+                // many times it SETTLED. Read here for the same reason and with
+                // the same caveat — a route published at issue time has opened
+                // exactly the cohorts its first act opened, and reporting that
+                // as history would be reporting the present as the past.
+                $this->recipients->cohortCountsByStep((int) $route['id'], $tenantId),
             ),
             $this->routes->listForDocument($documentId, $tenantId)
         );
