@@ -56,6 +56,16 @@ export type RouteFlowVerdict = 'approved' | 'rejected';
 export type RouteFlowQuorum = 'all' | 'any' | 'majority';
 
 /**
+ * Whether a stage ASKS or TELLS. Mirrors core's `RouteSatisfaction`.
+ *
+ * `'act'` waits for somebody to forward, acknowledge or return. `'delivery'`
+ * closes every row it opens, so the stage is satisfied by the sending itself —
+ * "put the PDF in every instructor's mailbox", where nobody downstream logs in
+ * and nobody acknowledges anything.
+ */
+export type RouteFlowSatisfaction = 'act' | 'delivery';
+
+/**
  * One stage of a flow.
  *
  * `position` is the identity on the wire and within this module. Database ids
@@ -81,6 +91,24 @@ export interface RouteFlowStep {
    * effective value rather than a blank.
    */
   decisionQuorum: RouteFlowQuorum | null;
+  /**
+   * Whether the people this stage reaches are ASKED TO ACT or simply TOLD
+   * (#1054).
+   *
+   * `'delivery'` closes every recipient row the instant it creates them —
+   * nobody is asked for anything and nobody can answer. It is therefore
+   * mutually exclusive with {@link decision}, which needs somebody holding the
+   * item; the server refuses the pair at three layers.
+   *
+   * CARRIED HERE EVEN THOUGH NOTHING DRAWS IT YET, because a field the model
+   * does not hold is a field a round trip destroys. `RouteTemplatePresenter`
+   * publishes it precisely so "a canvas that could not show it would let an
+   * author 'correct' it away by saving a graph that never carried it" — and
+   * that is exactly what happened: the save path omitted it, the server
+   * defaulted the missing value to `'act'`, and a delivery stage quietly became
+   * an ordinary one the first time anybody moved a node.
+   */
+  satisfiedBy: RouteFlowSatisfaction;
   canvasX: number;
   canvasY: number;
 }

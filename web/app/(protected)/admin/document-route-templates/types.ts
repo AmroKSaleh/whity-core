@@ -2,6 +2,7 @@ import type { AudienceGroupPreview } from '@amroksaleh/ui/audience-group-picker'
 import type {
   RouteFlowGraph,
   RouteFlowQuorum,
+  RouteFlowSatisfaction,
   RouteFlowStep,
   RouteFlowVerdict,
 } from '@amroksaleh/ui/route-flow/model';
@@ -48,6 +49,15 @@ export interface RouteTemplateStepWire {
   decision: boolean;
   /** `null` means "follow the tenant setting" — NOT "no quorum". */
   decision_quorum: RouteFlowQuorum | null;
+  /**
+   * Whether this stage asks its people to act, or simply tells them (#1054).
+   *
+   * Optional on the wire because the server defaults a missing value to `act` —
+   * and that default is exactly why omitting it here was destructive rather
+   * than merely lossy. Sent on every save now, so a delivery stage survives a
+   * round trip through the canvas.
+   */
+  satisfied_by: RouteFlowSatisfaction;
   canvas_x: number;
   canvas_y: number;
 }
@@ -79,6 +89,9 @@ export function toFlowGraph(wire: RouteTemplateGraphWire): RouteFlowGraph {
         label: s.label,
         decision: s.decision,
         decisionQuorum: s.decision_quorum,
+        // Defaulted rather than assumed present, so a graph read from a server
+        // that predates #1054 draws as `act` instead of `undefined`.
+        satisfiedBy: s.satisfied_by ?? 'act',
         canvasX: s.canvas_x,
         canvasY: s.canvas_y,
       })
@@ -106,6 +119,12 @@ export function toGraphRequest(graph: RouteFlowGraph): {
       label: s.label,
       decision: s.decision,
       decision_quorum: s.decisionQuorum,
+      // #1054/#1064. WITHOUT THIS LINE A SAVE DESTROYS A DELIVERY STAGE: the
+      // server reads a missing `satisfied_by` as `act`, so moving one node on a
+      // canvas turned "everybody is told" into "everybody must answer" — for
+      // every recipient of that stage, silently, with the trail showing a
+      // perfectly ordinary graph save.
+      satisfied_by: s.satisfiedBy,
       canvas_x: s.canvasX,
       canvas_y: s.canvasY,
     })),
