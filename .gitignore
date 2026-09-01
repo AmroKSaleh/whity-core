@@ -57,3 +57,10 @@ __pycache__/
 # constant that moves with the source whether or not the source was deployed,
 # which is the exact failure /api/build exists to detect.
 /build-identity.json
+
+# Child-process probe scripts written at the repository root by
+# EntryPointServiceWiringRealBootTest, which boots public/index.php and
+# BaseCommand::setupKernel() out-of-process. Its tearDown() unlinks them, so
+# these only survive a run that was KILLED — and then they sit at the root
+# looking exactly like source, which is how one of them nearly reached a commit.
+/.whity-probe-*.php

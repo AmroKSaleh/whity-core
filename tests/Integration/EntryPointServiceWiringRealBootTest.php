@@ -591,6 +591,78 @@ final class EntryPointServiceWiringRealBootTest extends TestCase
         self::assertSame('unknown_data_type', $result['reason']);
     }
 
+    /**
+     * The routing-effect catalogue boots populated in BOTH entry points
+     * (#1032).
+     *
+     * Both, because this one is a catalogue rather than a subscriber: a CLI
+     * command validating or describing a route asks it "what kinds exist", and
+     * an empty registry there would report every authored effect as an unknown
+     * kind — which {@see \Whity\Core\Document\Routing\RouteEffectRunner} records
+     * as `skipped`, so the route would look configured, run clean, and do
+     * nothing. That is precisely the silent no-op migration 112 refused to ship
+     * the declaration without an answer to, and the divergence BaseCommand's own
+     * comment names as the bug class this repository has already paid for twice.
+     */
+    public function testBothEntryPointsResolveAPopulatedRouteEffectCatalogue(): void
+    {
+        $probe = <<<'PHP'
+            $registry = \Whity\app(\Whity\Core\Document\Routing\RouteEffectRegistry::class);
+
+            whity_probe_emit([
+                'kinds'   => array_column($registry->catalogue(), 'kind'),
+                'sources' => array_column($registry->catalogue(), 'source'),
+                'notify'  => $registry->get(\Whity\Core\Document\Routing\RouteEffectRegistry::KIND_NOTIFY) !== null,
+            ]);
+            PHP;
+
+        $http = $this->runProbe(<<<PHP
+            \$_SERVER['REQUEST_METHOD'] = 'GET';
+            \$_SERVER['REQUEST_URI']    = '/api/health';
+            \$_SERVER['HTTP_HOST']      = 'localhost';
+            \$_GET = [];
+
+            ob_start();
+            require __DIR__ . '/public/index.php';
+            ob_end_clean();
+
+            {$probe}
+            PHP);
+
+        $cli = $this->runProbe(<<<PHP
+            require __DIR__ . '/vendor/autoload.php';
+            require __DIR__ . '/src/helpers.php';
+
+            \$command = new class extends \Whity\Cli\Commands\BaseCommand {
+                public function execute(array \$argv): int
+                {
+                    return 0;
+                }
+
+                /** Exposes the protected bootstrap every whity-cli API command runs. */
+                public function boot(): void
+                {
+                    \$this->setupKernel();
+                }
+            };
+            \$command->boot();
+
+            {$probe}
+            PHP);
+
+        foreach (['http' => $http, 'cli' => $cli] as $where => $result) {
+            self::assertSame(
+                ['notify'],
+                $result['kinds'],
+                "The {$where} entry point must register core's effect kinds. An empty catalogue "
+                . 'makes every authored effect an unknown kind, which records as skipped — so the '
+                . 'route looks configured and does nothing.'
+            );
+            self::assertSame(['core'], $result['sources'], "and {$where} must record them as core's.");
+            self::assertTrue($result['notify'], "and {$where} must resolve the notify effect.");
+        }
+    }
+
     // ─── probe plumbing ──────────────────────────────────────────────────────
 
     /**

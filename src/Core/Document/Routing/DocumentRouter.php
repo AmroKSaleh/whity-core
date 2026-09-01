@@ -336,6 +336,13 @@ final class DocumentRouter
             'title' => $title,
             'action' => RouteAction::ISSUED,
             'actor_profile_id' => $actorId,
+            // The trail entry this broadcast is ABOUT (#1032). Carried so a
+            // listener that records something of its own can point back at the
+            // exact act rather than correlating on a timestamp — an effect
+            // attempt that can only say "this document sent mail at 14:02" is a
+            // materially weaker record than one that says which approval caused
+            // it. Additive: every existing listener reads the payload by key.
+            'event_id' => $eventId,
             'step_count' => count($written),
             'delivered' => $outcome['delivered'],
             // WHO this act reached, and whether each of them is being ASKED for
@@ -617,6 +624,8 @@ final class DocumentRouter
             'title' => (string) $route['title'],
             'action' => $action,
             'actor_profile_id' => $actorId,
+            // See issue(): the trail entry this broadcast is about (#1032).
+            'event_id' => $eventId,
             'step_id' => (int) $step['id'],
             'delivered' => $outcome['delivered'],
             // Both, because they answer different questions and a listener has to
