@@ -2625,15 +2625,54 @@ $documentQrService = new \Whity\Core\Document\Qr\DocumentQrService(
 // and the code is minted BY THE PLATFORM against a real document id. The SDK's
 // FlowDocument offers no way to author one, so a plugin cannot print a document
 // that looks verified and resolves to nothing.
+$sdkDocumentRenderer = new \Whity\Core\Document\Render\SdkDocumentRenderer(
+    $flowDocumentRenderer,
+    $documentIssuer,
+    $settingsService,
+    $documentQrService
+);
 \Whity\register_service(
     \Whity\Sdk\Render\DocumentRenderer::class, // @phpstan-ignore-line
-    new \Whity\Core\Document\Render\SdkDocumentRenderer(
-        $flowDocumentRenderer,
-        $documentIssuer,
-        $settingsService,
-        $documentQrService
+    $sdkDocumentRenderer
+);
+
+// 13a-nonies-ter. TABULAR REPORTS (#947 item 6) — the last piece of that epic,
+// and the first production caller of the flowing renderer above.
+//
+// A source returns ROWS, never SQL. That is the same refusal DocumentCriteria
+// makes and for the same reason: `ci-tenant-predicate-guard.php` proves tenant
+// isolation by reading LITERAL SQL out of the source, so a statement core
+// assembled from a declaration is exactly the one CI cannot police. Each source
+// therefore runs its own query, in its own file, with its own visible tenant
+// predicate — and core's first source writes no new SQL at all, going through
+// DocumentCriteria and DocumentRepository so a report shows precisely the rows
+// the caller's own document list would.
+//
+// There is no `reports:run` permission. Each source names the EXISTING
+// permission that already governs reading its data, and the route adds
+// documents:render on top — because producing a report spends a
+// headless-browser page and writes to the tenant's storage, which is the same
+// capability the render endpoint requires.
+$reportSourceRegistry = new \Whity\Core\Report\ReportSourceRegistry();
+$reportSourceRegistry->registerCoreSource(
+    \Whity\Core\Report\ReportSourceRegistry::CORE_DOCUMENTS,
+    new \Whity\Core\Report\DocumentsReportSource(
+        $documentRepository,
+        $documentVisibilityPolicy,
+        $serverLabels
     )
 );
+\Whity\register_service(\Whity\Core\Report\ReportSourceRegistry::class, $reportSourceRegistry); // @phpstan-ignore-line
+$reportsHandler = new \Whity\Api\ReportsApiHandler(
+    $reportSourceRegistry,
+    new \Whity\Core\Report\ReportAssembler($sdkDocumentRenderer, $serverLabels),
+    $roleChecker,
+    $settingsService,
+    $ouReachResolver,
+    $languageRegistry
+);
+$router->register('GET',  '/api/reports',                            [$reportsHandler, 'index'],    null, null, CorePermissions::DOCUMENTS_RENDER);
+$router->register('POST', '/api/reports/{source:[a-z][a-z0-9_]*}/document', [$reportsHandler, 'document'], null, null, CorePermissions::DOCUMENTS_RENDER);
 
 $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     $documentRepository,
