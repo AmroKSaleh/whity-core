@@ -158,6 +158,13 @@ final class TenantOwnedTables
         // a join to the route.
         'document_route_edges'       => '119_add_route_verdicts_and_branching.php',
 
+        // #1032 — what a stage DOES to the world, and every time it tried. Both
+        // are tenant-owned and both are read directly (an effect declaration by
+        // step, an attempt by document), so the predicate guard polices each on
+        // its own rather than through a join to the route.
+        'document_route_step_effects'    => '139_create_route_step_effects.php',
+        'document_route_effect_attempts' => '139_create_route_step_effects.php',
+
         // #1027 — reusable, BRANCHING route TEMPLATES (migration 118): the record
         // a node-based flow editor edits, and the two tables that hang off it.
         //
