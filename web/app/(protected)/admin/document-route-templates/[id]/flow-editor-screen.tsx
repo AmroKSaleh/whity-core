@@ -348,7 +348,17 @@ function RouteFlowBody({
 
     const next = appendStep(
       graph,
-      { ruleKind: kind, ruleConfig: {}, label: null, decision: false, decisionQuorum: null },
+      {
+        ruleKind: kind,
+        ruleConfig: {},
+        label: null,
+        decision: false,
+        decisionQuorum: null,
+        // Explicit rather than left to a default further down. A new stage asks
+        // its people to act; that is the ordinary case and the one an author
+        // means when they drop a node without touching anything.
+        satisfiedBy: 'act',
+      },
       orientation,
       dir
     );

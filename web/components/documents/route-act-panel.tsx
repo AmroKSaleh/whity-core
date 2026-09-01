@@ -217,6 +217,50 @@ export function RouteActPanel({
   );
 
   /**
+   * The viewer's DELIVERED row on this route, if any (#1054/#1064).
+   *
+   * A delivery stage closes every row the instant it creates them, so a person
+   * this route merely TOLD has no open item — and this panel read that as
+   * "nothing is awaiting you", then explained it with a sentence about an item
+   * "you have already acted on". They never acted. They were sent something.
+   *
+   * `closed_by_delivery` exists precisely because `open` cannot carry the
+   * difference: both a delivered row and an answered row are closed. #1061 added
+   * it to the recipient list after that list rendered three hundred delivery
+   * rows identically to three hundred people who had acted; this is the same
+   * claim, made to the one person it is about.
+   *
+   * The LAST match rather than the first: a route can reach somebody more than
+   * once, and what a panel should describe is the most recent thing that
+   * happened to them.
+   */
+  const myDeliveredItem = useMemo<RouteRecipient | null>(() => {
+    if (viewerProfileId === null) return null;
+    const mine = recipients.filter(
+      (r) => r.route_id === route.id && r.profile_id === viewerProfileId && r.closed_by_delivery
+    );
+    return mine.length === 0 ? null : mine[mine.length - 1];
+  }, [recipients, route.id, viewerProfileId]);
+
+  /**
+   * Whether the honest delivery wording applies: nothing is open AND the reason
+   * nothing is open is that the document was delivered rather than answered.
+   *
+   * Both halves matter. Somebody who was delivered to at step 1 and is now
+   * holding an open item at step 4 is being asked for something, and the panel
+   * must say so rather than reporting the older, quieter fact.
+   */
+  const wasDeliveredTo = myOpenItem === null && myDeliveredItem !== null;
+
+  const deliveredStep = useMemo(
+    () =>
+      myDeliveredItem === null
+        ? null
+        : route.steps.find((s) => s.id === myDeliveredItem.step_id) ?? null,
+    [myDeliveredItem, route.steps]
+  );
+
+  /**
    * Whether the viewer is being asked for a VERDICT.
    *
    * Read from the step's own `decision` flag, never inferred from the edges: a
@@ -252,10 +296,19 @@ export function RouteActPanel({
     return route.steps.some((s) => s.position > myStep.position);
   }, [myStep, route.steps]);
 
-  const noOpenItemReason = t(
-    'routing.act.denied.noOpenItem',
-    'You have no open item on this route. An item you have already acted on cannot be acted on again — add a note instead, which appends to the trail without changing what happened.'
-  );
+  // Two reasons, because there are two situations and only one of them is about
+  // something the reader did. Told separately rather than softened into one
+  // sentence that covers both: a message vague enough to be true of both would
+  // stop telling either person what happened to them.
+  const noOpenItemReason = wasDeliveredTo
+    ? t(
+        'routing.act.denied.delivered',
+        'This route sent you the document rather than asking you for anything, so there is nothing here to answer. You can still add a note.'
+      )
+    : t(
+        'routing.act.denied.noOpenItem',
+        'You have no open item on this route. An item you have already acted on cannot be acted on again — add a note instead, which appends to the trail without changing what happened.'
+      );
 
   const availability = useMemo<Record<RecipientActionName, ActionAvailability>>(() => {
     if (myOpenItem === null || myStep === null) {
@@ -457,10 +510,22 @@ export function RouteActPanel({
   const overLimit = note.length > MAX_NOTE_LENGTH;
 
   return (
-    <div className="space-y-3" data-slot="route-act-panel" data-decision={isDecision ? 'true' : 'false'}>
+    <div
+      className="space-y-3"
+      data-slot="route-act-panel"
+      data-decision={isDecision ? 'true' : 'false'}
+      // Pinned as an attribute for the same reason `data-decision` is: the
+      // wording is translated, so a test that matched on the English sentence
+      // would pass while an Arabic reader saw the wrong one.
+      data-delivered={wasDeliveredTo ? 'true' : 'false'}
+    >
       <div>
         <h4 className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
-          {isDecision
+          {wasDeliveredTo
+            ? // "Your action on this route" over a panel with no action is the
+              // heading equivalent of the sentence below it — confidently wrong.
+              t('routing.act.delivered.heading', 'This route sent you the document')
+            : isDecision
             ? t('routing.act.decision.heading', 'Your decision on this route')
             : t('routing.act.heading', 'Your action on this route')}
           {isDecision && (
@@ -470,7 +535,22 @@ export function RouteActPanel({
           )}
         </h4>
         <p className="mt-1 text-xs text-muted-foreground">
-          {myOpenItem === null
+          {wasDeliveredTo
+            ? // NOT "nothing is awaiting you". That sentence is true and useless
+              // here: it describes an absence, when what actually happened is
+              // that somebody sent this person a document deliberately. Naming
+              // the step keeps it a fact about the route rather than a shrug.
+              deliveredStep === null
+              ? t(
+                  'routing.act.delivered',
+                  'This route sent you the document. You were not asked to act on it, so it is not waiting on you.'
+                )
+              : t(
+                  'routing.act.deliveredAtStep',
+                  'Step {position} sent you the document. You were not asked to act on it, so it is not waiting on you.',
+                  { position: deliveredStep.position }
+                )
+            : myOpenItem === null
             ? t(
                 'routing.act.noItem',
                 'Nothing on this route is awaiting you. You can still add a note — the trail has no edit path, so a correction is appended beside what it corrects.'
