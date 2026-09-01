@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.40).
+ * SDK identity (v1.41).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -648,13 +648,42 @@ namespace Whity\Sdk;
  * fixes the class of preload failure #957 traced to an unversioned path.
  *
  * A minor rather than a major: nothing legitimate stops working, and the trees
- * this refuses are the ones the ownership rule always claimed to cover.)
+ * this refuses are the ones the ownership rule always claimed to cover.) ->
+ * 1.41 (A RENDERING SEAM: {@see \Whity\Sdk\Render\DocumentRenderer}, resolved
+ * from the container, turning a plugin's structured content into a document.
+ * With it {@see \Whity\Sdk\Render\FlowDocument} (a builder — headings,
+ * paragraphs, tables, figures, generated contents/tables/figures lists, RTL and
+ * LTR), {@see \Whity\Sdk\Render\PageSpec}, and the two results:
+ * {@see \Whity\Sdk\Render\RenderedDocument} for bytes and
+ * {@see \Whity\Sdk\Render\IssuedDocument} for a first-class platform document
+ * with an id and an immutable artifact.
+ *
+ * The gap this closes was total: the SDK had no rendering surface of any kind,
+ * so a plugin holding structured content — an invoice, a certificate, a
+ * statement of account, a compliance submission — either shipped JSON and asked
+ * someone to print a web page or built its own renderer. Neither is a plugin
+ * author's mistake; both are what a missing seam produces.
+ *
+ * The signatures carry NO tenant id, which is a security property rather than
+ * an omission: the host reads the tenant and the actor from its own
+ * request-scoped context, so a document built from one tenant's content and
+ * filed in another's storage has no expression in this API.
+ *
+ * VERIFICATION CODES ARE THE PLATFORM'S TO MINT. An issued document carries the
+ * same code a person-issued one does, placed by the host against the document's
+ * own id. FlowDocument publishes no way to author one, so a plugin cannot print
+ * a document that looks verified and resolves to nothing.
+ *
+ * Purely additive. Nothing declared before 1.41 changed, and an instance with
+ * rendering disabled — the default — answers every call with
+ * {@see \Whity\Sdk\Render\RenderUnavailableException} rather than failing to
+ * load.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.40.0';
+    public const VERSION = '1.41.0';
 
     /**
      * Static identity only — never instantiated.

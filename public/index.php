@@ -2441,6 +2441,38 @@ $documentIssuer = new \Whity\Core\Document\DocumentIssuer(
     $documentArtifactRepository,
     $documentArtifactStore
 );
+// The FLOWING render mode (#1072) and the SDK seam in front of it.
+//
+// The fixed-canvas renderer above prints one PDF page per designed template
+// page. This one takes a content TREE with no positions and lets the renderer
+// decide how many pages it becomes — which is the only way to produce the
+// document class #1072 is about: a submission of well over a hundred pages
+// carrying a contents list, a list of tables and a list of figures, each entry
+// page-numbered. Those page numbers are a property of the laid-out result, so
+// nothing that assembles a tree can know them.
+//
+// EXPOSED TO PLUGINS, for the reason recorded above the artifact store: the SDK
+// had no rendering surface of any kind, so a plugin holding structured content
+// either shipped JSON and asked someone to print a web page or built its own
+// renderer. Registered under the SDK INTERFACE, so a plugin type-hints the
+// contract and never a core class — which is also what lets the host swap what
+// is behind it.
+//
+// The seam takes no tenant argument by design: SdkDocumentRenderer reads the
+// tenant and actor from the host's own request-scoped context, so a plugin
+// cannot render for a tenant other than the one whose request it is inside.
+// The renderer is built HERE, beside the other document services it belongs
+// with; the SEAM that exposes it to plugins is registered further down, after
+// $documentQrService exists — a plugin-issued document carries the same
+// verification code a person-issued one does, and PHP does not hoist.
+$flowDocumentRenderer = new \Whity\Core\Document\Render\FlowDocumentRenderer(
+    $settingsService,
+    new \Whity\Core\Document\Render\RenderServiceClient(
+        (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
+        (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
+        (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
+    )
+);
 $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
     $documentTemplateRepository,
     $documentAccessPolicy,
@@ -2571,6 +2603,36 @@ $documentQrService = new \Whity\Core\Document\Qr\DocumentQrService(
     $documentQrTokenRepository,
     $documentQrScanRepository,
     $appUrl
+);
+
+// THE SDK RENDERING SEAM (#1072), registered here rather than beside
+// $flowDocumentRenderer above because it needs $documentQrService and PHP does
+// not hoist — a use-before-definition here is a boot-time fatal on every
+// request, not a test failure.
+//
+// Registered under the SDK INTERFACE so a plugin type-hints the contract and
+// never a core class, which is also what the SDK's own contract test requires:
+// SDK sources may not reference a core namespace at all.
+//
+// It takes NO tenant argument by design. SdkDocumentRenderer reads the tenant
+// and the actor from the host's request-scoped context, so a plugin cannot
+// render for a tenant other than the one whose request it is inside — the
+// failure where a document is built from one tenant's content and filed in
+// another's storage has no expression in the API.
+//
+// The QR service is passed for the same reason the artifact store is shared: a
+// document a plugin issues must be verifiable exactly as one a person issues,
+// and the code is minted BY THE PLATFORM against a real document id. The SDK's
+// FlowDocument offers no way to author one, so a plugin cannot print a document
+// that looks verified and resolves to nothing.
+\Whity\register_service(
+    \Whity\Sdk\Render\DocumentRenderer::class, // @phpstan-ignore-line
+    new \Whity\Core\Document\Render\SdkDocumentRenderer(
+        $flowDocumentRenderer,
+        $documentIssuer,
+        $settingsService,
+        $documentQrService
+    )
 );
 
 $documentsHandler = new \Whity\Api\DocumentsApiHandler(

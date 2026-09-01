@@ -27,6 +27,12 @@ namespace Whity\Core\Document\Render;
  */
 final class RenderServiceClient implements RenderServiceClientInterface
 {
+    /** Largest error body {@see clientErrorFrom()} will even parse. */
+    private const MAX_ERROR_BODY_BYTES = 8192;
+
+    /** Longest relayed sentence. A field name and a rule, not a document. */
+    private const MAX_ERROR_CHARS = 500;
+
     public function __construct(
         private readonly string $baseUrl,
         private readonly string $sharedSecret,
@@ -135,6 +141,38 @@ final class RenderServiceClient implements RenderServiceClientInterface
         }
 
         $status = self::parseStatus($lines);
+
+        // A 422 is the CALLER's problem, and it is the only status where the
+        // service's own words are worth more than ours.
+        //
+        // Every other non-200 stays "unavailable". This one does not, because
+        // collapsing it there tells a caller who sent an unacceptable payload to
+        // retry a request that can never succeed — a 503 "temporarily
+        // unavailable" for a permanent, entirely fixable fault, with the sentence
+        // naming the offending field discarded on this line. The flowing mode
+        // makes that acute: `POST /render/flow` validates a whole content TREE
+        // (block types, heading levels, table row shapes, figure `data:` URIs,
+        // front-matter kinds) and answers `"content[3].level" must be a whole
+        // number 1-6`. Nothing core knows can reconstruct that string, and the
+        // alternative — a second copy of those rules in PHP — is two validators
+        // that drift, which is how this repository has already shipped a limit
+        // enforced in one place and not the other.
+        //
+        // WHAT IS RELAYED IS BOUNDED ON PURPOSE (WC-186). Only a 422, only the
+        // `error` STRING of a JSON body, and only up to a sane length: these are
+        // strings authored in render-service/src/{limits,flow/document}.js to be
+        // read by a caller, not wrapped internal errors. A 422 with any other
+        // body shape falls through to the generic rejection rather than
+        // forwarding whatever arrived.
+        if ($status === 422) {
+            error_log('[RenderServiceClient] render service rejected the payload (422) for POST ' . $url);
+
+            throw DocumentRenderRejectedException::because(
+                self::clientErrorFrom(is_string($raw) ? $raw : '')
+                    ?? 'The render service rejected this payload'
+            );
+        }
+
         if ($status !== 200) {
             error_log('[RenderServiceClient] render service returned HTTP ' . $status . ' for POST ' . $url);
             throw new RenderServiceUnavailableException('Render service returned HTTP ' . $status);
@@ -146,6 +184,32 @@ final class RenderServiceClient implements RenderServiceClientInterface
         }
 
         return [$raw, $lines];
+    }
+
+    /**
+     * The client-safe sentence out of a render-service error body, or null when
+     * the body is not the shape this service documents.
+     *
+     * Null rather than a best-effort excerpt: an unrecognised body is, by
+     * definition, not a string anyone wrote for a caller, and forwarding it
+     * would be the leak WC-186 forbids. The length cap is the same reasoning
+     * applied to a body that IS the right shape but has grown unreasonably —
+     * a validator naming a field needs a sentence, not a kilobyte.
+     */
+    private static function clientErrorFrom(string $body): ?string
+    {
+        if ($body === '' || strlen($body) > self::MAX_ERROR_BODY_BYTES) {
+            return null;
+        }
+
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded) || !is_string($decoded['error'] ?? null)) {
+            return null;
+        }
+
+        $message = trim($decoded['error']);
+
+        return $message === '' ? null : mb_substr($message, 0, self::MAX_ERROR_CHARS);
     }
 
     /**

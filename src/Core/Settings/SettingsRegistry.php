@@ -207,6 +207,36 @@ final class SettingsRegistry
     public const DOCUMENTS_RENDER_MAX_PAGES = 'documents.render_max_pages';
     public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
 
+    // FLOWING-mode ceilings (#1072). The three keys above bound a fixed-canvas
+    // render, where one template page is one PDF page and the total is therefore
+    // known before anything is sent. A flowing document is defined by NOT having
+    // that property: how many pages a content tree becomes is decided by the
+    // paginator, at render time, from the content. There is consequently no
+    // honest pre-flight page ceiling to enforce, and a post-hoc one would refuse
+    // work already paid for in full — so these bound the INPUT, which is what
+    // can actually be measured in advance.
+    //
+    //   - flow_max_blocks: how many content blocks one tree may carry.
+    //   - flow_max_table_rows: the largest single table in it.
+    //   - flow_max_bytes: the JSON-encoded size of the whole payload.
+    //
+    // The render service enforces its own HARD versions of all three
+    // (RENDER_FLOW_MAX_* in render-service/src/flow/document.js) and these
+    // default to the same numbers, which means core adds no ceiling of its own
+    // until an operator sets one. That is the intended resting state: the point
+    // of these keys is that a ceiling can be lowered FOR ONE TENANT — a tenant
+    // issuing hundred-page submissions and a tenant printing two-page receipts
+    // should not be held to one number — which the service, having no idea
+    // tenants exist, cannot do.
+    //
+    // Raising one ABOVE the service's hard limit is allowed and is not a trap:
+    // the service answers 422 naming the limit, and {@see
+    // \Whity\Core\Document\Render\RenderServiceClient} relays that as a 422
+    // rather than an outage.
+    public const DOCUMENTS_FLOW_MAX_BLOCKS = 'documents.flow_max_blocks';
+    public const DOCUMENTS_FLOW_MAX_TABLE_ROWS = 'documents.flow_max_table_rows';
+    public const DOCUMENTS_FLOW_MAX_BYTES = 'documents.flow_max_bytes';
+
     // Whether a render may be PERSISTED as a document record + a stored
     // artifact (#947 item 1). Distinct from DOCUMENTS_RENDER_ENABLED above,
     // which asks whether the render CONTAINER exists at all; this asks whether
@@ -745,6 +775,19 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
+        // The render service's own hard limits, mirrored — see the constants'
+        // note for why matching rather than undercutting is the right default.
+        // These three numbers have a twin in render-service/src/flow/document.js
+        // and DocumentFlowLimitsAgreeTest pins them together, because a ceiling
+        // that drifted apart from the one actually enforced would be discovered
+        // as an unexplained 422 on a payload core had already approved.
+        self::DOCUMENTS_FLOW_MAX_BLOCKS => '20000',
+        self::DOCUMENTS_FLOW_MAX_TABLE_ROWS => '5000',
+        // 20 MiB, and deliberately under express's 25 MiB body limit for the
+        // same reason the service's copy is: a caller over the line should be
+        // told which part of its document was too much, by a layer that knows
+        // what a figure is.
+        self::DOCUMENTS_FLOW_MAX_BYTES => '20971520',
         // Opt-OUT, not opt-in — see the constant's own note.
         self::DOCUMENTS_PERSIST_ENABLED => 'true',
         // 20 steps. Well past the longest real approval chain anybody described
@@ -1085,6 +1128,15 @@ final class SettingsRegistry
             self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
             self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
+            // Sanity bounds on the admin-set value, not the enforced ceiling.
+            // The upper ones are an order of magnitude past the service's hard
+            // limits so an operator raising a ceiling is not blocked here by a
+            // second, undocumented one; the lower ones stop a ceiling being set
+            // to zero, which would refuse every render with a message about a
+            // limit nobody meant to impose.
+            self::DOCUMENTS_FLOW_MAX_BLOCKS => self::validateFlowCeiling($key, $value, 1, 200000),
+            self::DOCUMENTS_FLOW_MAX_TABLE_ROWS => self::validateFlowCeiling($key, $value, 1, 100000),
+            self::DOCUMENTS_FLOW_MAX_BYTES => self::validateFlowCeiling($key, $value, 1024, 25 * 1024 * 1024),
             self::DOCUMENTS_PERSIST_ENABLED => self::validateBoolean($value, self::DOCUMENTS_PERSIST_ENABLED),
             self::DOCUMENTS_ROUTING_MAX_STEPS => self::validateRoutingMaxSteps($value),
             self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => self::validateRoutingMaxRecipients($value),
@@ -1583,6 +1635,36 @@ final class SettingsRegistry
         }
         if ($bytes > 20 * 1024 * 1024) {
             return 'documents.render_max_template_bytes must be 20971520 (20 MiB) or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * The three flowing-mode ceilings (#1072), which differ only in their name
+     * and their sanity bound.
+     *
+     * Written once and parameterised by key, rather than as three near-identical
+     * private methods, because the difference between them carries no meaning —
+     * and three copies is how `documents.render_max_*` ended up with one arm
+     * checking `>= 1` and another `>= 1024` for no recorded reason. The bound
+     * passed in is a sanity limit on the ADMIN-SET VALUE, not the enforced
+     * default: an operator may set any of these ABOVE what the render service
+     * accepts, which is deliberate and safe (the service answers 422 and
+     * {@see \Whity\Core\Document\Render\RenderServiceClient} relays it as one).
+     */
+    private static function validateFlowCeiling(string $key, string $value, int $min, int $max): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return $key . ' must be a whole number.';
+        }
+
+        $number = (int) $value;
+        if ($number < $min) {
+            return $key . ' must be at least ' . $min . '.';
+        }
+        if ($number > $max) {
+            return $key . ' must be ' . $max . ' or fewer.';
         }
 
         return null;

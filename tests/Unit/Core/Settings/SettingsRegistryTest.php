@@ -38,6 +38,8 @@ final class SettingsRegistryTest extends TestCase
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
+             'documents.flow_max_blocks', 'documents.flow_max_table_rows',
+             'documents.flow_max_bytes',
              // #947 item 1: may a render be STORED as a document record? Gates
              // the storage cost, not the render container, so unlike the master
              // switch above it is tenant-overridable.
@@ -220,7 +222,12 @@ final class SettingsRegistryTest extends TestCase
         // no per-tenant surface, and a tenant-overridable key sitting there
         // would give an operator a switch that looks global and is not.
         self::assertFalse(SettingsRegistry::isFeatureFlag('ui.hide_dates'));
-        self::assertCount(20, SettingsRegistry::tenantTextKeys());
+        // 23 since #1072: the three documents.flow_max_* ceilings are
+        // tenant-overridable on purpose — a tenant issuing hundred-page
+        // submissions and one printing two-page receipts should not be held to
+        // one number. The instance-wide documents.render_enabled switch above
+        // them stays global-only.
+        self::assertCount(23, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -347,7 +354,8 @@ final class SettingsRegistryTest extends TestCase
         // 60 since #1036 added documents.qr_enabled + documents.qr_public_detail.
         // 61 since #1054 added documents.routing_notification_channels.
         // 62 since #1068 added ui.hide_dates.
-        self::assertCount(62, $describe);
+        // 65 since #1072 added the three documents.flow_max_* ceilings.
+        self::assertCount(65, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

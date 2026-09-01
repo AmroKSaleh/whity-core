@@ -248,6 +248,43 @@ body {
   object-fit: contain;
 }
 
+/* ---- Verification code -------------------------------------------------- */
+
+/* Centred rather than corner-placed, and in the flow rather than pinned to a
+ * page. The fixed-canvas mode puts the code where a designer dropped it, which
+ * it can because it knows how many pages there are and what is on each. Here
+ * neither is known until after layout, so the code is a block like any other
+ * and lands wherever the document ends — the same place a signature would. */
+.flow-qr {
+  margin: 8mm 0 5mm;
+  text-align: center;
+  /* Never split: a barcode across two pages scans as nothing. The paginator
+   * already moves unsplittable units whole, and this keeps the code and its
+   * reference together when a browser applies its own break heuristics. */
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.flow-qr-code {
+  display: inline-block;
+}
+
+.flow-qr-code svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.flow-qr-reference {
+  margin-top: 1.5mm;
+  /* Monospace so the groups of a reference are countable by eye and an O
+   * cannot be read as a 0 by somebody typing it into the verification page. */
+  font-family: 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+  font-size: 9pt;
+  letter-spacing: 0.4pt;
+  color: #333333;
+}
+
 .flow-caption {
   margin-top: 1.5mm;
   font-size: 8.5pt;

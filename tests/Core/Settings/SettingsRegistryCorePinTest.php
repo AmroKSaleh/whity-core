@@ -88,6 +88,9 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_rows',
             'documents.render_max_pages',
             'documents.render_max_template_bytes',
+            'documents.flow_max_blocks',
+            'documents.flow_max_table_rows',
+            'documents.flow_max_bytes',
             'documents.persist_enabled',
             // #947 item 3 — routing ceilings, tenant-overridable like the render ones.
             'documents.routing_max_steps',
@@ -212,6 +215,9 @@ final class SettingsRegistryCorePinTest extends TestCase
             'documents.render_max_rows' => '500',
             'documents.render_max_pages' => '2000',
             'documents.render_max_template_bytes' => '2000000',
+            'documents.flow_max_blocks' => '20000',
+            'documents.flow_max_table_rows' => '5000',
+            'documents.flow_max_bytes' => '20971520',
             // #947 item 1. Opt-OUT where documents.render_enabled is opt-in:
             // the master switch is already off by default, so a deployment that
             // reaches this key has turned the render tier on deliberately, and
@@ -348,6 +354,22 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['error_tracking.retention_days', 'forever', false],
             ['documents.render_max_template_bytes', '1024', true],
             ['documents.render_max_template_bytes', '1023', false],
+            // The flowing-mode ceilings (#1072). `0` is rejected for the same
+            // reason `data_types.bulk_max_ids` rejects it below: a zero ceiling
+            // refuses every render, which from the outside is indistinguishable
+            // from the render tier being down.
+            ['documents.flow_max_blocks', '1', true],
+            ['documents.flow_max_blocks', '0', false],
+            ['documents.flow_max_blocks', '200001', false],
+            ['documents.flow_max_blocks', 'many', false],
+            ['documents.flow_max_table_rows', '5000', true],
+            ['documents.flow_max_table_rows', '100001', false],
+            // Above the render service's own 20 MiB hard limit, and ACCEPTED on
+            // purpose — the service answers 422 naming its limit and the client
+            // relays that as a 422, so an operator raising this is not silently
+            // handed an outage. Pinned so nobody "tightens" it into one.
+            ['documents.flow_max_bytes', '25165824', true],
+            ['documents.flow_max_bytes', '1023', false],
             // The bulk lifecycle batch ceiling. `0` is rejected rather than
             // clamped: a zero ceiling refuses every batch, which is
             // indistinguishable from the endpoint being broken.

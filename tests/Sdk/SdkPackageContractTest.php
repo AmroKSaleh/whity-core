@@ -242,9 +242,25 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.40.0',
+            '1.41.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.40 BRINGS THE FORM PRELOAD INTO THE CONTRACT: form.dataSource, the '
+            'SDK 1.41 ADDS A RENDERING SEAM: Whity\Sdk\Render\DocumentRenderer, resolved from the '
+            . 'container, turning a plugin\'s structured content into a document — with FlowDocument '
+            . '(a builder for headings, paragraphs, tables, figures and generated contents/tables/'
+            . 'figures lists, in RTL and LTR), PageSpec, and two results: RenderedDocument for bytes '
+            . 'and IssuedDocument for a first-class platform document with an id and an immutable '
+            . 'artifact. THE GAP WAS TOTAL — the SDK had no rendering surface of any kind, so a '
+            . 'plugin holding structured content (an invoice, a certificate, a statement of account, '
+            . 'a compliance submission) either shipped JSON and asked somebody to print a web page '
+            . 'or built its own renderer; neither is an author\'s mistake and both are what a '
+            . 'missing seam produces. THE SIGNATURES CARRY NO TENANT ID, which is a security '
+            . 'property and not an omission: the host reads tenant and actor from its own '
+            . 'request-scoped context, so a document built from one tenant\'s content and filed in '
+            . 'another\'s storage has no expression in this API. Core owns the tenant CEILINGS and '
+            . 'the render service owns what a valid document IS, so neither re-implements the '
+            . 'other. Purely additive; an instance with rendering disabled (the default) answers '
+            . 'RenderUnavailableException rather than failing to load. '
+            . 'SDK 1.40 BRINGS THE FORM PRELOAD INTO THE CONTRACT: form.dataSource, the '
             . '{method: GET, path} spec the renderer has honoured since #949 and which the '
             . 'contract never declared. An undeclared prop is neither validated nor stripped — '
             . 'BlockValidator::validateProps() walks the DECLARED rules rather than the node keys, '
@@ -858,6 +874,68 @@ final class SdkPackageContractTest extends TestCase
         );
         $this->assertSame('degraded', \Whity\Sdk\Health\ProbeResult::degraded('slow')->status);
         $this->assertSame('down', \Whity\Sdk\Health\ProbeResult::down('gone')->status);
+    }
+
+    /**
+     * SDK 1.41 (#1072): the rendering seam. Unlike the capability interfaces
+     * above, this is one a plugin RESOLVES rather than implements — the same
+     * shape as {@see \Whity\Sdk\Rbac\PermissionResolver} — so what is pinned
+     * here is the contract a plugin type-hints and the guarantees it relies on.
+     */
+    public function testDocumentRenderContributionPointLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\Render\DocumentRenderer::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\Render\DocumentRenderer::class))->getMethods()
+        );
+        sort($methods);
+        $this->assertSame(['isAvailable', 'issue', 'render'], $methods);
+
+        // THE SECURITY PROPERTY, pinned as a shape rather than a comment: no
+        // method takes a tenant id. The host reads the tenant from its own
+        // request-scoped context, so "render this for tenant 4" is not
+        // expressible — and a future signature that added the parameter back
+        // would fail here rather than quietly reopening the way to build a
+        // document from one tenant's content and file it in another's storage.
+        foreach (['isAvailable', 'issue', 'render'] as $method) {
+            foreach ((new \ReflectionMethod(\Whity\Sdk\Render\DocumentRenderer::class, $method))->getParameters() as $parameter) {
+                $this->assertStringNotContainsStringIgnoringCase(
+                    'tenant',
+                    $parameter->getName(),
+                    "DocumentRenderer::{$method}() must not take a tenant parameter"
+                );
+            }
+        }
+
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\FlowDocument::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\PageSpec::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\RenderedDocument::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\IssuedDocument::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\RenderRejectedException::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\RenderUnavailableException::class));
+
+        // Both results are host-built: a plugin reads them, and a value object
+        // a plugin could mint itself is one a plugin can be mistaken about.
+        foreach ([\Whity\Sdk\Render\RenderedDocument::class, \Whity\Sdk\Render\IssuedDocument::class] as $result) {
+            $this->assertFalse(
+                (new \ReflectionClass($result))->getConstructor()?->isPublic() ?? true,
+                $result . ' must be built through its factory, not constructed by a plugin'
+            );
+        }
+
+        // The two failure modes are DISTINCT types, because a plugin that
+        // cannot tell them apart either retries a malformed document forever or
+        // gives up on a container that was merely restarting.
+        $this->assertNotSame(
+            \Whity\Sdk\Render\RenderRejectedException::class,
+            \Whity\Sdk\Render\RenderUnavailableException::class
+        );
+        $this->assertSame(
+            'too many blocks',
+            \Whity\Sdk\Render\RenderRejectedException::because('too many blocks')->clientMessage
+        );
     }
 
     /**
