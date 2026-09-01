@@ -110,6 +110,14 @@ export interface RouteFlowEditorLabels {
   deleteStep: string;
   /** Badge on a step that demands a verdict. */
   decision: string;
+  /**
+   * Badge on a step that TELLS its people rather than asking them (#1054).
+   *
+   * Worded as what the stage does to the reader's document, not as the wire
+   * value: "delivery" is the engine's word for the mechanism, and a canvas that
+   * printed it would make an author guess whether it meant postage.
+   */
+  delivery: string;
   /** Prefix for the resolved audience, e.g. "reaches 1,043 people". */
   reaches: string;
   people: string;
@@ -212,6 +220,7 @@ const DEFAULT_LABELS: RouteFlowEditorLabels = {
   addStep: 'Add stage',
   deleteStep: 'Delete stage',
   decision: 'Decision',
+  delivery: 'Sent, not asked',
   reaches: 'Reaches',
   people: 'people',
   person: 'person',
@@ -405,6 +414,7 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
       data-slot="route-flow-node"
       data-position={step.position}
       data-decision={step.decision ? 'true' : 'false'}
+      data-satisfied-by={step.satisfiedBy}
     >
       <Handle type="target" position={targetFace} className={HANDLE_CLASS} />
 
@@ -418,6 +428,24 @@ function RouteFlowNodeCard({ data }: NodeProps<Node<RouteFlowNodeData>>) {
           {step.decision && (
             <span className="shrink-0 rounded bg-primary/10 px-1 text-[10px] font-medium uppercase text-primary">
               {labels.decision}
+            </span>
+          )}
+          {/* A BADGE, NOT A NOTE, and that is a height decision rather than a
+              style one. The card's height is DERIVED from its rows and the note
+              clamp is derived from ROUTE_FLOW_MAX_NOTES, whose value is a
+              PROVEN maximum over what notesFor() can emit — a fourth note would
+              make the card silently drop one, which is exactly the #1042 defect
+              those derivations were built to prevent.
+
+              A delivery stage is never a decision stage (the server refuses the
+              pair at three layers), so the two badges can never both appear and
+              the title row cannot grow because of this. */}
+          {step.satisfiedBy === 'delivery' && (
+            <span
+              className="shrink-0 rounded bg-muted px-1 text-[10px] font-medium uppercase text-muted-foreground"
+              data-slot="route-flow-node-delivery-badge"
+            >
+              {labels.delivery}
             </span>
           )}
         </span>
