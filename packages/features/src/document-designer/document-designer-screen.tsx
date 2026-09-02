@@ -699,6 +699,40 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   };
 
   // ── reusable blocks ───────────────────────────────────────────────────────
+
+  /** Whether an id came from the backend. Everything else — a starter's
+   *  `sys-header`, a locally-minted uuid — is a block that does not exist
+   *  server-side yet, which is the distinction the whole section below turns
+   *  on. Same test `saveBlock` uses to pick CREATE over UPDATE. */
+  const isBackendId = (id: string) => /^\d+$/.test(id);
+
+  /**
+   * Follow a block that has just been given a new id — in the live document AND
+   * IN THE UNDO STACKS.
+   *
+   * Saving a block whose id was not a backend id creates it, and the backend
+   * mints a fresh numeric one. `refreshBlocks()` then drops the old entry from
+   * the library (it matches by name), so every instance still pointing at the
+   * old id resolves to nothing.
+   *
+   * The history stacks matter as much as the current template, and used to be
+   * left behind: the old id resolves to nothing ANYWHERE now, so a snapshot
+   * holding it is a snapshot that renders a hole. Repointing only the live
+   * document leaves undo as a way to travel back to the broken state — which is
+   * worse than not fixing it, because it looks fixed until somebody presses
+   * ctrl-Z.
+   *
+   * Deliberately NOT a `commit()`: this is not an edit the author made, it is
+   * the same document described correctly. Pushing it as an undo step would
+   * offer "undo" as a way to re-break the pointers.
+   */
+  const followBlockId = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    setTemplate((tpl) => repointBlockInstances(tpl, fromId, toId));
+    setPast((p) => p.map((tpl) => repointBlockInstances(tpl, fromId, toId)));
+    setFuture((f) => f.map((tpl) => repointBlockInstances(tpl, fromId, toId)));
+  }, []);
+
   const saveSelectionAsBlock = async () => {
     const sel = elements.filter((e) => selectedIds.includes(e.id));
     const block = makeBlockFromElements(`Block ${blocks.length + 1}`, sel);
@@ -718,16 +752,58 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     }
   };
 
-  const insertBlock = (blockId: string) => {
+  /**
+   * Place a block on the page — PERSISTING IT FIRST if it is one of the
+   * client-side starters.
+   *
+   * THE BUG THIS FIXES IS INVISIBLE UNTIL THE PDF ARRIVES. A starter
+   * (`sys-header`) exists only in this bundle: `refreshBlocks` merges
+   * STARTER_BLOCKS into the library so the panel is never empty for a tenant
+   * that predates per-tenant seeding. Inserting one used to write a
+   * `blockInstance` pointing at `sys-header` straight into the template, and
+   * the canvas renders it perfectly, because the canvas resolves against that
+   * same in-memory library.
+   *
+   * The SERVER does not have that library. `DocumentRenderer::resolveBlocks()`
+   * skips any id that is not all digits and the harness renders a missing block
+   * as empty — so the document the customer receives has a blank space where
+   * its header was, with nothing anywhere reporting a problem. The designer,
+   * the preview, and the print view all agree it is fine.
+   *
+   * So a starter becomes real before anything points at it. Saved as
+   * `personal`, not with its own `system` scope: creating a system/tenant block
+   * is a publish action, which most authors may not perform, and it would fail
+   * exactly the people this fallback exists for. Personal is enough — the
+   * renderer resolves blocks by id within the tenant, not by who is reading, so
+   * the PDF is correct for every recipient.
+   */
+  const insertBlock = async (blockId: string) => {
     const b = blocksMap[blockId];
     if (!b) return;
+
+    let id = blockId;
+    if (!isBackendId(blockId)) {
+      try {
+        id = await adapter.saveBlock({ ...b, scope: 'personal' });
+        await refreshBlocks();
+      } catch (error) {
+        // Refuse to place it rather than placing a pointer that renders as a
+        // hole. A visible failure now beats a silent one at print time.
+        addToast(
+          error instanceof Error ? error.message : t('designer.block.saveFailed', 'Failed to save block.'),
+          'error'
+        );
+        return;
+      }
+    }
+
     commit('insert-block');
     setTemplate((tpl) => {
       const els = tpl.pages[pageIndex]?.elements ?? [];
       const inst = {
         id: `blockInstance-${Date.now()}-${(pasteSeq.current += 1)}`,
         type: 'blockInstance' as const,
-        blockId,
+        blockId: id,
         x: 8,
         y: 8,
         w: b.w,
@@ -761,8 +837,20 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     const b = blocksMap[id];
     if (!b) return;
     try {
-      await adapter.saveBlock({ ...b, scope });
+      const savedId = await adapter.saveBlock({ ...b, scope });
       await refreshBlocks();
+      // Publishing a STARTER creates it, so the backend hands back a different
+      // id — the same fork `exitBlockEdit` has always handled and this one did
+      // not. Without it, changing a starter's visibility silently stranded
+      // every instance of it already on the page: the starter leaves the
+      // library (refreshBlocks matches by name), the instances keep pointing at
+      // `sys-header`, and they render as "missing block". A visibility change
+      // is the last action anyone would expect to damage the document.
+      //
+      // `insertBlock` now persists a starter before placing it, so newly placed
+      // instances already hold a backend id. This still matters for every
+      // document saved before that.
+      followBlockId(id, savedId);
     } catch (error) {
       addToast(
         error instanceof Error
@@ -809,10 +897,13 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     const stash = blockStashRef.current;
     const editing = blockEdit;
     if (!stash || !editing) return;
-    // The pre-edit document to put back. Reassigned below when saving minted a
-    // new block id, so the restored page follows the block rather than
-    // dangling at its old one.
+    // The pre-edit document to put back, and the history it came with. All
+    // three are rewritten below when saving minted a new block id, so the
+    // restored page — and every state undo can travel back to — follows the
+    // block rather than dangling at its old id.
     let restored = stash.template;
+    let restoredPast = stash.past;
+    let restoredFuture = stash.future;
     if (save) {
       const els = template.pages[0]?.elements ?? [];
       const rebuilt = makeBlockFromElements(editing.name, els);
@@ -832,9 +923,14 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
           // instance on the page still points at the old one, and
           // `refreshBlocks` has just dropped the starter from the library
           // (same name as the block now saved), so leaving them alone renders
-          // them all as "missing block". Follow the id instead.
+          // them all as "missing block". Follow the id instead — in the undo
+          // stacks too, since the old id now resolves to nothing anywhere and a
+          // snapshot still holding it is a snapshot that renders a hole.
           if (savedId !== editing.id) {
-            restored = repointBlockInstances(restored, editing.id, savedId);
+            const follow = (tpl: DocTemplate) => repointBlockInstances(tpl, editing.id, savedId);
+            restored = follow(restored);
+            restoredPast = restoredPast.map(follow);
+            restoredFuture = restoredFuture.map(follow);
           }
           addToast(t('designer.block.updated', 'Block “{name}” updated.', { name: editing.name }), 'success');
         } catch (error) {
@@ -851,8 +947,8 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     setCurrentPage(stash.currentPage);
     setSelectedIds(stash.selectedIds);
     setCurrentId(stash.currentId);
-    setPast(stash.past);
-    setFuture(stash.future);
+    setPast(restoredPast);
+    setFuture(restoredFuture);
     historyRef.current = { lastLabel: '', lastTime: 0 };
     blockStashRef.current = null;
     setBlockEdit(null);
@@ -1116,7 +1212,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     onSelectAll: selectAllOnPage,
 
     onAddElement: addElement,
-    onInsertBlock: insertBlock,
+    onInsertBlock: (id) => void insertBlock(id),
 
     onAlign: alignSelected,
     onDistribute: distributeSelected,
@@ -1231,7 +1327,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
               onToggleLock: toggleLock,
               onToggleHidden: toggleHidden,
               onDelete: deleteElement,
-              onInsertBlock: insertBlock,
+              onInsertBlock: (id) => void insertBlock(id),
               onDeleteBlock: deleteBlockDef,
               onSetBlockScope: setBlockScope,
             }}
