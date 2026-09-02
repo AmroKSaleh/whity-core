@@ -77,6 +77,15 @@ final class QrTemplateComposer
      * is shared with whatever the author drew.
      */
     public const DEFAULT_QR_ELEMENT_ID = 'whity-verification-qr';
+
+    /**
+     * The white square drawn under the supplied code.
+     *
+     * Its own id, so {@see stripDefaults()} removes it with the rest when the
+     * code is switched off — a white rectangle left behind on a design would be
+     * a mark nobody could account for.
+     */
+    public const DEFAULT_BACKING_ELEMENT_ID = 'whity-verification-backing';
     public const DEFAULT_REFERENCE_ELEMENT_ID = 'whity-verification-ref';
 
     /**
@@ -110,6 +119,33 @@ final class QrTemplateComposer
      * caller is told, rather than a code nobody can read.
      */
     private const MIN_SIZE_MM = 12.0;
+
+    /**
+     * The white square drawn UNDER the code, and how far it extends past it.
+     *
+     * A QR is read by thresholding light against dark, so it needs both a light
+     * background and a QUIET ZONE — an unbroken light border around the symbol.
+     * The spec asks for four modules; on a 20 mm code that is roughly 2.5 mm.
+     * Printed straight onto a dark header band or a photograph, a code has
+     * neither, and it does not scan at all — it just looks like it should.
+     *
+     * Proportional with a floor, so a code shrunk onto a label keeps a border
+     * that is still a border rather than a hairline.
+     */
+    private const QUIET_ZONE_RATIO = 0.12;
+
+    private const MIN_QUIET_ZONE_MM = 2.0;
+
+    /**
+     * How finely the fallback scan walks the page looking for free space, in
+     * millimetres.
+     *
+     * Five is a deliberate compromise: fine enough to find a gap between a
+     * header band and a signature block, coarse enough that an A4 page is a few
+     * hundred candidate positions rather than tens of thousands — this runs on
+     * the render path, once per document.
+     */
+    private const SCAN_STEP_MM = 5.0;
 
     private function __construct()
     {
@@ -298,13 +334,86 @@ final class QrTemplateComposer
             ? $size + self::REFERENCE_GAP_MM + self::REFERENCE_HEIGHT_MM
             : $size;
 
-        $x = $pageWidth - $margin - $size;
-        $y = $pageHeight - $margin - $blockHeight;
-
         $lastIndex = array_key_last($pages);
         $lastPage = $pages[$lastIndex];
         $elements = self::elementsOf($lastPage);
         $z = self::topZ($elements) + 1;
+
+        // WHERE THERE IS ROOM, not simply bottom-right (#1036 follow-up).
+        //
+        // This used to be one line — the bottom-right corner, drawn at
+        // `topZ + 1`. On a template with a footer band, a logo strip or a
+        // signature block down there, that put the code ON TOP of them: it is
+        // the highest z on the page, so it wins, and the result is a symbol
+        // over artwork that a scanner cannot resolve and a reader cannot
+        // report, because it looks deliberate.
+        //
+        // The corner is still the FIRST preference — it is where a verification
+        // code belongs and where every existing document already has one, so a
+        // template with a clear corner is unaffected. What changed is that the
+        // corner is now a candidate rather than a conclusion.
+        $quiet = max(self::MIN_QUIET_ZONE_MM, $size * self::QUIET_ZONE_RATIO);
+        $occupied = self::occupiedRects($elements);
+
+        $spot = self::firstFreeSpot(
+            $occupied,
+            $pageWidth,
+            $pageHeight,
+            $margin,
+            $size,
+            $blockHeight,
+            $quiet,
+        );
+
+        if ($spot === null) {
+            // Nowhere clear at any offered size. Placed in the corner anyway,
+            // deliberately: `compose()`'s `placed` flag is DISCARDED by
+            // DocumentRenderer, so returning the template unchanged here would
+            // drop the verification code in complete silence — a document that
+            // claims to be tracked and carries nothing, which is the exact
+            // failure #1036 refuses. An overlapping code is at least visible,
+            // reportable, and fixable by moving one element.
+            //
+            // Logged so a crowded template is attributable rather than folklore.
+            error_log(
+                '[QrTemplateComposer] no clear space for the verification code on the last page; '
+                . 'placing it in the corner, where it may overlap existing elements'
+            );
+            $spot = ['x' => $pageWidth - $margin - $size, 'y' => $pageHeight - $margin - $blockHeight];
+        }
+
+        $x = $spot['x'];
+        $y = $spot['y'];
+
+        // THE WHITE BACKING, under everything this method adds.
+        //
+        // A code needs light-on-dark contrast and an unbroken quiet zone, and a
+        // template is free to put it over a dark band or a photograph. Drawing
+        // the backing rather than assuming the page is white is what makes the
+        // code readable on a design nobody checked against it — and it costs one
+        // element of an existing type, so no new element type and no new
+        // renderer support.
+        $elements[] = [
+            'id' => self::DEFAULT_BACKING_ELEMENT_ID,
+            'type' => 'rect',
+            'x' => $x - $quiet,
+            'y' => $y - $quiet,
+            'w' => $size + (2 * $quiet),
+            'h' => $blockHeight + (2 * $quiet),
+            'rotation' => 0,
+            'z' => $z,
+            'style' => [
+                'fill' => '#FFFFFF',
+                // No stroke. A border would read as a deliberate frame around
+                // the code and invite an author to "tidy" it; the backing is
+                // meant to be invisible on a white page.
+                'stroke' => 'none',
+                'strokeWidth' => 0,
+                'radius' => 0,
+            ],
+        ];
+
+        $z++;
 
         $elements[] = [
             'id' => self::DEFAULT_QR_ELEMENT_ID,
@@ -389,10 +498,44 @@ final class QrTemplateComposer
         return is_array($elements) ? array_values($elements) : [];
     }
 
+    /**
+     * Whether an element is part of the verification stamp and goes when the
+     * code is switched off.
+     *
+     * TWO TESTS, because the stamp is three elements and only one of them
+     * carries the binding.
+     *
+     * The BINDING catches any `qr` element bound to the verification payload —
+     * including one an author placed by hand, which must go too: left behind it
+     * would resolve to nothing and print an empty dashed box on every document
+     * of a tenant that had deliberately turned the feature off.
+     *
+     * The IDS catch the two elements this class supplies alongside it, which
+     * have no binding of their own: the printed reference is a `dynamicText`
+     * carrying a `template`, and the white backing is a plain `rect`. Matching
+     * only on the binding left both behind — so switching the feature off
+     * stripped the code and kept its caption, a reference number under nothing,
+     * on every template that had ever taken a supplied placement.
+     *
+     * Ids rather than shape-sniffing (`type === 'rect'` and white and near a
+     * qr): the ids are ours, they are stable, and a heuristic would eventually
+     * delete an author's own white rectangle.
+     */
     private static function isVerificationElement(mixed $element): bool
     {
-        return is_array($element)
-            && ($element['binding'] ?? null) === self::VERIFICATION_BINDING;
+        if (!is_array($element)) {
+            return false;
+        }
+
+        if (($element['binding'] ?? null) === self::VERIFICATION_BINDING) {
+            return true;
+        }
+
+        return in_array(
+            $element['id'] ?? null,
+            [self::DEFAULT_REFERENCE_ELEMENT_ID, self::DEFAULT_BACKING_ELEMENT_ID],
+            true,
+        );
     }
 
     /**
@@ -408,5 +551,137 @@ final class QrTemplateComposer
         }
 
         return $top;
+    }
+
+    /**
+     * The bounding boxes already drawn on a page.
+     *
+     * Rotation is IGNORED, and that is a deliberate simplification rather than
+     * an oversight: an axis-aligned box around a rotated element is larger than
+     * the element, so treating it as occupied is the CAUTIOUS error — it can
+     * push the code somewhere else unnecessarily, but it cannot let the code
+     * land on top of something. The opposite mistake is the one that produces
+     * an unscannable document.
+     *
+     * @param list<mixed> $elements
+     * @return list<array{x: float, y: float, w: float, h: float}>
+     */
+    private static function occupiedRects(array $elements): array
+    {
+        $rects = [];
+        foreach ($elements as $element) {
+            if (!is_array($element)) {
+                continue;
+            }
+            $w = (float) ($element['w'] ?? 0.0);
+            $h = (float) ($element['h'] ?? 0.0);
+            if ($w <= 0.0 || $h <= 0.0) {
+                continue;
+            }
+            $rects[] = [
+                'x' => (float) ($element['x'] ?? 0.0),
+                'y' => (float) ($element['y'] ?? 0.0),
+                'w' => $w,
+                'h' => $h,
+            ];
+        }
+
+        return $rects;
+    }
+
+    /**
+     * The first position where the code and its quiet zone touch nothing.
+     *
+     * Preference order, and each step is a worse outcome than the one before it
+     * rather than an arbitrary sequence:
+     *
+     *   1. the four CORNERS at full size — where a verification code belongs,
+     *      bottom-right first because that is where every document issued
+     *      before this change already carries one;
+     *   2. a coarse SCAN of the page at full size — anywhere clear beats
+     *      anywhere overlapping;
+     *   3. the same two, at progressively smaller sizes down to MIN_SIZE_MM — a
+     *      smaller code in clear space out-scans a larger one over artwork,
+     *      which is the whole point.
+     *
+     * @param list<array{x: float, y: float, w: float, h: float}> $occupied
+     * @return array{x: float, y: float}|null
+     */
+    private static function firstFreeSpot(
+        array $occupied,
+        float $pageWidth,
+        float $pageHeight,
+        float $margin,
+        float $size,
+        float $blockHeight,
+        float $quiet,
+    ): ?array {
+        $captionExtra = $blockHeight - $size;
+
+        for ($trySize = $size; $trySize >= self::MIN_SIZE_MM; $trySize -= 2.0) {
+            $tryQuiet = max(self::MIN_QUIET_ZONE_MM, $trySize * self::QUIET_ZONE_RATIO);
+            $tryHeight = $trySize + $captionExtra;
+
+            $left = $margin + $tryQuiet;
+            $top = $margin + $tryQuiet;
+            $right = $pageWidth - $margin - $trySize - $tryQuiet;
+            $bottom = $pageHeight - $margin - $tryHeight - $tryQuiet;
+
+            if ($right < $left || $bottom < $top) {
+                continue;
+            }
+
+            $candidates = [
+                ['x' => $right, 'y' => $bottom],
+                ['x' => $left, 'y' => $bottom],
+                ['x' => $right, 'y' => $top],
+                ['x' => $left, 'y' => $top],
+            ];
+
+            for ($y = $bottom; $y >= $top; $y -= self::SCAN_STEP_MM) {
+                for ($x = $right; $x >= $left; $x -= self::SCAN_STEP_MM) {
+                    $candidates[] = ['x' => $x, 'y' => $y];
+                }
+            }
+
+            foreach ($candidates as $candidate) {
+                $rect = [
+                    'x' => $candidate['x'] - $tryQuiet,
+                    'y' => $candidate['y'] - $tryQuiet,
+                    'w' => $trySize + (2 * $tryQuiet),
+                    'h' => $tryHeight + (2 * $tryQuiet),
+                ];
+
+                if (!self::intersectsAny($rect, $occupied)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array{x: float, y: float, w: float, h: float}       $rect
+     * @param list<array{x: float, y: float, w: float, h: float}> $others
+     */
+    private static function intersectsAny(array $rect, array $others): bool
+    {
+        foreach ($others as $other) {
+            // Touching edges do NOT count as intersecting: an element that ends
+            // exactly where the quiet zone begins leaves the code readable, and
+            // treating that as a collision would refuse the one placement a
+            // careful author had already left room for.
+            if (
+                $rect['x'] < $other['x'] + $other['w']
+                && $other['x'] < $rect['x'] + $rect['w']
+                && $rect['y'] < $other['y'] + $other['h']
+                && $other['y'] < $rect['y'] + $rect['h']
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
