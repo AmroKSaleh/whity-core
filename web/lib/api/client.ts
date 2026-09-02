@@ -22,6 +22,27 @@
 import createClient, { type Middleware } from 'openapi-fetch';
 import type { paths } from './schema';
 
+/**
+ * Fired once when a token refresh is REFUSED — the session is over.
+ *
+ * A browser event rather than a callback or a React import, because this module
+ * is framework-free and is also used outside a provider tree (tests, the desktop
+ * host). `AuthProvider` listens and clears the user, which is what lets
+ * `AuthGate` do the redirect it already knows how to do — so the sign-out path
+ * stays in one place instead of every caller inventing its own.
+ */
+export const SESSION_EXPIRED_EVENT = 'whity:session-expired';
+
+function announceSessionExpired(): void {
+  // Guarded: this module is imported during SSR and in jsdom-free tests, where
+  // there is no window to dispatch on and nothing listening if there were.
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+}
+
 export interface CreateApiClientOptions {
   /**
    * Base URL prepended to the spec paths. The default empty string keeps
@@ -62,8 +83,27 @@ export function createApiClient(options: CreateApiClientOptions = {}) {
           headers: { 'X-Requested-With': 'XMLHttpRequest' },
         })
       );
+
+      if (!response.ok) {
+        // A REFUSED refresh is a session that is definitively over, and until
+        // now nothing said so. The 401 went back to whichever component asked,
+        // each one handled it alone, and the app carried on rendering: `AuthGate`
+        // redirects on a null user but only evaluates at MOUNT, so a session that
+        // died mid-visit left a fully-formed shell whose every request failed.
+        //
+        // The visible result was a sidebar with no items — `NavigationProvider`
+        // catches its own 401 and returns `[]` — so the product looked like it
+        // had no features rather than like a session that had ended. That is the
+        // report this fixes: "there is no way to create templates in the GUI".
+        announceSessionExpired();
+      }
+
       return response.ok;
     } catch {
+      // A refresh that never REACHED the server says nothing about the session:
+      // a dropped connection, an offline laptop, a proxy hiccup. Signing
+      // somebody out on that would turn a moment of bad network into lost work,
+      // so only an explicit refusal above counts.
       return false;
     }
   };
