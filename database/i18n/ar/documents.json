@@ -3,6 +3,7 @@
     "language": "ar",
     "notice": "Hand-written translations. Unlike the English catalogue one directory up, this file is NOT generated — it is the source of truth for this language and is edited by hand. Every key must also exist in the English catalogue (CI fails on one that does not); a key absent from here falls back to English at runtime. Seed it with `whity-cli i18n:sync --language=<code>`.",
     "keys": {
+        "canvas.blockUnresolved": "هذه الكتلة ليست في مكتبتك",
         "commands.align.bottom": "أسفل",
         "commands.align.hcenter": "توسيط أفقي",
         "commands.align.left": "يسار",
