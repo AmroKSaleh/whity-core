@@ -5,6 +5,7 @@ import { snapMove } from '@amroksaleh/ui/documents/geometry';
 import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
 import { ElementContent } from '@amroksaleh/ui/documents/element-content';
 import { BlockInstanceContent } from '@amroksaleh/ui/documents/element-layer';
+import { useTranslation } from '../i18n';
 
 interface HandleDef {
   name: string;
@@ -120,6 +121,8 @@ export function Canvas({
   // Alignment guide lines to draw while dragging (x/y positions in mm).
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
   const selectedSet = new Set(selectedIds);
+
+  const t = useTranslation('documents');
 
   // Live scene + change callbacks read by the drag listener via refs, so the
   // listener subscribes ONCE per drag instead of re-subscribing on every render
@@ -331,7 +334,16 @@ export function Canvas({
               }}
             >
               {el.type === 'blockInstance' ? (
-                <BlockInstanceContent block={blocks[el.blockId]} data={data} preview={preview} />
+                <BlockInstanceContent
+                  block={blocks[el.blockId]}
+                  data={data}
+                  preview={preview}
+                  // This is the ONLY place the marker can appear: the print
+                  // renderer always passes `preview`, so it never draws one and
+                  // deliberately stays free of the i18n dependency (the render
+                  // harness bundles it).
+                  label={t('canvas.blockUnresolved', 'Block not in your library')}
+                />
               ) : (
                 <ElementContent el={el} data={data} preview={preview} />
               )}
