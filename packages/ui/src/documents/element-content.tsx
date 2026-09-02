@@ -55,6 +55,18 @@ export function ElementContent({
       // <img>. (Uploaded/data-URI logos await the backend image-upload endpoint.)
       const src = safeImageSrc(resolveBound(el.binding, el.src, data));
       if (src === '') {
+        // An 8px dashed box reading "image" is an AUTHORING affordance: it
+        // shows where an unresolved image sits so it can be selected and
+        // fixed. It was reaching the PDF, because `preview` is what the print
+        // harness passes and nothing here consulted it — so a bound image
+        // whose data row had no value printed a dashed placeholder onto the
+        // customer's document.
+        //
+        // `BlockInstanceContent`, four lines away in element-layer.tsx, has
+        // always guarded its own marker this way and says why: "omitted
+        // entirely in print/preview to avoid printing it". This is the same
+        // rule, applied to the sibling that was missed rather than a new one.
+        if (preview) return null;
         return (
           <div className="flex h-full w-full items-center justify-center rounded-sm border border-dashed border-border bg-muted/30 text-[8px] text-muted-foreground">
             {el.binding ? `{{${el.binding}}}` : 'image'}
@@ -98,8 +110,24 @@ export function ElementContent({
       // renderer, not here; nothing to draw as a leaf.
       return null;
     default: {
+      // TypeScript proves this unreachable for a well-typed DocElement, and
+      // `never` keeps a new element type from being added without a case here.
+      //
+      // At RUNTIME it is reachable, because the element comes from a template
+      // row rather than from the type system: an imported JSON file whose
+      // elements were hand-edited (`isDocTemplate` validates the envelope, not
+      // the element types), a row written straight to the API, or a document
+      // authored by a newer client during a rolling deploy.
+      //
+      // It used to render `String(el)` — which for an object is the literal
+      // text `[object Object]`, printed onto the customer's PDF. Debug output
+      // must never reach a rendered document, and an element this renderer
+      // cannot draw is better drawn as nothing: the surrounding layout is
+      // preserved, the rest of the page is correct, and the author still sees
+      // the element in the Layers list where it can be selected and removed.
       const _exhaustive: never = el;
-      return <>{String(_exhaustive)}</>;
+      void _exhaustive;
+      return null;
     }
   }
 }
