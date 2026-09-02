@@ -55,6 +55,18 @@ export function ElementContent({
       // <img>. (Uploaded/data-URI logos await the backend image-upload endpoint.)
       const src = safeImageSrc(resolveBound(el.binding, el.src, data));
       if (src === '') {
+        // An 8px dashed box reading "image" is an AUTHORING affordance: it
+        // shows where an unresolved image sits so it can be selected and
+        // fixed. It was reaching the PDF, because `preview` is what the print
+        // harness passes and nothing here consulted it — so a bound image
+        // whose data row had no value printed a dashed placeholder onto the
+        // customer's document.
+        //
+        // `BlockInstanceContent`, four lines away in element-layer.tsx, has
+        // always guarded its own marker this way and says why: "omitted
+        // entirely in print/preview to avoid printing it". This is the same
+        // rule, applied to the sibling that was missed rather than a new one.
+        if (preview) return null;
         return (
           <div className="flex h-full w-full items-center justify-center rounded-sm border border-dashed border-border bg-muted/30 text-[8px] text-muted-foreground">
             {el.binding ? `{{${el.binding}}}` : 'image'}

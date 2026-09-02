@@ -176,3 +176,51 @@ describe('ElementContent — exhaustiveness sanity', () => {
     expect(container.textContent).not.toContain('[object');
   });
 });
+
+/**
+ * THE UNRESOLVED-IMAGE PLACEHOLDER IS AN AUTHORING AFFORDANCE.
+ *
+ * An 8px dashed box reading "image" shows the author where an image that has
+ * not resolved sits, so it can be selected and fixed. It has no business on a
+ * customer's PDF — and `preview` is exactly what the print harness passes
+ * (print-document.tsx renders `<ElementContent … preview />`), so guarding on
+ * it is the same rule `BlockInstanceContent` has always applied to its own
+ * "missing block" marker: "omitted entirely in print/preview to avoid printing
+ * it".
+ *
+ * The bound case is the one that bites in practice: a variable-data batch whose
+ * row is missing that column resolves to nothing, and every affected copy used
+ * to print a dashed box.
+ */
+describe('ElementContent — an unresolved image', () => {
+  const IMG = { ...BASE, type: 'image' as const, fit: 'contain' as const };
+
+  it('shows the placeholder while editing', () => {
+    const el = { ...IMG, src: '', binding: undefined } as unknown as DocElement;
+
+    const { container } = render(<ElementContent el={el} data={{}} preview={false} />);
+
+    expect(container.textContent).toContain('image');
+  });
+
+  it('names the binding while editing, so the author can see which one is empty', () => {
+    const el = { ...IMG, src: '', binding: 'logo_url' } as unknown as DocElement;
+
+    const { container } = render(<ElementContent el={el} data={{}} preview={false} />);
+
+    expect(container.textContent).toBe('{{logo_url}}');
+  });
+
+  it('prints nothing at all, for either', () => {
+    for (const el of [
+      { ...IMG, src: '', binding: undefined },
+      { ...IMG, src: '', binding: 'logo_url' },
+      // Rejected by safeImageSrc — the sink is deliberately strict, and its
+      // refusal must be as invisible on the page as an empty src.
+      { ...IMG, src: 'data:image/svg+xml,<svg/>', binding: undefined },
+    ] as unknown as DocElement[]) {
+      const { container } = render(<ElementContent el={el} data={{}} preview />);
+      expect(container.textContent).toBe('');
+    }
+  });
+});
