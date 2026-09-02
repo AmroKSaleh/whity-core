@@ -134,8 +134,9 @@ async function listDeviceTemplates(): Promise<SavedTemplate[]> {
     }
 
     const id = `${DEVICE}${row.id}`
+    const scope = row.scope ?? "personal"
     deviceMeta.set(id, {
-      scope: row.scope ?? "personal",
+      scope,
       requiredPermission: row.requiredPermission ?? null,
       isSystem: row.isSystem ?? false,
     })
@@ -144,6 +145,12 @@ async function listDeviceTemplates(): Promise<SavedTemplate[]> {
       name: label(row.name, "device"),
       updatedAt: row.updatedAt ?? "",
       data: doc,
+      // The device row has always carried a scope — `deviceMeta` above has been
+      // reading it, so `saveDeviceTemplate` could send every domain column back
+      // unchanged. It just never reached the designer, which is the same
+      // omission the server client had: the value was known and dropped on the
+      // way to the only place that shows it to anybody.
+      scope,
     })
   }
   return out
@@ -200,14 +207,20 @@ export const documentsAdapter: DocumentDesignerAdapter = {
     return merged
   },
 
-  async saveTemplate(template: DocTemplate, id?: string): Promise<string> {
+  async saveTemplate(template: DocTemplate, id?: string, scope?: string): Promise<string> {
     if (id?.startsWith(DEVICE)) return saveDeviceTemplate(template, id)
     if (id?.startsWith(SERVER)) {
       return `${SERVER}${await server.saveTemplate(template, id.slice(SERVER.length))}`
     }
     // A brand-new document goes to the SERVER: it is the shared store, and a
     // device-local template is reachable from the plugin screen that created it.
-    return `${SERVER}${await server.saveTemplate(template)}`
+    //
+    // `scope` must be forwarded, not dropped. An optional parameter left off an
+    // implementation still satisfies the interface, so omitting it here would
+    // type-check and quietly discard the visibility the author chose in the top
+    // bar — filing every desktop-authored template as creator-only, which is
+    // the exact defect the parameter was added to fix.
+    return `${SERVER}${await server.saveTemplate(template, undefined, scope)}`
   },
 
   async deleteTemplate(id: string): Promise<void> {

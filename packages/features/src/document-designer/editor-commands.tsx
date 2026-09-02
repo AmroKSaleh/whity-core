@@ -284,15 +284,27 @@ function alignToolbarLabels(t: TranslateFn): Record<AlignKind, string> {
 }
 
 /**
- * The display name of a block's visibility tier.
+ * The display name of a visibility tier.
  *
  * `BLOCK_SCOPES` is a kit constant and carries English labels, which is right —
  * a kit constant may not reach for a translator. Translating is the consumer's
  * job. Literal `t()` calls per id, never `t('commands.blockScope.' + id)`: a
  * computed key is invisible to `i18n:extract` and would never reach a
  * translator. A scope the kit adds later falls back to its English label.
+ *
+ * EXPORTED, and living here rather than in a helper module of its own, because
+ * templates now name their visibility too (the top bar's badge, the save
+ * toast). A neutral module looked tidier and does not work: `t` arrives as a
+ * parameter there, so `i18n:extract` cannot tell which domain the keys belong
+ * to and fails. The alternative it offers — an `@i18n-keys` block restating all
+ * eight key/English pairs — would put the English in two places that nothing
+ * compares. This file binds `documents` exactly once, so the keys resolve from
+ * the only copy of the text there is.
+ *
+ * The keys keep their `blockScope` names now that templates share them, rather
+ * than churning catalogues that are already translated.
  */
-function blockScopeLabel(t: TranslateFn, scope: { id: string; label: string }): string {
+export function blockScopeLabel(t: TranslateFn, scope: { id: string; label: string }): string {
   switch (scope.id) {
     case 'system':
       return t('commands.blockScope.system', 'System');
@@ -304,6 +316,36 @@ function blockScopeLabel(t: TranslateFn, scope: { id: string; label: string }): 
       return t('commands.blockScope.global', 'Global');
     default:
       return scope.label;
+  }
+}
+
+/**
+ * What a successful template save says.
+ *
+ * It names WHO CAN SEE THE RESULT, because the previous message ("Template
+ * saved.") was true of every outcome including the one nobody wanted: filed
+ * personal, visible to its author alone, absent from everyone else's saved list
+ * and from the create-document picker. Nothing anywhere said so, so a tenant
+ * could fill the designer with work and still conclude the feature did not
+ * exist.
+ *
+ * `personal` gets the longer sentence on purpose. It is the default, it is the
+ * surprising one, and it is the only one worth spending a clause telling
+ * somebody how to change.
+ */
+export function savedMessage(t: TranslateFn, scope: string): string {
+  switch (scope) {
+    case 'tenant':
+      return t('designer.template.savedTenant', 'Template saved — everyone in your tenant can see it.');
+    case 'global':
+      return t('designer.template.savedGlobal', 'Template saved — visible to every tenant.');
+    case 'system':
+      return t('designer.template.savedSystem', 'Template saved as a system template.');
+    default:
+      return t(
+        'designer.template.savedPersonal',
+        'Template saved to your own library — only you can see it. Change that in Templates & Blocks.'
+      );
   }
 }
 
@@ -594,7 +636,19 @@ export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): Men
             disabled: s.id === ctx.currentSavedId,
             onSelect: () => ctx.onOpenSaved(s.id),
           })),
-          emptyLabel: t('commands.templates.openSavedEmpty', 'No saved templates yet'),
+          // NOT "no saved templates yet". This list is the server's, already
+          // filtered by RBAC and organisational reach, so an empty one means
+          // "none you can see" — and a template saved here defaults to
+          // creator-only, which makes that the ORDINARY state for everyone but
+          // its author. Claiming none exist sends somebody to build a second
+          // copy of a template that is already there.
+          //
+          // Templates & Blocks says the same thing correctly on the same data;
+          // this is that sentence, in the place an author actually looks.
+          emptyLabel: t(
+            'commands.templates.openSavedEmpty',
+            'No templates you can see. There may be templates filed elsewhere, or saved by other people.'
+          ),
         },
         { kind: 'separator', id: 'templates-sep-2' },
         {

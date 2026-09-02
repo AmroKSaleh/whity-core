@@ -141,6 +141,45 @@ final class DocumentTemplatesApiHandlerRealEngineTest extends TestCase
         self::assertSame(403, $res->getStatusCode(), 'promoting to a shared scope is a publish action');
     }
 
+    /**
+     * SAYING WHAT SOMETHING ALREADY IS IS NOT PUBLISHING IT.
+     *
+     * The gate used to fire on the mere PRESENCE of `scope` in the body, so a
+     * client that sends the whole object back — which is what any editor with a
+     * visibility control does, echoing the value this API just handed it — was
+     * refused a save that changed nothing about who could see the row. An
+     * author holding documents:write but not documents:publish could open a
+     * tenant template they were entitled to edit, correct a typo, and lose the
+     * edit to a 403 about publishing.
+     *
+     * Both halves matter. The first proves the no-op is allowed; the second
+     * proves the gate did not simply go soft, and is the reason this test is
+     * not just testPublishingSharedScopeRequiresPublishPermission again.
+     */
+    public function testRestatingAnUnchangedScopeIsNotAPublishAction(): void
+    {
+        // The owner (who holds publish) files a tenant-wide template.
+        $id = $this->decodeId(
+            $this->create(self::OWNER, ['name' => 'Shared', 'data' => ['version' => 2], 'scope' => 'tenant'])
+        );
+
+        // WRITER may edit it but may not publish. Echoing the SAME scope back
+        // alongside a real edit must succeed.
+        $res = $this->patch(self::WRITER, $id, [
+            'name'  => 'Shared (fixed typo)',
+            'data'  => ['version' => 2],
+            'scope' => 'tenant',
+        ]);
+        self::assertSame(200, $res->getStatusCode(), 'restating an unchanged scope must not read as publishing');
+
+        // ...and CHANGING it still must not.
+        self::assertSame(
+            403,
+            $this->patch(self::WRITER, $id, ['scope' => 'global'])->getStatusCode(),
+            'a real promotion is still a publish action'
+        );
+    }
+
     // ── CRUD + validation ─────────────────────────────────────────────────────
 
     public function testCreateValidatesNameAndData(): void

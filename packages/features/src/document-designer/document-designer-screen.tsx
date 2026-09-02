@@ -44,7 +44,7 @@ import { Canvas } from './canvas';
 import { SideRail, type RailTab } from './side-rail';
 import { PrintDocument } from './print-document';
 import { EditorTopBar, ShortcutsDialog, useModLabel } from './editor-top-bar';
-import type { EditorCommandContext, ZoomAction } from './editor-commands';
+import { savedMessage, type EditorCommandContext, type ZoomAction } from './editor-commands';
 
 /** Zoom bounds + step for the View menu / toolbar zoom controls. */
 const ZOOM_MIN = 0.25;
@@ -74,6 +74,29 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   const [showRulers, setShowRulers] = useState(false);
   const [saved, setSaved] = useState<SavedTemplate[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
+
+  /**
+   * Who the NEXT create files this template for. Only consulted while unsaved.
+   *
+   * `personal` matches the server's default for a missing scope, so the control
+   * starts by describing what already happens rather than changing it.
+   */
+  const [pendingScope, setPendingScope] = useState<BlockScope>('personal');
+
+  /**
+   * The current document's visibility.
+   *
+   * DERIVED for a saved template, deliberately: `saved` is re-fetched after
+   * every save and delete, so this is the server's answer, not a guess kept in
+   * step by hand. Six separate places call `setCurrentId`; a second useState
+   * beside it would need all six to remember, and the one that forgot would
+   * leave the badge quietly naming the wrong audience — which is the exact
+   * failure this whole change exists to fix.
+   */
+  const templateScope: BlockScope =
+    currentId === null
+      ? pendingScope
+      : ((saved.find((s) => s.id === currentId)?.scope as BlockScope | undefined) ?? 'personal');
   /**
    * Bumped every time the editor swaps to a different document (New, Open
    * saved, Import). In-flight async work started against the previous document
@@ -920,13 +943,32 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     // overwrite the saved template with it.
     const epoch = docEpoch.current;
     try {
-      const id = await adapter.saveTemplate(withSettings(template), currentId ?? undefined);
+      const creating = currentId === null;
+      const id = await adapter.saveTemplate(
+        withSettings(template),
+        currentId ?? undefined,
+        // Create only. An update leaves the stored scope alone so a save here
+        // cannot overwrite a visibility somebody set in Templates & Blocks,
+        // where the OU placement and permission tag that belong with it live.
+        creating ? pendingScope : undefined
+      );
       const stillSameDoc = docEpoch.current === epoch;
       if (stillSameDoc) {
         setCurrentId(id);
       }
-      setSaved(await adapter.listTemplates());
-      addToast(t('designer.template.saved', 'Template saved.'), 'success');
+      const list = await adapter.listTemplates();
+      setSaved(list);
+
+      // NAME THE AUDIENCE. "Template saved." was true and useless: it was also
+      // what you got when the save filed the template where nobody but you
+      // could ever see it, which is how a designer full of work looked like an
+      // empty product to everyone else.
+      //
+      // Read back from the list rather than echoing what we sent — the server
+      // has the last word on scope, and a refused promotion must not be
+      // reported here as if it had happened.
+      const filedAs = (list.find((s) => s.id === id)?.scope as BlockScope | undefined) ?? 'personal';
+      addToast(savedMessage(t, filedAs), 'success');
     } catch (error) {
       addToast(
         error instanceof Error ? error.message : t('designer.template.saveFailed', 'Failed to save template.'),
@@ -1126,6 +1168,8 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
           commit('name');
           setTemplate((tpl) => ({ ...tpl, name }));
         }}
+        scope={templateScope}
+        onScopeChange={setPendingScope}
         zoom={zoom}
         blockEdit={blockEdit}
         onExitBlockEdit={(save) => void exitBlockEdit(save)}
