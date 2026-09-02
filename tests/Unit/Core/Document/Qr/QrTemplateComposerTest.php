@@ -246,6 +246,153 @@ final class QrTemplateComposerTest extends TestCase
         self::assertSame('https://x.test/verify/abc', $merged[0][QrTemplateComposer::VERIFICATION_BINDING]);
     }
 
+    // ── Where the supplied code lands, and what is under it ──────────────────
+
+    public function testTheSuppliedCodeAvoidsWhatIsAlreadyInTheCorner(): void
+    {
+        // THE REPORTED DEFECT. The corner used to be a conclusion rather than a
+        // candidate: the code was placed bottom-right at the highest z on the
+        // page, so a footer band or a signature block underneath it got covered
+        // — a symbol over artwork that a scanner cannot resolve and a reader
+        // cannot report, because it looks deliberate.
+        $template = $this->a4WithNoCode();
+        $template['pages'][0]['elements'][] = [
+            'id' => 'footer-band',
+            'type' => 'rect',
+            // The whole bottom of the page, inside the margin.
+            'x' => 10.0, 'y' => 240.0, 'w' => 190.0, 'h' => 47.0,
+            'rotation' => 0, 'z' => 1,
+        ];
+
+        $composed = QrTemplateComposer::compose($template, true);
+        $code = $this->verificationElementOf($composed['data']);
+
+        self::assertTrue($composed['placed']);
+        self::assertLessThan(
+            240.0,
+            $code['y'] + $code['h'],
+            'the code must clear the footer rather than sit on top of it'
+        );
+    }
+
+    public function testAnEmptyPageStillPutsTheCodeInTheCornerInsetByItsQuietZone(): void
+    {
+        // The corner is still the FIRST preference — a clear page puts the code
+        // exactly where every document issued before this change carries one.
+        //
+        // It is inset by ONE QUIET ZONE, and that is a real (small) change to
+        // existing output rather than something to gloss over: the white backing
+        // extends past the code on every side, and flush to the margin it would
+        // spill into it — or off the sheet, where a printer's non-printable edge
+        // would clip the very border that makes the code scannable. So the code
+        // moves in by 2.4 mm on A4 and its backing occupies the space the code
+        // used to.
+        $composed = QrTemplateComposer::compose($this->a4WithNoCode(), true);
+        $code = $this->verificationElementOf($composed['data']);
+
+        $quiet = max(2.0, QrTemplateComposer::DEFAULT_SIZE_MM * 0.12);
+        $expected = 210.0 - 10.0 - QrTemplateComposer::DEFAULT_SIZE_MM - $quiet;
+
+        self::assertEqualsWithDelta($expected, $code['x'], 0.01);
+
+        // And the backing lands exactly where the code used to, inside the
+        // margin rather than over it.
+        $backing = null;
+        foreach ($composed['data']['pages'][0]['elements'] as $element) {
+            if (($element['id'] ?? null) === QrTemplateComposer::DEFAULT_BACKING_ELEMENT_ID) {
+                $backing = $element;
+            }
+        }
+        self::assertNotNull($backing);
+        self::assertEqualsWithDelta(210.0 - 10.0, $backing['x'] + $backing['w'], 0.01);
+    }
+
+    public function testAWhiteBackingIsDrawnUnderTheCode(): void
+    {
+        // A code is read by thresholding light against dark and needs an
+        // unbroken light border. Printed onto a dark band or a photograph it has
+        // neither, and it does not scan — it only looks as though it should.
+        $composed = QrTemplateComposer::compose($this->a4WithNoCode(), true);
+        $elements = $composed['data']['pages'][0]['elements'];
+
+        $backing = null;
+        $code = null;
+        foreach ($elements as $element) {
+            if (($element['id'] ?? null) === QrTemplateComposer::DEFAULT_BACKING_ELEMENT_ID) {
+                $backing = $element;
+            }
+            if (($element['id'] ?? null) === QrTemplateComposer::DEFAULT_QR_ELEMENT_ID) {
+                $code = $element;
+            }
+        }
+
+        self::assertNotNull($backing, 'a white backing must be supplied with the code');
+        self::assertNotNull($code);
+        self::assertSame('#FFFFFF', $backing['style']['fill']);
+        self::assertLessThan($code['z'], $backing['z'], 'the backing must be UNDER the code');
+
+        // It must extend past the code on every side — that border IS the quiet
+        // zone, and a backing flush to the symbol would not provide one.
+        self::assertLessThan($code['x'], $backing['x']);
+        self::assertLessThan($code['y'], $backing['y']);
+        self::assertGreaterThan($code['x'] + $code['w'], $backing['x'] + $backing['w']);
+    }
+
+    public function testSwitchingTheCodeOffRemovesTheBackingAndTheReference(): void
+    {
+        // A LATENT BUG this change surfaced. `isVerificationElement()` matched
+        // only on the binding, which the QR element carries and the other two do
+        // not — so turning the feature off stripped the code and KEPT its
+        // caption: a reference number printed under nothing, on every template
+        // that had ever taken a supplied placement.
+        $composed = QrTemplateComposer::compose($this->a4WithNoCode(), true);
+        self::assertCount(3, $composed['data']['pages'][0]['elements'], 'backing + code + reference');
+
+        $stripped = QrTemplateComposer::compose($composed['data'], false);
+
+        self::assertSame([], $stripped['data']['pages'][0]['elements']);
+        self::assertFalse($stripped['placed']);
+    }
+
+    public function testACrowdedPageStillGetsACodeRatherThanNone(): void
+    {
+        // Nowhere is clear at any size. The code is placed anyway, because
+        // `placed` is DISCARDED by DocumentRenderer — returning the template
+        // untouched would drop the verification code in complete silence, and a
+        // document that claims to be tracked and carries nothing is the exact
+        // failure the feature exists to prevent. An overlapping code is at least
+        // visible, reportable and fixable.
+        $template = $this->a4WithNoCode();
+        $template['pages'][0]['elements'][] = [
+            'id' => 'full-bleed',
+            'type' => 'image',
+            'x' => 0.0, 'y' => 0.0, 'w' => 210.0, 'h' => 297.0,
+            'rotation' => 0, 'z' => 1,
+        ];
+
+        $composed = QrTemplateComposer::compose($template, true);
+
+        self::assertTrue($composed['placed'], 'a crowded page must still carry a code');
+        $code = $this->verificationElementOf($composed['data']);
+        self::assertSame(QrTemplateComposer::DEFAULT_QR_ELEMENT_ID, $code['id']);
+    }
+
+    public function testAnAuthoredPlacementIsStillLeftExactlyWhereItWasPut(): void
+    {
+        // The search applies only to a SUPPLIED placement. An author who put the
+        // code somewhere chose that spot, and moving it because something is
+        // nearby would be this class overruling them.
+        $template = $this->a4WithNoCode();
+        $template['pages'][0]['elements'][] = $this->authoredCodeAt(12.0, 12.0);
+
+        $composed = QrTemplateComposer::compose($template, true);
+        $code = $this->verificationElementOf($composed['data']);
+
+        self::assertSame(12.0, $code['x']);
+        self::assertSame(12.0, $code['y']);
+        self::assertFalse($composed['supplied']);
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
     /**
