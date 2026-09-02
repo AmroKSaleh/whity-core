@@ -10,6 +10,7 @@ import { Input } from './ui-i18n';
 import { Switch } from '@amroksaleh/ui/switch';
 import { Button } from '@amroksaleh/ui/button';
 import { MathText } from '@amroksaleh/ui/math-text';
+import { safeImageSrc } from '@amroksaleh/ui/documents/element-content';
 import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight, IconBold, IconItalic } from '@tabler/icons-react';
 import { useTranslation, type TranslateFn } from '../i18n';
 
@@ -318,6 +319,23 @@ function ElementTab({
           <Field label={t('inspector.element.imageUrl', 'Image URL (fallback)')}>
             <Input value={el.src} onChange={(e) => onChange({ src: e.target.value })} placeholder="https://…" />
           </Field>
+          {/* SAY WHY THE BOX IS EMPTY.
+              `safeImageSrc` accepts only absolute http(s) URLs — it is an
+              XSS-safe sink and should stay strict, since a data: or
+              javascript: URL must never reach the <img>. But the refusal was
+              silent: paste a data: URI, an ftp:// address or a typo, and the
+              element just stayed blank, on the canvas and in the PDF alike,
+              with nothing anywhere to explain it.
+              Asked of the SAME function the renderer uses, so the field cannot
+              approve something that is then dropped downstream. */}
+          {el.src !== '' && safeImageSrc(el.src) === '' && (
+            <p className="text-xs text-destructive" data-testid="doc-image-src-refused">
+              {t(
+                'inspector.element.imageUrlRefused',
+                'Only web addresses starting with http:// or https:// can be shown. This one will render as empty.'
+              )}
+            </p>
+          )}
           <Field label={t('inspector.element.binding', 'Bind to placeholder')}>
             <select className={SELECT_CLASS} value={el.binding ?? ''} onChange={(e) => onChange({ binding: e.target.value || undefined })}>
               {bindingOptions}
