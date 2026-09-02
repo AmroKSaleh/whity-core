@@ -204,3 +204,72 @@ describe('changing a block’s visibility', () => {
     expect(pointers).toEqual([backendId]);
   });
 });
+
+/**
+ * MERGING THE BUILT-IN STARTERS WITH THE TENANT'S SEEDED ONES.
+ *
+ * `refreshBlocks` adds a built-in starter to the library only when the tenant
+ * has no equivalent. It used to decide that by comparing DISPLAY NAMES — and a
+ * display name is the one thing about a seeded block a tenant is invited to
+ * change.
+ *
+ * `starter_key` is the identity the server assigns and never accepts from a
+ * client (migration 075). It has been on every block row since #1013; the
+ * client was dropping it.
+ */
+describe('starter blocks merged into the tenant library', () => {
+  const seeded = (over: Record<string, unknown> = {}) =>
+    ({
+      id: '90',
+      name: 'Company header',
+      scope: 'tenant',
+      isSystem: true,
+      starterKey: 'sys-header',
+      w: 180,
+      h: 21,
+      elements: [TEXT_EL],
+      ...over,
+    }) as unknown as DocBlock;
+
+  it('does not re-add a built-in whose seeded twin is present', async () => {
+    const { adapter } = makeAdapter({ listBlocks: jest.fn(async () => [seeded()]) });
+    render(<DocumentDesignerScreen adapter={adapter} />);
+    await screen.findByTestId('doc-block-insert-90');
+
+    // The seeded row stands in for the built-in; the symbolic id must be absent.
+    expect(screen.queryByTestId('doc-block-insert-sys-header')).toBeNull();
+  });
+
+  it('still does not re-add it after the tenant RENAMES it', async () => {
+    // The regression. Under a name match this returned no hit, so the built-in
+    // came back and sat beside the real block: two entries for one block, one
+    // of them a phantom in nobody's library — and, since starters are persisted
+    // on insert, inserting the phantom would then have made a third.
+    const { adapter } = makeAdapter({
+      listBlocks: jest.fn(async () => [seeded({ name: 'Acme letterhead' })]),
+    });
+    render(<DocumentDesignerScreen adapter={adapter} />);
+    await screen.findByTestId('doc-block-insert-90');
+
+    expect(screen.queryByTestId('doc-block-insert-sys-header')).toBeNull();
+  });
+
+  it('falls back to the name for a row seeded before starter_key existed', async () => {
+    const { adapter } = makeAdapter({
+      listBlocks: jest.fn(async () => [seeded({ starterKey: undefined })]),
+    });
+    render(<DocumentDesignerScreen adapter={adapter} />);
+    await screen.findByTestId('doc-block-insert-90');
+
+    expect(screen.queryByTestId('doc-block-insert-sys-header')).toBeNull();
+  });
+
+  it('still offers a built-in the tenant has no row for', async () => {
+    // Only the header is seeded here, so the footer must still appear —
+    // otherwise "never re-add" would have quietly become "never offer".
+    const { adapter } = makeAdapter({ listBlocks: jest.fn(async () => [seeded()]) });
+    render(<DocumentDesignerScreen adapter={adapter} />);
+
+    await screen.findByTestId('doc-block-insert-sys-footer');
+  });
+});

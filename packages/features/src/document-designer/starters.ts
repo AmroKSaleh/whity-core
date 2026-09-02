@@ -171,7 +171,20 @@ export interface StarterTemplate {
  * these get seeded per-tenant pre-filled with real company info.
  */
 function block(id: string, name: string, w: number, h: number, els: DocElement[]): DocBlock {
-  return { id, name, scope: 'system', isSystem: true, w, h, elements: els.map((e, i) => ({ ...e, z: i + 1 })) };
+  // `starterKey` mirrors the id on purpose: these ARE the keys the server's
+  // DocumentStarterSeeder files its rows under ('sys-header', 'sys-footer'), so
+  // carrying it explicitly lets a seeded row and its built-in twin be matched
+  // by identity rather than by a display name the tenant is free to change.
+  return {
+    id,
+    name,
+    scope: 'system',
+    isSystem: true,
+    starterKey: id,
+    w,
+    h,
+    elements: els.map((e, i) => ({ ...e, z: i + 1 })),
+  };
 }
 
 export const STARTER_BLOCKS: ReadonlyArray<DocBlock> = [
