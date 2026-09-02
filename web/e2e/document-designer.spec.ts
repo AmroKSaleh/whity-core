@@ -82,6 +82,11 @@ function newDocument(page: Page) {
 async function deleteBlock(page: Page, blockId: string) {
   await openLayers(page);
   await page.getByTestId(`doc-block-delete-${blockId}`).click();
+  // Deleting a block is a confirmed action now: the × opens an AlertDialog
+  // naming the block and, for a shared or seeded one, who else loses it. The
+  // dialog is modal, so leaving it open here would block every later
+  // interaction in the spec, not just this assertion.
+  await page.getByTestId('doc-confirm-accept').click();
   await expect(page.getByTestId(`doc-block-insert-${blockId}`)).toHaveCount(0);
 }
 
@@ -498,8 +503,12 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-batch-prefix')).toHaveValue('DEV-');
 
     // Clean up: the template just loaded is the current one, so Delete removes
-    // it and leaves the shared library as this test found it.
+    // it and leaves the shared library as this test found it. Deleting is a
+    // confirmed action now — the menu item opens a modal AlertDialog naming
+    // the template, and it has to be accepted before anything else on the page
+    // can be clicked.
     await chooseMenu(page, 'templates', 'delete-saved');
+    await page.getByTestId('doc-confirm-accept').click();
     await openMenu(page, 'templates');
     await page.getByTestId('menu-item-open-saved').click();
     await expect(page.getByRole('menuitem', { name })).toHaveCount(0);
