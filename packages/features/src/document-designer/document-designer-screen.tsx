@@ -156,13 +156,31 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   // Effective library = the caller's visible blocks (server RBAC-filtered) +
   // any built-in starter blocks not already covered — so the Blocks panel is
   // never empty even for a tenant that predates per-tenant starter seeding.
-  // Matched by NAME (not id): a seeded starter's id is a real backend id, not
-  // the client constant's symbolic id ('sys-header'), so an id-based match
-  // would show both and duplicate it once the tenant IS seeded.
+  //
+  // MATCHED BY `starterKey`, WITH NAME AS THE FALLBACK.
+  //
+  // Not by id: a seeded starter's id is a real backend id, not the client
+  // constant's symbolic one, so an id match would show both.
+  //
+  // Not by name alone, which is what this did: a display name is the one thing
+  // about a seeded block a tenant is invited to change. Rename "Company header"
+  // to "Acme header" and the match failed, so the built-in starter came back
+  // and sat in the palette beside the real block — two entries, same block,
+  // one of them a phantom that exists in nobody's library. Since starters are
+  // persisted on insert, inserting the phantom then made a third.
+  //
+  // `starter_key` is the identity the server assigns and never accepts from a
+  // client (migration 075), and it has been on every block row since #1013 —
+  // the client was simply dropping it. `DocumentDemoSeeder` records making and
+  // then abandoning this exact name-matching trade on the server side.
+  //
+  // The name fallback stays for rows seeded before 075, which have no key.
   const refreshBlocks = useCallback(async () => {
     try {
       const saved = await adapter.listBlocks();
-      const extras = STARTER_BLOCKS.filter((b) => !saved.some((s) => s.name === b.name));
+      const extras = STARTER_BLOCKS.filter(
+        (b) => !saved.some((s) => (s.starterKey ? s.starterKey === b.id : s.name === b.name))
+      );
       setBlocks([...saved, ...extras]);
     } catch (error) {
       addToast(

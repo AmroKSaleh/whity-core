@@ -54,6 +54,17 @@ export interface DocumentBlockRow {
    * labelling an author's own block as the product's.
    */
   is_system?: unknown;
+  /**
+   * The STABLE identity of a seeded starter — `sys-header`, `sys-footer` —
+   * assigned by `DocumentStarterSeeder` and never accepted from a client
+   * (migration 075).
+   *
+   * The API has published it on every block row since #1013 and the client
+   * dropped it, which is why the starter merge below had to match by display
+   * NAME. `DocumentDemoSeeder` records having made and then abandoned exactly
+   * that trade on the server side.
+   */
+  starter_key?: unknown;
 }
 
 const KNOWN_SCOPES = ['system', 'personal', 'tenant', 'global'] as const;
@@ -92,6 +103,7 @@ export function toDocBlock(row: DocumentBlockRow): DocBlock | null {
     // an integer, and JSON has carried both. `=== true` alone would read every
     // seeded block on SQLite as an author's own.
     isSystem: row.is_system === true || row.is_system === 1 || row.is_system === '1',
+    starterKey: typeof row.starter_key === 'string' && row.starter_key !== '' ? row.starter_key : undefined,
     ...boundingBoxOf(row.data),
     elements: row.data,
   };

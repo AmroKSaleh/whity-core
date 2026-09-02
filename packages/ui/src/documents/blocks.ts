@@ -42,6 +42,14 @@ export interface DocBlock {
    * the product's.
    */
   isSystem?: boolean;
+  /**
+   * The stable identity of a seeded starter — `sys-header`, `sys-footer`.
+   *
+   * Set by the server's seeder and never by a client, so it survives a rename
+   * where the display name does not. The built-in `STARTER_BLOCKS` carry the
+   * same values as their `id`, which is what lets the two be matched.
+   */
+  starterKey?: string;
   /** Intrinsic size (bounding box of the block's elements), in millimetres. */
   w: number;
   h: number;
