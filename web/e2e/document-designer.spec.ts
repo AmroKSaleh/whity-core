@@ -471,7 +471,14 @@ test.describe('Document & Label Designer', () => {
     await page.getByTestId('doc-save').click();
     // Saving is a round-trip; wait for it to land rather than racing the next
     // step against it.
-    await expect(page.getByRole('status').filter({ hasText: 'Template saved.' })).toBeVisible();
+    //
+    // Matched on "Template saved" without the full stop: the toast now names
+    // the audience the save filed the template for ("…to your own library —
+    // only you can see it"), and which of the four sentences appears depends on
+    // the visibility control rather than on anything this test sets. The prefix
+    // is the part that means "the round-trip finished", which is all this
+    // assertion is here for. The wording itself is covered by unit tests.
+    await expect(page.getByRole('status').filter({ hasText: 'Template saved' })).toBeVisible();
 
     // New resets everything: the sheet is off (its fields disappear) and the
     // serial prefix returns to the default.
