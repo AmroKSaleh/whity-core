@@ -260,6 +260,7 @@
         "inspector.element.formatHint": "حدّد النص ثم اختر تغميق/مائل",
         "inspector.element.h": "الارتفاع",
         "inspector.element.imageUrl": "رابط الصورة (احتياطي)",
+        "inspector.element.imageUrlRefused": "يمكن عرض العناوين التي تبدأ بـ http:// أو https:// فقط. هذا العنوان سيظهر فارغًا.",
         "inspector.element.insertPlaceholder": "إدراج حقل نائب",
         "inspector.element.italic": "إمالة التحديد",
         "inspector.element.multiSelection": "العناصر المحدَّدة: {count}. إجراءات المحاذاة والترتيب والحافظة موجودة في شريط الأدوات وقائمة التنسيق؛ حدّد عنصراً واحداً لتعديل خصائصه.",

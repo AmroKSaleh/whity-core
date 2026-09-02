@@ -259,6 +259,7 @@
         "inspector.element.formatHint": "Select text, then Bold/Italic",
         "inspector.element.h": "H",
         "inspector.element.imageUrl": "Image URL (fallback)",
+        "inspector.element.imageUrlRefused": "Only web addresses starting with http:// or https:// can be shown. This one will render as empty.",
         "inspector.element.insertPlaceholder": "Insert placeholder",
         "inspector.element.italic": "Italic selection",
         "inspector.element.multiSelection": "{count} elements selected. Align, arrange and clipboard actions are in the toolbar and the Format menu; select a single element to edit its properties.",

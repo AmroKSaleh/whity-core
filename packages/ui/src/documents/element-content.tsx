@@ -132,8 +132,22 @@ export function ElementContent({
   }
 }
 
-/** Allow only absolute http(s) image URLs into the <img> src (XSS-safe sink). */
-function safeImageSrc(raw: string): string {
+/**
+ * Allow only absolute http(s) image URLs into the <img> src (XSS-safe sink).
+ *
+ * EXPORTED so the inspector can ask the same question this renderer answers.
+ * The author types a URL in one place and it is silently dropped in another,
+ * and the only honest way to explain that is for the field to consult the
+ * actual rule. A second copy of "what counts as a usable image URL" could
+ * disagree with this one — the field accepting something the renderer then
+ * discards is precisely the failure being fixed, and it would come back the
+ * first time either side changed.
+ *
+ * Same argument `DocumentRenderer` makes for delegating to `VariableData`:
+ * "two normalisers would let a document store values this renderer would then
+ * refuse".
+ */
+export function safeImageSrc(raw: string): string {
   try {
     const u = new URL(raw);
     return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : '';
