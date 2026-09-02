@@ -24,10 +24,12 @@ import {
 import { useTranslation } from '../i18n';
 
 import {
+  blockScopeLabel,
   listEditorShortcuts,
   useEditorChrome,
   type EditorCommandContext,
 } from './editor-commands';
+import { BLOCK_SCOPES, type BlockScope } from '@amroksaleh/ui/documents/blocks';
 
 /**
  * The editor's chrome: a Google-Docs-style stack of
@@ -46,6 +48,8 @@ export function EditorTopBar({
   ctx,
   name,
   onNameChange,
+  scope,
+  onScopeChange,
   zoom,
   blockEdit,
   onExitBlockEdit,
@@ -54,6 +58,11 @@ export function EditorTopBar({
   ctx: EditorCommandContext;
   name: string;
   onNameChange: (name: string) => void;
+  /** Who can see this document: the pending choice while unsaved, the server's
+   *  answer once saved. */
+  scope: BlockScope;
+  /** Only called while unsaved — see the visibility control below. */
+  onScopeChange: (scope: BlockScope) => void;
   zoom: number;
   /** Set while editing one block instead of the document. */
   blockEdit: { id: string; name: string } | null;
@@ -63,6 +72,7 @@ export function EditorTopBar({
 }) {
   const t = useTranslation('documents');
   const { menus, groups } = useEditorChrome(ctx);
+  const unsaved = ctx.currentSavedId === null && !blockEdit;
 
   return (
     <header className="shrink-0 border-b border-border bg-card" data-testid="doc-top-bar">
@@ -91,11 +101,59 @@ export function EditorTopBar({
           onChange={(e) => onNameChange(e.target.value)}
           className="h-7 max-w-[18rem] border-transparent bg-transparent font-medium hover:border-input focus-visible:border-ring"
         />
-        {ctx.currentSavedId === null && !blockEdit && (
+        {unsaved && (
           <span className="text-[0.625rem] text-muted-foreground" data-testid="doc-unsaved-hint">
             {t('topBar.unsaved', 'Not saved yet')}
           </span>
         )}
+
+        {/* ── who will be able to see this ──
+            A CONTROL while unsaved, a BADGE once saved.
+            The control exists because the answer used to be decided by
+            omission: the designer never sent a scope, and the server reads a
+            missing one as `personal` — the author and nobody else. It defaults
+            to `personal` still, so nothing is published by accident; the change
+            is that the author can see the decision and make a different one.
+            It becomes a badge after the first save rather than staying live,
+            because changing a SAVED template's visibility travels with its unit
+            placement and permission tag, and those live together in Templates &
+            Blocks. A partial duplicate here could also silently revert a scope
+            set there, since the editor holds whatever it loaded. Naming the
+            state truthfully and saying where to change it beats a second
+            control that can lie. */}
+        {!blockEdit &&
+          (unsaved ? (
+            <label className="flex items-center gap-1 text-[0.625rem] text-muted-foreground">
+              <span>{t('topBar.visibility', 'Visible to')}</span>
+              <select
+                data-testid="doc-scope"
+                className="h-6 rounded-md border border-input bg-transparent px-1 text-[0.625rem]"
+                value={scope}
+                onChange={(e) => onScopeChange(e.target.value as BlockScope)}
+              >
+                {/* `system` is deliberately not offered: it marks the rows the
+                    seeder owns, not something a person authors here. The badge
+                    above still NAMES it, so opening a system template shows
+                    what it is rather than a blank or a wrong tier. */}
+                {BLOCK_SCOPES.filter((s) => s.id !== 'system').map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {blockScopeLabel(t, s)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <span
+              className="rounded-md bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground"
+              data-testid="doc-scope-badge"
+              title={t(
+                'topBar.visibilityBadgeHint',
+                'Change who can see this template in Templates & Blocks'
+              )}
+            >
+              {blockScopeLabel(t, { id: scope, label: scope })}
+            </span>
+          ))}
         {batchLabel && (
           <span
             className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"

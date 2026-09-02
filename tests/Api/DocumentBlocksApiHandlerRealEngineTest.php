@@ -148,6 +148,42 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         self::assertSame(403, $res->getStatusCode(), 'promoting to a shared scope is a publish action');
     }
 
+    /**
+     * SAYING WHAT SOMETHING ALREADY IS IS NOT PUBLISHING IT.
+     *
+     * This was not hypothetical on blocks: the designer's block save has always
+     * sent the whole object back, `scope` included (web/lib/documents/blocks.ts),
+     * and the gate fired on that key merely being PRESENT. So an author holding
+     * documents:write but not documents:publish could not save any edit at all
+     * to a tenant-wide or global block — including the seeded sys-header and
+     * sys-footer, the two blocks a tenant is most likely to want corrected. The
+     * 403 blamed publishing for a save that published nothing.
+     *
+     * The second half is what keeps the first honest: the gate is unchanged for
+     * a real promotion.
+     */
+    public function testRestatingAnUnchangedScopeIsNotAPublishAction(): void
+    {
+        $id = $this->decodeId($this->create(self::OWNER, [
+            'name'  => 'Header',
+            'data'  => [['id' => 'e1', 'type' => 'text']],
+            'scope' => 'tenant',
+        ]));
+
+        $res = $this->patch(self::WRITER, $id, [
+            'name'  => 'Header (fixed typo)',
+            'data'  => [['id' => 'e1', 'type' => 'text']],
+            'scope' => 'tenant',
+        ]);
+        self::assertSame(200, $res->getStatusCode(), 'the designer echoes scope on every block save; that is not publishing');
+
+        self::assertSame(
+            403,
+            $this->patch(self::WRITER, $id, ['scope' => 'global'])->getStatusCode(),
+            'a real promotion is still a publish action'
+        );
+    }
+
     // ── CRUD + validation ─────────────────────────────────────────────────────
 
     public function testCreateValidatesNameAndData(): void

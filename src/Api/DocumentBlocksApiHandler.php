@@ -302,9 +302,22 @@ final class DocumentBlocksApiHandler
         $targetOu = array_key_exists('owner_ou_id', $fields)
             ? $fields['owner_ou_id']
             : ($row['owner_ou_id'] ?? null);
-        $becomesShared = array_key_exists('scope', $fields)
-            || array_key_exists('required_permission', $fields)
-            || array_key_exists('owner_ou_id', $fields);
+        // A publish action is one that CHANGES a sharing attribute — not one
+        // that merely mentions it. See the twin in DocumentTemplatesApiHandler.
+        //
+        // This bites HARDER here, because the designer's block save has always
+        // sent the whole object back, `scope` included (web/lib/documents/
+        // blocks.ts). Presence was therefore permanently true on this path, so
+        // an author holding documents:manage but not documents:publish could not
+        // save ANY edit to a tenant-wide or global block — including the seeded
+        // sys-header/sys-footer, the two blocks a tenant is most likely to want
+        // corrected. The 403 blamed publishing for a save that published
+        // nothing.
+        $becomesShared = (array_key_exists('scope', $fields) && $fields['scope'] !== $row['scope'])
+            || (array_key_exists('required_permission', $fields)
+                && $fields['required_permission'] !== $row['required_permission'])
+            || (array_key_exists('owner_ou_id', $fields)
+                && $fields['owner_ou_id'] != ($row['owner_ou_id'] ?? null));
         if ($becomesShared
             && $this->policy->needsPublish(
                 is_string($targetScope) ? $targetScope : null,

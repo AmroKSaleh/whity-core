@@ -220,9 +220,27 @@ final class DocumentTemplatesApiHandler
         $targetOu = array_key_exists('owner_ou_id', $fields)
             ? $fields['owner_ou_id']
             : ($row['owner_ou_id'] ?? null);
-        $becomesShared = array_key_exists('scope', $fields)
-            || array_key_exists('required_permission', $fields)
-            || array_key_exists('owner_ou_id', $fields);
+
+        // A publish action is one that CHANGES a sharing attribute — not one
+        // that merely mentions it.
+        //
+        // This used to be `array_key_exists(...)` on the three keys, which made
+        // the gate fire on presence. A client that sends the whole object back
+        // (which is what an editor with a visibility control does, echoing the
+        // value the server itself just gave it) was then refused a save it had
+        // changed nothing about: an author without documents:publish could open
+        // a tenant template they were allowed to edit, fix a typo, and lose the
+        // edit to a 403 about publishing.
+        //
+        // Comparing to the stored row keeps the gate exactly as strict for real
+        // promotions and stops it from firing on a no-op. Loose `!=` on the OU
+        // deliberately: it arrives parsed as int|null and the column may hand
+        // back a numeric string.
+        $becomesShared = (array_key_exists('scope', $fields) && $fields['scope'] !== $row['scope'])
+            || (array_key_exists('required_permission', $fields)
+                && $fields['required_permission'] !== $row['required_permission'])
+            || (array_key_exists('owner_ou_id', $fields)
+                && $fields['owner_ou_id'] != ($row['owner_ou_id'] ?? null));
         if ($becomesShared
             && $this->policy->needsPublish(
                 is_string($targetScope) ? $targetScope : null,
