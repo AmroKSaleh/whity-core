@@ -349,6 +349,80 @@ export function savedMessage(t: TranslateFn, scope: string): string {
   }
 }
 
+/**
+ * What a block delete will cost somebody other than the person clicking.
+ *
+ * Returns null when the answer is "nobody" — a personal block is genuinely just
+ * yours, and a warning that fires every time is a warning nobody reads.
+ *
+ * A SEEDED block is called out ahead of its scope, because "the product put
+ * this here" is the more surprising fact and the one that best explains why the
+ * block will come back looking different (or not at all) for the next tenant
+ * that is seeded.
+ */
+export function blockDeleteConsequence(t: TranslateFn, block: DocBlock): string | null {
+  if (block.isSystem) {
+    return t(
+      'designer.block.confirmDeleteSeeded',
+      'This is one of the blocks set up for your organisation, not one somebody here wrote. Deleting it removes it for everyone.'
+    );
+  }
+  switch (block.scope) {
+    case 'tenant':
+      return t(
+        'designer.block.confirmDeleteTenant',
+        'This block is shared with everyone in your tenant. Deleting it removes it for all of them.'
+      );
+    case 'global':
+      return t(
+        'designer.block.confirmDeleteGlobal',
+        'This block is shared with every tenant. Deleting it removes it for all of them.'
+      );
+    case 'system':
+      return t(
+        'designer.block.confirmDeleteSystem',
+        'This is a system block. Deleting it removes it for everyone.'
+      );
+    default:
+      return null;
+  }
+}
+
+/** The same question for a shared TEMPLATE. Only called for a non-personal one. */
+export function sharedTemplateWarning(t: TranslateFn, scope: string): string {
+  return scope === 'global'
+    ? t(
+        'designer.template.confirmDeleteGlobal',
+        'This template is visible to every tenant. Deleting it removes it for all of them.'
+      )
+    : t(
+        'designer.template.confirmDeleteShared',
+        'This template is visible beyond you. Deleting it removes it for everyone who can see it.'
+      );
+}
+
+/**
+ * What a completed block deletion says.
+ *
+ * NOT "deleted from your library". A tenant or global block is not in your
+ * library, it is in everybody's — telling the person who just removed one that
+ * they tidied their own shelf was the most misleading sentence in the flow, and
+ * the only one they see after the fact. It now names the same audience the
+ * confirmation warned about, so the question and the answer agree.
+ */
+export function blockDeletedMessage(t: TranslateFn, scope: string, name: string): string {
+  switch (scope) {
+    case 'tenant':
+      return t('designer.block.deletedTenant', '“{name}” deleted for everyone in your tenant.', { name });
+    case 'global':
+      return t('designer.block.deletedGlobal', '“{name}” deleted for every tenant.', { name });
+    case 'system':
+      return t('designer.block.deletedSystem', '“{name}” deleted for everyone.', { name });
+    default:
+      return t('designer.block.deletedPersonal', '“{name}” deleted from your library.', { name });
+  }
+}
+
 /** Blocks as menu nodes, grouped under a heading per visibility scope. */
 function blockNodes(ctx: EditorCommandContext, t: TranslateFn): MenuBarNode[] {
   const out: MenuBarNode[] = [];

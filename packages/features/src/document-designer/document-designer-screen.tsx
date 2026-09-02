@@ -44,7 +44,15 @@ import { Canvas } from './canvas';
 import { SideRail, type RailTab } from './side-rail';
 import { PrintDocument } from './print-document';
 import { EditorTopBar, ShortcutsDialog, useModLabel } from './editor-top-bar';
-import { savedMessage, type EditorCommandContext, type ZoomAction } from './editor-commands';
+import {
+  blockDeleteConsequence,
+  blockDeletedMessage,
+  savedMessage,
+  sharedTemplateWarning,
+  type EditorCommandContext,
+  type ZoomAction,
+} from './editor-commands';
+import { ConfirmDelete } from './confirm-delete';
 
 /** Zoom bounds + step for the View menu / toolbar zoom controls. */
 const ZOOM_MIN = 0.25;
@@ -816,17 +824,59 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     });
   };
 
-  const deleteBlockDef = async (id: string) => {
+  /**
+   * Actually delete a block. Reached only through the confirmation below.
+   *
+   * The toast no longer says "from your library". A tenant or global block is
+   * not in your library, it is in everybody's, and telling the person who just
+   * removed one that they tidied their own shelf is the most misleading moment
+   * in the whole flow. It now names the same audience the dialog warned about,
+   * so the confirmation and the result agree.
+   */
+  const deleteBlockDef = async (b: DocBlock) => {
     try {
-      await adapter.deleteBlock(id);
+      await adapter.deleteBlock(b.id);
       await refreshBlocks();
-      addToast(t('designer.block.deleted', 'Block deleted from your library.'), 'info');
+      addToast(blockDeletedMessage(t, b.scope, b.name), 'info');
     } catch (error) {
+      // A 409 here is the server's reference-integrity guard ("still referenced
+      // by N templates") — the most useful thing it can say, so it is relayed
+      // verbatim rather than flattened into a generic failure.
       addToast(
         error instanceof Error ? error.message : t('designer.block.deleteFailed', 'Failed to delete block.'),
         'error'
       );
     }
+  };
+
+  /**
+   * What the confirmation is currently asking about, or null when it is closed.
+   *
+   * One slot for both deletes rather than a pair of booleans: two of these can
+   * never be open at once, and a single nullable makes that a fact of the type
+   * instead of an invariant somebody has to maintain.
+   */
+  const [pendingDelete, setPendingDelete] = useState<{
+    title: string;
+    body: string;
+    consequence: string | null;
+    confirmLabel: string;
+    run: () => void;
+  } | null>(null);
+
+  const askDeleteBlock = (id: string) => {
+    const b = blocksMap[id];
+    if (!b) return;
+    setPendingDelete({
+      title: t('designer.block.confirmDeleteTitle', 'Delete “{name}”?', { name: b.name }),
+      body: t(
+        'designer.block.confirmDeleteBody',
+        'The block is removed for good. Documents that already use it keep working only if nothing points at it — a block still in use cannot be deleted.'
+      ),
+      consequence: blockDeleteConsequence(t, b),
+      confirmLabel: t('designer.block.confirmDeleteAction', 'Delete block'),
+      run: () => void deleteBlockDef(b),
+    });
   };
 
   // Change a block's visibility tier — a real, server-enforced publish action
@@ -1091,10 +1141,9 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     addToast(t('designer.template.loaded', 'Loaded “{name}”.', { name: entry.name }), 'info');
   };
 
-  const doDeleteSaved = async () => {
-    if (!currentId) return;
+  const doDeleteSaved = async (id: string) => {
     try {
-      await adapter.deleteTemplate(currentId);
+      await adapter.deleteTemplate(id);
       setSaved(await adapter.listTemplates());
       setCurrentId(null);
       addToast(t('designer.template.deleted', 'Saved template deleted.'), 'info');
@@ -1106,6 +1155,29 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
         'error'
       );
     }
+  };
+
+  /**
+   * Ask before deleting the open template.
+   *
+   * The menu item sits directly under "Open saved" and used to delete on the
+   * first click, with nothing to undo it — the undo stack holds document edits,
+   * not rows. Naming the template is most of the value: it is the difference
+   * between confirming an action and confirming *which* action.
+   */
+  const askDeleteSaved = () => {
+    if (!currentId) return;
+    const id = currentId;
+    setPendingDelete({
+      title: t('designer.template.confirmDeleteTitle', 'Delete “{name}”?', { name: template.name }),
+      body: t(
+        'designer.template.confirmDeleteBody',
+        'The saved template is removed for good. The document open in the editor stays as it is, unsaved.'
+      ),
+      consequence: templateScope === 'personal' ? null : sharedTemplateWarning(t, templateScope),
+      confirmLabel: t('designer.template.confirmDeleteAction', 'Delete template'),
+      run: () => void doDeleteSaved(id),
+    });
   };
 
   // Load a fresh document (blank or a starter), resetting all editor state.
@@ -1196,7 +1268,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     onStartFrom: doStartFrom,
     onOpenSaved: doLoad,
     onSave: () => void doSave(),
-    onDeleteSaved: () => void doDeleteSaved(),
+    onDeleteSaved: askDeleteSaved,
     onImport: () => fileRef.current?.click(),
     onExport: () => exportTemplateJson(withSettings(template)),
     onPrint: doPrint,
@@ -1328,7 +1400,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
               onToggleHidden: toggleHidden,
               onDelete: deleteElement,
               onInsertBlock: (id) => void insertBlock(id),
-              onDeleteBlock: deleteBlockDef,
+              onDeleteBlock: askDeleteBlock,
               onSetBlockScope: setBlockScope,
             }}
             inspector={{
@@ -1503,6 +1575,25 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
       <PrintDocument template={template} datasets={printDatasets} blocks={blocksMap} sheet={sheet} />
 
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} modLabel={modLabel} />
+
+      <ConfirmDelete
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title={pendingDelete?.title ?? ''}
+        body={pendingDelete?.body ?? ''}
+        consequence={pendingDelete?.consequence ?? null}
+        confirmLabel={pendingDelete?.confirmLabel ?? ''}
+        onConfirm={() => {
+          // Read the action out before clearing: AlertDialogAction closes the
+          // dialog as part of the same click, and `pendingDelete` is null by the
+          // time a later tick would look at it.
+          const run = pendingDelete?.run;
+          setPendingDelete(null);
+          run?.();
+        }}
+      />
 
       {/* Print stylesheet: hide the app chrome and emit each page at the physical
           @page size with a break between pages. Rendered as a text child (not
