@@ -171,7 +171,7 @@ export interface StarterTemplate {
  * these get seeded per-tenant pre-filled with real company info.
  */
 function block(id: string, name: string, w: number, h: number, els: DocElement[]): DocBlock {
-  return { id, name, scope: 'system', w, h, elements: els.map((e, i) => ({ ...e, z: i + 1 })) };
+  return { id, name, scope: 'system', isSystem: true, w, h, elements: els.map((e, i) => ({ ...e, z: i + 1 })) };
 }
 
 export const STARTER_BLOCKS: ReadonlyArray<DocBlock> = [
