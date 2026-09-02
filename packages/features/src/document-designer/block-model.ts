@@ -42,6 +42,18 @@ export interface DocumentBlockRow {
   name: string;
   scope: string;
   data: unknown;
+  /**
+   * Whether this block was SEEDED rather than authored — the tenant's
+   * `sys-header` / `sys-footer`, put there by `DocumentStarterSeeder`.
+   *
+   * The API has always published it and the client has always dropped it, so
+   * the designer could not tell a seeded starter from a block somebody wrote,
+   * and offered the same unceremonious delete button for both. Optional because
+   * a row from an older server, or a fixture, must still map; absent reads as
+   * "not seeded", which is the safe direction — it under-warns rather than
+   * labelling an author's own block as the product's.
+   */
+  is_system?: unknown;
 }
 
 const KNOWN_SCOPES = ['system', 'personal', 'tenant', 'global'] as const;
@@ -72,5 +84,15 @@ function boundingBoxOf(elements: DocElement[]): { w: number; h: number } {
 export function toDocBlock(row: DocumentBlockRow): DocBlock | null {
   if (!isElementList(row.data)) return null;
   const scope = (KNOWN_SCOPES as readonly string[]).includes(row.scope) ? (row.scope as DocBlock['scope']) : 'personal';
-  return { id: String(row.id), name: row.name, scope, ...boundingBoxOf(row.data), elements: row.data };
+  return {
+    id: String(row.id),
+    name: row.name,
+    scope,
+    // Coerced rather than trusted: PostgreSQL hands back a real boolean, SQLite
+    // an integer, and JSON has carried both. `=== true` alone would read every
+    // seeded block on SQLite as an author's own.
+    isSystem: row.is_system === true || row.is_system === 1 || row.is_system === '1',
+    ...boundingBoxOf(row.data),
+    elements: row.data,
+  };
 }

@@ -33,6 +33,15 @@ export interface DocBlock {
   id: string;
   name: string;
   scope: BlockScope;
+  /**
+   * Whether this block was SEEDED rather than authored by somebody — a tenant's
+   * `sys-header` / `sys-footer`.
+   *
+   * Optional, and absent means "not seeded". That is the safe direction: it
+   * under-warns before a delete rather than labelling an author's own block as
+   * the product's.
+   */
+  isSystem?: boolean;
   /** Intrinsic size (bounding box of the block's elements), in millimetres. */
   w: number;
   h: number;
