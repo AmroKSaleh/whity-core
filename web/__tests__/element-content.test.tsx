@@ -151,4 +151,28 @@ describe('ElementContent — exhaustiveness sanity', () => {
       expect(() => render(<ElementContent el={el} data={{}} preview />)).not.toThrow();
     }
   });
+
+  /**
+   * AN ELEMENT TYPE THIS RENDERER DOES NOT KNOW MUST DRAW NOTHING.
+   *
+   * The `default:` branch is a TypeScript exhaustiveness check, which proves it
+   * unreachable for a well-typed DocElement — and the input here is not one. It
+   * comes from a template row: an imported JSON file whose elements were
+   * hand-edited (`isDocTemplate` validates the envelope, not the element
+   * types), a row written straight to the API, or a document authored by a
+   * newer client during a rolling deploy.
+   *
+   * It used to render `String(el)`, which for an object is the literal text
+   * `[object Object]` — printed onto the customer's PDF. The cast below is the
+   * point of the test: it reproduces exactly what the type system cannot stop
+   * from reaching this function at runtime.
+   */
+  it('draws nothing for an unknown element type, instead of printing [object Object]', () => {
+    const alien = { ...BASE, type: 'hologram', spin: 4 } as unknown as DocElement;
+
+    const { container } = render(<ElementContent el={alien} data={{}} preview />);
+
+    expect(container.textContent).toBe('');
+    expect(container.textContent).not.toContain('[object');
+  });
 });

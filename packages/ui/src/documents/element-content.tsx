@@ -98,8 +98,24 @@ export function ElementContent({
       // renderer, not here; nothing to draw as a leaf.
       return null;
     default: {
+      // TypeScript proves this unreachable for a well-typed DocElement, and
+      // `never` keeps a new element type from being added without a case here.
+      //
+      // At RUNTIME it is reachable, because the element comes from a template
+      // row rather than from the type system: an imported JSON file whose
+      // elements were hand-edited (`isDocTemplate` validates the envelope, not
+      // the element types), a row written straight to the API, or a document
+      // authored by a newer client during a rolling deploy.
+      //
+      // It used to render `String(el)` — which for an object is the literal
+      // text `[object Object]`, printed onto the customer's PDF. Debug output
+      // must never reach a rendered document, and an element this renderer
+      // cannot draw is better drawn as nothing: the surrounding layout is
+      // preserved, the rest of the page is correct, and the author still sees
+      // the element in the Layers list where it can be selected and removed.
       const _exhaustive: never = el;
-      return <>{String(_exhaustive)}</>;
+      void _exhaustive;
+      return null;
     }
   }
 }
