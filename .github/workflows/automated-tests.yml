@@ -148,6 +148,31 @@ jobs:
               - 'templates/tauri-desktop/tsconfig.node.json'
               - 'templates/tauri-desktop/vite.config.ts'
               - 'public/openapi.json'
+              # The ROOT manifest and lockfile. This is an npm workspace, so
+              # they are what actually decides which version of every frontend
+              # dependency gets installed — `web/` has no lockfile of its own.
+              #
+              # THE THIRD TIME THIS FILTER HAS MISSED A TRIGGER, and the same
+              # shape as the two notes above: the job was not missing, the
+              # reason to run it was. A dependency bump changes ONLY these two
+              # files, so every Dependabot PR skipped this job — and with it
+              # `tsc`, `jest`, and the `npm audit` step that lives inside it.
+              # The audit did not run on the only PRs that change what is being
+              # audited.
+              #
+              # That is also how a bump reached develop and stayed unbuilt: the
+              # @tanstack/react-table v8 -> v9 migration (#1126) landed, and the
+              # staging box could not build its frontend for six days with
+              # nothing reporting it. CI would not have caught the install
+              # drift, but it would have run the suites against the new
+              # resolution instead of declaring a lockfile change uninteresting.
+              #
+              # The `backend` filter above has listed composer.json and
+              # composer.lock all along, which is what makes this an oversight
+              # rather than a policy: the same reasoning was applied to PHP and
+              # simply never carried across to the JS side.
+              - 'package.json'
+              - 'package-lock.json'
               - '.github/workflows/automated-tests.yml'
             # ADR 0012: the render service bundles this exact source slice
             # in from the rest of the monorepo (see
