@@ -2411,6 +2411,18 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                             'method' => 'POST',
                             'endpoint' => '/api/uikit/demo/tasks/{id}/reject',
                             'confirm' => 'Reject this request? The requester is notified.',
+                            // WC-532 item 5: the review-queue shape. `approve`
+                            // above needs no reason; sending one back does, and
+                            // `confirm` alone could only ask yes/no. The text
+                            // is posted as {"comment": "..."} and the plugin's
+                            // handler is the authority on it being present —
+                            // this only makes the requirement visible.
+                            'prompt' => [
+                                'field' => 'comment',
+                                'label' => 'Reason for rejection',
+                                'required' => true,
+                                'placeholder' => 'Tell the requester what to change',
+                            ],
                             'variant' => 'destructive',
                         ],
                     ],
