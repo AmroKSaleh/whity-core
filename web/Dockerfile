@@ -75,7 +75,23 @@ RUN npm run build --workspace web
 # answer 200 with every field null, which reads as "working" to anything
 # checking it. Fail here, where it is one line to read, rather than in a
 # deployment nobody is watching. This is the guard v0.2.2 did not have.
+#
+# #1138: the guard asks whether BUILD_ID NAMES A COMMIT, not merely whether it
+# is non-empty. `next.config.ts` pins BUILD_ID to the build commit, so the
+# emptiness check only ever caught "the file is missing" — an image built
+# WITHOUT the WHITY_BUILD_COMMIT arg gets Next's own random id, which is
+# non-empty, passes, and then serves `commit: null` from /web-build.
+#
+# Released images are gated by the release smoke job, so this never shipped.
+# Images an operator builds themselves are not gated by anything else, and they
+# are exactly the ones nobody is watching.
 RUN test -s web/.next/BUILD_ID     || (echo "ERROR: web/.next/BUILD_ID is empty — build identity was not injected" && exit 1)
+# 7-40 lowercase hex, not exactly 40: WHITY_BUILD_COMMIT is passed through
+# verbatim, so an operator abbreviating a sha is identifying the build
+# correctly and should not be refused. Next's own id is a mixed-case nanoid
+# from a 64-character alphabet, which this shape excludes.
+RUN grep -Eq '^[0-9a-f]{7,40}$' web/.next/BUILD_ID \
+    || (echo "ERROR: web/.next/BUILD_ID is '$(cat web/.next/BUILD_ID)', which does not name a commit — build with --build-arg WHITY_BUILD_COMMIT=\$(git rev-parse HEAD)" && exit 1)
 
 # Strip the toolchain from the tree the runtime stage inherits.
 RUN npm prune --omit=dev
