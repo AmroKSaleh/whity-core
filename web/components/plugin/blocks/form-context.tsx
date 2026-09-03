@@ -219,6 +219,83 @@ const FORM_INPUT_TYPES = [
  * "which children are inputs" a single answer: a template input the seeder did
  * not know about would render blank over a stored value and then save the blank.
  */
+/**
+ * The input names belonging to `variant` branches that are NOT selected.
+ *
+ * WC-532 item 3. This is the one place the form deliberately departs from the
+ * `visibleWhen` convention documented in {@link collectFormInputs}: a hidden
+ * input keeps its value in the map and still submits, because hiding is a
+ * display decision and the server is authoritative over what it accepts.
+ *
+ * A `variant` is not hiding. Its cases are alternative SHAPES for the same
+ * record, and a discriminated union means the branches that were not chosen do
+ * not exist — `{kind:'numeric', value: 5}`, never
+ * `{kind:'numeric', value: 5, text: '', pairs: []}` with twelve other branches
+ * riding along for the server to sort out.
+ *
+ * So these names are dropped from the payload AND exempted from required-field
+ * validation. Both, or neither is any use: a required field in an unchosen
+ * branch would block a submit that never intended to include it, and a form
+ * whose Save button does nothing while pointing at a field the user cannot see
+ * is the worst version of this feature.
+ *
+ * Nested variants work by construction — the walk recurses through cases, and
+ * an inner variant inside an inactive outer case is unreachable, so everything
+ * under it is collected as inactive too.
+ */
+export function inactiveVariantInputNames(
+  blocks: Block[],
+  values: Record<string, unknown>
+): Set<string> {
+  const dead = new Set<string>();
+  const alive = new Set<string>();
+
+  const walk = (list: Block[], live: boolean): void => {
+    for (const block of list) {
+      if (block.type === 'variant') {
+        const chosen = values[(block as { discriminator: string }).discriminator];
+        for (const child of (block.children ?? []) as Block[]) {
+          if (child.type !== 'variantCase') continue;
+          // String-compared: a discriminator is a select/text value on the
+          // wire, and `when` is declared as a string in the contract. Comparing
+          // loosely would make `when: '1'` answer to a numeric 1 in one browser
+          // and not another.
+          const active = live && String(chosen ?? '') === String((child as { when: string }).when);
+          walk((child.children ?? []) as Block[], active);
+        }
+        continue;
+      }
+      // Everything under an inactive case is inactive, whatever it is —
+      // including inputs nested in sections, cards or an inner variant.
+      const into = live ? alive : dead;
+      for (const input of collectFormInputs([block])) {
+        const n = (input as { name?: string }).name;
+        if (typeof n === 'string' && n !== '') into.add(n);
+      }
+      if (!live) continue;
+      for (const slot of ['children', 'otherwise'] as const) {
+        const nested = (block as { children?: unknown; otherwise?: unknown })[slot];
+        if (Array.isArray(nested)) walk(nested as Block[], live);
+      }
+    }
+  };
+
+  walk(blocks, true);
+
+  // BOTH SETS ARE NEEDED, because sibling cases are allowed to reuse a name —
+  // that is the point of the feature, and the validator permits it deliberately
+  // ({kind:'number', value: 5} and {kind:'text', value: 'x'} are one field in
+  // two shapes).
+  //
+  // So a name appearing in an unchosen branch does NOT mean it should be
+  // dropped: the chosen branch may declare the same name, and dropping it would
+  // silently strip the one field the union exists to carry. Only a name that is
+  // dead everywhere it appears is excluded.
+  for (const name of alive) dead.delete(name);
+
+  return dead;
+}
+
 export function collectFormInputs(blocks: Block[]): Block[] {
   const inputs: Block[] = [];
   for (const block of blocks) {
@@ -500,7 +577,15 @@ export function FormProvider({
     // Collect required-field errors across all descendant inputs (any depth).
     const newErrors: Record<string, string> = {};
 
+    // WC-532 item 3: fields in an unchosen `variant` branch are not part of
+    // this record's shape, so they are neither required nor sent. Computed once
+    // and used for both, because enforcing one without the other is incoherent.
+    const inactive = inactiveVariantInputNames(block.children, values);
+
     for (const child of collectFormInputs(block.children)) {
+      if (typeof (child as { name?: string }).name === 'string' && inactive.has((child as { name: string }).name)) {
+        continue;
+      }
       if (
         (child.type === 'textInput' ||
           child.type === 'textArea' ||
@@ -577,6 +662,10 @@ export function FormProvider({
     const payload: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(values)) {
       if (val === SENSITIVE_SENTINEL) continue;
+      // WC-532 item 3 — the branches that were not chosen do not exist. See
+      // `inactiveVariantInputNames` for why this is the one deliberate
+      // exception to "hidden inputs still submit".
+      if (inactive.has(key)) continue;
       payload[key] = val;
     }
 

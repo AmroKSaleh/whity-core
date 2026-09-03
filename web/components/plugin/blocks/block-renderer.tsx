@@ -37,6 +37,8 @@ import type {
   DocumentViewerBlock,
   DrawerBlock,
   FieldArrayBlock,
+  VariantBlock,
+  VariantCaseBlock,
   FileInputBlock,
   FlowBlock,
   FormBlock,
@@ -436,6 +438,36 @@ function RowRenderer({ block }: { block: RowBlock }) {
       ))}
     </div>
   );
+}
+
+/**
+ * WC-532 item 3: render the one `variantCase` whose `when` matches the current
+ * value of the discriminator field, and nothing otherwise.
+ *
+ * It renders NOTHING when no case matches — including before the user has
+ * picked anything. That is deliberate: a discriminated union with no
+ * discriminator chosen has no shape yet, and guessing a default branch would
+ * silently put that branch's fields into the payload for a record whose type
+ * nobody selected.
+ *
+ * The payload side lives in `inactiveVariantInputNames` (form-context), not
+ * here. Rendering and submitting are decided from the same declaration but by
+ * different code, and if they disagreed the result would be a field that is
+ * visible and dropped, or invisible and sent. The comparison is therefore the
+ * same string comparison in both places.
+ */
+function VariantRenderer({ block }: { block: VariantBlock }) {
+  const form = useFormBlockContext();
+  const chosen = String(form?.values[block.discriminator] ?? '');
+
+  const active = block.children.find(
+    (child): child is VariantCaseBlock =>
+      child.type === 'variantCase' && String((child as VariantCaseBlock).when) === chosen
+  );
+
+  if (!active) return null;
+
+  return <BlockList blocks={active.children} />;
 }
 
 function TabsRenderer({ block }: { block: TabsBlock }) {
@@ -4313,6 +4345,14 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return Array.isArray(block.children) && isValidSubmitSpec(block.submit) ? <FormRenderer block={block} /> : <UnsupportedBlock type="form" />;
     case 'fieldArray':
       return Array.isArray(block.children) && isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <FieldArrayRenderer block={block} /> : <UnsupportedBlock type="fieldArray" />;
+    case 'variant':
+      return Array.isArray(block.children) && isNonEmptyString(block.discriminator) ? <VariantRenderer block={block} /> : <UnsupportedBlock type="variant" />;
+    // A `variantCase` is never rendered on its own — `VariantRenderer` picks
+    // the matching one and renders its children directly. Reaching here means
+    // a case escaped its parent, which the validator rejects; saying so beats
+    // rendering the branch as though it had been selected.
+    case 'variantCase':
+      return <UnsupportedBlock type="variantCase" />;
     case 'textInput':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <TextInputRenderer block={block} /> : <UnsupportedBlock type="textInput" />;
     case 'textArea':

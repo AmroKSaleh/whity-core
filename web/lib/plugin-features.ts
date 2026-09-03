@@ -449,6 +449,28 @@ export interface FieldArrayBlock {
   children: Block[];
 }
 
+/**
+ * WC-532 item 3: a form region whose shape depends on another field's value.
+ *
+ * Only the case matching `discriminator`'s current value renders, and only its
+ * inputs reach the submit payload — the deliberate exception to the rule that a
+ * hidden input still submits. See `inactiveVariantInputNames` in form-context.
+ */
+export interface VariantBlock {
+  type: 'variant';
+  /** The name of a sibling input in the same form whose value selects a case. */
+  discriminator: string;
+  children: Block[];
+}
+
+export interface VariantCaseBlock {
+  type: 'variantCase';
+  /** The discriminator value this branch answers to. Compared as a string. */
+  when: string;
+  label?: string;
+  children: Block[];
+}
+
 /** Leaf (form only): a single-line text input. */
 export interface TextInputBlock {
   type: 'textInput';
@@ -925,6 +947,8 @@ export type Block = BlockFacets &
   | DataListBlock
   | FormBlock
   | FieldArrayBlock
+  | VariantBlock
+  | VariantCaseBlock
   | TextInputBlock
   | TextAreaBlock
   | RichTextInputBlock
