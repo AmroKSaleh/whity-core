@@ -367,8 +367,9 @@ final class UiKitShowcasePluginTest extends TestCase
 
     /**
      * WC-236 / WC-240: interactive and chart demos are now in the tree, so the
-     * coverage assertion is restored to ALL BlockContract::types() — 50 as of
-     * #950, which added `flow`. The count is written out rather than derived
+     * coverage assertion is restored to ALL BlockContract::types() — 52 as of
+     * WC-532 item 3, which added `variant` and `variantCase`. The count is
+     * written out rather than derived
      * because a type added to the whitelist WITHOUT a showcase instance is
      * precisely what this test exists to catch.
      *

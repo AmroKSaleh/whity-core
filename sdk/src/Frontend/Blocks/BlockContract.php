@@ -859,6 +859,45 @@ final class BlockContract
                 'source'    => ['type' => 'apiPath',        'required' => false],
                 'params'    => ['type' => 'sourceParamList', 'required' => false],
             ]],
+            // WC-532 item 3: a form region whose SHAPE depends on the value of
+            // another field — a discriminated union. `discriminator` names a
+            // sibling input in the same form; each `variantCase` child declares
+            // the value it answers to, and only the matching one renders.
+            //
+            // WHY THIS IS NOT `visibleWhen` ON THIRTEEN SECTIONS
+            // --------------------------------------------------
+            // `visibleWhen` hides. It is documented, in the web form context,
+            // that "hidden inputs stay in the value map" — the server
+            // re-validates and is authoritative over what it accepts, so
+            // showing and hiding deliberately does not change the payload.
+            //
+            // A discriminated union needs the opposite: the branches that were
+            // not chosen must be ABSENT, not merely invisible. A resource with
+            // thirteen type-dependent payloads, declared as thirteen hidden
+            // sections, submits all thirteen payloads at once and asks the
+            // server to sort it out. That is a different meaning, so it is a
+            // different mechanism rather than a flag on the existing one.
+            //
+            // WHY THE CASES ARE CHILD BLOCKS AND NOT A `cases` PROP
+            // -----------------------------------------------------
+            // A prop holding nested trees is invisible to every walker — the
+            // validator, the showcase coverage tests, and the host loader's
+            // ownership check and version rewrite. {@see self::CHILD_SLOTS}
+            // records what that costs: "an unchecked slot is a `source` that
+            // never got ownership-checked". Cases carried in `children` are
+            // traversed by everything that already walks a tree, so a `source`
+            // inside a case is checked exactly like one anywhere else, with no
+            // walker taught anything new.
+            'variant' => ['container' => true, 'props' => [
+                'discriminator' => ['type' => 'inputName', 'required' => true],
+            ]],
+            // One branch of a `variant`. `when` is the discriminator value this
+            // case answers to; only a direct child of `variant` (enforced in
+            // BlockValidator, as `tab` is for `tabs`).
+            'variantCase' => ['container' => true, 'props' => [
+                'when'  => ['type' => 'string', 'required' => true],
+                'label' => ['type' => 'string', 'required' => false],
+            ]],
             // WC-532 A3 / #909: `visibleWhen` is no longer declared per type.
             // It is a UNIVERSAL facet ({@see self::UNIVERSAL_PROPS}) merged into
             // every rule, because a condition that only some blocks may carry is

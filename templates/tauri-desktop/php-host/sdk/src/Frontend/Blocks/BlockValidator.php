@@ -161,6 +161,13 @@ final class BlockValidator
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
         'bilingualText', 'referenceSelect', 'richTextInput', 'ouScopePicker',
         'submitButton', 'fieldArray',
+        // WC-532 item 3. `variant` selects on a sibling input's value, so a
+        // form is the only place its discriminator can exist. `variantCase` is
+        // listed too rather than relying on its parent check alone: the two
+        // rules answer different questions ("is there a form?" and "is the
+        // parent a variant?"), and a case that somehow reached the tree without
+        // a form ancestor should say so in its own terms.
+        'variant', 'variantCase',
     ];
 
     /**
@@ -272,6 +279,24 @@ final class BlockValidator
         // own type is wrong).
         if ($parentType === 'tabs' && $type !== 'tab') {
             $errors[] = "{$path}: children of 'tabs' must be 'tab' blocks, got '{$type}'";
+
+            return;
+        }
+
+        // WC-532 item 3: `variant`/`variantCase` pair the same way, and for a
+        // sharper reason than tabs do. A case is the unit the renderer includes
+        // in or excludes from the SUBMIT PAYLOAD; an input sitting directly
+        // under a `variant`, in no case at all, has no answer to "which
+        // discriminator value does this belong to". Rejecting it here is the
+        // difference between a declaration error and a field that silently
+        // never submits.
+        if ($type === 'variantCase' && $parentType !== 'variant') {
+            $errors[] = "{$path}: 'variantCase' is only valid as a direct child of 'variant'";
+
+            return;
+        }
+        if ($parentType === 'variant' && $type !== 'variantCase') {
+            $errors[] = "{$path}: children of 'variant' must be 'variantCase' blocks, got '{$type}'";
 
             return;
         }
@@ -395,6 +420,32 @@ final class BlockValidator
                 // merges back out: that scoping is the point.
                 $childFormNames = [];
                 self::validateList($children, "{$path}.{$slot}", $depth + 1, $count, $errors, $type, true, $childFormNames);
+
+                continue;
+            }
+
+            // WC-532 item 3: a `variantCase` INHERITS the enclosing form's
+            // names but does not export its own.
+            //
+            // Inheriting is what stops a case from redefining a name the form
+            // already uses outside the variant: both would be in the payload
+            // together, and one would win silently.
+            //
+            // Not exporting is what makes the union work. Sibling cases are
+            // mutually exclusive by construction — at most one is ever
+            // submitted — so two cases may both declare `value`, which is
+            // exactly what a discriminated union looks like from the server's
+            // side: {type:'numeric', value: 5} and {type:'text', value: 'x'}.
+            // Merging their names back out would report that as a duplicate and
+            // force every branch to prefix its fields, which would make the
+            // payload shape depend on the declaration style rather than on the
+            // union being modelled.
+            //
+            // A duplicate WITHIN one case is still caught, because the case's
+            // own registry is shared across its subtree.
+            if ($type === 'variantCase') {
+                $caseNames = $outerNames;
+                self::validateList($children, "{$path}.{$slot}", $depth + 1, $count, $errors, $type, $inForm, $caseNames);
 
                 continue;
             }
