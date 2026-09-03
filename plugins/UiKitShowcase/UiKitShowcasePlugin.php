@@ -2069,6 +2069,52 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                         ['type' => 'numberInput', 'name' => 'qty', 'label' => 'Quantity', 'min' => 0],
                                     ],
                                 ],
+                                // WC-532 item 3: a discriminated union. The
+                                // select below is the discriminator; only the
+                                // matching case renders, and only its inputs
+                                // reach the payload — the other branch's
+                                // fields are ABSENT, not merely hidden.
+                                //
+                                // Both cases deliberately declare a field
+                                // named `value`. That is the shape a
+                                // discriminated union has on the wire
+                                // ({kind:'number', value: 5} or
+                                // {kind:'text', value: 'x'}), and it is legal
+                                // precisely because the cases are mutually
+                                // exclusive — see the name-scoping note in
+                                // BlockValidator.
+                                [
+                                    'type' => 'select',
+                                    'name' => 'answerKind',
+                                    'label' => 'Answer kind',
+                                    'options' => [
+                                        ['value' => 'number', 'label' => 'Numeric'],
+                                        ['value' => 'text', 'label' => 'Free text'],
+                                    ],
+                                ],
+                                [
+                                    'type' => 'variant',
+                                    'discriminator' => 'answerKind',
+                                    'children' => [
+                                        [
+                                            'type' => 'variantCase',
+                                            'when' => 'number',
+                                            'label' => 'Numeric answer',
+                                            'children' => [
+                                                ['type' => 'numberInput', 'name' => 'value', 'label' => 'Expected value'],
+                                                ['type' => 'numberInput', 'name' => 'tolerance', 'label' => 'Tolerance'],
+                                            ],
+                                        ],
+                                        [
+                                            'type' => 'variantCase',
+                                            'when' => 'text',
+                                            'label' => 'Free-text answer',
+                                            'children' => [
+                                                ['type' => 'textInput', 'name' => 'value', 'label' => 'Expected text'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
                                 [
                                     'type' => 'submitButton',
                                     'label' => 'Submit',

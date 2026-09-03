@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.41).
+ * SDK identity (v1.42).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -677,13 +677,36 @@ namespace Whity\Sdk;
  * Purely additive. Nothing declared before 1.41 changed, and an instance with
  * rendering disabled — the default — answers every call with
  * {@see \Whity\Sdk\Render\RenderUnavailableException} rather than failing to
- * load.)
+ * load.) ->
+ * 1.42 (DISCRIMINATED SUB-FORMS: the `variant` and `variantCase` blocks. A
+ * form region whose SHAPE depends on another field's value — `variant` names a
+ * sibling input as its `discriminator`, each `variantCase` declares the value
+ * it answers to, and only the matching one renders.
+ *
+ * The gap: a resource with type-dependent payloads had to be declared as one
+ * hidden section per type using `visibleWhen`, and hiding does not change what
+ * is submitted — a hidden input keeps its value and still sends it, on purpose,
+ * because the server is authoritative over what it accepts. So thirteen
+ * variants meant thirteen payloads at once. A discriminated union needs the
+ * branches that were not chosen to be ABSENT, which is a different meaning and
+ * therefore a different block rather than a flag on the existing one.
+ *
+ * The cases are CHILD BLOCKS, not a `cases` prop, because a prop holding
+ * nested trees is invisible to every walker — including the host loader's
+ * ownership check, where an unwalked slot is a `source` that never got checked.
+ *
+ * Sibling cases may reuse a field name: they are mutually exclusive, so
+ * `{kind:'number', value: 5}` and `{kind:'text', value: 'x'}` are the same
+ * field in two shapes, which is what a discriminated union is. A duplicate
+ * within one case, or one colliding with the enclosing form, is still refused.
+ *
+ * Purely additive. Nothing declared before 1.42 changed.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.41.0';
+    public const VERSION = '1.42.0';
 
     /**
      * Static identity only — never instantiated.
