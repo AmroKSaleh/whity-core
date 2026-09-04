@@ -118,6 +118,40 @@ below.
 For a compose-based deployment (the per-product deployment anatomy in
 [Plugin-Distribution.md](./Plugin-Distribution.md)):
 
+> ### One-time: the Postgres image changed, and an existing database needs a REINDEX
+>
+> The `postgres` service moved from `postgres:15-alpine` to
+> `pgvector/pgvector:pg15`, so a plugin can declare a vector column for
+> similarity search. Same Postgres 15, same data directory — it starts on your
+> existing volume without a dump.
+>
+> **But it is a different libc, and that silently changes text ordering.**
+> Alpine is musl; this image is Debian/glibc. On identical data in an
+> `en_US.utf8` database:
+>
+> | | `ORDER BY` result |
+> |---|---|
+> | musl (old image) | `Banana, Cherry, apple, date` |
+> | glibc (new image) | `apple, Banana, Cherry, date` |
+>
+> **Postgres does not warn**, because musl records no collation version for it
+> to compare against. So every index on a text column is built to an ordering
+> the server no longer uses, and queries that rely on one can return wrong rows
+> while looking healthy.
+>
+> Run this once, after the first start on the new image:
+>
+> ```bash
+> docker exec <app>_postgres psql -U <user> -d <db> -c 'REINDEX DATABASE <db>;'
+> ```
+>
+> A **fresh** database is unaffected — there is nothing built under the old
+> collation. Only an existing volume needs it.
+>
+> The extension is available, not enabled: nothing creates it for you, and a
+> deployment that wants no vector columns carries none. A plugin that needs one
+> runs `CREATE EXTENSION IF NOT EXISTS vector` in its own migration.
+
 1. **Back up the database** first; migrations are non-destructive by
    policy, but policy is not a backup:
 
