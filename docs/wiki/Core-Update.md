@@ -159,12 +159,34 @@ For a compose-based deployment (the per-product deployment anatomy in
    docker compose -p <app> restart web
    ```
 
-   provided the web service's command is `./scripts/start-web.sh`, which
-   rebuilds when the built commit differs from the checked-out one. A start
-   command that builds only when `.next/BUILD_ID` is ABSENT is the bug this
-   step exists for — it asks "does a build exist?", never "is it THIS
+   **Which of these you need depends on how your web tier runs, and this
+   repository ships no compose service that rebuilds for you** (#1138). Earlier
+   revisions of this page said the rebuild was automatic "provided the web
+   service's command is `./scripts/start-web.sh`" — a protection conditional on
+   configuration nothing here supplies, which reads as a guarantee. The two
+   real shapes:
+
+   - **Running a PUBLISHED IMAGE** (`ghcr.io/…/whity-core/web`, as
+     `docker-compose.staging-remote.yml` does). The bundle is baked in at build
+     time and its identity is checked in `web/Dockerfile` and again by the
+     release smoke job. There is nothing to rebuild: pull the new tag. A
+     `git pull` in a checkout changes nothing about what that container serves.
+
+   - **Running from a SOURCE CHECKOUT.** Nothing rebuilds unless you arrange
+     it. `scripts/start-web.sh` is the piece that does — it compares the built
+     commit against the checked-out one and rebuilds on a mismatch — but you
+     must actually make it the start command; no compose file here does. To
+     force a build regardless: `WHITY_FORCE_BUILD=1`.
+
+   A start command that builds only when `.next/BUILD_ID` is ABSENT is the bug
+   this step exists for — it asks "does a build exist?", never "is it THIS
    build?", so a restart after a checkout silently re-serves the old bundle.
-   To force a build regardless: `WHITY_FORCE_BUILD=1`.
+
+   **`npm ci` is not optional when the lockfile moved, and its absence does not
+   announce itself.** A checkout whose dependencies were never installed cannot
+   build at all, and `start-web.sh` will loop retrying — the failure is in the
+   web log, not on the page, which keeps serving the previous bundle. Verify
+   the result rather than assuming it (below).
 
    If you need to clear `.next` by hand and it is a NAMED VOLUME, remove its
    CONTENTS, never the directory:
