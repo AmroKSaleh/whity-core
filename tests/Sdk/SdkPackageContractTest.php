@@ -242,9 +242,25 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.42.0',
+            '1.43.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.42 ADDS DISCRIMINATED SUB-FORMS: the variant and variantCase blocks. A form '
+            'SDK 1.43 ADDS HAND-AUTHORED MCP TOOLS: PluginMcpToolsInterface, by which a plugin '
+            . 'contributes tools it writes itself instead of tools the host derives from its '
+            . 'routes. THE GAP: every MCP tool was CRUD-shaped, one per endpoint, because '
+            . 'derivation was all there was. Derived tools stay the default and are right for an '
+            . 'API surface; a WORKFLOW surface is a different thing — fewer tools, each carrying '
+            . 'domain semantics and guardrails no route signature implies. A DESCRIPTOR MUST '
+            . 'DECLARE ITS AUDIENCE (requiredRole, requiredPermission, or an explicit open: true): '
+            . 'a derived tool inherits its route RBAC gate and a route with no permission is '
+            . 'visibly open in the route table, whereas an authored tool has no route, so an '
+            . 'omitted permission would be visible nowhere while being callable by every '
+            . 'authenticated principal — refused at load rather than defaulted. A DERIVED TOOL '
+            . 'WINS A NAME COLLISION, because a route-backed name is already published in the '
+            . 'OpenAPI document and the generated clients; suppressesDerivedMcpTools() is the '
+            . 'deliberate way to take a name, scoped to the plugin OWN routes so it can never '
+            . 'silence core or another plugin. A throwing tool costs its caller an error, not the '
+            . 'dispatcher. Purely additive. '
+            . 'SDK 1.42 ADDS DISCRIMINATED SUB-FORMS: the variant and variantCase blocks. A form '
             . 'region whose SHAPE depends on the value of another field — variant names a sibling input '
             . 'as its discriminator, each variantCase declares the value it answers to, and only '
             . 'the matching one renders. THE GAP: a resource with type-dependent payloads had to be '

@@ -48,10 +48,12 @@ use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Mcp\Prompts\Prompt;
 use Whity\Mcp\Prompts\PromptRegistry;
+use Whity\Mcp\Tools\AuthoredToolRegistry;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginJobsInterface;
 use Whity\Sdk\PluginMcpInterface;
+use Whity\Sdk\PluginMcpToolsInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
 use Whity\Sdk\PluginThemeInterface;
@@ -1591,6 +1593,80 @@ class PluginLoader
             requiredRole:       $requiredRole,
             requiredPermission: $requiredPermission,
         ));
+    }
+
+    /**
+     * Register the HAND-AUTHORED MCP tools contributed by plugins (SDK 1.43,
+     * {@see PluginMcpToolsInterface}).
+     *
+     * The same shape as {@see collectMcpPrompts()}, and for the same reasons —
+     * including the one that matters most: a plugin that is administratively
+     * disabled, auto-failed, or otherwise not active contributes NOTHING. A
+     * disabled plugin whose TOOLS an AI agent could still list and call would
+     * still be part of the platform's surface, which is not what disabling one
+     * means. That is #952 exactly, and tools are the half of it where the
+     * consequence is an action rather than a listing.
+     *
+     * `suppressesDerivedMcpTools()` is read here rather than by the deriver,
+     * because this is the only place that holds both the plugin instance and
+     * its lifecycle state. A suppression from a DISABLED plugin is ignored for
+     * the same reason its tools are: a plugin that is off does not get to keep
+     * shaping the surface.
+     */
+    public function collectMcpTools(AuthoredToolRegistry $registry): void
+    {
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            $plugin = $info['plugin'];
+            if (!$plugin instanceof PluginMcpToolsInterface) {
+                continue;
+            }
+
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            try {
+                $descriptors = $plugin->getMcpTools();
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getMcpTools');
+                continue;
+            }
+
+            foreach ($descriptors as $descriptor) {
+                if (!is_array($descriptor)) {
+                    $this->logWarning("[Plugin:{$pluginKey}] getMcpTools() returned a non-array descriptor — skipped.");
+                    continue;
+                }
+                $reason = $registry->register($descriptor, $pluginKey);
+                if ($reason !== null) {
+                    $this->logWarning("[Plugin:{$pluginKey}] getMcpTools(): {$reason}.");
+                }
+            }
+
+            // Read AFTER the descriptors, and in its own try: a plugin whose
+            // getMcpTools() threw has contributed nothing, so honouring a
+            // suppression from it would remove its derived tools and leave it
+            // with no tools at all — the failure would read as "this plugin has
+            // no MCP surface" rather than "this plugin errored".
+            try {
+                if ($plugin->suppressesDerivedMcpTools()) {
+                    // The NAMESPACE PREFIX, not the plugin key. That is what a
+                    // route carries (`$route['namespacePrefix']`, the same field
+                    // `Router::unregisterByNamespace()` filters on), so it is
+                    // the only identifier that lets the deriver tell this
+                    // plugin's routes from anyone else's. Recording the plugin
+                    // key here would produce a suppression that matches nothing
+                    // and silently derives the tools anyway.
+                    $registry->suppressDerivationFor($info['namespacePrefix']);
+                }
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'suppressesDerivedMcpTools');
+            }
+        }
     }
 
     /**

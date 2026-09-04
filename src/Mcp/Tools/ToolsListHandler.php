@@ -28,6 +28,10 @@ final class ToolsListHandler implements MethodHandler
         private readonly ToolDeriver    $toolDeriver,
         private readonly RoleChecker    $roleChecker,
         private readonly TokenValidator $tokenValidator,
+        // SDK 1.43. Optional so every existing construction site keeps working:
+        // an installation with no tool-authoring plugin behaves exactly as it
+        // did, rather than every caller having to pass an empty registry.
+        private readonly ?AuthoredToolRegistry $authoredTools = null,
     ) {}
 
     /** @param array<string, mixed>|null $params */
@@ -39,12 +43,35 @@ final class ToolsListHandler implements MethodHandler
         $tenantId = TenantContext::getTenantId();
 
         $accessMap = $this->toolDeriver->buildAccessMap();
+        $derived   = $this->toolDeriver->deriveTools();
         $tools     = [];
-        foreach ($this->toolDeriver->deriveTools() as $tool) {
+        foreach ($derived as $tool) {
             $name   = (string) ($tool['name'] ?? '');
             $access = $accessMap[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
             if ($this->callerCanUse($access, $principal, $tenantId)) {
                 $tools[] = $tool;
+            }
+        }
+
+        // Authored tools are filtered through the SAME callerCanUse() as
+        // derived ones, deliberately: two filters would be two chances to let
+        // a tool through that the other would have hidden, and tools/list is
+        // the surface a model reads to decide what it may attempt.
+        if ($this->authoredTools !== null) {
+            // Drop anything a derived tool already named. Done here rather than
+            // at registration because derivation happens after plugins load —
+            // there was nothing to collide with at the time they registered.
+            $this->authoredTools->dropCollisionsWith(
+                array_map(static fn (array $t): string => (string) ($t['name'] ?? ''), $derived)
+            );
+
+            $authoredAccess = $this->authoredTools->accessMap();
+            foreach ($this->authoredTools->toolObjects() as $tool) {
+                $name   = (string) ($tool['name'] ?? '');
+                $access = $authoredAccess[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
+                if ($this->callerCanUse($access, $principal, $tenantId)) {
+                    $tools[] = $tool;
+                }
             }
         }
 

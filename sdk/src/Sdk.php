@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.42).
+ * SDK identity (v1.43).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -700,13 +700,44 @@ namespace Whity\Sdk;
  * field in two shapes, which is what a discriminated union is. A duplicate
  * within one case, or one colliding with the enclosing form, is still refused.
  *
- * Purely additive. Nothing declared before 1.42 changed.)
+ * Purely additive. Nothing declared before 1.42 changed.) ->
+ * 1.43 (HAND-AUTHORED MCP TOOLS: {@see PluginMcpToolsInterface}, by which a
+ * plugin contributes tools it writes itself rather than tools the host derives
+ * from its routes.
+ *
+ * The gap: every MCP tool was CRUD-shaped, one per endpoint, because
+ * derivation is all there was. Derived tools are the right default — near-zero
+ * authoring cost, and the list stays honest as routes change — but they can
+ * only ever describe an API surface. A workflow surface is a different thing:
+ * fewer tools, each carrying domain semantics, instructions and guardrails no
+ * route signature implies. Neither kind subsumes the other, and a platform
+ * hosting third-party plugins wants both.
+ *
+ * A DESCRIPTOR MUST DECLARE ITS AUDIENCE — `requiredRole`, `requiredPermission`
+ * or an explicit `open: true`. A derived tool inherits its route's RBAC gate,
+ * and a route declaring no permission is visibly open in the route table and in
+ * the route-catalogue check; an authored tool has no route, so an omitted
+ * permission would be visible nowhere while being callable by every
+ * authenticated principal. A descriptor declaring none of the three is refused
+ * at load rather than defaulted.
+ *
+ * A DERIVED TOOL WINS A NAME COLLISION, because a route-backed name is already
+ * published in the OpenAPI document and the generated clients, and letting an
+ * authored tool shadow it would leave two descriptions of one name disagreeing.
+ * `suppressesDerivedMcpTools()` is the deliberate way to take the name: it
+ * removes the competitor rather than hiding behind it, and it is scoped to the
+ * plugin's OWN routes so it can never silence core's or another plugin's.
+ *
+ * A throwing tool costs its caller an error, not the dispatcher.
+ *
+ * Purely additive. A plugin that does not implement the interface loads exactly
+ * as before and its routes are derived exactly as before.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.42.0';
+    public const VERSION = '1.43.0';
 
     /**
      * Static identity only — never instantiated.
