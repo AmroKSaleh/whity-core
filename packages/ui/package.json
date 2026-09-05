@@ -35,6 +35,7 @@
     "./documents/blocks": "./src/documents/blocks.ts",
     "./documents/element-content": "./src/documents/element-content.tsx",
     "./documents/element-layer": "./src/documents/element-layer.tsx",
+    "./documents/flow": "./src/documents/flow.ts",
     "./documents/geometry": "./src/documents/geometry.ts",
     "./documents/interpolation": "./src/documents/interpolation.ts",
     "./documents/sheet": "./src/documents/sheet.ts",

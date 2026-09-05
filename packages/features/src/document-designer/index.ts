@@ -84,3 +84,5 @@ export {
 } from './batch';
 export { parseDelimited, parseJsonRows, type ParsedRows } from './csv';
 export { applyPlainTextEdit, normalizeRuns, runsToPlainText, toggleRunFormat } from './rich-text';
+// #1186 slice 1: document mode.
+export { FlowEditor, type FlowEditorProps } from './flow-editor';
