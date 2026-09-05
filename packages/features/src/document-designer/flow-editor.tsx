@@ -1,6 +1,9 @@
 import { useRef } from 'react';
 import {
+  DEFAULT_MAX_FIGURE_BYTES,
+  FIGURE_MIME_TYPES,
   flowBlockSummary,
+  judgeFigureFile,
   type FlowBlock,
   type FlowContent,
   type FlowHeadingLevel,
@@ -42,9 +45,31 @@ export interface FlowEditorProps {
   /** Index of the block being edited, or null. Owned by the caller so the `/` palette can aim inserts. */
   selected: number | null;
   onSelect: (index: number | null) => void;
+  /**
+   * Largest image a figure will accept, in bytes of the source file. Defaults
+   * to {@link DEFAULT_MAX_FIGURE_BYTES}; raise it where the deployment raised
+   * `documents.render_max_template_bytes`.
+   */
+  maxFigureBytes?: number;
+  /**
+   * Told why a chosen image was refused.
+   *
+   * A CALLBACK RATHER THAN A SWALLOWED FAILURE. The alternative is a file
+   * picker that closes and changes nothing, which is indistinguishable from the
+   * editor ignoring the click — and this whole mode exists because the figure
+   * block previously could not be filled in at all.
+   */
+  onError?: (message: string) => void;
 }
 
-export function FlowEditor({ content, onChange, selected, onSelect }: FlowEditorProps) {
+export function FlowEditor({
+  content,
+  onChange,
+  selected,
+  onSelect,
+  maxFigureBytes = DEFAULT_MAX_FIGURE_BYTES,
+  onError,
+}: FlowEditorProps) {
   const t = useTranslation('documents');
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -141,7 +166,13 @@ export function FlowEditor({ content, onChange, selected, onSelect }: FlowEditor
             </span>
           </div>
 
-          <BlockBody block={block} index={index} onChange={(b) => replace(index, b)} />
+          <BlockBody
+            block={block}
+            index={index}
+            onChange={(b) => replace(index, b)}
+            maxFigureBytes={maxFigureBytes}
+            onError={onError}
+          />
         </div>
       ))}
     </div>
@@ -182,10 +213,14 @@ function BlockBody({
   block,
   index,
   onChange,
+  maxFigureBytes,
+  onError,
 }: {
   block: FlowBlock;
   index: number;
   onChange: (block: FlowBlock) => void;
+  maxFigureBytes: number;
+  onError?: (message: string) => void;
 }) {
   const t = useTranslation('documents');
 
@@ -237,17 +272,13 @@ function BlockBody({
 
     case 'figure':
       return (
-        <div className="flex items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element -- a data: URI the author supplied; next/image cannot serve one. */}
-          <img src={block.dataUri} alt="" className="h-12 w-12 rounded border border-border object-contain" />
-          <Input
-            value={block.caption ?? ''}
-            aria-label={t('flow.figureCaption', 'Image caption')}
-            data-testid={`flow-input-${index}`}
-            placeholder={t('flow.figureCaptionPlaceholder', 'Caption')}
-            onChange={(e) => onChange({ ...block, caption: e.target.value })}
-          />
-        </div>
+        <FigureBody
+          block={block}
+          index={index}
+          onChange={onChange}
+          maxFigureBytes={maxFigureBytes}
+          onError={onError}
+        />
       );
 
     case 'pageBreak':
@@ -346,6 +377,125 @@ function TableBody({
         </tbody>
       </table>
       <p className="pt-1 text-[0.625rem] text-muted-foreground">{flowBlockSummary(block)}</p>
+    </div>
+  );
+}
+
+/**
+ * The figure block's body: choose an image, and caption it.
+ *
+ * BEFORE THIS, "Insert ▸ Image" WAS A DEAD COMMAND. `newFlowBlock('figure')`
+ * starts as a 1×1 transparent PNG — the only honest empty state, because the
+ * renderer refuses a remote source and an empty string would be a block that
+ * exists and cannot print — and nothing anywhere let the author replace it. The
+ * command appeared to work and produced an invisible dot on the page.
+ *
+ * The file becomes a `data:` URI because that is what the flowing renderer
+ * accepts: it will not fetch, deliberately, since an http(s) source would make
+ * every render an outbound request from inside the render tier.
+ *
+ * Both refusals are REPORTED. A picker that closes and changes nothing is
+ * indistinguishable from the editor ignoring the click, which is the failure
+ * this component exists to fix — fixing it by a different route would be a poor
+ * trade.
+ */
+function FigureBody({
+  block,
+  index,
+  onChange,
+  maxFigureBytes,
+  onError,
+}: {
+  block: Extract<FlowBlock, { type: 'figure' }>;
+  index: number;
+  onChange: (block: FlowBlock) => void;
+  maxFigureBytes: number;
+  onError?: (message: string) => void;
+}) {
+  const t = useTranslation('documents');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const choose = (file: File | undefined) => {
+    if (!file) return;
+
+    // Judged BEFORE any bytes are read: reading a 40 MB file into memory to
+    // then refuse it is work nobody asked for.
+    const rejection = judgeFigureFile(file, maxFigureBytes);
+    if (rejection === 'type') {
+      onError?.(
+        t(
+          'flow.figureBadType',
+          'That file type cannot be used. Choose a PNG, JPEG, GIF or WebP image.'
+        )
+      );
+      return;
+    }
+    if (rejection === 'size') {
+      onError?.(
+        t('flow.figureTooBig', 'That image is larger than {mb} MB, so it cannot be embedded.', {
+          mb: (maxFigureBytes / (1024 * 1024)).toFixed(1),
+        })
+      );
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () =>
+      onError?.(t('flow.figureUnreadable', 'That image could not be read.'));
+    reader.onload = () => {
+      const result = reader.result;
+      // A non-string result means the read produced something that is not a
+      // data URI, and putting it in the block would create the exact
+      // unprintable state the placeholder exists to avoid.
+      if (typeof result !== 'string' || !result.startsWith('data:')) {
+        onError?.(t('flow.figureUnreadable', 'That image could not be read.'));
+        return;
+      }
+      onChange({ ...block, dataUri: result });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {/* eslint-disable-next-line @next/next/no-img-element -- a data: URI the author supplied; next/image cannot serve one. */}
+      <img
+        src={block.dataUri}
+        alt=""
+        data-testid={`flow-figure-preview-${index}`}
+        className="h-12 w-12 rounded border border-border bg-muted/30 object-contain"
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        // Raster only. SVG is absent because it can carry script and this value
+        // becomes a data: URI rendered both in the browser and in headless
+        // Chromium — the same hazard element-content.tsx already refuses.
+        accept={FIGURE_MIME_TYPES.join(',')}
+        className="hidden"
+        data-testid={`flow-figure-file-${index}`}
+        onChange={(e) => {
+          choose(e.target.files?.[0]);
+          // Cleared so choosing the SAME file again still fires a change.
+          e.target.value = '';
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        data-testid={`flow-figure-choose-${index}`}
+        onClick={() => fileRef.current?.click()}
+      >
+        {t('flow.figureChoose', 'Choose image…')}
+      </Button>
+      <Input
+        value={block.caption ?? ''}
+        aria-label={t('flow.figureCaption', 'Image caption')}
+        data-testid={`flow-input-${index}`}
+        placeholder={t('flow.figureCaptionPlaceholder', 'Caption')}
+        onChange={(e) => onChange({ ...block, caption: e.target.value })}
+      />
     </div>
   );
 }

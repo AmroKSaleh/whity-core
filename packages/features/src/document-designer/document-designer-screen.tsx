@@ -1589,6 +1589,10 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
               }}
               selected={flowSelected}
               onSelect={setFlowSelected}
+              // A refused image is REPORTED. Without this the picker closes and
+              // nothing changes, which reads exactly like the editor ignoring
+              // the click — the failure the picker was added to fix.
+              onError={(message) => addToast(message, 'error')}
             />
           ) : (
           <Canvas

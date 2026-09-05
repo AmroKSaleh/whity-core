@@ -179,3 +179,60 @@ export function flowBlockSummary(block: FlowBlock): string {
     }
   }
 }
+
+/**
+ * The largest image a `figure` block will accept, in bytes of the SOURCE file.
+ *
+ * A CLIENT-SIDE PRE-FLIGHT, not the rule. The server is authoritative: it caps
+ * a whole template at `documents.render_max_template_bytes` (2 MB by default,
+ * per-tenant configurable), and the render service caps the payload again. This
+ * exists so an author is told "that image is too big" while choosing it, rather
+ * than having the save refused later by a limit that names bytes rather than
+ * the picture they just picked.
+ *
+ * WHY THIS NUMBER. A data URI is base64, which inflates by about a third, so a
+ * 700 KB file lands near 950 KB inside the template — roughly half the default
+ * budget, which leaves room for the rest of the document and for a second
+ * image. It is deliberately well under the server limit rather than equal to
+ * it: a client guard that matched exactly would pass files the encoded template
+ * then fails on.
+ *
+ * Overridable via `FlowEditor`'s `maxFigureBytes` so a deployment that raised
+ * the server setting can raise this to match.
+ */
+export const DEFAULT_MAX_FIGURE_BYTES = 700 * 1024;
+
+/**
+ * Image types a figure accepts.
+ *
+ * SVG IS ABSENT ON PURPOSE and it is not an oversight about vectors. An SVG can
+ * carry script, and this value becomes a `data:` URI that the designer renders
+ * in the browser and the render service renders in headless Chromium —
+ * `element-content.tsx` already refuses script-carrying SVG data URIs on the
+ * canvas side for exactly this reason. Raster only, so the bytes cannot execute.
+ */
+export const FIGURE_MIME_TYPES: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+];
+
+/** Why a chosen file was refused, or null when it is acceptable. */
+export type FigureRejection = 'type' | 'size' | null;
+
+/**
+ * Judge a chosen file BEFORE reading it.
+ *
+ * Separated from the component so the rule is testable without a DOM file
+ * picker, and so both checks happen before any bytes are read — reading a
+ * 40 MB file into memory to then refuse it is work nobody asked for.
+ */
+export function judgeFigureFile(
+  file: { type: string; size: number },
+  maxBytes: number = DEFAULT_MAX_FIGURE_BYTES
+): FigureRejection {
+  if (!FIGURE_MIME_TYPES.includes(file.type)) return 'type';
+  if (file.size > maxBytes) return 'size';
+  return null;
+}
