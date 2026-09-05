@@ -341,6 +341,20 @@ export interface ItemAction {
   endpoint: string;
   scopedPermission?: string;
   confirm?: string;
+  /**
+   * WC-532 item 5: collect a reason and send it as `{[field]: text}`.
+   *
+   * `confirm` asks yes/no and posts an empty body — enough for "approve", and
+   * unable to express "return this, and say why". A review queue is mostly the
+   * second kind.
+   */
+  prompt?: {
+    /** Body key the text is sent under. Validated as an input name. */
+    field: string;
+    label: string;
+    required?: boolean;
+    placeholder?: string;
+  };
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
 }
 
