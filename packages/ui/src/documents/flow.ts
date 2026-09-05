@@ -236,3 +236,65 @@ export function judgeFigureFile(
   if (file.size > maxBytes) return 'size';
   return null;
 }
+
+/**
+ * Reshaping a `table` block — adding and removing rows and columns.
+ *
+ * A table used to be frozen at the shape `newFlowBlock` created: two columns,
+ * one row, forever. Every cell was editable, which is what made the limit
+ * costly — the block looked like a working table and only revealed it could not
+ * grow when somebody had a third row to enter.
+ *
+ * THE INVARIANT THESE EXIST TO KEEP is that the table stays RECTANGULAR: every
+ * row holds exactly `columns.length` cells. It is easy to add a column by
+ * pushing one heading and forgetting the body, and the result is a table that
+ * validates (the renderer only checks that rows are arrays), renders with the
+ * last column silently missing from every row, and looks like a styling bug
+ * rather than lost data. So these operate on the whole block, never on one
+ * list, and there are tests asserting rectangularity after each.
+ */
+
+/** A table block, narrowed. */
+export type FlowTable = Extract<FlowBlock, { type: 'table' }>;
+
+/** How many columns a table has, counting the body when there is no header. */
+export function tableColumnCount(block: FlowTable): number {
+  return block.columns?.length ?? block.rows[0]?.length ?? 0;
+}
+
+export function addTableRow(block: FlowTable): FlowTable {
+  const width = tableColumnCount(block);
+  return { ...block, rows: [...block.rows, Array.from({ length: width }, () => '')] };
+}
+
+/**
+ * Remove a row, keeping at least one.
+ *
+ * A table with no rows is valid to the renderer and prints as a header with
+ * nothing under it — or, with no header either, as nothing at all. Refusing the
+ * last removal keeps the block visible and re-fillable instead of leaving an
+ * invisible entry in the document's reading order.
+ */
+export function removeTableRow(block: FlowTable, index: number): FlowTable {
+  if (block.rows.length <= 1) return block;
+  return { ...block, rows: block.rows.filter((_, i) => i !== index) };
+}
+
+/** Add a column: one heading AND one cell in every row, or the table goes ragged. */
+export function addTableColumn(block: FlowTable): FlowTable {
+  return {
+    ...block,
+    columns: block.columns === undefined ? undefined : [...block.columns, ''],
+    rows: block.rows.map((r) => [...r, '']),
+  };
+}
+
+/** Remove a column from the heading AND from every row, keeping at least one. */
+export function removeTableColumn(block: FlowTable, index: number): FlowTable {
+  if (tableColumnCount(block) <= 1) return block;
+  return {
+    ...block,
+    columns: block.columns?.filter((_, i) => i !== index),
+    rows: block.rows.map((r) => r.filter((_, i) => i !== index)),
+  };
+}

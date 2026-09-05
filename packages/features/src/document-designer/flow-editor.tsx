@@ -2,8 +2,13 @@ import { useRef } from 'react';
 import {
   DEFAULT_MAX_FIGURE_BYTES,
   FIGURE_MIME_TYPES,
+  addTableColumn,
+  addTableRow,
   flowBlockSummary,
   judgeFigureFile,
+  removeTableColumn,
+  removeTableRow,
+  tableColumnCount,
   type FlowBlock,
   type FlowContent,
   type FlowHeadingLevel,
@@ -376,7 +381,51 @@ function TableBody({
           ))}
         </tbody>
       </table>
-      <p className="pt-1 text-[0.625rem] text-muted-foreground">{flowBlockSummary(block)}</p>
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid={`flow-table-add-row-${index}`}
+          onClick={() => onChange(addTableRow(block))}
+        >
+          {t('flow.tableAddRow', 'Add row')}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid={`flow-table-add-column-${index}`}
+          onClick={() => onChange(addTableColumn(block))}
+        >
+          {t('flow.tableAddColumn', 'Add column')}
+        </Button>
+        {/* Disabled rather than hidden at the last one. A control that vanishes
+            reads as a bug, and "a table keeps at least one" is worth saying. */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={block.rows.length <= 1}
+          title={t('flow.tableLastRow', 'A table keeps at least one row')}
+          data-testid={`flow-table-remove-row-${index}`}
+          onClick={() => onChange(removeTableRow(block, block.rows.length - 1))}
+        >
+          {t('flow.tableRemoveRow', 'Remove row')}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={tableColumnCount(block) <= 1}
+          title={t('flow.tableLastColumn', 'A table keeps at least one column')}
+          data-testid={`flow-table-remove-column-${index}`}
+          onClick={() => onChange(removeTableColumn(block, tableColumnCount(block) - 1))}
+        >
+          {t('flow.tableRemoveColumn', 'Remove column')}
+        </Button>
+        <span className="text-[0.625rem] text-muted-foreground">{flowBlockSummary(block)}</span>
+      </div>
     </div>
   );
 }
