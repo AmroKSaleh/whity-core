@@ -164,15 +164,47 @@ final class DocumentRenderer
      */
     private function resolveBlocks(array $templateData, int $tenantId): array
     {
-        $ids = BlockReferenceScanner::collectBlockIds($templateData);
-        $out = [];
-        foreach ($ids as $id) {
+        // A WORKLIST, not a single pass over the template's own references
+        // (#1186 slice 3). A block may now hold another block, and a nested
+        // reference lives in the PARENT BLOCK'S data — somewhere this method
+        // never looked, because it scanned the template tree alone.
+        //
+        // Scanning once was correct while nesting was forbidden and silently
+        // wrong the moment it was not: the nested id never entered the map, the
+        // harness looked it up, found nothing, and drew nothing. The document
+        // would have printed with a hole in it and no error anywhere.
+        $queue   = BlockReferenceScanner::collectBlockIds($templateData);
+        $out     = [];
+        $visited = [];
+
+        while ($queue !== []) {
+            $id = (string) array_shift($queue);
+
+            // Also the cycle guard. A block that (transitively) contains itself
+            // is resolved once and not re-entered, so a malformed library costs
+            // a wrong-looking document rather than a render that never returns.
+            if (isset($visited[$id])) {
+                continue;
+            }
+            $visited[$id] = true;
+
             if (!ctype_digit($id)) {
                 continue;
             }
+
             $block = $this->blocks->findById((int) $id, $tenantId);
-            if ($block !== null) {
-                $out[$id] = ['id' => $id, 'elements' => $block['data']];
+            if ($block === null) {
+                continue;
+            }
+
+            $out[$id] = ['id' => $id, 'elements' => $block['data']];
+
+            // Tenant-scoped at every level: `findById` takes the tenant, so a
+            // nested pointer cannot reach across tenants however deep it sits.
+            foreach (BlockReferenceScanner::collectBlockIds($block['data']) as $childId) {
+                if (!isset($visited[$childId])) {
+                    $queue[] = $childId;
+                }
             }
         }
 

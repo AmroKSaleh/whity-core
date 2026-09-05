@@ -5175,7 +5175,19 @@ final class CoreApiSchemas
                     'is_system' => self::bool(),
                     'updated_at' => self::str(),
                 ], ['id', 'name', 'scope', 'is_system', 'updated_at'])],
-            ], ['block_id', 'total', 'hidden', 'templates']),
+                // The OTHER kind of user (#1186). Blocks may contain blocks, so
+                // a block held only by another block used to report no users
+                // here and then refuse to delete with a 409.
+                'blocks' => ['type' => 'array', 'items' => self::object([
+                    'id' => self::int(),
+                    'name' => self::str(),
+                    'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                    'required_permission' => self::str(true),
+                    'owner_ou_id' => self::int(true),
+                    'is_system' => self::bool(),
+                    'updated_at' => self::str(),
+                ], ['id', 'name', 'scope', 'is_system', 'updated_at'])],
+            ], ['block_id', 'total', 'hidden', 'templates', 'blocks']),
             'DocumentBlockUsageResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlockUsage')),
 
             // ── Resource-scoped role grants (WC-712 §3) ───────────────────────
@@ -9966,17 +9978,19 @@ final class CoreApiSchemas
             // readability; `usage` is not a digit, so it could never have matched
             // the /{id:\d+} constraint either way.
             self::permissionRoute('GET', '/api/document-blocks/{id:\d+}/usage', 'documents:read', [
-                'summary' => 'What would break if this block changed: the templates that instance it',
+                'summary' => 'What would break if this block changed: the templates and blocks that instance it',
                 'description' =>
                     'A block is POINTER-referenced (a `blockInstance` element), so editing it propagates '
-                    . 'to every template that instances it — and unlike delete, an edit is never refused. '
-                    . 'This is the answer a client needs before offering either action. `templates` is '
-                    . 'row-filtered to what the caller may see; `total` counts EVERY referencing template '
+                    . 'to everything that instances it — and unlike delete, an edit is never refused. '
+                    . 'This is the answer a client needs before offering either action. There are TWO kinds '
+                    . 'of user: `templates`, and `blocks`, since a block may contain another block. Both are '
+                    . 'row-filtered to what the caller may see; `total` counts EVERY reference of both kinds '
                     . 'in the tenant and `hidden` is the difference, so a caller with narrow reach is told '
-                    . 'the edit reaches further than they can see instead of being quietly understated.',
+                    . 'the edit reaches further than they can see instead of being quietly understated. '
+                    . '`total > 0` means exactly that a DELETE would be refused with 409.',
                 'tags' => ['documents'],
                 'responses' => [
-                    200 => self::jsonResponse('The referencing templates, plus the unfiltered total', 'DocumentBlockUsageResponse'),
+                    200 => self::jsonResponse('The referencing templates and blocks, plus the unfiltered total', 'DocumentBlockUsageResponse'),
                     404 => self::errorResponse('Block not found or not visible to the caller'),
                 ] + self::authErrors(),
             ]),

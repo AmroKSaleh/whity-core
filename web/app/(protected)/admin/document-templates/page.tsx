@@ -480,7 +480,11 @@ export default function DocumentTemplatesPage() {
               onClick={() => setInspecting(row)}
               className="text-start font-medium text-primary underline-offset-4 hover:underline"
             >
-              {t('documentTemplates.table.usedByCount', '{count} templates', {
+              {/* Not "{count} templates": the total counts blocks that nest
+                  this one as well (#1186), and a cell that named one kind
+                  while counting two would be wrong in exactly the cases
+                  nesting introduced. */}
+              {t('documentTemplates.table.usedByCount', '{count} uses', {
                 count: usage.total,
               })}
               {usage.hidden > 0 && (

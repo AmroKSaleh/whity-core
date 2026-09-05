@@ -79,16 +79,24 @@ export interface UsageTemplate {
 /**
  * The blast radius of changing a block.
  *
- * `total` counts EVERY referencing template in the tenant; `templates` holds
+ * `total` counts EVERY reference in the tenant; `templates` and `blocks` hold
  * only the ones this caller may see, and `hidden` is the difference. The
  * asymmetry is deliberate and is the entire reason the endpoint exists — see
  * `DocumentBlocksApiHandler::usage()`.
+ *
+ * There are TWO kinds of user because a block may contain another block
+ * (#1186). Counting only templates would tell somebody a block is unused while
+ * a letterhead depends on it — and the delete would then refuse with a 409,
+ * which is the disagreement the reference scanners are kept in parity to
+ * prevent. `total > 0` means exactly "a delete would be refused".
  */
 export interface BlockUsage {
   block_id: number;
   total: number;
   hidden: number;
   templates: UsageTemplate[];
+  /** Blocks that NEST this one. Same row shape as a template. */
+  blocks: UsageTemplate[];
 }
 
 /** A unit, as `GET /api/v1/ous` lists them. */

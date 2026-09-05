@@ -143,6 +143,8 @@ interface RouteOptions {
   blocks?: unknown[];
   ousStatus?: number;
   permissionsStatus?: number;
+  /** Override the usage answer for block 4 (#1186: nesting). */
+  usage?: unknown;
 }
 
 function routeApi(options: RouteOptions = {}) {
@@ -152,7 +154,7 @@ function routeApi(options: RouteOptions = {}) {
   mockApiClient.mockImplementation((url: string) => {
     if (url === '/api/v1/document-templates') return jsonResponse(200, { data: templates });
     if (url === '/api/v1/document-blocks') return jsonResponse(200, { data: blocks });
-    if (url === '/api/v1/document-blocks/4/usage') return jsonResponse(200, { data: USAGE_BLOCK_4 });
+    if (url === '/api/v1/document-blocks/4/usage') return jsonResponse(200, { data: options.usage ?? USAGE_BLOCK_4 });
     if (url === '/api/v1/document-blocks/1/usage') {
       return jsonResponse(200, { data: { block_id: 1, total: 0, hidden: 0, templates: [] } });
     }
@@ -289,7 +291,7 @@ describe('what uses this block', () => {
 
     // THE assertion. The caller holds one referencing template; the server says
     // three. Three is the number that must be on screen.
-    expect(screen.getByText('3 templates')).toBeInTheDocument();
+    expect(screen.getByText('3 uses')).toBeInTheDocument();
     expect(screen.queryByText('1 templates')).not.toBeInTheDocument();
     expect(screen.getByText('2 you cannot see')).toBeInTheDocument();
   });
@@ -338,12 +340,12 @@ describe('what uses this block', () => {
     render(<DocumentTemplatesPage />);
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Blocks' })).toBeInTheDocument());
     await openBlocksTab(user);
-    await waitFor(() => expect(screen.getByText('3 templates')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('3 uses')).toBeInTheDocument());
 
-    await user.click(screen.getByText('3 templates'));
+    await user.click(screen.getByText('3 uses'));
 
     await waitFor(() =>
-      expect(screen.getByText(/3 templates in this tenant use this block/)).toBeInTheDocument()
+      expect(screen.getByText(/3 things in this tenant use this block/)).toBeInTheDocument()
     );
     expect(screen.getByText('2 are not listed')).toBeInTheDocument();
     // The one it may name is named; the two it may not are not.
@@ -364,7 +366,7 @@ describe('destructive actions ask first', () => {
     await openRowMenu(user, 'Demo civil site-safety notice');
     await user.click(screen.getByRole('menuitem', { name: 'Delete…' }));
 
-    await waitFor(() => expect(screen.getByText('Still used by 3 templates')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Still used in 3 places')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
 
     // And nothing was attempted: the 409 is a backstop, not the explanation.
@@ -465,6 +467,51 @@ describe('the visibility dialog', () => {
     expect(screen.getByRole('button', { name: 'Save visibility' })).toBeEnabled();
   });
 
+  /**
+   * A block held only by ANOTHER BLOCK (#1186). Before nesting, "what uses this"
+   * had one possible answer and the dialog said "templates". A block nested in a
+   * letterhead would have been reported as used by nothing — and then refused
+   * deletion with a 409, which is the client/server disagreement the reference
+   * scanners are kept in parity to prevent.
+   */
+  it('names the blocks that contain this one, not only the templates', async () => {
+    routeApi({
+      usage: {
+        block_id: 4,
+        total: 1,
+        hidden: 0,
+        templates: [],
+        blocks: [
+          {
+            id: 9,
+            name: 'Company letterhead',
+            scope: 'tenant',
+            required_permission: null,
+            owner_ou_id: null,
+            is_system: false,
+            updated_at: '2026-01-02T00:00:00Z',
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    render(<DocumentTemplatesPage />);
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Blocks' })).toBeInTheDocument());
+    await openBlocksTab(user);
+    await waitFor(() =>
+      expect(screen.getByText('Demo civil site-safety notice')).toBeInTheDocument()
+    );
+
+    await user.click(screen.getByText('1 uses'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('usage-nesting-blocks')).toBeInTheDocument()
+    );
+    expect(screen.getByText('Company letterhead')).toBeInTheDocument();
+    // And it must NOT be reported as safe to delete.
+    expect(screen.queryByText('Nothing uses this block')).not.toBeInTheDocument();
+  });
+
   it('leads with the block’s usage before offering any control', async () => {
     const user = userEvent.setup();
     render(<DocumentTemplatesPage />);
@@ -477,7 +524,7 @@ describe('the visibility dialog', () => {
     await openRowMenu(user, 'Demo civil site-safety notice');
     await user.click(screen.getByRole('menuitem', { name: 'Change who can see this…' }));
 
-    await waitFor(() => expect(screen.getByText('Used by 3 templates')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Used in 3 places')).toBeInTheDocument());
     expect(screen.getByText(/1 you can see, and 2 you cannot/)).toBeInTheDocument();
   });
 

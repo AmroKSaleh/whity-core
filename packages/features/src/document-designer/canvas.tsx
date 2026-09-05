@@ -343,6 +343,11 @@ export function Canvas({
                   // deliberately stays free of the i18n dependency (the render
                   // harness bundles it).
                   label={t('canvas.blockUnresolved', 'Block not in your library')}
+                  blocks={blocks}
+                  brokenLabel={t(
+                    'canvas.blockNestedBroken',
+                    'Part of this block could not be resolved'
+                  )}
                 />
               ) : (
                 <ElementContent el={el} data={data} preview={preview} />

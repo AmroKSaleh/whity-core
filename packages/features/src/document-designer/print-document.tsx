@@ -41,7 +41,7 @@ function LabelBody({
             }}
           >
             {el.type === 'blockInstance' ? (
-              <BlockInstanceContent block={blocks[el.blockId]} data={data} preview />
+              <BlockInstanceContent block={blocks[el.blockId]} data={data} preview blocks={blocks} />
             ) : (
               <ElementContent el={el} data={data} preview />
             )}

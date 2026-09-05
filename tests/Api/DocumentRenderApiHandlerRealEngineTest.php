@@ -305,6 +305,77 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
         self::assertArrayHasKey((string) $blockId, (array) $blocks);
     }
 
+    /**
+     * NESTED blocks reach the payload too (#1186 slice 3).
+     *
+     * The resolution used to scan the TEMPLATE tree once. A block nested inside
+     * another block is referenced from the parent BLOCK'S data — somewhere that
+     * scan never looked — so its id never entered the map, the render harness
+     * looked it up, found nothing, and drew nothing. The PDF would have printed
+     * with a hole in it and no error raised anywhere along the way.
+     */
+    public function testNestedBlockReferencesAreResolvedTransitively(): void
+    {
+        $this->enableRendering();
+        $blockRepo = new DocumentBlockRepository($this->pdo);
+
+        $logoId = $blockRepo->create(self::TENANT, [
+            'name' => 'Logo',
+            'data' => [['id' => 'el1', 'type' => 'text', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'text' => 'ACME', 'style' => []]],
+        ]);
+        $headId = $blockRepo->create(self::TENANT, [
+            'name' => 'Letterhead',
+            'data' => [['id' => 'el2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId]],
+        ]);
+
+        // The TEMPLATE names only the letterhead. The logo is reachable solely
+        // through it — which is exactly the case the single pass missed.
+        $data = $this->minimalTemplateData();
+        $data['pages'][0]['elements'] = [
+            ['id' => 'inst1', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $headId],
+        ];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Nested', 'data' => $data]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        $blocks = (array) $this->fakeRender->calls[0]['blocks'];
+        self::assertArrayHasKey((string) $headId, $blocks);
+        self::assertArrayHasKey((string) $logoId, $blocks, 'the nested block must reach the render payload');
+    }
+
+    /**
+     * A library that contains a cycle must still render. Resolution visits each
+     * block once, so a malformed pointer costs a wrong-looking document rather
+     * than a request that never returns.
+     */
+    public function testACycleBetweenBlocksDoesNotHangTheRender(): void
+    {
+        $this->enableRendering();
+        $blockRepo = new DocumentBlockRepository($this->pdo);
+
+        $aId = $blockRepo->create(self::TENANT, ['name' => 'A', 'data' => []]);
+        $bId = $blockRepo->create(self::TENANT, [
+            'name' => 'B',
+            'data' => [['id' => 'el2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $aId]],
+        ]);
+        // Close the loop: A points back at B.
+        $blockRepo->update($aId, self::TENANT, [
+            'data' => [['id' => 'el1', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $bId]],
+        ]);
+
+        $data = $this->minimalTemplateData();
+        $data['pages'][0]['elements'] = [
+            ['id' => 'inst1', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $aId],
+        ];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Cyclic', 'data' => $data]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        $blocks = (array) $this->fakeRender->calls[0]['blocks'];
+        self::assertArrayHasKey((string) $aId, $blocks);
+        self::assertArrayHasKey((string) $bId, $blocks);
+    }
+
     // ── batch limits ─────────────────────────────────────────────────────────
 
     public function testTooManyDataRowsIsRejectedWith422(): void

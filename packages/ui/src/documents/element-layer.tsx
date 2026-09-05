@@ -1,7 +1,7 @@
 'use client';
 
 import type { DocElement } from './types';
-import type { DocBlock } from './blocks';
+import { flattenBlock, type DocBlock } from './blocks';
 import { ElementContent } from './element-content';
 
 /**
@@ -75,12 +75,25 @@ export function BlockInstanceContent({
   data,
   preview,
   label = 'Block not in your library',
+  blocks,
+  brokenLabel = 'Part of this block could not be resolved',
 }: {
   block: DocBlock | undefined;
   data: Record<string, string>;
   preview: boolean;
   /** Shown in place of a block that did not resolve. Editing only. */
   label?: string;
+  /**
+   * The library, for expanding blocks nested INSIDE this one (#1186 slice 3).
+   *
+   * Optional so the existing callers and the published package's consumers keep
+   * working unchanged. Omitted, a nested instance resolves to nothing — which is
+   * exactly what happened before nesting existed, so leaving it out is no worse
+   * than the old behaviour and passing it is strictly better.
+   */
+  blocks?: Record<string, DocBlock>;
+  /** Shown when nesting inside this block broke. Editing only. */
+  brokenLabel?: string;
 }) {
   if (!block) {
     if (preview) return null;
@@ -94,5 +107,29 @@ export function BlockInstanceContent({
       </div>
     );
   }
-  return <ElementLayer elements={block.elements} data={data} />;
+
+  const { elements, diagnostics } = flattenBlock(block, blocks ?? {});
+  const broken =
+    diagnostics.cycles.length > 0 || diagnostics.unresolved.length > 0 || diagnostics.tooDeep;
+
+  return (
+    <>
+      <ElementLayer elements={elements} data={data} />
+      {/* The parts that DID resolve are drawn either way — a bad pointer in one
+          nested branch is not a reason to blank the rest of the block.
+          The marker is an authoring affordance and never reaches print, the
+          same rule the unresolved-block marker above follows and for the same
+          reason: a hole a customer can see is worse than a hole an author is
+          told about. */}
+      {broken && !preview ? (
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-destructive/10 px-0.5 text-[7px] leading-tight text-destructive"
+          data-testid="doc-block-nested-broken"
+          title={brokenLabel}
+        >
+          {brokenLabel}
+        </div>
+      ) : null}
+    </>
+  );
 }

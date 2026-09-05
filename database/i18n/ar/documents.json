@@ -3,6 +3,7 @@
     "language": "ar",
     "notice": "Hand-written translations. Unlike the English catalogue one directory up, this file is NOT generated — it is the source of truth for this language and is edited by hand. Every key must also exist in the English catalogue (CI fails on one that does not); a key absent from here falls back to English at runtime. Seed it with `whity-cli i18n:sync --language=<code>`.",
     "keys": {
+        "canvas.blockNestedBroken": "تعذّر حلّ جزء من هذه الكتلة",
         "canvas.blockUnresolved": "هذه الكتلة ليست في مكتبتك",
         "commands.align.bottom": "أسفل",
         "commands.align.hcenter": "توسيط أفقي",
@@ -160,6 +161,7 @@
         "designer.block.scopeFailed": "تعذّر تغيير نطاق ظهور الكتلة.",
         "designer.block.selectFirst": "حدّد عنصراً واحداً أو أكثر لحفظه ككتلة.",
         "designer.block.updated": "حُدّثت الكتلة «{name}».",
+        "designer.block.wouldCycle": "هذه الكتلة موجودة بالفعل داخل تلك الكتلة، لذا فإن إضافتها هنا ستُنشئ حلقة مغلقة.",
         "designer.blocks.loadFailed": "تعذّر تحميل الكتل.",
         "designer.import.done": "تم استيراد القالب.",
         "designer.import.invalid": "هذا الملف ليس قالباً صالحاً.",

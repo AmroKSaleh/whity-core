@@ -277,6 +277,143 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         self::assertSame(204, $this->delete(self::OWNER, $blockId)->getStatusCode());
     }
 
+    /**
+     * THE INVARIANT. `usage.total > 0` must mean exactly "delete would be
+     * refused", in both directions.
+     *
+     * The two answers come from different queries, and while a block could only
+     * be held by a template they happened to agree. Nesting gave the delete
+     * guard a second source and left usage with one, so a block held only by
+     * another block reported "nothing uses this" and then refused to delete —
+     * the client/server disagreement the reference scanners exist to prevent.
+     */
+    public function testUsageAgreesWithTheDeleteGuardForANestedBlock(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+        $this->create(self::OWNER, [
+            'name' => 'Letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]);
+
+        $data = $this->usage(self::OWNER, $logoId);
+
+        self::assertSame(1, $data['total'], 'a nesting block is a user of the block');
+        self::assertSame([], $data['templates'], 'no template uses it — that part was always right');
+        self::assertCount(1, (array) $data['blocks']);
+        self::assertSame('Letterhead', ((array) ((array) $data['blocks'])[0])['name']);
+
+        // The other half of the invariant.
+        self::assertSame(409, $this->delete(self::OWNER, $logoId)->getStatusCode());
+    }
+
+    public function testUsageCountsTemplatesAndNestingBlocksTogether(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+        $this->create(self::OWNER, [
+            'name' => 'Letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]);
+        $this->referencingTemplate('Invoice', $logoId);
+
+        $data = $this->usage(self::OWNER, $logoId);
+
+        // Two users of two different kinds. Counting only one kind is how a
+        // person is told a block is safe to change when it is not.
+        self::assertSame(2, $data['total']);
+        self::assertCount(1, (array) $data['templates']);
+        self::assertCount(1, (array) $data['blocks']);
+    }
+
+    // ── nesting: a block may now hold another block (#1186 slice 3) ──────────
+
+    /**
+     * THE HOLE NESTING OPENED. Before blocks could contain blocks, "no template
+     * references it" was the whole question. It stopped being so the moment a
+     * letterhead could hold a logo: the logo is referenced by nothing a template
+     * scan can see, so the delete would have succeeded and left the letterhead
+     * pointing at a row that is gone — the orphaned pointer this 409 exists to
+     * prevent, arrived at by the guard's own blind spot.
+     */
+    public function testDeleteIsRefusedWhileAnotherBlockNestsIt(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+
+        // No TEMPLATE references the logo. Only another block does.
+        $this->create(self::OWNER, [
+            'name' => 'Letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]);
+
+        $res = $this->delete(self::OWNER, $logoId);
+        self::assertSame(409, $res->getStatusCode(), 'a block nested inside another block must not be deletable');
+
+        $decoded = json_decode($res->getBody(), true);
+        self::assertIsArray($decoded);
+        self::assertArrayHasKey('error', $decoded);
+        self::assertStringNotContainsString('SQLSTATE', (string) $decoded['error']);
+
+        self::assertSame(200, $this->show(self::OWNER, $logoId)->getStatusCode());
+    }
+
+    public function testDeleteSucceedsOnceTheNestingBlockIsGone(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+        $headId = $this->decodeId($this->create(self::OWNER, [
+            'name' => 'Letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]));
+
+        self::assertSame(409, $this->delete(self::OWNER, $logoId)->getStatusCode());
+
+        // Remove the holder, and the guard lets go. A guard that stayed latched
+        // would be a leak, not a safeguard.
+        self::assertSame(204, $this->delete(self::OWNER, $headId)->getStatusCode());
+        self::assertSame(204, $this->delete(self::OWNER, $logoId)->getStatusCode());
+    }
+
+    /**
+     * A block that contains ITSELF is malformed, and letting it veto its own
+     * deletion would make the one row somebody most wants to remove the one row
+     * they cannot. The scan excludes the row being deleted for that reason.
+     */
+    public function testABlockContainingItselfCanStillBeDeleted(): void
+    {
+        $id = $this->decodeId($this->create(self::OWNER, ['name' => 'Self', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+
+        $this->pdo->exec(
+            "UPDATE document_blocks SET data = '"
+            . json_encode([['id' => 'e2', 'type' => 'blockInstance', 'blockId' => (string) $id]])
+            . "' WHERE id = " . $id
+        );
+
+        self::assertSame(204, $this->delete(self::OWNER, $id)->getStatusCode());
+    }
+
+    public function testNestingDeleteGuardIsTenantScoped(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+
+        // Another TENANT's block naming the same numeric id must not hold this
+        // one hostage — the same isolation the template scan already has.
+        $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (2, 'b', 'b')");
+        (new DocumentBlockRepository($this->pdo))->create(2, [
+            'name' => 'Other tenant letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]);
+
+        self::assertSame(204, $this->delete(self::OWNER, $logoId)->getStatusCode());
+    }
+
     // ── usage: what would break if this block changed ────────────────────────
 
     /**
@@ -388,7 +525,7 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
     // ── helpers ─────────────────────────────────────────────────────────────
 
     /**
-     * @return array{block_id: int, total: int, hidden: int, templates: list<array<string, mixed>>}
+     * @return array{block_id: int, total: int, hidden: int, templates: list<array<string, mixed>>, blocks: list<array<string, mixed>>}
      */
     private function usage(int $userId, int $blockId): array
     {
@@ -398,7 +535,7 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         self::assertIsArray($decoded);
         self::assertIsArray($decoded['data'] ?? null);
 
-        /** @var array{block_id: int, total: int, hidden: int, templates: list<array<string, mixed>>} */
+        /** @var array{block_id: int, total: int, hidden: int, templates: list<array<string, mixed>>, blocks: list<array<string, mixed>>} */
         return $decoded['data'];
     }
 

@@ -919,8 +919,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What would break if this block changed: the templates that instance it
-         * @description A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to every template that instances it — and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. `templates` is row-filtered to what the caller may see; `total` counts EVERY referencing template in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated.
+         * What would break if this block changed: the templates and blocks that instance it
+         * @description A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to everything that instances it — and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. There are TWO kinds of user: `templates`, and `blocks`, since a block may contain another block. Both are row-filtered to what the caller may see; `total` counts EVERY reference of both kinds in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated. `total > 0` means exactly that a DELETE would be refused with 409.
          */
         get: operations["get_api_v1_document_blocks_id_usage"];
         put?: never;
@@ -5059,6 +5059,16 @@ export interface components {
             total: number;
             hidden: number;
             templates: {
+                id: number;
+                name: string;
+                /** @enum {string} */
+                scope: "personal" | "tenant" | "global" | "system";
+                required_permission?: string | null;
+                owner_ou_id?: number | null;
+                is_system: boolean;
+                updated_at: string;
+            }[];
+            blocks: {
                 id: number;
                 name: string;
                 /** @enum {string} */
@@ -12540,7 +12550,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The referencing templates, plus the unfiltered total */
+            /** @description The referencing templates and blocks, plus the unfiltered total */
             200: {
                 headers: {
                     [name: string]: unknown;
