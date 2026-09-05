@@ -33,17 +33,21 @@ const INITIAL_ROWS = 8;
  * "What uses this block?" — answered before anything destructive is offered.
  *
  * A block is pointer-referenced with Gutenberg synced-pattern semantics: editing
- * it rewrites every template that instances it, and unlike delete that is never
+ * it rewrites everything that instances it, and unlike delete that is never
  * refused. So this dialog is the safeguard, and its job is to be believed:
  *
- *  - the TOTAL is the server's unfiltered count, and when some of those templates
+ *  - the TOTAL is the server's unfiltered count, and when some of those users
  *    are outside the caller's visibility that is stated as a number rather than
  *    quietly dropped. A count of only the visible ones would understate the blast
  *    radius for exactly the people whose reach is narrowest.
- *  - a template the caller may not see is counted but never NAMED. The hidden
+ *  - a user the caller may not see is counted but never NAMED. The hidden
  *    count is a number about their own tenant; the identities are not theirs.
  *  - an unreadable count is shown as unreadable. A blank is not a zero, and a
  *    zero is what would license the delete.
+ *  - there are TWO kinds of user, because a block may contain another block
+ *    (#1186). They are listed separately rather than merged: a template is a
+ *    document, a nesting block is another block that a delete would leave
+ *    pointing at nothing, and the person deciding needs to know which is which.
  */
 export function UsageDialog({
   block,
@@ -63,6 +67,13 @@ export function UsageDialog({
   const shown = expanded ? rows : rows.slice(0, INITIAL_ROWS);
   const collapsed = rows.length - shown.length;
 
+  // Blocks that NEST this one (#1186). Listed separately rather than merged
+  // into the table above, because the two are not the same kind of thing and a
+  // person deciding whether to delete needs to know which is which: a template
+  // is a document, a block is another block that would be left pointing at
+  // nothing.
+  const nesting = usage?.blocks ?? [];
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-2xl">
@@ -73,7 +84,7 @@ export function UsageDialog({
           <DialogDescription>
             {t(
               'documentTemplates.usage.description',
-              'A block is referenced by pointer, so editing it changes every template below. Nothing here is a copy.'
+              'A block is referenced by pointer, so editing it changes everything listed below. Nothing here is a copy.'
             )}
           </DialogDescription>
         </DialogHeader>
@@ -93,13 +104,13 @@ export function UsageDialog({
             title={t('documentTemplates.usage.emptyTitle', 'Nothing uses this block')}
             description={t(
               'documentTemplates.usage.emptyBody',
-              'No template in this tenant holds a pointer at it — including templates you cannot see, which is why this is safe to act on.'
+              'Nothing in this tenant holds a pointer at it — no template and no other block, including ones you cannot see, which is why this is safe to act on.'
             )}
           />
         ) : (
           <>
             <p className="text-sm">
-              {t('documentTemplates.usage.count', '{total} templates in this tenant use this block.', {
+              {t('documentTemplates.usage.count', '{total} things in this tenant use this block.', {
                 total: usage.total,
               })}
             </p>
@@ -120,6 +131,7 @@ export function UsageDialog({
               </Alert>
             )}
 
+            {rows.length > 0 && (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -156,11 +168,41 @@ export function UsageDialog({
                 </TableBody>
               </Table>
             </div>
+            )}
 
             {collapsed > 0 && (
               <Button variant="ghost" size="sm" onClick={() => setExpanded(true)}>
                 {t('documentTemplates.usage.showAll', 'Show {count} more', { count: collapsed })}
               </Button>
+            )}
+
+            {nesting.length > 0 && (
+              <div data-testid="usage-nesting-blocks">
+                <p className="text-sm font-medium">
+                  {t(
+                    'documentTemplates.usage.nestedTitle',
+                    'Blocks that contain this one'
+                  )}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {t(
+                    'documentTemplates.usage.nestedBody',
+                    'Deleting this block is refused while any of these hold it. Editing it changes them too.'
+                  )}
+                </p>
+                <ul className="mt-2 space-y-1 text-sm">
+                  {nesting.map((b) => (
+                    <li key={b.id} className="flex items-center gap-2">
+                      <span className="font-medium">{b.name}</span>
+                      <ScopeBadge
+                        row={{ ...b, created_by: null }}
+                        ouName={ouName(b.owner_ou_id)}
+                        viewerProfileId={null}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </>
         )}

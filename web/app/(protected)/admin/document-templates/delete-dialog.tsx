@@ -90,7 +90,11 @@ export function DeleteDialog({
     }
   };
 
-  const names = (usage?.templates ?? []).slice(0, NAMES_SHOWN).map((template) => template.name);
+  // BOTH kinds of user (#1186). A block may be held by another block, and a
+  // delete that named only templates would list nothing while refusing —
+  // leaving the person with a 409 and no idea what is holding it.
+  const users = [...(usage?.templates ?? []), ...(usage?.blocks ?? [])];
+  const names = users.slice(0, NAMES_SHOWN).map((row) => row.name);
   const unnamed = (usage?.total ?? 0) - names.length;
 
   return (
@@ -142,7 +146,7 @@ export function DeleteDialog({
         {blockedByUsage && (
           <Alert variant="destructive">
             <AlertTitle>
-              {t('documentTemplates.delete.inUseTitle', 'Still used by {count} templates', {
+              {t('documentTemplates.delete.inUseTitle', 'Still used in {count} places', {
                 count: usage.total,
               })}
             </AlertTitle>

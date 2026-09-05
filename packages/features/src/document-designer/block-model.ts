@@ -1,8 +1,22 @@
 import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
 import type { DocElement } from '@amroksaleh/ui/documents/types';
 
-export type { BlockScope, DocBlock } from '@amroksaleh/ui/documents/blocks';
-export { BLOCK_SCOPES, blocksById, makeBlockFromElements, resolveInstance } from '@amroksaleh/ui/documents/blocks';
+export type {
+  BlockScope,
+  DocBlock,
+  FlattenDiagnostics,
+  FlattenResult,
+} from '@amroksaleh/ui/documents/blocks';
+export {
+  BLOCK_SCOPES,
+  MAX_BLOCK_DEPTH,
+  blockChildIds,
+  blocksById,
+  flattenBlock,
+  makeBlockFromElements,
+  resolveInstance,
+  wouldCycle,
+} from '@amroksaleh/ui/documents/blocks';
 
 /**
  * The PURE model half for reusable document/label-designer blocks: row

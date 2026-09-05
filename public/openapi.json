@@ -6013,11 +6013,11 @@
         "/api/v1/document-blocks/{id}/usage": {
             "get": {
                 "operationId": "get_api_v1_document_blocks_id_usage",
-                "summary": "What would break if this block changed: the templates that instance it",
+                "summary": "What would break if this block changed: the templates and blocks that instance it",
                 "tags": [
                     "documents"
                 ],
-                "description": "A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to every template that instances it \u2014 and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. `templates` is row-filtered to what the caller may see; `total` counts EVERY referencing template in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated.",
+                "description": "A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to everything that instances it \u2014 and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. There are TWO kinds of user: `templates`, and `blocks`, since a block may contain another block. Both are row-filtered to what the caller may see; `total` counts EVERY reference of both kinds in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated. `total > 0` means exactly that a DELETE would be refused with 409.",
                 "parameters": [
                     {
                         "name": "id",
@@ -6030,7 +6030,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "The referencing templates, plus the unfiltered total",
+                        "description": "The referencing templates and blocks, plus the unfiltered total",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -35813,13 +35813,58 @@
                                 "updated_at"
                             ]
                         }
+                    },
+                    "blocks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "integer"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "scope": {
+                                    "type": "string",
+                                    "enum": [
+                                        "personal",
+                                        "tenant",
+                                        "global",
+                                        "system"
+                                    ]
+                                },
+                                "required_permission": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "owner_ou_id": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "is_system": {
+                                    "type": "boolean"
+                                },
+                                "updated_at": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "id",
+                                "name",
+                                "scope",
+                                "is_system",
+                                "updated_at"
+                            ]
+                        }
                     }
                 },
                 "required": [
                     "block_id",
                     "total",
                     "hidden",
-                    "templates"
+                    "templates",
+                    "blocks"
                 ]
             },
             "DocumentBlockUsageResponse": {

@@ -49,9 +49,16 @@ export {
   blocksById,
   makeBlockFromElements,
   resolveInstance,
+  // #1186 slice 3: blocks nested inside blocks.
+  MAX_BLOCK_DEPTH,
+  blockChildIds,
+  flattenBlock,
+  wouldCycle,
   type BlockScope,
   type DocBlock,
   type DocumentBlockRow,
+  type FlattenDiagnostics,
+  type FlattenResult,
 } from './block-model';
 
 export { PrintDocument } from './print-document';

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Document;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access for `document_blocks` (WC-docdesigner) — reusable designer blocks
@@ -162,5 +163,192 @@ final class DocumentBlockRepository
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
 
         return $stmt->rowCount();
+    }
+
+    /**
+     * Does any OTHER block in the tenant hold a live `blockInstance` pointer at
+     * $blockId? (#1186 slice 3.)
+     *
+     * The sibling of {@see DocumentTemplateRepository::referencesBlock()}, and
+     * the half that did not exist while nesting did not. That guard asks only
+     * whether a TEMPLATE points at the block, which was a complete question
+     * when a block could not contain another block. It is not any more: a logo
+     * used by nothing but the letterhead block would have answered "not
+     * referenced", been deleted, and left the letterhead pointing at a row that
+     * is gone — precisely the orphaned pointer the 409 exists to prevent.
+     *
+     * $blockId is excluded from its own scan. A block that contains itself is
+     * malformed, and letting it veto its own deletion would make the one row
+     * somebody most wants to remove the one row they cannot.
+     *
+     * Two engines, one answer, mirroring the template scan exactly: a
+     * `jsonb_path_exists` recursive descent on Postgres, and a decode-and-walk
+     * in PHP on SQLite, where `data` is TEXT and jsonpath does not exist.
+     */
+    public function referencesBlock(int $blockId, int $tenantId): bool
+    {
+        if ($this->driver() === 'pgsql') {
+            // ::text for the reason the template scan records — Postgres cannot
+            // infer a bound parameter's type inside jsonb_build_object()'s
+            // variadic "any" signature and raises 42P18 without the cast.
+            $stmt = $this->db->prepare(
+                "SELECT EXISTS (
+                     SELECT 1 FROM document_blocks
+                      WHERE tenant_id = :tenant_id
+                        AND id <> :self_id
+                        AND jsonb_path_exists(
+                            data,
+                            '\$.** ? (@.type == \"blockInstance\" && @.blockId == \$bid)',
+                            jsonb_build_object('bid', :block_id::text)
+                        )
+                 ) AS referenced"
+            );
+            $stmt->execute([
+                ':tenant_id' => $tenantId,
+                ':self_id'   => $blockId,
+                ':block_id'  => (string) $blockId,
+            ]);
+
+            return DbBool::of($stmt->fetchColumn());
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT data FROM document_blocks WHERE tenant_id = :tenant_id AND id <> :self_id'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':self_id' => $blockId]);
+
+        $needle = (string) $blockId;
+        while (($raw = $stmt->fetchColumn()) !== false) {
+            $decoded = json_decode((string) $raw, true);
+            if (is_array($decoded) && self::treeReferencesBlock($decoded, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * WHICH blocks in the tenant nest $blockId — the list form of the yes/no
+     * {@see self::referencesBlock()} answers (#1186 slice 3).
+     *
+     * The sibling of {@see DocumentTemplateRepository::referencingTemplates()},
+     * and it exists for the reason that one does: "is it referenced?" is enough
+     * to refuse a delete but is the wrong thing to put in front of a person.
+     * A usage screen that reported no users over a delete the server then
+     * refuses with 409 is the exact client/server disagreement the reference
+     * scanners are kept in parity to avoid — and nesting would have created it,
+     * because a block held only by another block is invisible to the template
+     * list while being perfectly visible to the delete guard.
+     *
+     * Rows carry the governance columns {@see DocumentAccessPolicy} reads, so
+     * the caller can filter this list the way it filters the template one: a
+     * viewer must not learn the names of blocks they cannot see.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function referencingBlocks(int $blockId, int $tenantId): array
+    {
+        if ($this->driver() === 'pgsql') {
+            $stmt = $this->db->prepare(
+                "SELECT id, tenant_id, name, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at
+                   FROM document_blocks
+                  WHERE tenant_id = :tenant_id
+                    AND id <> :self_id
+                    AND jsonb_path_exists(
+                        data,
+                        '\$.** ? (@.type == \"blockInstance\" && @.blockId == \$bid)',
+                        jsonb_build_object('bid', :block_id::text)
+                    )
+                  ORDER BY updated_at DESC, id DESC"
+            );
+            $stmt->execute([
+                ':tenant_id' => $tenantId,
+                ':self_id'   => $blockId,
+                ':block_id'  => (string) $blockId,
+            ]);
+            /** @var list<array<string, mixed>> $rows */
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            return array_map(self::normalizeReferenceRow(...), $rows);
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT id, tenant_id, name, data, scope, required_permission, is_system, created_by, owner_ou_id, starter_key, created_at, updated_at
+             FROM document_blocks WHERE tenant_id = :tenant_id AND id <> :self_id ORDER BY updated_at DESC, id DESC'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':self_id' => $blockId]);
+
+        $needle = (string) $blockId;
+        $out = [];
+        /** @var array<string, mixed> $row */
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $decoded = json_decode((string) $row['data'], true);
+            if (is_array($decoded) && self::treeReferencesBlock($decoded, $needle)) {
+                $out[] = self::normalizeReferenceRow($row);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Map a reference row to the governance shape, mirroring
+     * {@see DocumentTemplateRepository::normalizeReferenceRow()} exactly. `data`
+     * is keyed as an empty array so the row stays assignable wherever a block
+     * row is expected.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function normalizeReferenceRow(array $row): array
+    {
+        return [
+            'id'                  => (int) $row['id'],
+            'tenant_id'           => (int) $row['tenant_id'],
+            'name'                => (string) $row['name'],
+            'data'                => [],
+            'scope'               => (string) $row['scope'],
+            'required_permission' => $row['required_permission'] !== null ? (string) $row['required_permission'] : null,
+            'is_system'           => DbBool::of($row['is_system']),
+            'created_by'          => $row['created_by'] !== null ? (int) $row['created_by'] : null,
+            'owner_ou_id'         => ($row['owner_ou_id'] ?? null) !== null ? (int) $row['owner_ou_id'] : null,
+            'starter_key'         => ($row['starter_key'] ?? null) !== null ? (string) $row['starter_key'] : null,
+            'created_at'          => (string) $row['created_at'],
+            'updated_at'          => (string) $row['updated_at'],
+        ];
+    }
+
+    /**
+     * Recursive-descent shape check, identical to the template repository's and
+     * to `collectBlockIds` in packages/ui: `{type: 'blockInstance', blockId}` at
+     * any depth under any key. Deliberately does not assume the element shape,
+     * so it stays correct across schema changes.
+     *
+     * @param array<int|string, mixed> $node
+     */
+    private static function treeReferencesBlock(array $node, string $needle): bool
+    {
+        if (
+            ($node['type'] ?? null) === 'blockInstance'
+            && array_key_exists('blockId', $node)
+            && (string) $node['blockId'] === $needle
+        ) {
+            return true;
+        }
+        foreach ($node as $value) {
+            if (is_array($value) && self::treeReferencesBlock($value, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function driver(): string
+    {
+        $name = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
+
+        return is_string($name) ? $name : '';
     }
 }

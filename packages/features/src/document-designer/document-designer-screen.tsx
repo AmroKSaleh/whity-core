@@ -25,6 +25,7 @@ import {
   blocksById,
   makeBlockFromElements,
   resolveInstance,
+  wouldCycle,
   type BlockScope,
   type DocBlock,
 } from '@amroksaleh/ui/documents/blocks';
@@ -842,6 +843,27 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     const b = blocksMap[blockId];
     if (!b) return;
 
+    // THE ONLY PLACE A CYCLE CAN BE CREATED (#1186 slice 3). Blocks may hold
+    // blocks, so inserting one INTO a block being edited can close a loop —
+    // directly (a block into itself) or through a chain nobody can see on
+    // screen, which is the case actually built by accident: A already holds B,
+    // and someone drops A into B months later.
+    //
+    // Refused here rather than survived at render time. `flattenBlock` cuts a
+    // cycle and reports it, so the document still prints — but the honest
+    // moment to say no is when somebody builds one, not when part of a
+    // document quietly stops appearing.
+    if (blockEdit && wouldCycle(blocksMap, blockEdit.id, blockId)) {
+      addToast(
+        t(
+          'designer.block.wouldCycle',
+          'That block already contains this one, so adding it here would make a loop.'
+        ),
+        'error'
+      );
+      return;
+    }
+
     let id = blockId;
     if (!isBackendId(blockId)) {
       try {
@@ -1059,6 +1081,13 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
 
   // Detach a block instance: replace the pointer with independent copies of the
   // block's elements (inlined at the instance position), unlinking it.
+  //
+  // ONE LEVEL, deliberately, now that blocks may nest (#1186). Detaching a
+  // letterhead inlines its elements and leaves the logo instance inside it
+  // still a live pointer — you unlinked the letterhead, not everything the
+  // letterhead was built from. `resolveInstance` rather than `flattenBlock` is
+  // what says so: flattening would quietly sever every nested block too, and a
+  // person who wanted that can detach the inner one next.
   const detachInstance = (instId: string) => {
     const inst = elements.find((e) => e.id === instId);
     if (!inst || inst.type !== 'blockInstance') return;

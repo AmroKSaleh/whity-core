@@ -169,10 +169,35 @@ final class DocumentBlocksApiHandler
         $referencing = $this->templateRepo->referencingTemplates($id, $tenantId);
         $visible = $this->policy->filterVisible($referencing, $callerId, $has, $reaches);
 
+        // Blocks may now nest blocks (#1186 slice 3), so the templates are no
+        // longer the whole answer. A block held only by another block would
+        // report NO users here and then be refused with a 409 by delete() —
+        // the client/server disagreement the reference scanners are deliberately
+        // kept in parity to avoid, arrived at from the other side.
+        //
+        // Filtered through the same policy as the templates: a viewer must not
+        // learn the names of blocks they cannot see, and `total` counts what
+        // exists while `hidden` says how much of it is being withheld.
+        $nesting = $this->repo->referencingBlocks($id, $tenantId);
+        $visibleNesting = $this->policy->filterVisible($nesting, $callerId, $has, $reaches);
+
         return Response::json(['data' => [
             'block_id'  => $id,
-            'total'     => count($referencing),
-            'hidden'    => count($referencing) - count($visible),
+            'total'     => count($referencing) + count($nesting),
+            'hidden'    => (count($referencing) - count($visible))
+                + (count($nesting) - count($visibleNesting)),
+            'blocks'    => array_map(
+                static fn (array $row): array => [
+                    'id'                  => $row['id'],
+                    'name'                => $row['name'],
+                    'scope'               => $row['scope'],
+                    'required_permission' => $row['required_permission'],
+                    'owner_ou_id'         => $row['owner_ou_id'],
+                    'is_system'           => $row['is_system'],
+                    'updated_at'          => $row['updated_at'],
+                ],
+                $visibleNesting,
+            ),
             'templates' => array_map(
                 static fn (array $row): array => [
                     'id'                  => $row['id'],
@@ -359,6 +384,15 @@ final class DocumentBlocksApiHandler
         // blockInstance pointer held by any template in the tenant.
         if ($this->templateRepo->referencesBlock($id, $tenantId)) {
             return Response::error('Cannot delete a block that is still referenced by a template', 409);
+        }
+
+        // The same guard for the other holder of a pointer (#1186 slice 3).
+        // Blocks may now contain blocks, so "no template uses it" stopped being
+        // the whole question: a logo used only by the letterhead BLOCK would
+        // have passed the check above, been deleted, and left the letterhead
+        // pointing at a row that no longer exists.
+        if ($this->repo->referencesBlock($id, $tenantId)) {
+            return Response::error('Cannot delete a block that is still nested inside another block', 409);
         }
 
         $this->repo->delete($id, $tenantId);

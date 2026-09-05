@@ -87,6 +87,28 @@ copy. Blocks have scope tiers **system / personal / tenant / global**. Built-in
 **system** starters (company header/footer) ship so the Blocks panel is never
 empty (`starters.ts#STARTER_BLOCKS`).
 
+**Blocks may contain blocks** (#1186). A letterhead holding the logo block means
+the logo is stored once and every letterhead follows it when it changes.
+
+- Resolution is `blocks.ts#flattenBlock`, which expands to leaves and returns
+  **diagnostics** alongside the elements. Three things stop an expansion — the
+  block is gone, it is an ancestor of itself, or nesting exceeds
+  `MAX_BLOCK_DEPTH` — and all three draw nothing, so elements alone cannot tell
+  "empty" from "broken". The editor shows a marker; print never does.
+- A **cycle is cut, not refused**: the branches that resolve still print. One
+  bad pointer must not blank a page.
+- Cycles are refused **at insertion** (`wouldCycle`), which is the honest moment
+  to say no. The case built by accident is indirect: A already holds B, and
+  someone drops A into B later.
+- The server resolves **transitively** (`DocumentRenderer::resolveBlocks`) — a
+  nested reference lives in the parent block's data, not the template tree, so a
+  single pass would have sent a payload missing the nested block and printed a
+  hole with no error raised.
+- Deleting is guarded on **both** holders: a template pointer
+  (`DocumentTemplateRepository::referencesBlock`) and a block pointer
+  (`DocumentBlockRepository::referencesBlock`). A block used only by another
+  block was invisible to the template scan alone.
+
 ### Starters (no white sheet)
 **Start from…** offers ready, editable templates (Invoice, Exam sheet,
 Production note, Shipping label). These are the seed source the backend will use

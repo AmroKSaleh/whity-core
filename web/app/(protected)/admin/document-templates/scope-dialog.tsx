@@ -191,7 +191,8 @@ export function ScopeDialog({
         {kind === 'block' && usage !== null && usage.total > 0 && (
           <Alert variant={narrowing ? 'warning' : 'info'}>
             <AlertTitle>
-              {t('documentTemplates.scopeDialog.usageTitle', 'Used by {count} templates', {
+              {/* Counts templates AND the blocks that nest this one (#1186). */}
+              {t('documentTemplates.scopeDialog.usageTitle', 'Used in {count} places', {
                 count: usage.total,
               })}
             </AlertTitle>
@@ -200,7 +201,7 @@ export function ScopeDialog({
                 ? t(
                     'documentTemplates.scopeDialog.usageHidden',
                     '{visible} you can see, and {hidden} you cannot. Narrowing this block does not delete anything — it stops the pointer resolving for people who no longer reach it, so those documents render without it and look fine.',
-                    { visible: usage.templates.length, hidden: usage.hidden }
+                    { visible: usage.templates.length + (usage.blocks?.length ?? 0), hidden: usage.hidden }
                   )
                 : t(
                     'documentTemplates.scopeDialog.usageVisible',
