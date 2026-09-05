@@ -36,15 +36,15 @@
   "devDependencies": {
     "@hookform/resolvers": "^5.9.1",
     "@types/katex": "^0.16.8",
-    "katex": "^0.18.4",
+    "katex": "^0.18.5",
     "radix-ui": "^1.6.7",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
+    "@types/react-dom": "^19.2.5",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-hook-form": "^7.85.0",
+    "react-hook-form": "^7.87.0",
     "typescript": "^5",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
