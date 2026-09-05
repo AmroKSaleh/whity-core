@@ -46,6 +46,7 @@ import { PrintDocument } from './print-document';
 import { EditorTopBar, ShortcutsDialog, useModLabel } from './editor-top-bar';
 import {
   buildEditorMenus,
+  flowBlockLabel,
   blockDeleteConsequence,
   blockDeletedMessage,
   savedMessage,
@@ -55,7 +56,10 @@ import {
 } from './editor-commands';
 import { ConfirmDelete } from './confirm-delete';
 import { CommandPalette } from '@amroksaleh/ui/command-palette';
-import { paletteItemsFromMenus } from './editor-palette';
+import { FlowEditor } from './flow-editor';
+import { canvasToFlow, describeSwitch, flowToCanvas } from './mode-switch';
+import { newFlowBlock, type FlowBlockType, type FlowContent } from '@amroksaleh/ui/documents/flow';
+import { flowPaletteItems, paletteItemsForFlow, paletteItemsFromMenus } from './editor-palette';
 
 /** Zoom bounds + step for the View menu / toolbar zoom controls. */
 const ZOOM_MIN = 0.25;
@@ -124,6 +128,13 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   const [railOpen, setRailOpen] = useState(true);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // #1186: which flow block is being edited. Separate from `selectedIds`
+  // because a flow block is addressed by INDEX and a canvas element by id —
+  // one selection model covering both would have to mean different things
+  // depending on the mode, which is how a selection ends up pointing at the
+  // wrong thing after a switch.
+  const [flowSelected, setFlowSelected] = useState<number | null>(null);
+  const mode = template.mode ?? 'canvas';
   // The canvas scroll viewport, measured by View ▸ Fit page in window.
   const viewportRef = useRef<HTMLElement>(null);
 
@@ -1222,6 +1233,78 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     });
   };
 
+  /**
+   * Insert a flow block, after the selected one or at the end.
+   *
+   * "After the selected one" is what makes the `/` palette feel like writing
+   * rather than appending: you are somewhere in the document, and the new block
+   * arrives where you are. With nothing selected it goes to the end, which is
+   * where an author with no cursor is.
+   */
+  const insertFlowBlock = (type: FlowBlockType) => {
+    commit('flow-insert');
+    const at = flowSelected === null ? (template.flow?.blocks.length ?? 0) : flowSelected + 1;
+    setTemplate((tpl) => {
+      const content: FlowContent = tpl.flow ?? { blocks: [] };
+      const blocks = [...content.blocks];
+      blocks.splice(at, 0, newFlowBlock(type));
+      return { ...tpl, flow: { ...content, blocks } };
+    });
+    setFlowSelected(at);
+  };
+
+  /**
+   * Switch the document between canvas and flow (#1186 slice 2).
+   *
+   * Routed through the SAME confirmation the deletes use, because canvas ->
+   * flow discards placement and cannot recover it. The count comes from
+   * `describeSwitch`, so the number the author is shown is the number that
+   * actually survives — promising more than converts would be worse than not
+   * saying anything.
+   *
+   * Flow -> canvas is additive and asks nothing: it lays the blocks out and
+   * every one of them is draggable from that moment. An "are you sure" on an
+   * action that loses nothing trains people to dismiss the ones that do.
+   */
+  const switchMode = (to: 'canvas' | 'flow') => {
+    if (to === mode) return;
+    const cost = describeSwitch(template, to);
+
+    const apply = () => {
+      commit('switch-mode');
+      setSelectedIds([]);
+      setFlowSelected(null);
+      if (to === 'flow') {
+        setTemplate((tpl) => ({ ...tpl, mode: 'flow', flow: canvasToFlow(tpl) }));
+      } else {
+        setTemplate((tpl) => flowToCanvas(tpl, () => `el-${Date.now()}-${(pasteSeq.current += 1)}`));
+      }
+    };
+
+    if (!cost.lossy) {
+      apply();
+      return;
+    }
+
+    setPendingDelete({
+      title: t('flow.switchTitle', 'Switch to document mode?'),
+      body: t(
+        'flow.switchBody',
+        'Document mode arranges blocks one below another, so the positions you set on the canvas are not kept. Your canvas layout stays saved and comes back if you switch again.'
+      ),
+      consequence: t(
+        'flow.switchCost',
+        '{carried} of {total} items carry over as text or images. Shapes, lines, barcodes and placed blocks have no document-mode equivalent and are left behind.',
+        {
+          carried: String(cost.carried),
+          total: String(template.pages.reduce((n, p) => n + p.elements.length, 0)),
+        }
+      ),
+      confirmLabel: t('flow.switchAction', 'Switch to document mode'),
+      run: apply,
+    });
+  };
+
   // Load a fresh document (blank or a starter), resetting all editor state.
   const loadFreshTemplate = (tpl: DocTemplate) => {
     docEpoch.current += 1;
@@ -1305,6 +1388,8 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     batchIndex: batchClampIndex,
     batchTotal: rows.length,
     blockEditing: blockEdit !== null,
+    mode,
+    onSwitchMode: switchMode,
 
     onNew: doNew,
     onStartFrom: doStartFrom,
@@ -1409,6 +1494,20 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
           data-testid="doc-canvas-viewport"
           className="min-h-0 flex-1 overflow-auto bg-muted/30 p-6"
         >
+          {mode === 'flow' ? (
+            /* Document mode. The canvas viewport keeps its scroll and padding —
+               only what sits inside it changes — so switching modes does not
+               rebuild the whole editor chrome around the author. */
+            <FlowEditor
+              content={template.flow ?? { blocks: [] }}
+              onChange={(next) => {
+                commit('flow-edit');
+                setTemplate((tpl) => ({ ...tpl, flow: next }));
+              }}
+              selected={flowSelected}
+              onSelect={setFlowSelected}
+            />
+          ) : (
           <Canvas
             elements={elements}
             page={template.page}
@@ -1425,6 +1524,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
             onChangeMany={changeMany}
             onEditBlock={enterBlockEdit}
           />
+          )}
         </main>
 
         {railOpen ? (
@@ -1626,7 +1726,20 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
       <CommandPalette
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
-        items={paletteOpen ? paletteItemsFromMenus(buildEditorMenus(ctx, t)) : []}
+        items={
+          !paletteOpen
+            ? []
+            : mode === 'flow'
+              ? paletteItemsForFlow(
+                  buildEditorMenus(ctx, t),
+                  flowPaletteItems(
+                    t('commands.menu.insert', 'Insert'),
+                    (type) => flowBlockLabel(t, type),
+                    insertFlowBlock
+                  )
+                )
+              : paletteItemsFromMenus(buildEditorMenus(ctx, t))
+        }
         label={t('palette.command.label', 'Command palette')}
         placeholder={t('palette.command.placeholder', 'Type a command or search for a block…')}
         emptyLabel={t('palette.command.empty', 'No matching command')}
