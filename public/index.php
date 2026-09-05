@@ -270,6 +270,7 @@ use Whity\Mcp\Prompts\PromptsListHandler;
 use Whity\Mcp\Resources\ResourceDeriver;
 use Whity\Mcp\Resources\ResourcesListHandler;
 use Whity\Mcp\Resources\ResourcesReadHandler;
+use Whity\Mcp\Tools\AuthoredToolRegistry;
 use Whity\Mcp\Tools\ToolDeriver;
 use Whity\Mcp\Tools\ToolsCallHandler;
 use Whity\Mcp\Tools\ToolsListHandler;
@@ -3958,13 +3959,18 @@ $mcpListChangedNotifier = new ListChangedNotifier(
     $mcpCatalogSignature,
     new DatabaseSharedStore($db->getPdo()),
 );
+// SDK 1.43: the tools plugins write themselves, as opposed to the ones the
+// deriver reads off the route table. Built here so the two tool handlers share
+// ONE registry — a second instance would answer tools/list from a different set
+// than tools/call dispatches from.
+$authoredMcpTools = new AuthoredToolRegistry();
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher([
         'initialize'              => new InitializeHandler(listChanged: true),
         'ping'                    => new PingHandler(),
         'notifications/cancelled' => new CancelledNotificationHandler(),
-        'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator),
-        'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
+        'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools),
+        'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools),
         'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
         'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
         'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
@@ -3980,6 +3986,11 @@ $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']
 // shadowed by a plugin claiming the same path.
 $pluginLoader->load();
 $pluginLoader->collectMcpPrompts($promptRegistry);
+// SDK 1.43. Collect FIRST, then hand the deriver the suppressions: a plugin
+// that authors its own tools may ask for its routes not to be derived, and the
+// deriver has to know that before anything asks it for a tool list.
+$pluginLoader->collectMcpTools($authoredMcpTools);
+$toolDeriver->suppressNamespaces($authoredMcpTools->suppressedPlugins());
 
 // #952: everything the MCP layer memoized off the plugin registry is rebuilt
 // whenever the registry changes. Announcing a change while continuing to serve
@@ -3996,12 +4007,22 @@ $pluginLoader->collectMcpPrompts($promptRegistry);
 $refreshMcpCatalog = static function (string $trigger) use (
     $promptRegistry,
     $pluginLoader,
-    $mcpCatalogSignature
+    $mcpCatalogSignature,
+    $authoredMcpTools,
+    $toolDeriver
 ): void {
     ToolDeriver::clearCache();
     $promptRegistry->reset();
     CorePrompts::register($promptRegistry);
     $pluginLoader->collectMcpPrompts($promptRegistry);
+    // #952 applies to TOOLS at least as hard as to prompts: a plugin turned off
+    // whose tools stayed listed would leave them CALLABLE, which is an action
+    // rather than a listing. Rebuilt from the current plugin set, suppressions
+    // included — a suppression from a plugin that is no longer active must stop
+    // hiding derived tools.
+    $authoredMcpTools->reset();
+    $pluginLoader->collectMcpTools($authoredMcpTools);
+    $toolDeriver->suppressNamespaces($authoredMcpTools->suppressedPlugins());
     // Last: the signature must be computed from the refreshed catalogue, not the
     // one being replaced.
     $mcpCatalogSignature->invalidate();
