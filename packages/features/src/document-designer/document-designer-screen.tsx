@@ -45,6 +45,7 @@ import { SideRail, type RailTab } from './side-rail';
 import { PrintDocument } from './print-document';
 import { EditorTopBar, ShortcutsDialog, useModLabel } from './editor-top-bar';
 import {
+  buildEditorMenus,
   blockDeleteConsequence,
   blockDeletedMessage,
   savedMessage,
@@ -53,6 +54,8 @@ import {
   type ZoomAction,
 } from './editor-commands';
 import { ConfirmDelete } from './confirm-delete';
+import { CommandPalette } from '@amroksaleh/ui/command-palette';
+import { paletteItemsFromMenus } from './editor-palette';
 
 /** Zoom bounds + step for the View menu / toolbar zoom controls. */
 const ZOOM_MIN = 0.25;
@@ -120,6 +123,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   const [railTab, setRailTab] = useState<RailTab>('layers');
   const [railOpen, setRailOpen] = useState(true);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // The canvas scroll viewport, measured by View ▸ Fit page in window.
   const viewportRef = useRef<HTMLElement>(null);
 
@@ -397,6 +401,26 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
         return;
       }
       const mod = e.ctrlKey || e.metaKey;
+
+      // The command palette. `/` alone, and Ctrl/Cmd-K as the conventional
+      // alternative for anyone who expects it.
+      //
+      // Both sit BELOW the guard above, which already returns early for an
+      // INPUT/TEXTAREA/contentEditable target — so a slash typed into a text
+      // element, a placeholder name or the batch editor stays a slash. That
+      // guard is the whole reason `/` is safe to bind bare here; without it
+      // this would be a keystroke that silently eats a character.
+      if (!mod && e.key === '/') {
+        e.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+      if (mod && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+
       if (mod && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         undo();
@@ -1593,6 +1617,20 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
       <PrintDocument template={template} datasets={printDatasets} blocks={blocksMap} sheet={sheet} />
 
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} modLabel={modLabel} />
+
+      {/* The `/` palette. Its items are DERIVED from the same registry the menu
+          bar renders (see editor-palette.tsx), so a command added to the menus
+          appears here without anyone remembering to add it — and one removed
+          cannot linger. Built only while open: flattening ~60 nodes on every
+          render of the editor would be work nobody asked for. */}
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        items={paletteOpen ? paletteItemsFromMenus(buildEditorMenus(ctx, t)) : []}
+        label={t('palette.command.label', 'Command palette')}
+        placeholder={t('palette.command.placeholder', 'Type a command or search for a block…')}
+        emptyLabel={t('palette.command.empty', 'No matching command')}
+      />
 
       <ConfirmDelete
         open={pendingDelete !== null}

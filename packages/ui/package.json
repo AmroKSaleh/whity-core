@@ -11,8 +11,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./access-denied": "./src/access-denied.tsx",
-    "./alert-dialog": "./src/alert-dialog.tsx",
     "./alert": "./src/alert.tsx",
+    "./alert-dialog": "./src/alert-dialog.tsx",
     "./app-sidebar": "./src/app-sidebar.tsx",
     "./audience-group-picker": "./src/audience-group-picker.tsx",
     "./audience-people-picker": "./src/audience-people-picker.tsx",
@@ -27,6 +27,7 @@
     "./collapsible": "./src/collapsible.tsx",
     "./color-card": "./src/color-card.tsx",
     "./color-picker": "./src/color-picker.tsx",
+    "./command-palette": "./src/command-palette.tsx",
     "./data-table": "./src/data-table.tsx",
     "./date-picker": "./src/date-picker.tsx",
     "./dialog": "./src/dialog.tsx",
@@ -41,6 +42,7 @@
     "./dropdown-menu": "./src/dropdown-menu.tsx",
     "./empty-state": "./src/empty-state.tsx",
     "./form": "./src/form.tsx",
+    "./globals.css": "./src/globals.css",
     "./input": "./src/input.tsx",
     "./locked-screen": "./src/locked-screen.tsx",
     "./math-text": "./src/math-text.tsx",
@@ -51,8 +53,8 @@
     "./plugin-card": "./src/plugin-card.tsx",
     "./popover": "./src/popover.tsx",
     "./radio-group": "./src/radio-group.tsx",
-    "./route-flow/model": "./src/route-flow/model.ts",
     "./route-flow/editor": "./src/route-flow/editor.tsx",
+    "./route-flow/model": "./src/route-flow/model.ts",
     "./screen-too-small": "./src/screen-too-small.tsx",
     "./select": "./src/select.tsx",
     "./separator": "./src/separator.tsx",
@@ -66,13 +68,12 @@
     "./tabs": "./src/tabs.tsx",
     "./tag-input": "./src/tag-input.tsx",
     "./textarea": "./src/textarea.tsx",
-    "./time-picker": "./src/time-picker.tsx",
-    "./top-nav": "./src/top-nav.tsx",
     "./theme-mode": "./src/theme-mode.ts",
+    "./time-picker": "./src/time-picker.tsx",
     "./tooltip": "./src/tooltip.tsx",
-    "./view-toggle": "./src/view-toggle.tsx",
+    "./top-nav": "./src/top-nav.tsx",
     "./utils": "./src/utils.ts",
-    "./globals.css": "./src/globals.css"
+    "./view-toggle": "./src/view-toggle.tsx"
   },
   "files": [
     "src"
