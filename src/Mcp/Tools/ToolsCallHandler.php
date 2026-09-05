@@ -12,6 +12,7 @@ use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\JsonRpc\ErrorCode;
+use Throwable;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Core\Request;
@@ -45,7 +46,112 @@ final class ToolsCallHandler implements MethodHandler
         private readonly TokenValidator         $tokenValidator,
         private readonly InputSchemaValidator   $schemaValidator = new InputSchemaValidator(),
         private readonly ?AuditLoggerInterface  $auditLogger = null,
+        // SDK 1.43. Optional, so an installation with no tool-authoring plugin
+        // behaves exactly as before and no existing construction site changes.
+        private readonly ?AuthoredToolRegistry  $authoredTools = null,
     ) {}
+
+    /**
+     * Run a HAND-AUTHORED tool (SDK 1.43).
+     *
+     * Deliberately parallel to {@see self::executeResolved()} in the order it
+     * does things — validate the schema, enforce RBAC, then run — because the
+     * two paths must be equally strict and the easiest way to keep them so is
+     * for them to read the same way.
+     *
+     * What differs is where authority comes from. A derived tool inherits the
+     * matched ROUTE's `requiredPermission`/`requiredRole`; an authored tool has
+     * no route, so the requirement is the one its descriptor declared. The
+     * registry has already refused any descriptor that declared no audience at
+     * all, so by the time execution reaches here the tool is either gated or
+     * deliberately marked open.
+     *
+     * @param array<string, mixed> $arguments
+     * @param array{name: string, description: string, inputSchema: array<string, mixed>, handler: callable, requiredRole: ?string, requiredPermission: ?string, plugin: string} $tool
+     * @return array{content: list<array{type: string, text: string}>}
+     * @throws McpException On RBAC failure or invalid arguments.
+     */
+    private function executeAuthored(
+        string $toolName,
+        array $arguments,
+        array $tool,
+        McpPrincipal $principal,
+    ): array {
+        // The SAME validator, against the SAME schema tools/list advertised, so
+        // a handler can never be handed arguments the published schema said
+        // were impossible.
+        $this->schemaValidator->validate($tool['inputSchema'], $arguments);
+
+        $tenantId = TenantContext::getTenantId();
+        if ($tenantId === null) {
+            throw new McpException(ErrorCode::UNAUTHENTICATED, 'No tenant context');
+        }
+
+        if ($tool['requiredPermission'] !== null) {
+            if (!$this->roleChecker->hasPermissionForProfile($principal->userId, $tool['requiredPermission'], $tenantId)) {
+                throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
+            }
+        }
+        if ($tool['requiredRole'] !== null) {
+            if (!$this->roleChecker->hasRoleForProfile($principal->userId, $tool['requiredRole'], $tenantId)) {
+                throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
+            }
+        }
+
+        // BOTH are checked when both are set — an `elseif` here would silently
+        // ignore the role whenever a permission was also declared, which reads
+        // as "belt and braces" in the descriptor and would be one of them.
+
+        try {
+            $result = ($tool['handler'])($arguments);
+        } catch (McpException $e) {
+            // A handler that speaks the protocol deliberately (a domain refusal
+            // as FORBIDDEN, say) is relayed as it meant it.
+            throw $e;
+        } catch (Throwable $e) {
+            // The guarantee the interface makes: a throwing tool costs its
+            // caller an error, not the dispatcher. One plugin's bug must not
+            // take down every other tool in the session.
+            $this->warn(sprintf(
+                "[Mcp] authored tool '%s' from plugin '%s' threw %s: %s",
+                $toolName,
+                $tool['plugin'],
+                $e::class,
+                $e->getMessage(),
+            ));
+
+            throw new McpException(ErrorCode::INTERNAL_ERROR, "Tool '{$toolName}' failed");
+        }
+
+        return $this->asToolResult($result);
+    }
+
+    /**
+     * Wrap a handler's return value in the MCP tool-result envelope.
+     *
+     * A handler returns domain data, not protocol. Making it construct the
+     * envelope itself would put the protocol shape into every plugin, where a
+     * mistake surfaces to the model as a malformed response rather than as a
+     * plugin bug.
+     */
+    /** @return array{content: list<array{type: string, text: string}>} */
+    private function asToolResult(mixed $result): array
+    {
+        if (is_string($result)) {
+            return ['content' => [['type' => 'text', 'text' => $result]]];
+        }
+
+        return ['content' => [[
+            'type' => 'text',
+            'text' => json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                ?: '{}',
+        ]]];
+    }
+
+    private function warn(string $message): void
+    {
+        error_log($message);
+    }
 
     /**
      * @param array<string, mixed>|null $params
@@ -77,9 +183,37 @@ final class ToolsCallHandler implements MethodHandler
         // actor rather than null.
         AuditContext::set($principal->userId, null);
 
-        // 3. Resolve tool name → route declaration.
+        // 3. Resolve tool name → route declaration, or a hand-authored tool.
+        //
+        // DERIVED IS TRIED FIRST, matching the collision rule the registry
+        // enforces: a route-backed name is the one the OpenAPI document and the
+        // typed clients already describe, so it must be the one that answers.
+        // Checking authored first would let a plugin shadow a published
+        // operation by naming a tool after it.
         $declaration = $this->toolDeriver->findDeclarationByName($toolName);
         if ($declaration === null) {
+            $authored = $this->authoredTools?->get($toolName);
+            if ($authored !== null) {
+                try {
+                    return $this->executeAuthored($toolName, $arguments, $authored, $principal);
+                } finally {
+                    $this->auditLogger?->record('mcp.tools.call', [
+                        'tenant_id'     => $principal->tenantId,
+                        'actor_user_id' => $principal->userId,
+                        'target_type'   => 'tool',
+                        'metadata'      => [
+                            'tool'   => $toolName,
+                            // Named so an authored tool is distinguishable in
+                            // the trail: it ran plugin code directly rather
+                            // than dispatching through the router, so "which
+                            // route did this hit" has no answer for it.
+                            'plugin' => $authored['plugin'],
+                            'args'   => $this->redactArgs($arguments),
+                        ],
+                    ]);
+                }
+            }
+
             throw new McpException(ErrorCode::METHOD_NOT_FOUND, "Unknown tool: {$toolName}");
         }
 
