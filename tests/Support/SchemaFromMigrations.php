@@ -49,6 +49,8 @@ use Whity\Database\Database;
  * SQLite limitations handled automatically (SQLite path only):
  *   - SERIAL / BIGSERIAL → INTEGER AUTOINCREMENT
  *   - VARCHAR(n) / TIMESTAMP / BOOLEAN / JSONB / JSON → TEXT / INTEGER
+ *   - vector(n) → TEXT, CREATE EXTENSION → no-op (SQLite has neither; the
+ *     distance operators are PostgreSQL-only and are not emulated)
  *   - DEFAULT NOW() → DEFAULT (datetime('now'))
  *   - DEFAULT false/true → DEFAULT 0/1
  *   - PostgreSQL cast operator (::typename) → stripped
@@ -857,6 +859,27 @@ final class SchemaFromMigrations
 
                 // JSONB / JSON -> TEXT
                 $sql = preg_replace('/\bJSONB?\b/i', 'TEXT', $sql) ?? $sql;
+
+                // vector(n) -> TEXT, and CREATE EXTENSION -> a no-op.
+                //
+                // SQLite has no vector type and no extensions, so a plugin's
+                // similarity-search migration would otherwise fail the whole
+                // schema build on this path — taking every unrelated test in
+                // that suite with it, for a column those tests never touch.
+                //
+                // TEXT is honest here rather than lossy: pgvector accepts and
+                // emits the literal '[1,2,3]' form, so a row written on either
+                // engine round-trips as the same string. What SQLite cannot do
+                // is the DISTANCE OPERATORS (<->, <=>, <#>), and nothing here
+                // pretends otherwise — a test that exercises similarity ranking
+                // has to run on PostgreSQL, the same way the dialect suites
+                // already do.
+                $sql = preg_replace('/\bVECTOR\s*\(\s*\d+\s*\)/i', 'TEXT', $sql) ?? $sql;
+                $sql = preg_replace(
+                    '/\bCREATE\s+EXTENSION\s+(IF\s+NOT\s+EXISTS\s+)?[\w"]+\s*;?/i',
+                    'SELECT 1',
+                    $sql
+                ) ?? $sql;
 
                 // PostgreSQL type-cast operator (e.g. '{}'::jsonb) -> strip ::typename
                 $sql = preg_replace('/::\w+/i', '', $sql) ?? $sql;

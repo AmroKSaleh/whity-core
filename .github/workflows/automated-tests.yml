@@ -706,7 +706,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15-alpine
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_USER: whity
           POSTGRES_PASSWORD: whity_dev
@@ -830,7 +830,7 @@ jobs:
     # other's schemas.
     services:
       postgres:
-        image: postgres:15-alpine
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_USER: whity
           POSTGRES_PASSWORD: whity_dev
@@ -987,7 +987,7 @@ jobs:
     # sharing one server would contend on the same advisory lock for no gain.
     services:
       postgres:
-        image: postgres:15-alpine
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_USER: whity
           POSTGRES_PASSWORD: whity_dev

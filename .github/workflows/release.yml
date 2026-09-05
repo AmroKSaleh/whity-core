@@ -189,7 +189,7 @@ jobs:
     # fails on PostgreSQL.
     services:
       postgres:
-        image: postgres:15-alpine
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_USER: whity
           POSTGRES_PASSWORD: whity_dev
@@ -532,7 +532,7 @@ jobs:
             -e POSTGRES_USER=whity \
             -e POSTGRES_PASSWORD=whity_smoke \
             -e POSTGRES_DB=whity_core \
-            postgres:15-alpine
+            pgvector/pgvector:pg15
 
       - name: Wait for Postgres to be ready
         run: |
