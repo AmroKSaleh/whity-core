@@ -61,3 +61,33 @@ export async function deleteRow(
   const parsed = (await response.json().catch(() => null)) as { error?: string } | null;
   return parsed?.error ?? fallbackMessage;
 }
+
+/**
+ * POST a copy of a row, returning null on success or a message on failure.
+ *
+ * The management-surface half of the designer's "Save as a copy". Both exist
+ * because both surfaces had the same hole: the only way to base a template on
+ * an existing one was to open it and overwrite it, which for a tenant-wide row
+ * changes the template everybody uses.
+ *
+ * FILED AS PERSONAL, whatever the original was. Copying somebody's published
+ * template is not the same act as publishing your version of it, and the copy
+ * arrives unplaced and untagged rather than inheriting a placement and a
+ * permission that were chosen for a different row. Promoting it is the
+ * deliberate step this screen already offers.
+ */
+export async function duplicateRow(
+  apiClient: ApiClient,
+  kind: ResourceKind,
+  row: { name: string; data: unknown },
+  copyName: string,
+  fallbackMessage: string
+): Promise<string | null> {
+  const response = await apiClient(basePath(kind), {
+    method: 'POST',
+    body: JSON.stringify({ name: copyName, data: row.data, scope: 'personal' }),
+  });
+  if (response.ok) return null;
+  const parsed = (await response.json().catch(() => null)) as { error?: string } | null;
+  return parsed?.error ?? fallbackMessage;
+}

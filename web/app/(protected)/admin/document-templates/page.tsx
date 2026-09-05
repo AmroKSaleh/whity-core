@@ -40,6 +40,7 @@ import type {
   PermissionSource,
   TemplateRow,
 } from './types';
+import { duplicateRow } from './api';
 
 /**
  * Templates & Blocks — the GOVERNANCE surface for the document designer's saved
@@ -228,6 +229,42 @@ export default function DocumentTemplatesPage() {
     blocks.refetch();
   }, [templates, blocks]);
 
+  /**
+   * Copy a row into a new personal one.
+   *
+   * No confirmation: nothing is destroyed and the result is visible in the list
+   * immediately, so an "are you sure" here would be the kind that teaches
+   * people to dismiss the ones that matter.
+   */
+  const duplicate = useCallback(
+    async (kind: Kind, row: TemplateRow | BlockRow) => {
+      const copyName = t('documentTemplates.duplicate.name', '{name} (copy)', { name: row.name });
+      const failure = await duplicateRow(
+        apiClient,
+        kind,
+        row,
+        copyName,
+        t('documentTemplates.duplicate.failed', 'Could not duplicate.')
+      );
+      if (failure !== null) {
+        addToast(failure, 'error');
+        return;
+      }
+      // NAME THE AUDIENCE, as the designer's save does. A copy of a tenant-wide
+      // template is personal, and somebody who expected their duplicate to be
+      // where the original was needs to hear that from the success message
+      // rather than discover it when a colleague cannot find it.
+      addToast(
+        t('documentTemplates.duplicate.done', '“{name}” created, visible only to you.', {
+          name: copyName,
+        }),
+        'success'
+      );
+      refetchAll();
+    },
+    [apiClient, addToast, refetchAll, t]
+  );
+
   const ouName = useCallback(
     (ouId: number | null): string | null => {
       if (ouId === null) return null;
@@ -288,6 +325,13 @@ export default function DocumentTemplatesPage() {
           )}
           <DropdownMenuItem onClick={() => setRenaming({ kind, row })} disabled={!canWrite}>
             {t('documentTemplates.rowActions.rename', 'Rename…')}
+          </DropdownMenuItem>
+          {/* Copying needs WRITE, not publish: the copy lands personal, which
+              is the one scope everybody with write already has. Gating it on
+              publish would stop somebody making their own version of a template
+              they can already open and edit. */}
+          <DropdownMenuItem onClick={() => void duplicate(kind, row)} disabled={!canWrite}>
+            {t('documentTemplates.rowActions.duplicate', 'Duplicate')}
           </DropdownMenuItem>
           {/* Every field in this dialog is a publish action server-side —
               including placement, even on a personal row — so the whole entry is
