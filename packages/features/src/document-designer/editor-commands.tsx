@@ -105,6 +105,9 @@ export interface EditorCommandContext {
   batchTotal: number;
   /** True while the editor is repurposed to edit a single block. */
   blockEditing: boolean;
+  /** Which editor owns the document (#1186): absolute canvas, or flowing blocks. */
+  mode: 'canvas' | 'flow';
+  onSwitchMode: (to: 'canvas' | 'flow') => void;
 
   // ── the commands themselves ──
   onNew: () => void;
@@ -645,6 +648,22 @@ export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): Men
       id: 'view',
       label: t('commands.menu.view', 'View'),
       items: [
+        // #1186. The mode is the first thing in View because it decides what
+        // every other item in the menu even means: grid, rulers and snap are
+        // canvas concepts, and zoom is a canvas verb.
+        {
+          id: 'mode-canvas',
+          label: t('commands.view.modeCanvas', 'Canvas mode (place freely)'),
+          disabled: ctx.mode === 'canvas',
+          onSelect: () => ctx.onSwitchMode('canvas'),
+        },
+        {
+          id: 'mode-flow',
+          label: t('commands.view.modeFlow', 'Document mode (blocks in order)'),
+          disabled: ctx.mode === 'flow',
+          onSelect: () => ctx.onSwitchMode('flow'),
+        },
+        { kind: 'separator', id: 'view-sep-0' },
         { kind: 'checkbox', id: 'preview', label: t('commands.view.preview', 'Preview'), checked: ctx.preview, onCheckedChange: ctx.onTogglePreview },
         { kind: 'separator', id: 'view-sep-1' },
         // Edit-time aids only — preview and print never show them.
@@ -875,4 +894,32 @@ export function useEditorChrome(ctx: EditorCommandContext): {
   const t = useTranslation('documents');
 
   return { menus: buildEditorMenus(ctx, t), groups: buildEditorToolbar(ctx, t) };
+}
+
+/**
+ * A flow block type's name, for the `/` palette in document mode (#1186).
+ *
+ * Lives here, beside `blockScopeLabel` and `savedMessage`, for the same reason
+ * they do: this file binds the `documents` domain exactly once, so the literal
+ * `t()` keys resolve and `i18n:extract` can see them. A helper module taking
+ * `t` as a parameter cannot be scanned — that is a mistake already made and
+ * recorded once in this file.
+ */
+export function flowBlockLabel(t: TranslateFn, type: string): string {
+  switch (type) {
+    case 'heading':
+      return t('flow.insert.heading', 'Heading');
+    case 'paragraph':
+      return t('flow.insert.paragraph', 'Paragraph');
+    case 'table':
+      return t('flow.insert.table', 'Table');
+    case 'figure':
+      return t('flow.insert.figure', 'Image');
+    case 'pageBreak':
+      return t('flow.insert.pageBreak', 'Page break');
+    case 'spacer':
+      return t('flow.insert.spacer', 'Spacer');
+    default:
+      return type;
+  }
 }

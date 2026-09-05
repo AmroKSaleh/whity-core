@@ -1,4 +1,5 @@
 import type { CommandPaletteItem } from '@amroksaleh/ui/command-palette';
+import { FLOW_BLOCK_TYPES, type FlowBlockType } from '@amroksaleh/ui/documents/flow';
 import type { MenuBarMenu, MenuBarNode } from '@amroksaleh/ui/menu-bar';
 
 /**
@@ -110,4 +111,55 @@ export function paletteItemsFromMenus(menus: MenuBarMenu[]): CommandPaletteItem[
   }
 
   return [...priority, ...rest];
+}
+
+/**
+ * The blocks a DOCUMENT-MODE author can insert (#1186 slice 2).
+ *
+ * Replaces the canvas Insert group entirely rather than joining it, and that
+ * substitution is a correctness fix, not a tidiness one. The canvas Insert
+ * commands add absolutely-positioned ELEMENTS to `pages`; a flow document
+ * renders from `flow`. Offering them here would let somebody insert a text
+ * element into a document that never draws `pages` — it would appear nowhere,
+ * report nothing, and be indistinguishable from the editor ignoring the click.
+ *
+ * That is precisely the failure this architecture is arranged to prevent, so
+ * the two vocabularies are not merged.
+ */
+export function flowPaletteItems(
+  group: string,
+  labelFor: (type: FlowBlockType) => string,
+  onInsert: (type: FlowBlockType) => void
+): CommandPaletteItem[] {
+  return FLOW_BLOCK_TYPES.map((type) => ({
+    id: `flow-insert-${type}`,
+    label: labelFor(type),
+    group,
+    onSelect: () => onInsert(type),
+  }));
+}
+
+/**
+ * Palette items for a document-mode editor: flow inserts, then everything from
+ * the registry that is NOT the canvas Insert menu.
+ *
+ * Canvas-geometry commands (align, arrange, zoom-to-fit) are left in place
+ * rather than filtered out. They are harmless — with no canvas selection there
+ * is nothing for them to act on — and hiding them would mean maintaining a
+ * second list of which commands belong to which mode, which is the drift this
+ * file exists to avoid.
+ */
+export function paletteItemsForFlow(
+  menus: MenuBarMenu[],
+  flowItems: CommandPaletteItem[]
+): CommandPaletteItem[] {
+  const seen = new Set<string>();
+  const rest: CommandPaletteItem[] = [];
+
+  for (const menu of menus) {
+    if (menu.id === 'insert') continue;
+    nodesToItems(menu.items, textOf(menu.label), rest, seen);
+  }
+
+  return [...flowItems, ...rest];
 }
