@@ -303,6 +303,89 @@ final class BlockValidatorTest extends TestCase
         ];
     }
 
+    // ---- WC-532 item 5: the reason-collecting action prompt ----
+
+    /**
+     * `mixed`, not an array shape: one case deliberately passes a string, to
+     * prove the validator refuses a prompt that is not an object. A narrower
+     * type here would make that case unwritable rather than unnecessary.
+     *
+     * @return array{ok: bool, errors: list<string>}
+     */
+    private function validateInboxPrompt(mixed $prompt): array
+    {
+        $inbox = self::validInbox();
+        $inbox['actions'][] = [
+            'key' => 'reject',
+            'label' => 'Reject',
+            'method' => 'POST',
+            'endpoint' => '/api/tasks/{id}/reject',
+            'prompt' => $prompt,
+        ];
+
+        return BlockValidator::validate([$inbox]);
+    }
+
+    /**
+     * The review-queue shape: approve needs no reason, returning something does.
+     * `confirm` can only ask yes/no, which is why this exists at all.
+     */
+    public function testAnItemActionMayCollectAReason(): void
+    {
+        $result = $this->validateInboxPrompt([
+            'field' => 'comment',
+            'label' => 'Reason for rejection',
+            'required' => true,
+            'placeholder' => 'What should change?',
+        ]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    /** `field` and `label` are what make the prompt dispatchable and readable. */
+    public function testAPromptWithoutAFieldOrLabelIsRefused(): void
+    {
+        $missingField = $this->validateInboxPrompt(['label' => 'Why?']);
+        $this->assertFalse($missingField['ok']);
+        $this->assertStringContainsString('prompt field must be a non-empty string', implode('; ', $missingField['errors']));
+
+        $missingLabel = $this->validateInboxPrompt(['field' => 'comment']);
+        $this->assertFalse($missingLabel['ok']);
+        $this->assertStringContainsString('prompt label must be a non-empty string', implode('; ', $missingLabel['errors']));
+    }
+
+    /**
+     * `field` becomes a key in the JSON body a handler reads by name, so it is
+     * held to the same shape a form input's `name` is. A dotted or spaced key
+     * would be accepted here and then be unreadable at the other end.
+     */
+    public function testAPromptFieldMustLookLikeAnInputName(): void
+    {
+        $result = $this->validateInboxPrompt(['field' => 'the comment', 'label' => 'Why?']);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('prompt field must be a valid input name', implode('; ', $result['errors']));
+    }
+
+    public function testAPromptWithMistypedOptionalsIsRefused(): void
+    {
+        $required = $this->validateInboxPrompt(['field' => 'comment', 'label' => 'Why?', 'required' => 'yes']);
+        $this->assertFalse($required['ok']);
+        $this->assertStringContainsString('prompt required must be a boolean', implode('; ', $required['errors']));
+
+        $notAnObject = $this->validateInboxPrompt('just a string');
+        $this->assertFalse($notAnObject['ok']);
+        $this->assertStringContainsString('prompt must be an object', implode('; ', $notAnObject['errors']));
+    }
+
+    /** The control: prompt is optional, and an action without one still validates. */
+    public function testAnItemActionWithoutAPromptIsUnchanged(): void
+    {
+        $result = BlockValidator::validate([self::validInbox()]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
     public function testTimelineAcceptsItsFullPropSet(): void
     {
         $result = BlockValidator::validate([[

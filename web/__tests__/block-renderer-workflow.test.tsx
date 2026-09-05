@@ -455,3 +455,81 @@ describe('inbox block', () => {
     expect(await screen.findByText(/unsupported block/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * WC-532 item 5: an action that collects a reason before it dispatches.
+ *
+ * `confirm` asks yes/no and posts an empty body. That covers "approve" and
+ * cannot express "return this, and say why" — which is most of what a review
+ * queue does, and the reason item 5 stayed open after the `inbox` block landed.
+ *
+ * The tests are about the BODY. Whether a dialog appears is the visible half;
+ * whether the typed reason reaches the endpoint under the declared key is the
+ * half a plugin's handler depends on.
+ */
+describe('inbox — an action that collects a reason', () => {
+  const promptTree: Block[] = [
+    {
+      type: 'inbox',
+      source: '/api/v1/tasks/mine',
+      idField: 'id',
+      titleField: 'title',
+      actions: [
+        { key: 'approve', label: 'Approve', method: 'POST', endpoint: '/api/v1/tasks/{id}/approve' },
+        {
+          key: 'reject',
+          label: 'Reject',
+          method: 'POST',
+          endpoint: '/api/v1/tasks/{id}/reject',
+          prompt: { field: 'comment', label: 'Reason for rejection', required: true },
+        },
+      ],
+    } as Block,
+  ];
+
+  it('sends the typed reason under the declared field', async () => {
+    const user = userEvent.setup();
+    stubHost({ rows: [TASKS[0]], allow: () => true });
+    renderWrapped(<BlockRenderer blocks={promptTree} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Reject' }));
+    await user.type(await screen.findByTestId('item-action-prompt-reject'), 'Needs a budget code');
+    await user.click(screen.getByRole('button', { name: 'Reject' }));
+
+    await waitFor(() => {
+      const reject = calls().find((c) => c.url.endsWith('/reject'));
+      expect(reject?.body).toEqual({ comment: 'Needs a budget code' });
+    });
+  });
+
+  it('will not dispatch a required reason while it is blank', async () => {
+    const user = userEvent.setup();
+    stubHost({ rows: [TASKS[0]], allow: () => true });
+    renderWrapped(<BlockRenderer blocks={promptTree} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Reject' }));
+    await screen.findByTestId('item-action-prompt-reject');
+
+    // The confirm button is disabled rather than failing after the click. The
+    // plugin's handler remains the authority on an empty reason; this is the
+    // affordance, not the rule.
+    const confirm = screen.getAllByRole('button', { name: 'Reject' }).at(-1);
+    expect(confirm).toBeDisabled();
+    expect(calls().some((c) => c.url.endsWith('/reject'))).toBe(false);
+  });
+
+  it('leaves an action WITHOUT a prompt posting an empty body', async () => {
+    const user = userEvent.setup();
+    stubHost({ rows: [TASKS[0]], allow: () => true });
+    renderWrapped(<BlockRenderer blocks={promptTree} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    // The control. `prompt` is opt-in, and adding it must not have turned every
+    // other action into a two-step one or changed what they send.
+    await waitFor(() => {
+      const approve = calls().find((c) => c.url.endsWith('/approve'));
+      expect(approve?.body).toEqual({});
+    });
+  });
+});

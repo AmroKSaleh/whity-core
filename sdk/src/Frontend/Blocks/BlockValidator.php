@@ -1531,8 +1531,21 @@ final class BlockValidator
      *       endpoint:          an apiPath, `{field}`-templatable from the item,
      *       scopedPermission?: a `resource:action` slug, resolved AT the item,
      *       confirm?:          string,
+     *       prompt?:           {field, label, required?, placeholder?},
      *       variant?:          primary|secondary|outline|ghost|destructive,
      *     }
+     *
+     * `prompt` (WC-532 item 5) COLLECTS A REASON AND SENDS IT. `confirm` asks
+     * a yes/no question and posts an empty body, which covers "approve" and
+     * cannot express "return this, and say why" — the shape a review queue is
+     * mostly made of. Without it a plugin has to leave the inbox and hand-build
+     * the screen, which is what item 5 was raised about.
+     *
+     * The value is sent as `{[field]: text}` in the request body. `required`
+     * means the action cannot be dispatched with it blank — enforced in the
+     * dialog, and by the plugin's own handler, which is the authority. A
+     * required comment that the client alone enforced would be a convention,
+     * not a rule.
      *
      * There is deliberately no `permission` prop for the endpoint's own gate.
      * The host reads that off the route the endpoint dispatches to; a plugin
@@ -1622,6 +1635,35 @@ final class BlockValidator
 
             if (\array_key_exists('confirm', $item) && !\is_string($item['confirm'])) {
                 $errors[] = "{$at}.confirm: '{$type}.{$prop}' confirm must be a string";
+            }
+
+            // WC-532 item 5: the reason-collecting prompt. `field` is the body
+            // key the text is sent under, so it is validated as an input name —
+            // the same rule a form field's `name` follows, for the same reason:
+            // it becomes a key in a JSON payload a handler reads by name.
+            if (\array_key_exists('prompt', $item)) {
+                $prompt = $item['prompt'];
+                if (!\is_array($prompt)) {
+                    $errors[] = "{$at}.prompt: '{$type}.{$prop}' prompt must be an object";
+                } else {
+                    foreach (['field', 'label'] as $req) {
+                        $v = $prompt[$req] ?? null;
+                        if (!\is_string($v) || trim($v) === '') {
+                            $errors[] = "{$at}.prompt.{$req}: '{$type}.{$prop}' prompt {$req} must be a non-empty string";
+                        }
+                    }
+                    if (\is_string($prompt['field'] ?? null)
+                        && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $prompt['field']) !== 1
+                    ) {
+                        $errors[] = "{$at}.prompt.field: '{$type}.{$prop}' prompt field must be a valid input name";
+                    }
+                    if (\array_key_exists('required', $prompt) && !\is_bool($prompt['required'])) {
+                        $errors[] = "{$at}.prompt.required: '{$type}.{$prop}' prompt required must be a boolean";
+                    }
+                    if (\array_key_exists('placeholder', $prompt) && !\is_string($prompt['placeholder'])) {
+                        $errors[] = "{$at}.prompt.placeholder: '{$type}.{$prop}' prompt placeholder must be a string";
+                    }
+                }
             }
 
             if (

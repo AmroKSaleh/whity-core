@@ -2402,23 +2402,105 @@ function InboxActionButton({
   const t = useTranslation('plugin');
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  // WC-532 item 5: the reason typed into a prompting action's dialog.
+  const [reason, setReason] = React.useState('');
 
-  const run = React.useCallback(() => {
-    setBusy(true);
-    void submitPluginAction(path, action.method, {}).then((result) => {
-      setBusy(false);
-      setOpen(false);
-      if (result.ok) {
-        addToast(t('action.toast.completed', 'Completed successfully'), 'success');
-        onMutated();
-      } else {
-        // `result.error` is the server's own message — never keyed.
-        addToast(result.error ?? t('action.toast.requestFailed', 'Request failed'), 'error');
-      }
-    });
-  }, [action.method, path, addToast, onMutated, t]);
+  const run = React.useCallback(
+    (body: Record<string, unknown> = {}) => {
+      setBusy(true);
+      void submitPluginAction(path, action.method, body).then((result) => {
+        setBusy(false);
+        setOpen(false);
+        if (result.ok) {
+          setReason('');
+          addToast(t('action.toast.completed', 'Completed successfully'), 'success');
+          onMutated();
+        } else {
+          // `result.error` is the server's own message — never keyed.
+          addToast(result.error ?? t('action.toast.requestFailed', 'Request failed'), 'error');
+        }
+      });
+    },
+    [action.method, path, addToast, onMutated, t]
+  );
 
   const variant = action.variant === 'primary' ? 'default' : (action.variant ?? 'outline');
+
+  /**
+   * WC-532 item 5: an action that collects a reason before it dispatches.
+   *
+   * Checked BEFORE `confirm`, because a prompt already is a confirmation — it
+   * puts a deliberate step between the click and the request — and an action
+   * declaring both should ask once, not twice.
+   *
+   * `required` disables the dispatch button rather than failing after the
+   * click. The plugin's own handler is the authority on an empty reason; this
+   * is the affordance, not the rule. A required comment enforced only here
+   * would be a convention.
+   */
+  if (action.prompt !== undefined) {
+    const promptSpec = action.prompt;
+    const blank = reason.trim() === '';
+    const blocked = promptSpec.required === true && blank;
+
+    return (
+      <AlertDialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          // Reset on close so a cancelled action does not pre-fill the reason
+          // the next time this item is acted on — including a DIFFERENT action
+          // that happens to share the component.
+          if (!next) setReason('');
+        }}
+      >
+        <AlertDialogTrigger asChild>
+          <Button type="button" variant={variant} size="sm" disabled={busy}>
+            {action.label}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{action.label}</AlertDialogTitle>
+            {typeof action.confirm === 'string' && action.confirm !== '' && (
+              <AlertDialogDescription>{action.confirm}</AlertDialogDescription>
+            )}
+          </AlertDialogHeader>
+          <label className="space-y-1.5 text-sm">
+            <span className="font-medium">
+              {promptSpec.label}
+              {promptSpec.required === true && (
+                <span className="text-destructive" aria-hidden>
+                  {' '}*
+                </span>
+              )}
+            </span>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={promptSpec.placeholder}
+              aria-label={promptSpec.label}
+              aria-required={promptSpec.required === true}
+              data-testid={`item-action-prompt-${action.key}`}
+            />
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('blocks.dialog.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={blocked || busy}
+              onClick={(e) => {
+                e.preventDefault();
+                if (blocked) return;
+                run({ [promptSpec.field]: reason });
+              }}
+            >
+              {action.label}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
 
   if (typeof action.confirm === 'string' && action.confirm !== '') {
     return (
@@ -2444,8 +2526,10 @@ function InboxActionButton({
     );
   }
 
+  // `() => run()`, not `run`: now that run() takes a body, passing it straight
+  // to onClick would hand it the click event and post THAT as the request body.
   return (
-    <Button type="button" variant={variant} size="sm" disabled={busy} onClick={run}>
+    <Button type="button" variant={variant} size="sm" disabled={busy} onClick={() => run()}>
       {action.label}
     </Button>
   );
