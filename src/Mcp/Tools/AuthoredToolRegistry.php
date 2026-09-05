@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Mcp\Tools;
 
+use Whity\Core\Container\HostWiredService;
+
 /**
  * The hand-authored MCP tools plugins contribute (SDK 1.43,
  * {@see \Whity\Sdk\PluginMcpToolsInterface}).
@@ -29,8 +31,14 @@ namespace Whity\Mcp\Tools;
  * PromptRegistry's rule for the same reason: two plugins claiming one name is a
  * packaging mistake, and picking a winner by load order at least makes it
  * stable and reportable.
+ *
+ * HOST-WIRED ({@see HostWiredService}). An improvised, empty instance is
+ * indistinguishable from a correct one — "this deployment has no tool-authoring
+ * plugin" is a perfectly ordinary state — so a caller handed a fresh registry
+ * would find no tool and report none, which is precisely the silent failure the
+ * marker exists to prevent.
  */
-final class AuthoredToolRegistry
+final class AuthoredToolRegistry implements HostWiredService
 {
     /**
      * name => the registered tool.
