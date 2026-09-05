@@ -512,6 +512,42 @@ describe('the visibility dialog', () => {
     expect(screen.queryByText('Nothing uses this block')).not.toBeInTheDocument();
   });
 
+  /**
+   * Duplicating a template: the management-surface half of the designer's
+   * "Save as a copy".
+   *
+   * Both exist because both surfaces had the same hole — the only way to base a
+   * template on an existing one was to open it and overwrite it, which for a
+   * tenant-wide row rewrites the template everybody uses.
+   */
+  it('copies a row into a new PERSONAL one, leaving the original alone', async () => {
+    const user = userEvent.setup();
+    render(<DocumentTemplatesPage />);
+    await waitFor(() => expect(screen.getByText('Demo civil works order')).toBeInTheDocument());
+
+    await openRowMenu(user, 'Demo civil works order');
+    await user.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+
+    await waitFor(() =>
+      expect(mockApiClient).toHaveBeenCalledWith(
+        '/api/v1/document-templates',
+        expect.objectContaining({ method: 'POST' })
+      )
+    );
+
+    const call = mockApiClient.mock.calls.find(
+      ([url, init]) => url === '/api/v1/document-templates' && (init as RequestInit)?.method === 'POST'
+    );
+    const body = JSON.parse((call?.[1] as RequestInit).body as string) as Record<string, unknown>;
+
+    expect(body.name).toBe('Demo civil works order (copy)');
+    // Personal whatever the original was: copying somebody's published template
+    // is not the same act as publishing your version of it.
+    expect(body.scope).toBe('personal');
+    // And it carries the body, or the copy would be an empty document.
+    expect(body.data).toBeDefined();
+  });
+
   it('leads with the block’s usage before offering any control', async () => {
     const user = userEvent.setup();
     render(<DocumentTemplatesPage />);

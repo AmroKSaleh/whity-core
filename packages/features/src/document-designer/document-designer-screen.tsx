@@ -1205,6 +1205,59 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     }
   };
 
+  /**
+   * SAVE AS A COPY — start from an existing template without overwriting it.
+   *
+   * The hole this fills is not "a convenience". Opening a TENANT-WIDE template,
+   * changing something, and pressing Save rewrites the template everyone in the
+   * tenant uses: `doSave` updates in place whenever `currentId` is set, and an
+   * update deliberately leaves the stored scope alone, so the edit stays
+   * published. Somebody exploring "what if the header looked like this" had no
+   * way to keep the result that did not also change everyone else's document,
+   * and nothing on screen said so.
+   *
+   * Three things make this a copy rather than a second save:
+   *
+   *  - it CREATES (no id passed), so the original row is untouched;
+   *  - it is filed as PERSONAL whatever the original was, because copying
+   *    somebody's tenant template is not the same act as publishing your
+   *    version of it to the tenant — and promoting it is a deliberate step that
+   *    lives in Templates & Blocks with the placement and permission tag that
+   *    belong beside it;
+   *  - the editor then follows the COPY. Leaving it pointed at the original
+   *    would put the next Ctrl+S straight back into the bug this exists to
+   *    prevent.
+   */
+  const doSaveAsCopy = async () => {
+    const epoch = docEpoch.current;
+    // Named, not prompted, matching how a block is saved from a selection. The
+    // library is where things get renamed, and two rows with one name is the
+    // confusion worth avoiding here.
+    const copy = withSettings({
+      ...template,
+      name: t('designer.template.copyName', '{name} (copy)', { name: template.name }),
+    });
+
+    try {
+      const id = await adapter.saveTemplate(copy, undefined, 'personal');
+      const list = await adapter.listTemplates();
+      setSaved(list);
+
+      if (docEpoch.current === epoch) {
+        setCurrentId(id);
+        setTemplate(copy);
+      }
+
+      const filedAs = (list.find((s) => s.id === id)?.scope as BlockScope | undefined) ?? 'personal';
+      addToast(savedMessage(t, filedAs), 'success');
+    } catch (error) {
+      addToast(
+        error instanceof Error ? error.message : t('designer.template.saveFailed', 'Failed to save template.'),
+        'error'
+      );
+    }
+  };
+
   const doLoad = (id: string) => {
     // Read from the already-loaded `saved` state rather than re-fetching —
     // it is kept current by the mount effect and every save/delete below.
@@ -1424,6 +1477,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     onStartFrom: doStartFrom,
     onOpenSaved: doLoad,
     onSave: () => void doSave(),
+    onSaveAsCopy: () => void doSaveAsCopy(),
     onDeleteSaved: askDeleteSaved,
     onImport: () => fileRef.current?.click(),
     onExport: () => exportTemplateJson(withSettings(template)),

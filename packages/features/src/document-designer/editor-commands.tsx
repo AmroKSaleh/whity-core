@@ -114,6 +114,12 @@ export interface EditorCommandContext {
   onStartFrom: (starterId: string) => void;
   onOpenSaved: (id: string) => void;
   onSave: () => void;
+  /**
+   * Save the open document as a NEW personal template, leaving the original
+   * untouched (#1186 follow-up). Not a variant of Save: Save overwrites a
+   * published template in place for the whole tenant.
+   */
+  onSaveAsCopy: () => void;
   onDeleteSaved: () => void;
   onImport: () => void;
   onExport: () => void;
@@ -472,6 +478,15 @@ export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): Men
       items: [
         { id: 'new', label: t('commands.file.new', 'New document'), icon: <IconFilePlus />, onSelect: ctx.onNew },
         { id: 'save', label: t('commands.file.save', 'Save'), shortcut: k('save'), disabled: ctx.blockEditing, onSelect: ctx.onSave },
+        {
+          id: 'save-as-copy',
+          label: t('commands.file.saveAsCopy', 'Save as a copy'),
+          // Disabled while editing a block for the same reason Save is: the
+          // editor is showing a block, not the document, so "a copy of this"
+          // would mean something the author did not ask for.
+          disabled: ctx.blockEditing,
+          onSelect: ctx.onSaveAsCopy,
+        },
         { kind: 'separator', id: 'file-sep-1' },
         { id: 'import', label: t('commands.file.import', 'Import JSON…'), onSelect: ctx.onImport },
         { id: 'export', label: t('commands.file.export', 'Export JSON'), onSelect: ctx.onExport },
