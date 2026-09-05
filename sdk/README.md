@@ -6,7 +6,7 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications without dragging a host
 framework along.
 
-## Contract surface (v1.41.0)
+## Contract surface (v1.43.0)
 
 | Type | Since | Purpose |
 | --- | --- | --- |
@@ -58,11 +58,85 @@ optional surface existing plugins can ignore —
   [Proving offline-host compatibility](#proving-offline-host-compatibility-127)
   below.
 
+The list above is illustrative, not a changelog. The authoritative,
+version-by-version ledger is the docblock on
+[`Sdk.php`](src/Sdk.php), which every release appends to.
+
 Breaking contract changes require a new major. A plugin declares the SDK range
 it supports via `getSdkConstraint()` (e.g. `'^1.1'`) and, optionally, the host
 CORE range via `getCoreConstraint()` (e.g. `'^0.1'`); the host refuses to load
 a plugin when its own `Sdk::VERSION` or `CoreVersion::VERSION` falls outside the
 respective range — with the reason visible in the admin plugin list.
+
+### What a MINOR version may and may not change
+
+"Additive" is the promise; these are its terms. A plugin pinned `^1.x` and
+loading today must still load on any later `1.y`.
+
+**A minor MAY:**
+
+- add a new optional interface a plugin can choose to implement
+  (`PluginHealthProbesInterface`, `PluginMcpToolsInterface`, …);
+- add an OPTIONAL parameter to an existing method, with a default;
+- add a new value object, exception type, or testing kit;
+- add a new optional key to a declared array shape (a route declaration, a
+  block descriptor), where omitting it preserves the previous behaviour exactly;
+- widen what an existing method accepts.
+
+**A minor MAY NOT:**
+
+- add a method to an existing interface — that breaks every implementer, which
+  is why a new capability arrives as a NEW interface even when an obviously
+  related one already exists;
+- remove or rename anything public, or narrow a parameter or return type;
+- change the meaning of an existing key. Adding `scope` to a descriptor is
+  additive; changing what an ABSENT `scope` means is not, because it silently
+  alters the behaviour of code nobody edited.
+
+The last one is the rule that is easiest to break by accident, because the
+diff looks like a default value rather than a contract change.
+
+### Upgrading a deployment that carries third-party plugins
+
+The gate is enforced at LOAD, per plugin, and it fails closed: a plugin whose
+`getSdkConstraint()` excludes the host's `Sdk::VERSION` is **quarantined** —
+moved to `failed` state with no routes, permissions, hooks, migrations or
+frontend features registered. It does not partially load, and it does not take
+the host down with it.
+
+**After upgrading**, read the state of every installed plugin:
+
+```bash
+curl -s http://<host>/api/plugins | jq '.data[] | {name, version, state, last_error}'
+```
+
+A quarantined plugin is in `state: "failed"` with `last_error.type` of
+`"quarantine"` and a message naming the mismatch:
+
+```
+requires plugin SDK '^2.0', but the host provides 1.43.0
+```
+
+The same message is written to the host's error log at load, so it is visible
+without an authenticated call.
+
+**Before upgrading there is no equivalent probe, and that is a real gap.** A
+plugin's declared `getSdkConstraint()` is evaluated at load but is NOT
+published in the plugin list, so the only way to know whether an installed
+build will survive an upgrade is to read the plugin's own source or its
+distribution metadata. Until that is exposed, the practical check is to stage
+the upgrade somewhere disposable first and read the list above.
+
+A plugin that declares NO constraint is never quarantined by this gate. That
+is deliberate — the declaration is opt-in — but it means such a plugin can load
+against an SDK it was never tested on and fail later, in its own code, on a
+request. Declaring a constraint is how a plugin author converts that into a
+clean refusal at boot.
+
+**Recovering** is a plugin-side change, not a host-side one: publish a build
+whose constraint admits the new SDK, install it, and the plugin loads on the
+next boot. Nothing in the host needs rolling back, because a quarantined
+plugin changed nothing when it failed to load.
 
 ### Declaring frontend features (1.2)
 
