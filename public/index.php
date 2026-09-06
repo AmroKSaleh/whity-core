@@ -804,7 +804,12 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'href' => '/admin/billing',
         'icon' => 'receipt',
         'group' => 'access',
-        'order' => 6,
+        // 7, not 6: `user-groups` holds 6 and orders must be unique within a
+        // group — CoreNavigationRegistrationTest fails a collision, because two
+        // items sharing an order sit in whatever sequence the array happened to
+        // be built in, and that is a menu whose shape changes when an unrelated
+        // item is added.
+        'order' => 7,
         // Mirrors GET /api/plans, which gates on plans:manage. The ROUTE
         // additionally requires the system tenant, and the screen shows
         // read-only without that — a nav item cannot express "and the system

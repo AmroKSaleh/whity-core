@@ -103,7 +103,12 @@ final class PlanPricesApiHandler
                 ($body['is_per_seat'] ?? false) === true,
             );
         } catch (PlanValidationException $e) {
-            return Response::error($e->getMessage(), 422);
+            // The exception's STRUCTURED fields, never its message. A handler
+            // interpolating getMessage() is refused by ExceptionLeakageTest, and
+            // rightly: you cannot tell a safe message from one carrying a
+            // SQLSTATE by looking, and the next exception type to arrive here
+            // will be the unsafe one. Mirrors PlansApiHandler.
+            return Response::error('Validation failed', 422, [$e->field() => $e->reason()]);
             // @phpstan-ignore catch.neverThrown
         } catch (\PDOException) {
             // NOT DEAD, whatever the analyser thinks: the partial unique index
