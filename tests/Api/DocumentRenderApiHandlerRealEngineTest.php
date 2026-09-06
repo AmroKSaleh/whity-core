@@ -18,6 +18,7 @@ use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Document\Render\FlowDocumentRenderer;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -100,7 +101,10 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
         $renderer = new DocumentRenderer(
             new DocumentBlockRepository($this->pdo),
             $this->settingsService,
-            $this->fakeRender
+            $this->fakeRender,
+            // #1186: the flowing renderer, so a document-mode template takes
+            // the road it needs instead of printing its unused canvas pages.
+            new FlowDocumentRenderer($this->settingsService, $this->fakeRender)
         );
         $documents = new DocumentRepository($this->pdo);
         $artifacts = new DocumentArtifactRepository($this->pdo);
@@ -374,6 +378,96 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
         $blocks = (array) $this->fakeRender->calls[0]['blocks'];
         self::assertArrayHasKey((string) $aId, $blocks);
         self::assertArrayHasKey((string) $bId, $blocks);
+    }
+
+    // ── document mode: the flowing renderer (#1186) ──────────────────────────
+
+    /**
+     * THE FAILURE THIS BRANCH REMOVES.
+     *
+     * A template in document mode keeps its `pages` tree — both bodies live on
+     * the template so a mode switch is not destructive — and its content lives
+     * in `flow`. Before the branch existed, the render path measured `pages`
+     * and printed it: for a document built entirely in document mode, the blank
+     * starting page. The content was authored, saved, and printed as nothing,
+     * and no error was raised anywhere along the way.
+     */
+    public function testADocumentModeTemplateGoesToTheFlowingRenderer(): void
+    {
+        $this->enableRendering();
+
+        $data = $this->minimalTemplateData();
+        $data['mode'] = 'flow';
+        $data['flow'] = ['blocks' => [['type' => 'paragraph', 'text' => 'Printed at last']]];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Report', 'data' => $data]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        // The FLOW endpoint, not the canvas one.
+        self::assertCount(1, $this->fakeRender->flowCalls);
+        $payload = $this->fakeRender->flowCalls[0];
+        self::assertSame([['type' => 'paragraph', 'text' => 'Printed at last']], $payload['content']);
+        // And nothing from the canvas body came with it.
+        self::assertArrayNotHasKey('template', $payload);
+    }
+
+    public function testACanvasTemplateStillGoesToTheCanvasRenderer(): void
+    {
+        $this->enableRendering();
+
+        $id = $this->createTemplate(self::OWNER, [
+            'name' => 'Label',
+            'data' => $this->minimalTemplateData(),
+        ]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        // A template written before document mode existed carries no `mode` at
+        // all, and the whole existing library is that shape.
+        self::assertCount(0, $this->fakeRender->flowCalls);
+        self::assertArrayHasKey('template', $this->fakeRender->calls[0]);
+    }
+
+    /**
+     * An empty document-mode template is refused with a message about the
+     * DOCUMENT, not relayed from the service as a complaint about an array.
+     * It is the exact state a mode switch leaves behind, so people reach it.
+     */
+    public function testAnEmptyDocumentModeTemplateIsRefusedBeforeTheServiceIsCalled(): void
+    {
+        $this->enableRendering();
+
+        $data = $this->minimalTemplateData();
+        $data['mode'] = 'flow';
+        $data['flow'] = ['blocks' => []];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Empty', 'data' => $data]);
+
+        $res = $this->render(self::OWNER, $id);
+
+        self::assertSame(422, $res->getStatusCode());
+        self::assertCount(0, $this->fakeRender->calls, 'the service must not be paid for an empty document');
+    }
+
+    /**
+     * The page box carries over. The service's own margin default is
+     * 25/20/25/20, so a template whose author set 10 mm would be silently
+     * reflowed if this were left out.
+     */
+    public function testThePageBoxCarriesOverToTheFlowPayload(): void
+    {
+        $this->enableRendering();
+
+        $data = $this->minimalTemplateData();
+        $data['mode'] = 'flow';
+        $data['page'] = ['widthMm' => 148, 'heightMm' => 210, 'marginMm' => 12, 'background' => '#ffffff'];
+        $data['flow'] = ['blocks' => [['type' => 'paragraph', 'text' => 'x']]];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'A5', 'data' => $data]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        $page = $this->fakeRender->flowCalls[0]['page'];
+        self::assertSame(148.0, $page['widthMm']);
+        self::assertSame(12.0, $page['margin']['topMm']);
     }
 
     // ── batch limits ─────────────────────────────────────────────────────────
