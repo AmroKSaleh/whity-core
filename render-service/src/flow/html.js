@@ -78,9 +78,74 @@ function mm(value) {
   return `${Number(value)}mm`;
 }
 
+/**
+ * The per-block LAYOUT a caller asked for (#1186), as the fragments a block's
+ * root element needs.
+ *
+ * SPACING GOES THROUGH A CUSTOM PROPERTY, NOT AN INLINE MARGIN, and that is
+ * load-bearing rather than stylistic. `.flow-page-content > :first-child` sets
+ * `margin-top: 0` so a unit's leading air does not push the first thing on a
+ * page below the page's own top margin — the paginator measures with that rule
+ * in force, so what it measures is what prints. An inline `margin-top` beats a
+ * class rule on specificity, so an author's spacing would have overridden it
+ * and every page beginning with a spaced block would have started lower than
+ * every other page.
+ *
+ * WIDTH IS EMITTED AS THE PERCENTAGE IT WAS GIVEN. The content column comes
+ * from the page box, so the same document is laid out correctly on A4 and on
+ * A5 without the width being restated — which is what "behaves on narrower
+ * paper" has to mean for something that is printed rather than scrolled.
+ *
+ * The break hints are DATA ATTRIBUTES because the paginator, not CSS, decides
+ * pages here: it measures every unit and packs the page boxes itself, so
+ * `break-inside: avoid` is advice Chromium never gets to act on.
+ */
+function blockLayout(block) {
+  const classes = [];
+  const styles = [];
+  const attrs = [];
+
+  const before = Number(block.spaceBeforeMm);
+  if (Number.isFinite(before) && before > 0) {
+    classes.push('flow-space-before');
+    styles.push(`--flow-space-before:${mm(before)}`);
+  }
+  const after = Number(block.spaceAfterMm);
+  if (Number.isFinite(after) && after > 0) {
+    classes.push('flow-space-after');
+    styles.push(`--flow-space-after:${mm(after)}`);
+  }
+
+  const width = Number(block.widthPercent);
+  if (Number.isFinite(width) && width > 0 && width < 100) {
+    classes.push('flow-width');
+    styles.push(`--flow-width:${width}%`);
+  }
+
+  if (block.breakBefore === true) attrs.push(' data-break-before="1"');
+  if (block.keepWithNext === true) attrs.push(' data-keep-with-next="1"');
+  if (block.keepTogether === true) attrs.push(' data-keep-together="1"');
+
+  return {
+    cls: classes.length > 0 ? ` ${classes.join(' ')}` : '',
+    style: styles.length > 0 ? styles.join(';') : '',
+    attrs: attrs.join(''),
+  };
+}
+
+/** Merge the layout's custom properties with a style a block already needed. */
+function styleAttr(layoutStyle, own) {
+  const parts = [own, layoutStyle].filter(Boolean);
+  return parts.length > 0 ? ` style="${parts.join(';')}"` : '';
+}
+
 function renderTable(block, direction) {
   const parts = [];
-  parts.push(`<figure class="flow-table" data-flow-unit="table" data-anchor="${escapeHtml(block.anchorId)}">`);
+  const lay = blockLayout(block);
+  parts.push(
+    `<figure class="flow-table${lay.cls}" data-flow-unit="table" ` +
+    `data-anchor="${escapeHtml(block.anchorId)}"${lay.attrs}${styleAttr(lay.style, '')}>`
+  );
   if (block.caption) {
     parts.push(
       `<figcaption class="flow-caption flow-table-caption">` +
@@ -108,10 +173,12 @@ function renderTable(block, direction) {
 }
 
 function renderFigure(block, direction) {
-  const heightAttr = Number.isFinite(block.heightMm) ? ` style="height:${mm(block.heightMm)}"` : '';
+  const heightOwn = Number.isFinite(block.heightMm) ? `height:${mm(block.heightMm)}` : '';
+  const lay = blockLayout(block);
   return (
-    `<figure class="flow-figure" data-flow-unit="figure" data-anchor="${escapeHtml(block.anchorId)}">` +
-    `<div class="flow-figure-image"${heightAttr}><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '')}"></div>` +
+    `<figure class="flow-figure${lay.cls}" data-flow-unit="figure" ` +
+    `data-anchor="${escapeHtml(block.anchorId)}"${lay.attrs}${styleAttr(lay.style, '')}>` +
+    `<div class="flow-figure-image"${heightOwn ? ` style="${heightOwn}"` : ''}><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '')}"></div>` +
     (block.caption
       ? `<figcaption class="flow-caption flow-figure-caption">` +
         `<span class="flow-caption-label">${isolateForeignRuns(block.label, direction)}</span>` +
@@ -176,15 +243,22 @@ function renderBlock(block, direction) {
   switch (block.type) {
     case 'heading': {
       const number = block.number ? `<span class="flow-heading-number"><bdi>${escapeHtml(block.number)}</bdi></span> ` : '';
+      const lay = blockLayout(block);
       return (
-        `<h${block.level} class="flow-heading flow-heading-${block.level}" ` +
-        `data-flow-unit="heading" data-level="${block.level}" data-anchor="${escapeHtml(block.anchorId)}">` +
+        `<h${block.level} class="flow-heading flow-heading-${block.level}${lay.cls}" ` +
+        `data-flow-unit="heading" data-level="${block.level}" data-anchor="${escapeHtml(block.anchorId)}"` +
+        `${lay.attrs}${styleAttr(lay.style, '')}>` +
         `${number}${isolateForeignRuns(block.text, direction)}</h${block.level}>`
       );
     }
     case 'paragraph': {
       const align = block.align === 'center' || block.align === 'end' ? ` flow-align-${block.align}` : '';
-      return `<p class="flow-paragraph${align}" data-flow-unit="paragraph">${isolateForeignRuns(block.text, direction)}</p>`;
+      const lay = blockLayout(block);
+      return (
+        `<p class="flow-paragraph${align}${lay.cls}" data-flow-unit="paragraph"` +
+        `${lay.attrs}${styleAttr(lay.style, '')}>` +
+        `${isolateForeignRuns(block.text, direction)}</p>`
+      );
     }
     case 'table':
       return renderTable(block, direction);
