@@ -127,6 +127,18 @@ to seed each tenant, pre-filled with real company info.
   SVG rendered as an inert `data:` URI `<img>` (no script/fetch). Image `src` is
   hardened to `http(s)` only via `new URL().protocol` (regex guards were not
   accepted by CodeQL).
+- **Document mode** (#1186) does NOT go through `PrintDocument`. Its content
+  reflows and paginates, and that maths lives in the render service, so a
+  flow-mode template renders through `POST /render/flow`:
+  `DocumentRenderer` branches on `template.mode`,
+  `FlowTemplatePayload` turns the stored template into the payload, and
+  `FlowDocumentRenderer` (the same one the SDK's `FlowDocument` uses) applies
+  the tenant's ceilings and makes the call. **There is no client-side flowing
+  renderer**, so document mode needs the render container — which
+  `documents.render_enabled` leaves off by default.
+  The stored shape and the wire shape differ: a template stores
+  `flow.contents`, the service takes `frontMatter: [{kind}]`, and
+  `FlowTemplatePayload` is that seam.
 - **Server-side PDF** goes through the optional `whity_render` container
   (`ghcr.io/<repo>/render`), which runs `PrintDocument` — *this* file, bundled
   from source at image build time — inside headless Chromium, so an export and
