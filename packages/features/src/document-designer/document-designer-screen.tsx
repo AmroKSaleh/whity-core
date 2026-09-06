@@ -58,6 +58,7 @@ import {
 import { ConfirmDelete } from './confirm-delete';
 import { CommandPalette } from '@amroksaleh/ui/command-palette';
 import { FlowEditor } from './flow-editor';
+import { FlowBlockSettings } from './flow-block-settings';
 import { canvasToFlow, describeSwitch, flowToCanvas } from './mode-switch';
 import { newFlowBlock, type FlowBlockType, type FlowContent } from '@amroksaleh/ui/documents/flow';
 import { flowPaletteItems, paletteItemsForFlow, paletteItemsFromMenus } from './editor-palette';
@@ -1619,6 +1620,30 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
             tab={railTab}
             onTabChange={setRailTab}
             onCollapse={() => setRailOpen(false)}
+            // Document mode swaps the properties slot for the selected BLOCK's
+            // settings. Passed only in flow mode, so the canvas rail is
+            // untouched (#1186).
+            blockSettings={
+              mode === 'flow' ? (
+                <FlowBlockSettings
+                  block={flowSelected === null ? null : (template.flow?.blocks[flowSelected] ?? null)}
+                  nextBlock={
+                    flowSelected === null ? null : (template.flow?.blocks[flowSelected + 1] ?? null)
+                  }
+                  onChange={(next) => {
+                    if (flowSelected === null) return;
+                    commit('block-settings');
+                    setTemplate((tpl) => ({
+                      ...tpl,
+                      flow: {
+                        ...(tpl.flow ?? { blocks: [] }),
+                        blocks: (tpl.flow?.blocks ?? []).map((b, i) => (i === flowSelected ? next : b)),
+                      },
+                    }));
+                  }}
+                />
+              ) : undefined
+            }
             palette={{
               elements,
               selectedIds,

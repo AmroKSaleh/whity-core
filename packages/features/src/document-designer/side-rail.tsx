@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import {
   IconStack2,
   IconAdjustments,
@@ -63,6 +63,7 @@ export function SideRail({
   onCollapse,
   palette,
   inspector,
+  blockSettings,
 }: {
   tab: RailTab;
   onTabChange: (tab: RailTab) => void;
@@ -71,6 +72,15 @@ export function SideRail({
   palette: ComponentProps<typeof Palette>;
   /** Props for every other tab; its own `tab` is supplied from `tab` here. */
   inspector: Omit<ComponentProps<typeof Inspector>, 'tab'>;
+  /**
+   * Shown in the properties slot INSTEAD of the inspector when supplied — the
+   * document-mode block settings (#1186).
+   *
+   * Optional, so the canvas passes nothing and behaves exactly as before. The
+   * alternative was a seventh tab, which would then sit in the strip doing
+   * nothing whenever the canvas was open.
+   */
+  blockSettings?: ReactNode;
 }) {
   const t = useTranslation('documents');
   const labels = tabLabels(t);
@@ -117,7 +127,18 @@ export function SideRail({
       </h2>
 
       <div className="min-h-0 flex-1 overflow-hidden p-3">
-        {tab === 'layers' ? <Palette {...palette} /> : <Inspector {...inspector} tab={tab} />}
+        {tab === 'layers' ? (
+          <Palette {...palette} />
+        ) : tab === 'element' && blockSettings !== undefined ? (
+          // Document mode puts BLOCK settings in the properties slot. Same
+          // question the slot answers on the canvas — "the properties of what I
+          // have selected" — asked of a different kind of thing, which is why
+          // it is this slot rather than a seventh tab that would sit there
+          // doing nothing in canvas mode.
+          blockSettings
+        ) : (
+          <Inspector {...inspector} tab={tab} />
+        )}
       </div>
     </aside>
   );
